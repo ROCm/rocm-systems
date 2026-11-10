@@ -247,6 +247,9 @@ class Memory : public amd::RuntimeObject {
 
   std::recursive_mutex lockMemoryOps_;  //!< Lock to serialize memory operations
   std::unique_ptr<std::unordered_set<const Device*>> explicitVmmAccess_;
+  // Allocated only for mapped VMM segments. A fresh mapping starts with an
+  // empty cache, so unmap/remap cannot inherit permissions from an old one.
+  std::unique_ptr<std::unordered_map<const Device*, uint32_t>> vmmAccessCache_;
   std::set<Memory*> subBuffers_;  //!< List of all subbuffers for this memory object
   device::Memory* svmBase_;       //!< svmBase allocation for MGPU case
   size_t alignment_ = 0;          //!< alignment for allocation address
@@ -300,17 +303,39 @@ class Memory : public amd::RuntimeObject {
   //! Returns the memory lock object
   std::recursive_mutex& lockMemoryOps() { return lockMemoryOps_; }
 
-  void recordExplicitVmmAccess(const Device* dev) {
+  // Serializes VMM permission changes with copy preflight and lazy grants.
+  // Callers that inspect several segments hold this lock for the whole plan.
+  static std::recursive_mutex& VmmAccessMutex();
+
+  void recordExplicitVmmAccess(const Device* dev, uint32_t access) {
     std::scoped_lock lock(lockMemoryOps_);
     if (!explicitVmmAccess_) {
       explicitVmmAccess_ = std::make_unique<std::unordered_set<const Device*>>();
     }
     explicitVmmAccess_->insert(dev);
+    cacheVmmAccess(dev, access);
   }
 
   bool hasExplicitVmmAccess(const Device* dev) {
     std::scoped_lock lock(lockMemoryOps_);
     return explicitVmmAccess_ && explicitVmmAccess_->find(dev) != explicitVmmAccess_->end();
+  }
+
+  bool getCachedVmmAccess(const Device* dev, uint32_t* access) {
+    std::scoped_lock lock(lockMemoryOps_);
+    if (!vmmAccessCache_) return false;
+    auto it = vmmAccessCache_->find(dev);
+    if (it == vmmAccessCache_->end()) return false;
+    *access = it->second;
+    return true;
+  }
+
+  void cacheVmmAccess(const Device* dev, uint32_t access) {
+    std::scoped_lock lock(lockMemoryOps_);
+    if (!vmmAccessCache_) {
+      vmmAccessCache_ = std::make_unique<std::unordered_map<const Device*, uint32_t>>();
+    }
+    (*vmmAccessCache_)[dev] = access;
   }
 
   //! Adds a view into the list
@@ -469,7 +494,7 @@ class Memory : public amd::RuntimeObject {
   Device* GetDeviceById();
 
   //! Validate memory access for vmm memory
-  bool ValidateMemAccess(const Device& dev, bool read_write);
+  bool ValidateMemAccess(const Device& dev, bool read_write, bool grant = true);
 
   //! Get alignment_
   size_t getAlignment() const { return alignment_; }

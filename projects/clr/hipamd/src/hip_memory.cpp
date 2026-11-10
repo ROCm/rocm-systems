@@ -520,41 +520,138 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 }
 
 // ================================================================================================
-hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj, size_t sizeBytes,
-                                      size_t offset, bool read_write) {
-  if (memObj->parent() && (memObj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
-    // A copy may span several physical allocations mapped into one VA range.
-    // Grant/check access on every mapped segment before submitting the copy.
-    amd::Memory* reservation = memObj->parent();
-    const uintptr_t base = reinterpret_cast<uintptr_t>(memObj->getSvmPtr());
-    const uintptr_t start = base + offset;
-    const uintptr_t reservation_base = reinterpret_cast<uintptr_t>(reservation->getSvmPtr());
-    if (start < base || start < reservation_base ||
-        start - reservation_base > reservation->getSize() ||
-        sizeBytes > reservation->getSize() - (start - reservation_base)) {
-      return hipErrorInvalidValue;
+// A copy is one permission transaction: inspect every operand and mapped
+// segment before changing HSA state. The shared lock also prevents an explicit
+// hipMemSetAccess denial from racing between preflight and a lazy grant.
+class VmmCopyAccessPlan {
+ public:
+  explicit VmmCopyAccessPlan(amd::Device& device)
+      : device_(device), lock_(amd::Memory::VmmAccessMutex(), std::defer_lock) {}
+
+  hipError_t add(amd::Memory* memObj, size_t sizeBytes, size_t offset, bool read_write) {
+    if (memObj == nullptr) return hipErrorInvalidValue;
+    if ((memObj->getMemFlags() & CL_MEM_VA_RANGE_AMD) && !lock_.owns_lock()) {
+      lock_.lock();
     }
-    uintptr_t cursor = start;
-    size_t remaining = sizeBytes;
-    while (remaining != 0) {
-      size_t segment_offset = 0;
-      amd::Memory* segment =
-          amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(cursor), &segment_offset);
-      if (segment == nullptr || segment->parent() != reservation ||
-          segment_offset >= segment->getSize() || !segment->ValidateMemAccess(device, read_write)) {
+    if (memObj->parent() && (memObj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
+      amd::Memory* reservation = memObj->parent();
+      const uintptr_t base = reinterpret_cast<uintptr_t>(memObj->getSvmPtr());
+      const uintptr_t start = base + offset;
+      const uintptr_t reservation_base = reinterpret_cast<uintptr_t>(reservation->getSvmPtr());
+      if (start < base || start < reservation_base ||
+          start - reservation_base > reservation->getSize() ||
+          sizeBytes > reservation->getSize() - (start - reservation_base)) {
         return hipErrorInvalidValue;
       }
-      const size_t chunk = std::min(remaining, segment->getSize() - segment_offset);
-      remaining -= chunk;
-      cursor += chunk;
+      uintptr_t cursor = start;
+      size_t remaining = sizeBytes;
+      amd::Memory* segment = memObj;
+      while (remaining != 0) {
+        const uintptr_t segment_base = reinterpret_cast<uintptr_t>(segment->getSvmPtr());
+        // The first segment was already found by getMemoryObjectPairs. Only
+        // crossings need another global map lookup.
+        if (cursor < segment_base || cursor - segment_base >= segment->getSize()) {
+          segment = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(cursor));
+          if (segment == nullptr) return hipErrorInvalidValue;
+        }
+        const uintptr_t current_base = reinterpret_cast<uintptr_t>(segment->getSvmPtr());
+        if (segment->parent() != reservation || cursor < current_base ||
+            cursor - current_base >= segment->getSize()) {
+          return hipErrorInvalidValue;
+        }
+        if (addSegment(segment, read_write) != hipSuccess) return hipErrorInvalidValue;
+        const size_t chunk = std::min(remaining, segment->getSize() - (cursor - current_base));
+        remaining -= chunk;
+        cursor += chunk;
+      }
+      return hipSuccess;
     }
+
+    if (offset > memObj->getSize() || sizeBytes > memObj->getSize() - offset) {
+      return hipErrorInvalidValue;
+    }
+    return addSegment(memObj, read_write);
+  }
+
+  hipError_t commit() {
+    size_t applied = 0;
+    for (const auto& grant : grants_) {
+      if (!grant.mem->ValidateMemAccess(device_, grant.read_write, /*grant*/ true)) {
+        // HSA can fail after preflight. Restore every earlier permission and
+        // its cache so a rejected copy never leaves a partial lazy grant.
+        while (applied != 0) {
+          const auto& old = grants_[--applied];
+          if (device_.SetMemAccess(old.mem->getSvmPtr(), old.mem->getSize(), old.before)) {
+            old.mem->cacheVmmAccess(&device_, static_cast<uint32_t>(old.before));
+          }
+        }
+        return hipErrorInvalidValue;
+      }
+      ++applied;
+    }
+    // Batch submission may wait on a stream. Keep the permission lock only
+    // for preflight and grant, never for a potentially blocking enqueue.
+    if (lock_.owns_lock()) lock_.unlock();
     return hipSuccess;
   }
 
-  if (offset > memObj->getSize() || sizeBytes > (memObj->getSize() - offset)) {
-    return hipErrorInvalidValue;
+ private:
+  struct Grant {
+    amd::Memory* mem;
+    bool read_write;
+    amd::Device::VmmAccess before;
+  };
+
+  hipError_t addSegment(amd::Memory* mem, bool read_write) {
+    if (!(mem->getMemFlags() & CL_MEM_VA_RANGE_AMD)) return hipSuccess;
+    if (!mem->ValidateMemAccess(device_, read_write, /*grant*/ false)) {
+      return hipErrorInvalidValue;
+    }
+    uint32_t cached_access = static_cast<uint32_t>(amd::Device::VmmAccess::kNone);
+    // PAL validates VMM access without a ROCm cache or lazy grant.
+    if (!mem->getCachedVmmAccess(&device_, &cached_access)) return hipSuccess;
+    const auto access = static_cast<amd::Device::VmmAccess>(cached_access);
+    if (access == amd::Device::VmmAccess::kReadWrite ||
+        (!read_write && access == amd::Device::VmmAccess::kReadOnly)) {
+      return hipSuccess;
+    }
+    for (auto& grant : grants_) {
+      if (grant.mem == mem) {
+        grant.read_write |= read_write;
+        return hipSuccess;
+      }
+    }
+    grants_.push_back({mem, read_write, access});
+    return hipSuccess;
   }
-  return memObj->ValidateMemAccess(device, read_write) ? hipSuccess : hipErrorInvalidValue;
+
+  amd::Device& device_;
+  std::unique_lock<std::recursive_mutex> lock_;
+  std::vector<Grant> grants_;
+};
+
+hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj, size_t sizeBytes,
+                                      size_t offset, bool read_write) {
+  VmmCopyAccessPlan plan(device);
+  const hipError_t status = plan.add(memObj, sizeBytes, offset, read_write);
+  return status == hipSuccess ? plan.commit() : status;
+}
+
+hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                               amd::Memory* srcMemory, size_t srcSizeBytes,
+                               size_t dstSizeBytes, size_t dstOffset, size_t srcOffset) {
+  VmmCopyAccessPlan plan(device);
+  hipError_t status = plan.add(srcMemory, srcSizeBytes, srcOffset, /*read_write*/ false);
+  if (status != hipSuccess) return status;
+  status = plan.add(dstMemory, dstSizeBytes, dstOffset, /*read_write*/ true);
+  return status == hipSuccess ? plan.commit() : status;
+}
+
+hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                               amd::Memory* srcMemory, size_t sizeBytes,
+                               size_t dstOffset, size_t srcOffset) {
+  return ihipMemcpy_validate(device, dstMemory, srcMemory, sizeBytes, sizeBytes,
+                             dstOffset, srcOffset);
 }
 
 // ================================================================================================
@@ -3182,6 +3279,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   getMemoryObjectBatchPairs(dev, srcs, dsts, count, srcMemories, dstMemories, srcOffsets,
                             dstOffsets);
 
+  VmmCopyAccessPlan batchAccessPlan(amdDev);
   size_t validateAttrIdx = 0;
   for (size_t i = 0; i < count; ++i) {
     // Indirect copies pass a sizeof(void*) pointer-holder on the indirect side and
@@ -3202,14 +3300,18 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
     hipError_t status;
     if (srcMemories[i] != nullptr && dstMemories[i] != nullptr) {
-      status = ihipMemcpy_validate(amdDev, dstMemories[i], srcMemories[i], actualSrcSize,
-                                   actualDstSize, dstOffsets[i], srcOffsets[i]);
+      status = batchAccessPlan.add(srcMemories[i], actualSrcSize, srcOffsets[i],
+                                   /*read_write*/ false);
+      if (status == hipSuccess) {
+        status = batchAccessPlan.add(dstMemories[i], actualDstSize, dstOffsets[i],
+                                     /*read_write*/ true);
+      }
     } else if (srcMemories[i] != nullptr) {
-      status = ihipMemcpy_validate_memory(amdDev, srcMemories[i], actualSrcSize, srcOffsets[i],
-                                          /*read_write*/ false);
+      status = batchAccessPlan.add(srcMemories[i], actualSrcSize, srcOffsets[i],
+                                   /*read_write*/ false);
     } else {
-      status = ihipMemcpy_validate_memory(amdDev, dstMemories[i], actualDstSize, dstOffsets[i],
-                                          /*read_write*/ true);
+      status = batchAccessPlan.add(dstMemories[i], actualDstSize, dstOffsets[i],
+                                   /*read_write*/ true);
     }
     if (status != hipSuccess) {
       return fail(i, status);
@@ -3350,6 +3452,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
       }
     }
   }
+
+  // Apply lazy grants only after every batch entry and attribute has passed.
+  IHIP_RETURN_ONFAIL(batchAccessPlan.commit());
 
   hipError_t status = hipSuccess;
 

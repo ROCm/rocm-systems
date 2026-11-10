@@ -862,32 +862,16 @@ namespace hip {
   extern hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj,
                                                 size_t sizeBytes, size_t offset, bool read_write);
 
-  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
-                                         amd::Memory* srcMemory, size_t sizeBytes,
-                                         size_t dstOffset, size_t srcOffset) {
-    hipError_t status =
-        ihipMemcpy_validate_memory(device, srcMemory, sizeBytes, srcOffset, /*read_write*/ false);
-    if (status != hipSuccess) return status;
-    status =
-        ihipMemcpy_validate_memory(device, dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
-    if (status != hipSuccess) return status;
-    return hipSuccess;
-  }
+  hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                 amd::Memory* srcMemory, size_t sizeBytes,
+                                 size_t dstOffset, size_t srcOffset);
 
   // Two-size variant used by the batch memcpy path: indirect copies place a
   // sizeof(void*) pointer-holder on one side and the real data buffer on the other,
   // so src and dst must be validated against independent region sizes.
-  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
-                                         amd::Memory* srcMemory, size_t srcSizeBytes,
-                                         size_t dstSizeBytes, size_t dstOffset, size_t srcOffset) {
-    hipError_t status = ihipMemcpy_validate_memory(device, srcMemory, srcSizeBytes, srcOffset,
-                                                    /*read_write*/ false);
-    if (status != hipSuccess) return status;
-    status = ihipMemcpy_validate_memory(device, dstMemory, dstSizeBytes, dstOffset,
-                                         /*read_write*/ true);
-    if (status != hipSuccess) return status;
-    return hipSuccess;
-  }
+  hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                 amd::Memory* srcMemory, size_t srcSizeBytes,
+                                 size_t dstSizeBytes, size_t dstOffset, size_t srcOffset);
 
   constexpr bool kMarkerDisableFlush = true;  //!< Avoids command batch flush in ROCclr
 

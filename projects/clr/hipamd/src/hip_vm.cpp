@@ -249,6 +249,8 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
     HIP_RETURN(hipErrorInvalidValue)
   }
 
+  std::lock_guard<std::recursive_mutex> access_lock(amd::Memory::VmmAccessMutex());
+
   // Convert the access flags to amd::Device access flag
   auto& dev = g_devices[location->id];
   amd::Device::VmmAccess access_flags = static_cast<amd::Device::VmmAccess>(0);
@@ -369,6 +371,8 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   if (ptr == nullptr || handle == nullptr || size == 0 || offset != 0 || flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  std::lock_guard<std::recursive_mutex> access_lock(amd::Memory::VmmAccessMutex());
 
   // Re-interpret the ga handle.
   hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(handle);
@@ -501,6 +505,10 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  // Serialize the HSA permission update and its cache/explicit-state update
+  // against copy preflight and lazy grants.
+  std::lock_guard<std::recursive_mutex> access_lock(amd::Memory::VmmAccessMutex());
+
   // Ensure that the specified size parameter matches the sum of a complete set of
   // sub-buffers in the range, disallowing partial sub-buffer coverage.
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(ptr);
@@ -560,7 +568,7 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
         if (mapped == nullptr || offset >= mapped->getSize()) {
           HIP_RETURN(hipErrorInvalidValue);
         }
-        mapped->recordExplicitVmmAccess(accessDev);
+        mapped->recordExplicitVmmAccess(accessDev, static_cast<uint32_t>(access_flags));
         const size_t chunk = std::min(remaining, mapped->getSize() - offset);
         cursor += chunk;
         remaining -= chunk;

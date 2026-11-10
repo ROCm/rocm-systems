@@ -6,8 +6,11 @@
 
 #include <hip/hip_runtime_api.h>
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <vector>
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
@@ -467,6 +470,13 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   (void)hipGetLastError();
   HIP_CHECK(hipStreamSynchronize(resources.stream));
   HIP_CHECK(hipDeviceSynchronize());
+  if (!allowed) {
+    unsigned long long after_src = 0, after_dst = 0;
+    HIP_CHECK(hipMemGetAccess(&after_src, &location, src));
+    HIP_CHECK(hipMemGetAccess(&after_dst, &location, dst));
+    REQUIRE(after_src == src_access);
+    REQUIRE(after_dst == dst_access);
+  }
 
   // Restore owner access for readback. The destination must be unchanged on
   // error and match the entire random payload on success.
@@ -594,6 +604,17 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmSegmentedPeerAccess) {
   REQUIRE(status == (deny_second ? hipErrorInvalidValue : hipSuccess));
   (void)hipGetLastError();
   HIP_CHECK(hipStreamSynchronize(resources.stream));
+  if (deny_second) {
+    // The first segment passed preflight; the second was explicitly denied.
+    // Rejecting the copy must leave both segments at their original access.
+    const int remote = 1 - resources.stream_device;
+    for (int segment = 0; segment < 2; ++segment) {
+      auto* mapped = static_cast<char*>(resources.ptr[remote]) + segment * segment_size;
+      unsigned long long access = ~0ULL;
+      HIP_CHECK(hipMemGetAccess(&access, &location, mapped));
+      REQUIRE(access == 0);
+    }
+  }
   HIP_CHECK(hipSetDevice(dst_device));
   for (int segment = 0; segment < 2; ++segment) {
     auto* mapped = static_cast<char*>(resources.ptr[dst_device]) + segment * segment_size;
@@ -604,6 +625,107 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmSegmentedPeerAccess) {
   const auto mismatch = std::mismatch(actual.begin(), actual.end(), poison.begin());
   INFO("First destination mismatch at byte " << std::distance(actual.begin(), mismatch.first));
   REQUIRE(mismatch.first == actual.end());
+}
+
+HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmConcurrentLazyGrantCache) {
+  if (HipTest::getDeviceCount() < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+  for (int device = 0; device < 2; ++device) {
+    int supported = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                    device));
+    if (!supported) HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+    HIP_CHECK(hipDeviceCanAccessPeer(&supported, device, 1 - device));
+    if (!supported) HIP_SKIP_TEST("Bidirectional peer access is required");
+  }
+
+  VmmPeerResources resources;
+  HIP_CHECK(hipGetDevice(&resources.original_device));
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  size_t granularity[2]{};
+  for (int device = 0; device < 2; ++device) {
+    prop.location.id = device;
+    HIP_CHECK(hipMemGetAllocationGranularity(&granularity[device], &prop,
+                                             hipMemAllocationGranularityMinimum));
+  }
+  resources.size = 2 * std::lcm(granularity[0], granularity[1]);
+  for (int device = 0; device < 2; ++device) {
+    HIP_CHECK(hipSetDevice(device));
+    prop.location.id = device;
+    HIP_CHECK(hipMemAddressReserve(&resources.ptr[device], resources.size, 0, nullptr, 0));
+    HIP_CHECK(hipMemCreate(&resources.handle[device][0], resources.size, &prop, 0));
+    HIP_CHECK(hipMemMap(resources.ptr[device], resources.size, 0,
+                        resources.handle[device][0], 0));
+    resources.mapped[device][0] = true;
+    resources.mapped_size[device][0] = resources.size;
+    hipMemAccessDesc owner_access{};
+    owner_access.location = prop.location;
+    owner_access.flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemSetAccess(resources.ptr[device], resources.size, &owner_access, 1));
+  }
+
+  HIP_CHECK(hipSetDevice(0));
+  const hipError_t enabled = hipDeviceEnablePeerAccess(1, 0);
+  resources.enabled_peer[0] = enabled == hipSuccess;
+  REQUIRE((enabled == hipSuccess || enabled == hipErrorPeerAccessAlreadyEnabled));
+  (void)hipGetLastError();
+  std::vector<unsigned char> source(resources.size), actual(resources.size);
+  std::mt19937 random(0x15333);
+  for (auto& value : source) value = static_cast<unsigned char>(random());
+  HIP_CHECK(hipMemcpy(resources.ptr[0], source.data(), resources.size, hipMemcpyHostToDevice));
+
+  std::atomic<int> ready{0};
+  std::atomic<bool> start{false};
+  std::array<hipError_t, 2> results{hipSuccess, hipSuccess};
+  const size_t half = resources.size / 2;
+  auto copy_half = [&](int index) {
+    results[index] = hipSetDevice(0);
+    ready.fetch_add(1, std::memory_order_release);
+    while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+    if (results[index] != hipSuccess) return;
+    for (int iteration = 0; iteration < 16; ++iteration) {
+      results[index] = hipMemcpyPeer(static_cast<char*>(resources.ptr[1]) + index * half, 1,
+                                     static_cast<char*>(resources.ptr[0]) + index * half, 0, half);
+      if (results[index] != hipSuccess) return;
+    }
+  };
+  std::thread first(copy_half, 0), second(copy_half, 1);
+  while (ready.load(std::memory_order_acquire) != 2) std::this_thread::yield();
+  start.store(true, std::memory_order_release);
+  first.join();
+  second.join();
+  REQUIRE(results[0] == hipSuccess);
+  REQUIRE(results[1] == hipSuccess);
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemcpy(actual.data(), resources.ptr[1], resources.size, hipMemcpyDeviceToHost));
+  REQUIRE(actual == source);
+
+  if (resources.enabled_peer[0]) {
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipDeviceDisablePeerAccess(1));
+    resources.enabled_peer[0] = false;
+    hipMemLocation location{hipMemLocationTypeDevice, 0};
+    unsigned long long access = 0;
+    HIP_CHECK(hipMemGetAccess(&access, &location, resources.ptr[1]));
+    REQUIRE(access == hipMemAccessFlagsProtReadWrite);
+  }
+
+  hipMemAccessDesc deny{};
+  deny.location.type = hipMemLocationTypeDevice;
+  deny.location.id = 0;
+  deny.flags = hipMemAccessFlagsProtNone;
+  HIP_CHECK(hipMemSetAccess(resources.ptr[1], resources.size, &deny, 1));
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK_ERROR(hipMemcpyPeer(resources.ptr[1], 1, resources.ptr[0], 0, half),
+                  hipErrorInvalidValue);
+  (void)hipGetLastError();
+  hipMemLocation location{hipMemLocationTypeDevice, 0};
+  unsigned long long access = ~0ULL;
+  HIP_CHECK(hipMemGetAccess(&access, &location, resources.ptr[1]));
+  REQUIRE(access == 0);
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Capture) {

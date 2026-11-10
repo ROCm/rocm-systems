@@ -2182,12 +2182,11 @@ class Device : public RuntimeObject {
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const = 0;
 
   /**
-   * Validate Access permisions for a virtual memory object.
-   *
-   * @param va_addr Virtual Address ptr
-   * @param access_flags_ptr Access permissions to be filled
+   * Check access to a mapped VMM segment. With grant=false, only determine
+   * whether the requested access is allowed; with grant=true, apply a needed
+   * peer-access grant after the caller has checked the complete copy.
    */
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const = 0;
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write, bool grant = true) const = 0;
 
   /**
    * Free a VA range

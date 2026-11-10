@@ -145,7 +145,7 @@ class NullDevice : public amd::Device {
 
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const { return true; }
 
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write, bool grant = true) const { return true; }
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override {
@@ -596,7 +596,7 @@ class Device : public NullDevice {
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1);
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const;
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const;
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write, bool grant = true) const;
 
   virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle);
 

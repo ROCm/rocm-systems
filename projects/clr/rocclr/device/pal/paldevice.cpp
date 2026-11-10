@@ -2682,7 +2682,7 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
 }
 
 // ================================================================================================
-bool Device::ValidateMemAccess(amd::Memory& amd_mem_obj, bool read_write) const {
+bool Device::ValidateMemAccess(amd::Memory& amd_mem_obj, bool read_write, bool grant) const {
   device::Memory* dev_mem = amd_mem_obj.getDeviceMemory(*this);
   device::Memory::MemAccess mem_access = dev_mem->GetAccess();
 
