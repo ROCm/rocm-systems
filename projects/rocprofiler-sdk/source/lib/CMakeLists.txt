@@ -22,6 +22,11 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     add_subdirectory(rocprofiler-sdk-rocattach)
 endif()
 
+if(ROCPROFILER_BUILD_COLLECTOR)
+    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
+    add_subdirectory(rocprofiler-sdk-collector)
+endif()
+
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
 add_subdirectory(att-tool)
 add_subdirectory(rocprofiler-sdk-tool)

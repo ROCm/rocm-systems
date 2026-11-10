@@ -484,3 +484,17 @@ else()
                                INTERFACE ROCPROFILER_SDK_USE_SYSTEM_HIPFILE=0)
 
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# lttng-ctl (out-of-process collector)
+#
+# ----------------------------------------------------------------------------------------#
+
+if(ROCPROFILER_BUILD_COLLECTOR)
+    find_package(PkgConfig REQUIRED)
+    # lttng-tools 2.13 or newer: the collector's private session daemon must match the
+    # runtimes' lttng-ust 2.13.
+    pkg_check_modules(LTTNG_CTL REQUIRED IMPORTED_TARGET lttng-ctl>=2.13)
+    target_link_libraries(rocprofiler-sdk-lttng-ctl INTERFACE PkgConfig::LTTNG_CTL)
+endif()
