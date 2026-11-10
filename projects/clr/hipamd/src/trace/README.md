@@ -11,6 +11,7 @@ design and plan are in sdk-future-design (`proposals/api-tracing-hld.md`,
 |---|---|
 | `rocm_trace_hip.yaml` | What the generator cannot read from the headers: outputs, strings, kernel names |
 | `hip_trace_probes.h`, `.cpp` | Generated from the dispatch tables and `rocm_trace_hip.yaml`: one probe per entry and the install functions. Do not edit |
+| `hip_trace_probes.json` | Generated with them: the probe schema, every event field with its C type, enum names and capture rule. Installed as `share/rocm-trace/rocm_hip.json` for tools that read the trace. Do not edit |
 | `hip_trace.hpp`, `.cpp` | The `rocm_hip` provider, `ROCM_TRACE_DISABLE`, `ROCM_TRACE_CAPTURE`, and the install call |
 
 ## Behaviour

@@ -41,6 +41,15 @@ endif()
 target_sources(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_trace.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip_trace_probes.cpp)
+
+# The probe schema, generated with the probes: every rocm_hip event field with its C type, enum
+# names and capture rule, for tools that read the trace (shared/rocm-trace/scripts/README.md).
+# Installed with the runtime it describes.
+install(
+  FILES ${CMAKE_CURRENT_SOURCE_DIR}/hip_trace_probes.json
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/rocm-trace
+  RENAME rocm_hip.json
+  COMPONENT binary)
 target_include_directories(amdhip64 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(amdhip64 PRIVATE rocm::trace)
 target_compile_definitions(amdhip64 PRIVATE HIP_ROCM_TRACE=1)
