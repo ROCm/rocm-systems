@@ -41,6 +41,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -1391,6 +1392,25 @@ TEST(RegisterAccessTest, DeniedMultiRegisterReadRegionReturnsBoundedZeros) {
   EXPECT_EQ(visited, 2u);
 }
 
+// Empty arithmetic inputs must not materialize uniform sources as a side effect.
+TEST(RegisterAccessTest, ArithmeticInputsWithNoLanesDoNotReadScalarSources) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  RegisterAccess registers(*fx.wf);
+  cdna4::Operand source(32, cdna4::OperandType::OPR_SRC, 8);
+  fx.cu->write_sgpr(fx.sgpr_base() + 8, 0x12345678u);
+  fx.cu->write_sgpr(fx.sgpr_base() + 9, 0xabcdef01u);
+  arith::VectorInput32 narrow(registers, *fx.wf, source, 0);
+  source.size_bits_ = 64;
+  arith::VectorInput64 wide(registers, *fx.wf, source, 0);
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+    EXPECT_EQ(narrow.data[lane], 0u);
+    EXPECT_EQ(wide.data[0][lane], 0u);
+    EXPECT_EQ(wide.data[1][lane], 0u);
+  }
+}
+
 TEST(RegisterAccessTest, ZeroLaneMaskDoesNotMeanOwnershipDenial) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -2214,6 +2234,39 @@ TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
   EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
   EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), "destination exceeds read region");
   EXPECT_EQ(words, original_words);
+}
+
+TEST(RegisterAccessTest, TypedScalarAccessPreservesObservationAndReadDelegates) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 1, /*vgprs_per_wave=*/4);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  fx.cu->write_sgpr(fx.sgpr_base(), 41);
+  fx.plugin->sgpr_reads.clear();
+  fx.plugin->sgpr_writes.clear();
+  fx.plugin->reads.clear();
+  cdna4::Operand src(32, cdna4::OperandType::OPR_SSRC, 0);
+  cdna4::Operand dst(32, cdna4::OperandType::OPR_SDST, 1);
+  cdna4::Operand vector(32, cdna4::OperandType::OPR_VGPR, 127);
+  ASSERT_FALSE(src.is_vgpr());
+  ASSERT_FALSE(dst.is_vgpr());
+  RegisterAccess registers(*fx.wf);
+  EXPECT_EQ(registers.read_scalar(src), 41u);
+  registers.write_scalar(dst, 42);
+  EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + 1), 42u);
+  EXPECT_EQ(fx.plugin->sgpr_reads, std::vector<uint32_t>{fx.sgpr_base()});
+  EXPECT_EQ(fx.plugin->sgpr_writes, std::vector<uint32_t>{fx.sgpr_base() + 1});
+  {
+    ScopedOperandDelegate delegate(src, &dst);
+    EXPECT_EQ(registers.read_scalar(src), 42u);
+  }
+  const auto scalar_reads = fx.plugin->sgpr_reads.size();
+  {
+    // Reject unowned VGPR backing before interpreting the delegated scalar selector.
+    ScopedOperandDelegate delegate(src, &vector);
+    EXPECT_EQ(registers.read_scalar(src), 0u);
+  }
+  EXPECT_EQ(fx.plugin->sgpr_reads.size(), scalar_reads);
+  EXPECT_TRUE(fx.plugin->reads.empty());
 }
 
 TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {

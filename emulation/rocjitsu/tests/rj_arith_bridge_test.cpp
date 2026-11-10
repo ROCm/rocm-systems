@@ -6310,6 +6310,25 @@ TEST(ArithBridgeTest, ConditionalObservesOnlySelectedSources) {
   ASSERT_EQ(fixture.recorder->reads.size(), 2U);
   EXPECT_EQ(fixture.recorder->reads[0].lanes, 1U);
   EXPECT_EQ(fixture.recorder->reads[1].lanes, 2U);
+  // A uniform source is observed only when at least one active lane selects it.
+  for (uint32_t lanes : {32U, 64U}) {
+    BridgeFixture scalar_fixture(false, lanes);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    scalar_fixture.wave->set_exec(1);
+    auto scalar_words =
+        rdna4::build_vop2(rdna4::kVCndmaskB32Vop2, {.src0 = 8, .vsrc1 = 1, .vdst = 2});
+    auto scalar_instruction = scalar_fixture.decoder->decode_window(scalar_words);
+    ASSERT_TRUE(scalar_instruction.succeeded());
+    for (uint64_t vcc : {0ULL, 1ULL}) {
+      scalar_fixture.wave->set_vcc_mask(vcc);
+      scalar_fixture.recorder->scalar_reads.clear();
+      ASSERT_TRUE(scalar_fixture.cu
+                      ->execute_instruction(scalar_instruction.value().get(), *scalar_fixture.wave)
+                      .succeeded());
+      EXPECT_EQ(scalar_fixture.recorder->scalar_reads,
+                vcc ? std::vector<uint32_t>{} : std::vector<uint32_t>{8});
+    }
+  }
 }
 
 TEST(ArithBridgeTest, PermlaneObservesOnlySelectedSourceLanes) {
