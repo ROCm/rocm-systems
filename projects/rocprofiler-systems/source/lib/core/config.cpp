@@ -78,6 +78,7 @@
 #include <unistd.h>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys
@@ -1265,7 +1266,7 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(
         std::string, env_vars::TIMEMORY_COMPONENTS,
         "List of components to collect via timemory (see `rocprof-sys-avail -C`)",
-        "wall_clock", "timemory", "component");
+        std::string{}, "timemory", "component");
 
     ROCPROFSYS_CONFIG_SETTING(std::string, env_vars::OUTPUT_FILE,
                               "[DEPRECATED] See ROCPROFSYS_PERFETTO_FILE", std::string{},

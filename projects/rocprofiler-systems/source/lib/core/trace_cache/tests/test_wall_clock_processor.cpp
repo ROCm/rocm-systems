@@ -43,8 +43,8 @@ make_region(const char* name, std::uint64_t begin = k_begin_ns,
 [[nodiscard]] std::string
 read_file(const std::filesystem::path& path)
 {
-    std::ifstream      stream{ path };
-    std::ostringstream content;
+    const std::ifstream stream{ path };
+    std::ostringstream  content;
     content << stream.rdbuf();
     return content.str();
 }

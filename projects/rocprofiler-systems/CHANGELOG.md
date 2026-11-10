@@ -54,7 +54,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   API call that launched them, and each worker thread's tree starts at the top level
   instead of under the `pthread_create` call that spawned it. The report is written
   whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
-  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed.
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of that setting is now empty instead of `wall_clock`.
 
 ### Resolved issues
 

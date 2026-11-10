@@ -16,14 +16,14 @@ namespace rocprofsys
 {
 using wall_clock_nanoseconds = std::chrono::duration<std::uint64_t, std::nano>;
 
-/// A timing unit of the report, named like its std::chrono literal, e.g. { "ms", 1ms }.
+/// A timing unit of the report, named as timemory prints it, e.g. { "msec", 1ms }.
 struct wall_clock_unit
 {
     std::string_view         name;
     std::chrono::nanoseconds length;
 };
 
-inline constexpr wall_clock_unit k_wall_clock_seconds{ .name = "s",
+inline constexpr wall_clock_unit k_wall_clock_seconds{ .name = "sec",
                                                        .length =
                                                            std::chrono::seconds{ 1 } };
 inline constexpr std::int32_t    k_wall_clock_max_width = 120;

@@ -300,7 +300,7 @@ class TestPython(RocprofsysTest):
             # suffix, no timestamped subdir) so the file checks below can find them.
             "ROCPROFSYS_USE_PID": "OFF",
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
-            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
+            "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count",
             "PYTHONPATH": str(rocprof_config.rocprofsys_site_packages or ""),
         }
         profile_args = ["--label", "file"]
