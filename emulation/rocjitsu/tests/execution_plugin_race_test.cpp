@@ -5294,7 +5294,7 @@ TEST(RaceDetectorPluginOutputTest, CountsReportsInsteadOfTheirTwoPcsAndCountsSup
   EXPECT_EQ(report.find("END_RACE\n", first + 1), std::string::npos);
 }
 
-TEST(RaceDetectorPluginOutputTest, CapturesSplitWaitBarrierAndBranchMetadataForElision) {
+TEST(RaceDetectorPluginOutputTest, PreservesWaitsBarriersAndControlFlowDuringElision) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 104));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -5310,21 +5310,21 @@ TEST(RaceDetectorPluginOutputTest, CapturesSplitWaitBarrierAndBranchMetadataForE
   auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-  for (uint16_t opcode :
-       {cdna5::kSWaitDscntSopp, cdna5::kSWaitAsynccntSopp, cdna5::kSWaitTensorcntSopp,
-        cdna5::kSBarrierWaitSopp, cdna5::kSBranchSopp}) {
+  for (uint16_t opcode : {cdna5::kSWaitDscntSopp, cdna5::kSWaitAsynccntSopp,
+                          cdna5::kSWaitTensorcntSopp, cdna5::kSBarrierWaitSopp, cdna5::kSBranchSopp,
+                          cdna5::kSCbranchScc1Sopp, cdna5::kSTrapSopp, cdna5::kSEndpgmSopp}) {
     const auto words = cdna5::build_sopp(opcode);
     auto decoded = decoder->decode_window(words);
     ASSERT_TRUE(decoded.succeeded());
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *decoded.value(), *wave);
-    EXPECT_TRUE(state->trace[state->trace.size() - 1].is_sync_or_branch());
+    EXPECT_TRUE(state->trace[state->trace.size() - 1].preserve_in_trace());
     wave->pc += 4;
   }
   const auto nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
   auto nop = decoder->decode_window(nop_words);
   ASSERT_TRUE(nop.succeeded());
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
-  EXPECT_FALSE(state->trace[state->trace.size() - 1].is_sync_or_branch());
+  EXPECT_FALSE(state->trace[state->trace.size() - 1].preserve_in_trace());
 }
 
 TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {

@@ -52,11 +52,11 @@ util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Inst
     report_plugin_failure(wf, "race detector instruction has no valid encoding");
     return util::Result::failure();
   }
-  const bool sync_or_branch =
+  const bool preserve_in_trace =
       inst.is_waitcnt() || inst.has_embedded_memory_wait() || inst.is_barrier() ||
-      (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL));
+      inst.writes_pc();
   return InstructionSnapshot{pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)),
-                             sync_or_branch};
+                             preserve_in_trace};
 }
 
 // Before-execute records the instruction before its register or memory hooks.
@@ -211,7 +211,7 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
   constexpr size_t tail = kTraceContextRows - head;
   for (size_t i = first; i < last; ++i) {
     shown[i] = span <= kTraceContextRows || i - first < head || last - i <= tail ||
-               trace[i].is_sync_or_branch();
+               trace[i].preserve_in_trace();
     if (nonsequential(i))
       shown[i - 1] = shown[i] = true;
   }

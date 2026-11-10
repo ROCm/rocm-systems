@@ -34,9 +34,9 @@ std::string text(const InstructionSnapshot &instruction) {
 }
 
 InstructionSnapshot snapshot(uint64_t pc, uint32_t word, size_t width = 1,
-                             bool sync_or_branch = false) {
+                             bool preserve_in_trace = false) {
   std::array<uint32_t, InstructionSnapshot::kMaxWords> words{word};
-  return {pc, std::span(words).first(width), sync_or_branch};
+  return {pc, std::span(words).first(width), preserve_in_trace};
 }
 
 struct PrintedRow {
