@@ -359,9 +359,13 @@ through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
 token of issue-time pressure, on LGKMCNT before GFX12 and on KMcnt on gfx1250,
 but message occupancy and returning
 message results are not retained as pending events. Timestamp-query operations
-such as `s_memtime` and `s_memrealtime` are not accounted for. These operations
-therefore remain unsupported rather than being treated as complete message or
-timestamp modeling.
+such as `s_memtime` and `s_memrealtime` are not accounted for, nor are the
+gfx1250 barrier instructions that use KMcnt: `s_barrier_signal_isfirst`,
+`s_get_barrier_state` and `s_barrier_leave` (CDNA5 ISA 5.6.3). These operations
+therefore remain unsupported rather than being treated as complete message,
+timestamp or barrier modeling. Leaving out a counter's operations only makes
+its capacity model conservative: the detector can miss a completion, never
+retire too much.
 
 For example, CDNA cannot issue the final scalar load below while all 15 earlier
 LGKM tokens remain outstanding:
