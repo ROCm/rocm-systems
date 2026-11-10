@@ -68,6 +68,7 @@ set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/sha256_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/smbios_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/status_string_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/sysfs_layout_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/temporary_kat_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/utilities_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/vectors_test.cc

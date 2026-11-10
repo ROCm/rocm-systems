@@ -256,37 +256,45 @@ bool gpu_class(uint16_t pci_class) { return (pci_class >> 8) == 0x03 || (pci_cla
 constexpr const char kKfdNodes[] = "/sys/class/kfd/kfd/topology/nodes";
 constexpr const char kPciDevices[] = "/sys/bus/pci/devices";
 
-// The UnitID KFD gives the partition rendered by `device` (a PCI GPU for
-// partition 0, an amdgpu_xcp_<n> platform device for the rest), or 0 where
-// its GPU is not partitioned, has no KFD node, or is not the parent KFD names.
+// The UnitID the KFD rule gives the node rendered by `device` (a PCI GPU, or
+// an amdgpu_xcp_<n> platform device for partitions 1 and up): 0 for the device
+// as a whole, -1 where the rule names nothing, as when the GPU has no KFD node
+// or `device` is not the parent KFD names.
 //
 // Partition k of n has UnitID n*(n-1)/2 + 1 + k. In DPX, TPX and QPX the mode
 // fixes n, so a hidden node elsewhere does not matter, a visible count must
 // agree with it, and more nodes than n are never a partial view. In CPX, or
 // while amdgpu cannot report the mode (during a reset), n is the count of the
-// parent's nodes, which needs every node.
-uint16_t kfd_unit_id(const std::string& device, const std::string& pci_root,
-                     const std::string& kfd_nodes) {
+// parent's nodes, which needs every node, and n == 1 is the whole device.
+int kfd_rule(const std::string& device, const std::string& pci_root, const std::string& kfd_nodes) {
   const int minor = render_minor_of(device);
-  if (minor <= 0) return 0;
+  if (minor <= 0) return -1;
   KfdPartition partition;
-  if (!kfd_partition(kfd_snapshot(kfd_nodes), minor, partition)) return 0;
+  if (!kfd_partition(kfd_snapshot(kfd_nodes), minor, partition)) return -1;
   const std::string name = device.substr(device.find_last_of('/') + 1);
-  if (pci_bdf(name) && name != partition.parent_bdf) return 0;
+  if (pci_bdf(name) && name != partition.parent_bdf) return -1;
   const std::string parent = pci_root + "/" + partition.parent_bdf;
-  if (access(parent.c_str(), F_OK) != 0) return 0;
+  if (access(parent.c_str(), F_OK) != 0) return -1;
   const auto mode = CuidUtilities::read_sysfs_file(parent + "/current_compute_partition");
   if (mode == "SPX") return 0;
   unsigned n = mode_partition_count(mode);
   if (n == 0) {
-    if (!partition.complete || !partition.contiguous) return 0;
+    if (!partition.complete || !partition.contiguous) return -1;
     n = partition.visible;
   } else if (partition.visible > n ||
              (partition.complete && (partition.visible != n || !partition.contiguous))) {
-    return 0;
+    return -1;
   }
-  if (n < 2 || partition.k >= n) return 0;
+  if (n == 1) return 0;
+  if (partition.k >= n) return -1;
   return CuidUtilities::partition_unit_id(n, partition.k);
+}
+
+// The partition UnitID KFD gives `device`, or 0 where it names no partition.
+uint16_t kfd_unit_id(const std::string& device, const std::string& pci_root,
+                     const std::string& kfd_nodes) {
+  const int unit_id = kfd_rule(device, pci_root, kfd_nodes);
+  return unit_id > 0 ? static_cast<uint16_t>(unit_id) : 0;
 }
 
 // A PCI GPU in a mode with more than one partition. Its own render node then
@@ -296,9 +304,13 @@ bool partitioned_gpu(const std::string& device) {
   if (access((device + "/current_compute_partition").c_str(), F_OK) != 0) return false;
   if (access((device + "/xcp/" + CuidUtilities::kDriverUnitIdAttribute).c_str(), F_OK) == 0)
     return true;
-  if (kfd_unit_id(device, kPciDevices, kKfdNodes) != 0) return true;
-  // An unreadable mode, as during a reset, counts as split: partition 0 must
-  // never be reported as the GPU as a whole.
+  // Without a partition's, the driver's cuid_unit_id here is the whole device's.
+  if (access((device + "/" + CuidUtilities::kDriverUnitIdAttribute).c_str(), F_OK) == 0)
+    return false;
+  const int unit_id = kfd_rule(device, kPciDevices, kKfdNodes);
+  if (unit_id >= 0) return unit_id > 0;
+  // With neither the driver nor KFD to say, an unreadable mode counts as
+  // split: partition 0 must never be reported as the GPU as a whole.
   return CuidUtilities::read_sysfs_file(device + "/current_compute_partition") != "SPX";
 }
 
@@ -385,7 +397,15 @@ amdcuid_status_t CuidGpu::resolve_path(const std::string& path, CuidGpuRoute& ro
   struct stat st{};
   if (stat(input.c_str(), &st) != 0) {
     if (errno == EACCES || errno == EPERM) return AMDCUID_STATUS_PERMISSION_DENIED;
-    return route.partition ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_FILE_NOT_FOUND;
+    if (!route.partition) return AMDCUID_STATUS_FILE_NOT_FOUND;
+    // amdgpu before v6.16 has no xcp kobject; such a partition is named by
+    // the path it would have, and KFD alone says it is one.
+    const auto device = resolved_path(parent_dir(input));
+    if (device.empty() || kfd_unit_id(device, kPciDevices, kKfdNodes) == 0)
+      return AMDCUID_STATUS_UNSUPPORTED;
+    route.device = device + "/xcp";
+    route.node = route.device;
+    return AMDCUID_STATUS_SUCCESS;
   }
   if (S_ISCHR(st.st_mode)) {
     input = "/sys/dev/char/" + std::to_string(major(st.st_rdev)) + ":" +
@@ -761,9 +781,12 @@ std::string CuidGpu::partition_attr_dir_for_device(const std::string& device_pat
   // is publishing here. A stock amdgpu publishes none, and the partition is
   // the one KFD describes.
   if (access((dir + "/" + CuidUtilities::kDriverUnitIdAttribute).c_str(), F_OK) == 0) return dir;
+  // Before v6.16 amdgpu has no xcp kobject, and the partition is named by the
+  // path it would have under its resolved device.
   const auto real = resolved_path(dir);
-  if (!real.empty() && kfd_unit_id(parent_dir(real), kPciDevices, kKfdNodes) != 0) return dir;
-  return "";
+  const auto device = real.empty() ? resolved_path(parent_dir(dir)) : parent_dir(real);
+  if (device.empty() || kfd_unit_id(device, kPciDevices, kKfdNodes) == 0) return "";
+  return real.empty() ? device + "/xcp" : dir;
 }
 
 amdcuid_status_t CuidGpu::discover_partition(amdcuid_gpu_info* gpu_info,
