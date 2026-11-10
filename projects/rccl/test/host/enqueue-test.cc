@@ -401,7 +401,7 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
 }
 
-// gfx942 multi-node alltoall cap (enqueue.cc:1363). The fit loop divides
+// gfx942 multi-node alltoall cap (enqueue.cc:1361). The fit loop divides
 // p2pnChannelsPerPeer by two while fitted * nRanks is strictly greater than
 // p2pnChannels, then returns 2 only when the result is still above 2. Every
 // other collective, arch, node count, and a user-set nChannelsPerNetPeer fall
