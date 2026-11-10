@@ -31,6 +31,7 @@
 #include <linux/limits.h>
 #include <array>
 #include <fstream>
+#include <optional>
 
 namespace rocprofiler
 {
@@ -149,12 +150,35 @@ output_key::output_key(std::string _key, std::string _val, std::string _desc)
 , description{std::move(_desc)}
 {}
 
+namespace
+{
+std::optional<output_process>&
+get_output_process()
+{
+    static auto* _v = new std::optional<output_process>{};
+    return *_v;
+}
+}  // namespace
+
+void
+set_output_process(const output_process& process)
+{
+    get_output_process() = process;
+}
+
+void
+reset_output_process()
+{
+    get_output_process().reset();
+}
+
 std::vector<output_key>
 output_keys(std::string _tag)
 {
     using strpair_t = std::pair<std::string, std::string>;
 
-    auto _cmdline = common::read_command_line(getpid());
+    const auto& _process = get_output_process();
+    auto _cmdline = (_process) ? _process->command_line : common::read_command_line(getpid());
 
     if(_tag.empty() && !_cmdline.empty()) _tag = ::basename(_cmdline.front().c_str());
 
@@ -202,8 +226,8 @@ output_keys(std::string _tag)
 
     auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
     auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
-    auto _proc_id       = fmt::format("{}", getpid());
-    auto _parent_id     = fmt::format("{}", getppid());
+    auto _proc_id       = fmt::format("{}", (_process) ? _process->pid : getpid());
+    auto _parent_id     = fmt::format("{}", (_process) ? _process->ppid : getppid());
     auto _pgroup_id     = fmt::format("{}", getpgid(getpid()));
     auto _session_id    = fmt::format("{}", getsid(getpid()));
     auto _proc_size     = fmt::format("{}", get_num_siblings());

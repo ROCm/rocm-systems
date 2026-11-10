@@ -1085,6 +1085,13 @@ For attachment profiling of running processes:
     )
 
     advanced_options.add_argument(
+        "--collector",
+        help="""Experimental: run the application under the out-of-process collector, with no profiler code in the application. The HIP runtime's trace probes record its API calls through LTTng, and rocprofv3 writes the same output files from them. Only HIP API tracing (--hip-trace, --hip-runtime-trace, --hip-compiler-trace) is available; HIP graph and HIP event records are not, and are dropped with a warning when --hip-trace implies them. Also selected by ROCPROF_COLLECTOR=1.""",
+        action="store_true",
+        default=None,
+    )
+
+    advanced_options.add_argument(
         "--rocm-root",
         help="Use the given path as the root ROCm path instead of the relative path of this script",
         type=str,
@@ -1653,6 +1660,11 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+    use_collector = collector_requested(args)
+    # What the user asked for, before options imply others (see check_collector_services).
+    explicit_services = {
+        itr: getattr(args, itr, None) for itr in COLLECTOR_IMPLIED_SERVICES
+    }
 
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
@@ -1782,7 +1794,10 @@ def run(app_args, args, **kwargs):
 
         return app_env.get(env_var, None)
 
-    update_env("ROCPROFILER_LIBRARY_CTOR", True)
+    # On the collector path nothing is loaded into the application, and rocprofv3-collector
+    # (which loads librocprofiler-sdk to write the output) must not start the tool either.
+    if not use_collector:
+        update_env("ROCPROFILER_LIBRARY_CTOR", True)
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
@@ -1801,14 +1816,20 @@ def run(app_args, args, **kwargs):
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     )
 
-    ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
+    # the collector path loads no tool library into the application
+    if not use_collector:
+        ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
     ROCPROF_ROCTX_LIBRARY = resolve_library_path(ROCPROF_ROCTX_LIBRARY, args)
-    ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(ROCPROF_KOKKOSP_LIBRARY, args)
-    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
-        ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
-    )
-    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
+    if not use_collector:
+        ROCPROF_KOKKOSP_LIBRARY = resolve_library_path(ROCPROF_KOKKOSP_LIBRARY, args)
+        ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
+            ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
+        )
+    if not use_collector:
+        ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(
+            ROCPROF_ATTACH_TOOL_LIBRARY, args
+        )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1816,12 +1837,14 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    if not args.pid:
+    if use_collector:
+        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+    elif not args.pid:
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
         update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     # in attach mode, rocprof-attach selects the tool library for the target process
-    if not args.pid:
+    if not args.pid and not use_collector:
         update_env(
             "ROCP_TOOL_LIBRARIES",
             f"{ROCPROF_TOOL_LIBRARY}",
@@ -1936,6 +1959,9 @@ def run(app_args, args, **kwargs):
 
     if args.att_no_intercept:
         args.advanced_thread_trace = True
+
+    if use_collector:
+        check_collector_services(args, explicit_services)
 
     trace_count = 0
     trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
@@ -2559,6 +2585,18 @@ def run(app_args, args, **kwargs):
                     overwrite=True,
                 )
 
+    if use_collector:
+        collector_program = find_collector_program()
+        if collector_program is None:
+            fatal_error(
+                "rocprofv3-collector not found: this installation was built without the collector (ROCPROFILER_BUILD_COLLECTOR)"
+            )
+        # lttng-tools from the ROCm installation (TheRock's sysdeps), unless set
+        sysdeps = os.path.join(ROCM_DIR, "lib", "rocm_sysdeps")
+        if os.path.isfile(os.path.join(sysdeps, "bin", "lttng-sessiond")):
+            update_env("ROCPROFILER_COLLECTOR_LTTNG_PREFIX", sysdeps, overwrite=False)
+        app_args = [collector_program, "--"] + list(app_args)
+
     if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
 
@@ -2583,6 +2621,103 @@ def run(app_args, args, **kwargs):
         except Exception as e:
             fatal_error(f"{e}\n")
         return exit_code
+
+
+def collector_requested(args):
+    """Whether this run uses the out-of-process collector: --collector, else ROCPROF_COLLECTOR."""
+    if getattr(args, "collector", None) is not None:
+        return bool(args.collector)
+    return os.environ.get("ROCPROF_COLLECTOR", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+# Services the collector provides, by argument name.
+COLLECTOR_SERVICES = ("hip_runtime_trace", "hip_compiler_trace")
+# Services --hip-trace and --hip-runtime-trace imply that the collector does not provide yet:
+# dropped with a warning when implied, an error when asked for.
+COLLECTOR_IMPLIED_SERVICES = ("hip_graph_trace", "hip_event_trace")
+
+
+def check_collector_services(args, explicit):
+    """Before launch: every requested service must be available on the collector path."""
+    unavailable = []
+    service_args = (
+        "hsa_core_trace",
+        "hsa_amd_trace",
+        "hsa_image_trace",
+        "hsa_finalizer_trace",
+        "marker_trace",
+        "rccl_trace",
+        "ompt_trace",
+        "rocdecode_trace",
+        "rocjpeg_trace",
+        "rocshmem_trace",
+        "hipfile_trace",
+        "kernel_trace",
+        "memory_copy_trace",
+        "memory_allocation_trace",
+        "kfd_page_migration_trace",
+        "kfd_page_mapping_trace",
+        "kfd_queue_trace",
+        "kfd_dropped_events_trace",
+        "scratch_memory_trace",
+        "advanced_thread_trace",
+        "pmc",
+        "pc_sampling_beta_enabled",
+    )
+    for itr in service_args:
+        if getattr(args, itr, None):
+            unavailable.append("--{}".format(itr.replace("_", "-")))
+    if getattr(args, "pmc_groups", None):
+        unavailable.append("--pmc-groups")
+    if getattr(args, "pid", None):
+        unavailable.append("--pid (attach)")
+
+    dropped = []
+    for itr in COLLECTOR_IMPLIED_SERVICES:
+        if not getattr(args, itr, None):
+            continue
+        if explicit.get(itr):
+            unavailable.append("--{}".format(itr.replace("_", "-")))
+        else:
+            setattr(args, itr, False)
+            dropped.append("--{}".format(itr.replace("_", "-")))
+
+    if unavailable:
+        fatal_error(
+            "{} not available with --collector (ROCPROF_COLLECTOR); unset it to use the current implementation".format(
+                ", ".join(unavailable)
+            )
+        )
+    if not any(getattr(args, itr, None) for itr in COLLECTOR_SERVICES):
+        fatal_error(
+            "--collector (ROCPROF_COLLECTOR) needs --hip-trace, --hip-runtime-trace or --hip-compiler-trace"
+        )
+    if dropped:
+        warning(
+            "{} not available with --collector (ROCPROF_COLLECTOR) yet; recording the HIP API calls only".format(
+                ", ".join(dropped)
+            )
+        )
+
+
+def find_collector_program():
+    """Path of the rocprofv3-collector program, or None (<prefix>/<libexecdir>/rocprofiler-sdk/)."""
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    libexec_dirs = ["libexec"]
+    if not DOCTOR_LIBEXEC_DIR.startswith("@"):
+        libexec_dirs.insert(0, DOCTOR_LIBEXEC_DIR)
+    for libexec_dir in libexec_dirs:
+        candidate = os.path.join(
+            prefix, libexec_dir, "rocprofiler-sdk", "rocprofv3-collector"
+        )
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def find_doctor_script():
