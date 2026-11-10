@@ -67,7 +67,7 @@ The reader is built in five layers. Each layer only calls the one below it.
 | C interface | `include/c/profiler_hub.h`, `include/c/profiler_hub_trim.h`, `source/profiler_hub_c_api.cpp` | Checks arguments, runs the call now or on a future, catches exceptions, and maps them to `ph_result_t`. |
 | Context | `source/ph_ctx.cpp`, `source/ph_ctx.hpp` | Owns the opened sources, the published track list, the global track ids, the caches, and every result buffer it hands out. |
 | Caches | `source/cached_track_reader.cpp`, `source/track_file_store.cpp`, `source/catalog_aggregate_store.cpp`, `source/cache_directory.cpp` | Keep timeline data and catalog aggregates in memory or on disk so a second read or a second open does not query SQLite again. |
-| Format reader | `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | Turns a format-neutral request into SQL for one rocpd schema. |
+| Format reader | `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd/*`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | Turns a format-neutral request into SQL for one rocpd schema. |
 | Storage | `source/common/connection_pool.cpp`, `source/storage_impl.cpp`, `source/data_storage/backends/*` | Opens SQLite connections and runs prepared statements. |
 
 ## 2. Core concepts
@@ -94,22 +94,28 @@ events are not published.
 
 ### 2.2 Format dispatch
 
-`ph_ctx_create*` probes each file first (`source/file_probe.cpp`):
+`ph_ctx_create*` probes each file first (`source/file_probe.cpp`). The probe
+checks that the file exists, is a regular file and is readable, then asks each
+entry of the format registry (`source/formats/trace_formats.cpp`), in order,
+whether the file is its own. The first entry that recognises it probes it. The
+rocpd entry recognises a file by the SQLite header and reads its metadata
+tables (`source/formats/rocpd/rocpd_probe.cpp`):
 
 - A table named `rocpd_metadata_<guid>` means schema 3. Every GUID must have
   major version 3 or later, and all versions must match.
 - Otherwise an unsuffixed `rocpd_metadata` table with major version 2 means
   schema 2, the legacy `.rpd` layout.
 
-The probed schema and version form a `trace_format_t`. The format registry in
-`source/formats/trace_formats.cpp` maps it to two factories: one builds the
-`reader_t::impl` subclass (`rocpd_v2_reader` or `rocpd_v3_reader`), and one
-builds the trim rules. A file is accepted only when the registry has an entry
-for it.
+The probed schema and version form a `trace_format_t`. The entry for that
+schema says which versions this build reads and maps the version to two
+factories: one builds the `reader_t::impl` subclass (`rocpd_v2_reader` or
+`rocpd_v3_reader`), and one builds the trim rules. A file is accepted only when
+its entry reads the probed version.
 
 The compile options `PROFILER_HUB_ENABLE_ROCPD_V2` and
-`PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove a format's sources
-and its registry entry. A file of a removed format probes as
+`PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove that version's reader
+and trim sources and make the rocpd entry stop reading it. The entry itself is
+always built. A file of a removed version probes as
 `PH_RESULT_UNSUPPORTED_FILE`.
 
 ### 2.3 Synchronous and asynchronous calls
