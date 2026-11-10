@@ -19,9 +19,10 @@ include_guard(DIRECTORY)
 set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
 set_and_check(@PACKAGE_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
 
-# When fmt, spdlog, and/or rocprofiler-sdk-rocpd were imported packages at
-# build time, the exported static-library target references them as link
-# requirements. Only @PACKAGE_NAME@::@PACKAGE_NAME@-static needs them
+# When fmt, spdlog, ZLIB (PyTorch trace support), and/or rocprofiler-sdk-rocpd
+# were imported packages at build time, the exported static-library target
+# references them as link requirements. Only
+# @PACKAGE_NAME@::@PACKAGE_NAME@-static needs them
 # resolvable: each is looked up QUIET below and, if missing, recorded in
 # @PACKAGE_NAME@_static_MISSING_DEPENDENCIES rather than aborting - the
 # shared @PACKAGE_NAME@::@PACKAGE_NAME@ target has no such requirement and is
