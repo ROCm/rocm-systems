@@ -680,6 +680,15 @@ std::vector<uint8_t> make_retained_pc_data_elf(const PcDataLayout &layout) {
     test_support::write_elf_struct_for_test(image, header.e_phoff, segment);
     target = sections[1].sh_addr + sections[1].sh_size + 16;
   }
+  if (layout.before_text) {
+    // Keep LOADs in address order when moving data before text, as ROCr requires.
+    const Elf64_Phdr text_load =
+        test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+    const Elf64_Phdr data_load = test_support::read_elf_struct_for_test<Elf64_Phdr>(
+        image, header.e_phoff + sizeof(Elf64_Phdr));
+    test_support::write_elf_struct_for_test(image, header.e_phoff, data_load);
+    test_support::write_elf_struct_for_test(image, header.e_phoff + sizeof(Elf64_Phdr), text_load);
+  }
   const uint64_t delta = target - (sections[1].sh_addr + 8);
   test_support::write_value_for_test(image, sections[1].sh_offset + 12,
                                      static_cast<uint32_t>(delta));
@@ -702,6 +711,11 @@ TEST(CheckedTextEdits, RetainedPcDataReferenceRequiresStableDataAddresses) {
     SCOPED_TRACE(layout.zero_fill);
     const bool stable = layout.before_text && !layout.zero_fill;
     const std::vector<uint8_t> image = make_retained_pc_data_elf(layout);
+    const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    const std::vector<Elf64_Phdr> loads =
+        test_support::read_elf_array_for_test<Elf64_Phdr>(image, header.e_phoff, header.e_phnum);
+    ASSERT_EQ(loads.size(), 2u);
+    ASSERT_LT(loads[0].p_vaddr, loads[1].p_vaddr);
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
     const Section &text = *source.text_sections().front();
