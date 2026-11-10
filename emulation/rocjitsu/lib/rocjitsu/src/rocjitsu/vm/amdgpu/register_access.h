@@ -1130,8 +1130,12 @@ public:
     requires OperandT::kStaticRegisterAccess
   [[nodiscard]] uint32_t read_scalar(const OperandT &op) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
-      return 0;
+    // Generated scalar-only operand types cannot reference VGPR storage. A
+    // delegate may still do so, and must retain the normal ownership check.
+    if (op.is_vgpr() || op.delegate()) {
+      if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
+        return 0;
+    }
     return op.read_scalar(wf);
   }
   [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
@@ -1220,8 +1224,13 @@ public:
     requires OperandT::kStaticRegisterAccess
   void write_scalar(const OperandT &op, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
-      return;
+    // Destination resolution ignores read delegates. Only VGPR-capable types
+    // need the backing-storage check; the normal write still notifies observers.
+    if (op.is_vgpr()) {
+      if (auto base = op.simd_vgpr_base_mut(wf);
+          base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+        return;
+    }
     op.write_scalar(wf, value);
   }
   void write_scalar64(const Operand &op, uint64_t value) const {
