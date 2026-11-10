@@ -6402,6 +6402,16 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
+// A caller that JIT-compiles its device code must allocate the devComm in the
+// runtime layout, so it is told the runtime's size, not its own headers'.
+TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
+  props.version = NCCL_VERSION(2, 31, 0);
+  props.devCommRuntimeVersionSize = 0;
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, sizeof(ncclDevComm_t));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
