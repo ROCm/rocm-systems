@@ -1292,31 +1292,162 @@ def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
         profiler.sanitize()
 
 
-@pytest.mark.parametrize("multiple_files", [False, True])
-@pytest.mark.parametrize("collected", [set(), {"SQ_WAVES"}])
+WMMA_HINT = (
+    "Check SDK/aqlprofile support for gfx1201 SQ event 233 and the "
+    "configured SqcCounterBlockMaxEvent limit."
+)
+WMMA_HINTS = {
+    "SQ_WMMA_VALU_INSTS": WMMA_HINT,
+    "SQ_WMMA_VALU_INSTS_sum": WMMA_HINT,
+}
+MISSING_COUNTER_MESSAGE = "Requested counters missing from this pass:"
+
+
+def write_pmc_perf(path, counters):
+    """Write one pmc_perf job using the same names parse_pmc_perf returns."""
+    lines = ["jobs:", "  - pmc:"]
+    lines.extend(f"    - {counter}" for counter in counters)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    (
+        "counters",
+        "collected",
+        "multiple_files",
+        "hints",
+        "warned_name",
+        "debugged_name",
+    ),
+    [
+        pytest.param(
+            ["SQ_WMMA_VALU_INSTS"],
+            {"SQ_WAVES"},
+            False,
+            WMMA_HINTS,
+            "SQ_WMMA_VALU_INSTS",
+            None,
+            id="hinted-missing-warns",
+        ),
+        pytest.param(
+            ["SQ_WAVES"],
+            {"GRBM_COUNT"},
+            False,
+            WMMA_HINTS,
+            None,
+            "SQ_WAVES",
+            id="unhinted-missing-debugs",
+        ),
+        pytest.param(
+            ["SQ_WAVES", "SQ_WMMA_VALU_INSTS"],
+            {"SQ_WAVES", "SQ_WMMA_VALU_INSTS"},
+            False,
+            WMMA_HINTS,
+            None,
+            None,
+            id="all-collected-silent",
+        ),
+        pytest.param(
+            ["SQ_WMMA_VALU_INSTS"],
+            set(),
+            False,
+            WMMA_HINTS,
+            None,
+            None,
+            id="empty-collected-skipped",
+        ),
+        pytest.param(
+            ["SQ_WMMA_VALU_INSTS"],
+            {"SQ_WAVES"},
+            True,
+            WMMA_HINTS,
+            None,
+            None,
+            id="multiple-input-files-skipped",
+        ),
+        pytest.param(
+            ["SQ_WMMA_VALU_INSTS"],
+            {"SQ_WMMA_VALU_INSTS_sum"},
+            False,
+            WMMA_HINTS,
+            None,
+            None,
+            id="sum-suffix-satisfies-raw-name",
+        ),
+        pytest.param(
+            ["SQ_WAVES_sum"],
+            {"SQ_WAVES"},
+            False,
+            {},
+            None,
+            None,
+            id="raw-name-satisfies-sum-suffix",
+        ),
+        pytest.param(
+            ["TCC_HIT[0]"],
+            {"TCC_HIT_sum"},
+            False,
+            {},
+            None,
+            "TCC_HIT[0]",
+            id="channel-counter-not-satisfied-by-accumulate",
+        ),
+    ],
+)
 def test_profile_reports_each_pass_counter_inventory(
-    tmp_path, monkeypatch, multiple_files, collected
+    tmp_path,
+    monkeypatch,
+    counters,
+    collected,
+    multiple_files,
+    hints,
+    warned_name,
+    debugged_name,
 ):
+    """Missing pass counters warn only when the SoC supplies a hint."""
     first_input = tmp_path / "pmc_perf_0.yaml"
-    first_input.write_text("jobs:\n  - pmc: [SQ_WAVES]\n", encoding="utf-8")
+    write_pmc_perf(first_input, counters)
     second_input = tmp_path / "pmc_perf_1.yaml"
-    second_input.write_text(
-        "jobs:\n  - pmc: [SQ_WMMA_VALU_INSTS_sum]\n", encoding="utf-8"
+    write_pmc_perf(second_input, ["SQ_INSTS"])
+    warnings = []
+    debug_messages = []
+    monkeypatch.setattr(
+        profiler_base_module,
+        "console_warning",
+        lambda *args: warnings.append(" ".join(map(str, args))),
     )
-    validation = Mock()
+    monkeypatch.setattr(
+        profiler_base_module,
+        "console_debug",
+        lambda *args: debug_messages.append(" ".join(map(str, args))),
+    )
+    monkeypatch.setattr(profiler_base_module, "run_prof", lambda **_kwargs: collected)
     args = argparse.Namespace(
-        output_directory=str(tmp_path), trace_ml_api=None, retain_rocpd_output=False
+        output_directory=str(tmp_path),
+        trace_ml_api=None,
+        retain_rocpd_output=False,
     )
     profiler = rocprofiler_sdk_profiler(
         args,
         profiler_mode="rocprofiler-sdk",
-        soc=SimpleNamespace(validate_counter_collection=validation),
+        soc=SimpleNamespace(counter_collection_hints=hints),
     )
-    monkeypatch.setattr(profiler_base_module, "run_prof", lambda **_kwargs: collected)
     input_files = [first_input, second_input] if multiple_files else first_input
     profiler.profile(input_files, {}, total_runs=1)
-    if collected and not multiple_files:
-        expected_requested = {"SQ_WAVES"}
-        validation.assert_called_once_with(expected_requested, collected)
+
+    missing_warnings = [
+        message for message in warnings if MISSING_COUNTER_MESSAGE in message
+    ]
+    missing_debug = [
+        message for message in debug_messages if MISSING_COUNTER_MESSAGE in message
+    ]
+    if warned_name:
+        assert missing_warnings == [
+            f"{MISSING_COUNTER_MESSAGE} {warned_name}. {WMMA_HINT}"
+        ]
     else:
-        validation.assert_not_called()
+        assert missing_warnings == []
+    if debugged_name:
+        assert missing_debug == [f"profiling {MISSING_COUNTER_MESSAGE} {debugged_name}"]
+    else:
+        assert missing_debug == []

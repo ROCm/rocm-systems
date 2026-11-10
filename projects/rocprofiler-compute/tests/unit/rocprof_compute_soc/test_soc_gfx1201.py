@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Navi48 SoC setup and WMMA collection diagnostics without GPU hardware."""
+"""Navi48 SoC setup and WMMA collection hints without GPU hardware."""
 
 from argparse import Namespace
 from types import SimpleNamespace
@@ -41,50 +41,11 @@ def test_gfx1201_profiling_setup_returns_selected_blocks(navi48_soc, monkeypatch
     assert navi48_soc.profiling_setup() == ["2", "3"]
 
 
-@pytest.mark.parametrize(
-    "requested, collected, should_warn",
-    [
-        pytest.param(
-            {"SQ_WMMA_VALU_INSTS"},
-            {"SQ_WMMA_VALU_INSTS_sum"},
-            False,
-            id="sum-alias-collected",
-        ),
-        pytest.param(
-            {"SQ_WMMA_VALU_INSTS_sum"},
-            {"SQ_WMMA_VALU_INSTS"},
-            False,
-            id="raw-alias-collected",
-        ),
-        pytest.param({"SQ_WMMA_VALU_INSTS_sum"}, set(), False, id="no-kernel-data"),
-        pytest.param(
-            {"SQ_WMMA_VALU_INSTS_sum"},
-            {"UNRELATED_COUNTER"},
-            False,
-            id="no-requested-counter-data",
-        ),
-        pytest.param(
-            {"SQ_INSTS_VALU_sum"}, {"SQ_INSTS_VALU_sum"}, False, id="wmma-not-requested"
-        ),
-        pytest.param(
-            {"SQ_WMMA_VALU_INSTS_sum", "SQ_WAVES_sum"},
-            {"SQ_WAVES_sum"},
-            True,
-            id="wmma-missing-from-populated-pass",
-        ),
-    ],
-)
-def test_counter_collection_diagnoses_only_missing_requested_wmma(
-    navi48_soc, monkeypatch, requested, collected, should_warn
-):
-    warnings = []
-    monkeypatch.setattr(soc_gfx1201, "console_warning", warnings.append)
-    navi48_soc.validate_counter_collection(requested, collected)
-    assert bool(warnings) is should_warn
-    if should_warn:
-        assert len(warnings) == 1
-        assert "SQ event 233" in warnings[0]
-        assert "collected other counters" in warnings[0]
+def test_gfx1201_wmma_counter_collection_hint(navi48_soc):
+    hint = navi48_soc.counter_collection_hints["SQ_WMMA_VALU_INSTS"]
+    assert "SQ event 233" in hint
+    assert "SqcCounterBlockMaxEvent" in hint
+    assert navi48_soc.counter_collection_hints["SQ_WMMA_VALU_INSTS_sum"] == hint
 
 
 @pytest.mark.parametrize(

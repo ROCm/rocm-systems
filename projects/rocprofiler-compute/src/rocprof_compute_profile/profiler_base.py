@@ -42,6 +42,7 @@ from vendored import yaml
 
 # Only the specs classes that can be power-gated carry a perf_level, so seeing
 # AUTO here is enough to warn.
+_SUM_SUFFIX = "_sum"
 _PMC_POWER_GATING_WARNING = (
     "AUTO performance level can gate the perfmon clock, so counters such as "
     "TCP_REQ may report zero even when the kernel issues global memory traffic. "
@@ -70,6 +71,26 @@ def _partition_warning_messages(mspec: MachineSpecs) -> List[str]:
             f"based on the number of {derived} derived for this partition mode."
         )
     return messages
+
+
+def _counter_name_key(name: str) -> str:
+    """Drop a trailing _sum. Channel names such as TCC_HIT[0] stay intact."""
+    if name.endswith(_SUM_SUFFIX):
+        return name[: -len(_SUM_SUFFIX)]
+    return name
+
+
+def _collection_hint(name: str, hints: Dict[str, str]) -> Optional[str]:
+    """Return an arch hint for this counter or its _sum alias."""
+    key = _counter_name_key(name)
+    if name in hints:
+        return hints[name]
+    if key in hints:
+        return hints[key]
+    summed = f"{key}{_SUM_SUFFIX}"
+    if summed in hints:
+        return hints[summed]
+    return None
 
 
 def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[str]]:
@@ -436,9 +457,7 @@ class RocProfCompute_Base:
             # cannot establish whether a missing counter's own pass ran kernels.
             if len(input_files) == 1:
                 requested_counters = set(parse_pmc_perf(input_files[0]))
-                self._soc.validate_counter_collection(
-                    requested_counters, collected_counters
-                )
+                self._warn_missing_counters(requested_counters, collected_counters)
 
         end_time = time.time()
         duration = end_time - start_time
@@ -448,6 +467,35 @@ class RocProfCompute_Base:
             f" {duration % 60} sec"
         )
         return duration
+
+    def _warn_missing_counters(self, requested: Set[str], collected: Set[str]) -> None:
+        """Warn once for hinted gaps in this pass; debug-log the others."""
+        collected_keys = {_counter_name_key(name) for name in collected}
+        missing = sorted(
+            name for name in requested if _counter_name_key(name) not in collected_keys
+        )
+        if not missing:
+            return
+
+        hints = getattr(self._soc, "counter_collection_hints", {})
+        names_by_hint: Dict[str, List[str]] = {}
+        unhinted: List[str] = []
+        for name in missing:
+            hint = _collection_hint(name, hints)
+            if hint:
+                names_by_hint.setdefault(hint, []).append(name)
+            else:
+                unhinted.append(name)
+
+        for hint, names in names_by_hint.items():
+            console_warning(
+                f"Requested counters missing from this pass: {', '.join(names)}. {hint}"
+            )
+        if unhinted:
+            console_debug(
+                "profiling",
+                "Requested counters missing from this pass: " + ", ".join(unhinted),
+            )
 
     @abstractmethod
     def run_profiling(self, version: str, prog: str) -> None:

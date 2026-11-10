@@ -138,6 +138,9 @@ class AnalysisConfigMetric(NamedTuple):
 
 
 class OmniSoC_Base:
+    # Arch-specific text for counters that can be requested but not collected.
+    counter_collection_hints: Dict[str, str] = {}  # noqa: UP006
+
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         # new info field will contain rocminfo or sysinfo to populate properties
         console_debug("[omnisoc init]")
@@ -743,13 +746,6 @@ class OmniSoC_Base:
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
-    def validate_counter_collection(
-        self,
-        requested: Set[str],  # noqa: UP006
-        collected: Set[str],  # noqa: UP006
-    ) -> None:
-        """Inspect one pass's counter inventory without rereading profiling output."""
-
     @abstractmethod
     def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""
