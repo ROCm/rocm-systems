@@ -54,15 +54,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
     LOG_ERROR_ABORT("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
 
-  // Get current device and total number of local GPU devices
+  // Get current device
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
-  int numDevices;
-  CHECK_HIP(hipGetDeviceCount(&numDevices));
-  num_devices = numDevices;
-  // Note: shm_size is the number of local PEs (ranks on this node); num_devices (set above) is
-  // the number of actual GPU devices on this node. SDMA peer connections are wired per device,
-  // not per rank, so the loops below iterate num_devices/numDevices rather than shm_size.
 
   wiredPeers = 0;
   uint32_t queuesBefore = 0;
@@ -76,9 +70,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
     queuesBefore = sdma_anvil::anvil.queuesUsed();
     status = kSdmaReady;
 
-    // Connect to every local GPU device. A failure is not acted on here; the group agrees on the
-    // result below, because disagreeing on sdmaEnabled hangs alltoall.
-    for (int i = 0; i < numDevices; i++) {
+    // Connect to every local PE. A failure is not acted on here; the group agrees on the result
+    // below, because disagreeing on sdmaEnabled hangs alltoall.
+    for (int i = 0; i < shm_size; i++) {
       if (i != deviceId) {
         sdma_anvil::EnablePeerAccess(deviceId, i);
       }
@@ -139,9 +133,9 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
 }
 
 __host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
-  // Total number of handles: num_devices * numChannels
+  // Total number of handles: shm_size * numChannels
   // Indexed as: deviceHandles_d[local_pe * numChannels + channel_idx]
-  int total_handles = num_devices * numChannels;
+  int total_handles = shm_size * numChannels;
 
   // Allocate device-side array to hold SDMA queue device handles
   CHECK_HIP(hipMalloc(&deviceHandles_d,
@@ -150,7 +144,7 @@ __host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
   // Copy device handles to device memory
   std::vector<sdma_anvil::SdmaQueueDeviceHandle*> handles_h(total_handles, nullptr);
   if (useQueues) {
-    for (int i = 0; i < num_devices; i++) {
+    for (int i = 0; i < shm_size; i++) {
       for (int ch = 0; ch < numChannels; ch++) {
         int idx = i * numChannels + ch;
         sdma_anvil::SdmaQueue* queue = sdma_anvil::anvil.getSdmaQueue(deviceId, i, ch);
