@@ -62,7 +62,7 @@
         "1700_l2_cache.yaml": "6efc012759383b0602f56c9ef81b0b6c",
         "1800_l2_cache_per_channel.yaml": "17eb4dec1b555d6fb7e6e11cffe36622",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3",
-        "collectables.yaml": "54a48ebb40ebbd383771504a357fda20"
+        "collectables.yaml": "5eb9ef8b0aba20c177df8d10a9f18ac0"
       }
     },
     "gfx90a": {
@@ -85,7 +85,7 @@
         "1700_l2_cache.yaml": "0fbe69c41975adec7516441823441475",
         "1800_l2_cache_per_channel.yaml": "5fba55606e7a4cc31d745be8254d41f4",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3",
-        "collectables.yaml": "70ae9c549139d9223b3b498bad0dbac0"
+        "collectables.yaml": "a1c8f990aa9b1f98fcc66493edc02815"
       }
     },
     "gfx942": {
@@ -108,7 +108,7 @@
         "1700_l2_cache.yaml": "0c934935621bf349224bd3994fdaaf52",
         "1800_l2_cache_per_channel.yaml": "5c9cb158d155d78fe3d4523eed7829a8",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3",
-        "collectables.yaml": "01b3d8a4a3a9b799f0d8e5ea5fcdf51b"
+        "collectables.yaml": "f422ca2bdcaabeda583a2ea52e6b9048"
       }
     },
     "gfx950": {
@@ -132,7 +132,7 @@
         "1800_l2_cache_per_channel.yaml": "cfeddd1e9ab3174f7e8a105aeb60157b",
         "2100_pc_sampling.yaml": "24c8aa42c3162070bc5b8023c27586a3",
         "3000_mem_bw.yaml": "6467e3a9ad9c95a885193025155c2562",
-        "collectables.yaml": "7c6baa5b63b4014e0378a5eef953d856"
+        "collectables.yaml": "306aff375cc9516071f6d19db3da5551"
       }
     }
   }
