@@ -266,9 +266,10 @@ and README, as `src/memory_chart/loader.py` sits next to its layouts.
 6. Load `variables.yaml` (inherited like the metric files) into
    `MetricLibrary.variables`, in file order.
 
-7. Load `sets.yaml` from the arch directory (inherited along `METRIC_LIBRARY_PARENT_ARCH` like the
-   metric files) into `MetricLibrary.sets: dict[str, SetDefinition]`. Sets only reference
-   metric ids; see [Sets migration](#sets-migration).
+7. Load `sets.yaml` from the arch directory (inherited along
+   `METRIC_LIBRARY_PARENT_ARCH` like the metric files) into `MetricLibrary.sets` (set
+   option -> `title` and `metrics`). Sets only reference metric ids; see
+   [Sets migration](#sets-migration).
 
 `MetricLibrary` class:
 
@@ -277,7 +278,7 @@ class MetricLibrary:
     arch: str                       # the canonical arch, e.g. "gfx115x"
     metrics: dict[str, dict]        # metric id -> its fields
     variables: dict[str, dict]      # variable name -> {formula}, in file order
-    sets: dict[str, SetDefinition]  # Stage 4, sets migration
+    sets: dict[str, dict]           # set option -> {title, metrics}
 
     @classmethod
     def load(cls, metric_dir: Path, arch: str) -> "MetricLibrary": ...
@@ -642,10 +643,11 @@ How a set's results are displayed is a Layer 3 concern (see
 
 Sets move from `profile_configs/sets/{arch}_sets.yaml` to
 `metric_library/{arch}/sets.yaml` and switch from numeric positional IDs to string metric
-IDs:
+IDs. Like a metric file, the file maps each set option to its fields: a `title` and the
+list of `metrics`. The unread `description` (every set said "Placeholder") is dropped.
 
 ```yaml
-# Before
+# Before: profile_configs/sets/gfx908_sets.yaml
 sets:
 - title: Compute Throughput Utilization
   set_option: compute_thruput_util
@@ -654,12 +656,10 @@ sets:
   - 11.2.2: SALU Utilization
   - 11.2.3: VALU Utilization
 
-# After
-sets:
-- title: Compute Throughput Utilization
-  set_option: compute_thruput_util
-  description: Placeholder
-  metric:
+# After: metric_library/gfx908/sets.yaml
+compute_thruput_util:
+  title: Compute Throughput Utilization
+  metrics:
   - compute.salu_util
   - compute.valu_util
 ```
@@ -668,12 +668,15 @@ sets:
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
 - **Inheritance.** `sets.yaml` inherits along `METRIC_LIBRARY_PARENT_ARCH` like the
-  metric files.
-- **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
-  set's counters fit in one pass.
+  metric files; a child overrides a set's fields, and a list replaces the parent's.
+- **Single-pass check.** `tools/validate_metric_library.py` uses
+  `get_counters_for_metrics()` to confirm that each set's counters fit in one pass on
+  every GPU arch the directory serves.
 - **Transition.** Production `--set` and `--list-sets` keep reading
-  `profile_configs/sets/` until the cutover. The equivalence checks prove that each
-  string-ID set yields the same counters as the numeric set it replaces.
+  `profile_configs/sets/` until the cutover. The sync test checks that each string-ID
+  set has the title of the numeric set it replaces and lists the metrics of its rows, in
+  order. A numeric set whose rows show no formula on an arch has no library set there:
+  gfx908 has no MFMA counters, so it has no `compute_thruput_flops` set.
 
 ### Built-in variable migration
 
@@ -690,7 +693,7 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
+| `validate_sets_metric_ids.py` | No change: the numeric files keep their positional and one-pass checks until the cutover. `tools/validate_metric_library.py` checks `metric_library/{arch}/sets.yaml` with its own copy of the one-pass check. |
 | `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
 | `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |

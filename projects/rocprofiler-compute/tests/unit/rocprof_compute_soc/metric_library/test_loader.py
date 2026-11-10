@@ -239,6 +239,21 @@ def test_load_reads_variables_apart_from_metrics(family):
     assert "GRBM_X" not in library.metrics
 
 
+def test_load_reads_sets_through_the_chain(family):
+    write_file(
+        family / "gfx_base" / "sets.yaml",
+        "busy:\n  title: Busy\n  metrics: [compute.salu_util, compute.valu_util]\n"
+        "old:\n  title: Old\n  metrics: [compute.salu_util]\n",
+    )
+    write_file(
+        family / "gfx_c4" / "sets.yaml",
+        "remove:\n  - old\nbusy:\n  metrics: [compute.valu_util]\n",
+    )
+    library = MetricLibrary.load(family, "gfx_c4")
+    assert library.sets == {"busy": {"title": "Busy", "metrics": ["compute.valu_util"]}}
+    assert "busy" not in library.metrics
+
+
 def test_id_defined_in_two_files_fails(family):
     write_file(family / "gfx_c4" / "wave.yaml", "compute.valu_util:\n  name: Again\n")
     with pytest.raises(MetricLibraryError, match=r"\['compute.valu_util'\]"):
