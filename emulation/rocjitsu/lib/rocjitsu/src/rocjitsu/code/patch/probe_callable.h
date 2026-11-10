@@ -269,6 +269,8 @@ struct ProbeCallable {
 ///     access (FLAT scratch_* / SMEM s_scratch_*); note private access via FLAT
 ///     addressing, or via a buffer instruction given a scratch resource
 ///     descriptor, is not statically detectable here and is not rejected,
+///   - contain no CDNA1-4 instruction that may enable VSKIP, which suppresses
+///     the vector instructions used to restore VGPRs and SGPRs after the call,
 ///   - contain no RDNA4 image instruction (VIMAGE / VSAMPLE), whose decoded
 ///     operands do not name every register it reads and writes, and
 ///   - end in `s_setpc_b64 s[30:31]`.

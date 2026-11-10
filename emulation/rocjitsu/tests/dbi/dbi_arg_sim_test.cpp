@@ -588,6 +588,58 @@ TEST(DbiAfterInstSim, VskipEnableRejectsAfterInstWhileBeforeInstPreservesScalarS
   }
 }
 
+TEST(DbiAfterInstSim, RejectsVskipEnablingProbeAndPreservesScalarStateWithClearOnlyProbe) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint32_t> result =
+      build_s_mov_b32(4, scalar_positive_inline_u32(7), kArch);
+  constexpr util::FailureOr<uint32_t> clobber =
+      build_s_mov_b32(4, scalar_positive_inline_u32(11), kArch);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(result.succeeded() && clobber.succeeded() && setpc.succeeded());
+  const uint32_t clear = cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0];
+  const util::FailureOr<uint32_t> readback = build_v_mov_b32_src(2, 4, kArch);
+  ASSERT_TRUE(readback.succeeded());
+  const std::vector<uint8_t> image = test::with_descriptor_metadata(
+      test::make_gfx950_kernel_elf(
+          {result.value(), clear, readback.value(), cdna4::build_sopp(cdna4::kSEndpgmSopp)[0]}, 64),
+      kArch);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  for (const bool enables : {false, true}) {
+    SCOPED_TRACE(enables);
+    const uint32_t write_vskip = cdna4::build_sopc(
+        cdna4::kSSetvskipSopc, {.ssrc0 = static_cast<uint8_t>(128 + enables), .ssrc1 = 128})[0];
+    const std::vector<uint8_t> body = test::make_gfx950_probe_elf(
+        "vskip_result_clobber", {clobber.value(), write_vskip, setpc.value()});
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "vskip_result_clobber",
+                                        .probe_args = {},
+                                        .force_full_exec = true};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject patched = instrumentor.patch();
+    if (enables && !patched.errors.empty()) {
+      ASSERT_EQ(patched.errors.size(), 1u);
+      EXPECT_NE(patched.errors.front().find("VSKIP"), std::string::npos);
+      EXPECT_TRUE(patched.elf_bytes.empty());
+      EXPECT_TRUE(patched.sites.empty());
+      continue;
+    }
+    ASSERT_TRUE(patched.errors.empty()) << patched.errors.front();
+    const AmdGpuCodeObject executable(patched.elf_bytes.data(), patched.elf_bytes.size());
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+    const std::vector<uint32_t> values =
+        sim.run_and_read_vgpr(test::section_words(executable, ".text"),
+                              test::patched_private_segment_size(executable), 2);
+    // If admission regresses, execute the unsafe image too: the guest clears
+    // VSKIP before reading s4, exposing an SGPR restore suppressed by the probe.
+    EXPECT_EQ(values, std::vector<uint32_t>(64, 7));
+    EXPECT_FALSE(enables) << "a probe that enables VSKIP must be rejected before emission";
+  }
+}
+
 TEST(DbiAfterInstSim, PreservesANewScalarDefinitionWithoutArguments) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   constexpr uint16_t kResultSgpr = 4;

@@ -79,41 +79,60 @@ bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
          (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
 }
 
-enum class VectorMode { GprIndexing, Vskip };
+enum class CallableState { GprIndexing, Vskip, UnavailableStorage };
 
-enum class ModeWrite { Unchanged, Clear, MayEnable };
+enum class StateWrite { Unchanged, Safe, Unsafe };
 
-ModeWrite
-vector_mode_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
-                  VectorMode mode,
-                  const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
-  if (mode == VectorMode::GprIndexing ? !isa_properties(arch).mode_has_gpr_idx_en
-                                      : !arch_is_cdna_4_or_lower(arch))
-    return ModeWrite::Unchanged;
+bool has_callable_state(rj_code_arch_t arch, CallableState state) {
+  switch (state) {
+  case CallableState::GprIndexing:
+    return isa_properties(arch).mode_has_gpr_idx_en;
+  case CallableState::Vskip:
+    return arch_is_cdna_4_or_lower(arch);
+  case CallableState::UnavailableStorage:
+    return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+           arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+  }
+  return false;
+}
+
+StateWrite
+callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+                     CallableState state,
+                     const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
+  if (!has_callable_state(arch, state))
+    return StateWrite::Unchanged;
   if (inst.flags() & INDIRECT_CALL)
-    return preserving_calls != nullptr && preserving_calls->contains(&inst) ? ModeWrite::Unchanged
-                                                                            : ModeWrite::MayEnable;
-  const bool enables = mode == VectorMode::GprIndexing ? may_enable_gpr_indexing(inst, text, arch)
-                                                       : may_enable_vskip(inst, text, arch);
+    return preserving_calls != nullptr && preserving_calls->contains(&inst) ? StateWrite::Unchanged
+                                                                            : StateWrite::Unsafe;
+  // Descriptor counts prove only dispatch-time storage. No later allocation
+  // currently proves that the callback envelope has sufficient VGPRs/scratch.
+  if (state == CallableState::UnavailableStorage)
+    return inst.mnemonic() == "s_alloc_vgpr" || deallocates_vgprs(inst, arch)
+               ? StateWrite::Unsafe
+               : StateWrite::Unchanged;
+  const bool enables = state == CallableState::GprIndexing
+                           ? may_enable_gpr_indexing(inst, text, arch)
+                           : may_enable_vskip(inst, text, arch);
   if (enables)
-    return ModeWrite::MayEnable;
-  if ((mode == VectorMode::GprIndexing && inst.mnemonic() == "s_set_gpr_idx_off") ||
-      (mode == VectorMode::Vskip && inst.mnemonic() == "s_setvskip"))
-    return ModeWrite::Clear;
+    return StateWrite::Unsafe;
+  if ((state == CallableState::GprIndexing && inst.mnemonic() == "s_set_gpr_idx_off") ||
+      (state == CallableState::Vskip && inst.mnemonic() == "s_setvskip"))
+    return StateWrite::Safe;
   if (inst.mnemonic() == "s_setreg_b32" || inst.mnemonic() == "s_setreg_imm32_b32") {
     const Operand *hwreg = inst.dst_operand(0);
     if (hwreg != nullptr &&
         amdgpu::hwreg_slice_overlaps_mode_bit(static_cast<uint16_t>(hwreg->encoding_value()),
-                                              mode == VectorMode::GprIndexing ? 27 : 28))
-      return ModeWrite::Clear;
+                                              state == CallableState::GprIndexing ? 27 : 28))
+      return StateWrite::Safe;
   }
-  return ModeWrite::Unchanged;
+  return StateWrite::Unchanged;
 }
 
-// A resolved straight-line helper can preserve MODE without relying on an ABI
-// assumption. More complex or unresolved callees remain unknown to this proof.
-bool callee_preserves_vector_mode(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
-                                  rj_code_arch_t arch, VectorMode mode) {
+// A resolved straight-line helper can preserve the required state without an
+// ABI assumption. More complex or unresolved callees remain unknown here.
+bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
+                            rj_code_arch_t arch, CallableState state) {
   if (edge.callee == nullptr || !edge.callee->successors().empty() ||
       !edge.callee->predecessors().empty())
     return false;
@@ -127,7 +146,7 @@ bool callee_preserves_vector_mode(const BasicBlock::CallEdge &edge, std::span<co
     if (&inst == ret)
       break;
     if (inst.mnemonic().starts_with("s_movrel") ||
-        vector_mode_write(inst, text, arch, mode) != ModeWrite::Unchanged)
+        callable_state_write(inst, text, arch, state) != StateWrite::Unchanged)
       return false;
     const InstDefUse effects(inst, 64);
     if (effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
@@ -137,13 +156,145 @@ bool callee_preserves_vector_mode(const BasicBlock::CallEdge &edge, std::span<co
   return true;
 }
 
-bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
-                                std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                std::span<const KernelDescriptorInfo> kernels,
-                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                                VectorMode mode) {
-  if (mode == VectorMode::GprIndexing ? !isa_properties(arch).mode_has_gpr_idx_en
-                                      : !arch_is_cdna_4_or_lower(arch))
+// Recognize a contiguous negative 64-bit PC adjustment with its carry intact.
+// Restrict hidden edges to dispatch roots so they cannot enter another helper
+// with a return-link context supplied only by that helper's own callers.
+bool adjusted_pc_returns_to_entry(const std::array<const Instruction *, 3> &tail, uint64_t base,
+                                  uint16_t link, std::span<const KernelDescriptorInfo> kernels) {
+  if (tail[0] == nullptr || tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc() ||
+      tail[1]->src_loc() + tail[1]->size() != tail[2]->src_loc())
+    return false;
+  const std::string_view low_name = tail[0]->mnemonic();
+  const std::string_view high_name = tail[1]->mnemonic();
+  const std::string_view ret_name = tail[2]->mnemonic();
+  if ((low_name != "s_add_u32" && low_name != "s_add_co_u32") ||
+      (high_name != "s_addc_u32" && high_name != "s_add_co_ci_u32") ||
+      (ret_name != "s_setpc_b64" && ret_name != "s_set_pc_i64"))
+    return false;
+  const auto is_link = [](const Operand *operand, uint16_t index, uint8_t width = 1) {
+    return operand != nullptr &&
+           operand->to_register_ref() == RegisterRef{RegClass::SGPR, index, width};
+  };
+  const uint16_t high = link + 1;
+  if (!is_link(tail[0]->dst_operand(0), link) || !is_link(tail[0]->src_operand(0), link) ||
+      !is_link(tail[1]->dst_operand(0), high) || !is_link(tail[1]->src_operand(0), high) ||
+      !is_link(tail[2]->src_operand(0), link, 2))
+    return false;
+  const Operand *low_value = tail[0]->src_operand(1);
+  const Operand *high_value = tail[1]->src_operand(1);
+  if (low_value == nullptr || high_value == nullptr)
+    return false;
+  const std::optional<uint64_t> low_constant = low_value->const_value();
+  const std::optional<uint64_t> high_constant = high_value->const_value();
+  if (!low_constant || !high_constant || static_cast<uint32_t>(*high_constant) != 0xffffffffu)
+    return false;
+  const int64_t delta = static_cast<int32_t>(static_cast<uint32_t>(*low_constant));
+  if (delta >= 0 || base < static_cast<uint64_t>(-delta))
+    return false;
+  const uint64_t target = base - static_cast<uint64_t>(-delta);
+  if (!std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
+        return kernel.entry_text_offset == target;
+      }))
+    return false;
+  return true;
+}
+
+bool callee_returns_to_entry(const BasicBlock::CallEdge &edge,
+                             std::span<const KernelDescriptorInfo> kernels) {
+  if (edge.callee == nullptr || edge.continuation == nullptr ||
+      !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
+    return false;
+  std::array<const Instruction *, 3> tail = {};
+  for (const Instruction &inst : edge.callee->instructions())
+    tail = {tail[1], tail[2], &inst};
+  if (!adjusted_pc_returns_to_entry(tail, edge.continuation->start_offset(), edge.return_sreg,
+                                    kernels))
+    return false;
+  const uint16_t high = edge.return_sreg + 1;
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (&inst == tail[0])
+      break;
+    const InstDefUse effects(inst, 64);
+    if (inst.mnemonic().starts_with("s_movrel") ||
+        effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
+        effects.defs.contains({RegClass::SGPR, high, 1}))
+      return false;
+  }
+  return true;
+}
+
+bool static_pc_returns_to_entry(const BasicBlock &block,
+                                std::span<const KernelDescriptorInfo> kernels) {
+  std::array<const Instruction *, 4> tail = {};
+  for (const Instruction &inst : block.instructions())
+    tail = {tail[1], tail[2], tail[3], &inst};
+  if (tail[0] == nullptr ||
+      (tail[0]->mnemonic() != "s_getpc_b64" && tail[0]->mnemonic() != "s_get_pc_i64") ||
+      tail[0]->src_loc() + tail[0]->size() != tail[1]->src_loc())
+    return false;
+  const Operand *destination = tail[0]->dst_operand(0);
+  if (destination == nullptr)
+    return false;
+  const std::optional<RegisterRef> pair = destination->to_register_ref();
+  return pair && pair->cls == RegClass::SGPR && pair->width == 2 &&
+         adjusted_pc_returns_to_entry({tail[1], tail[2], tail[3]},
+                                      tail[0]->src_loc() + tail[0]->size(), pair->index, kernels);
+}
+
+// Hidden but bounded return edges cannot invalidate storage if no instruction
+// anywhere in the closed text changes it. Unknown/external transfers still fail.
+bool storage_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                         std::span<const KernelDescriptorInfo> kernels,
+                                         std::span<const uint8_t> text, rj_code_arch_t arch) {
+  std::unordered_set<const Instruction *> known_returns;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic() == "s_alloc_vgpr" || deallocates_vgprs(inst, arch) ||
+          inst.mnemonic().starts_with("s_rfe"))
+        return false;
+      if ((inst.flags() & INDIRECT_CALL) &&
+          (&inst != block->terminator() || block->call_edges().empty()))
+        return false;
+    }
+    for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+      if (edge.callee == nullptr ||
+          std::ranges::any_of(kernels,
+                              [&](const KernelDescriptorInfo &kernel) {
+                                return kernel.entry_text_offset == edge.callee->start_offset();
+                              }) ||
+          (!callee_preserves_state(edge, text, arch, CallableState::UnavailableStorage) &&
+           !callee_returns_to_entry(edge, kernels)))
+        return false;
+      known_returns.insert(edge.callee->terminator());
+    }
+  }
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    const BasicBlock::SuccessorIssue issue = block->successor_issue();
+    if (issue == BasicBlock::SuccessorIssue::None)
+      continue;
+    if (issue != BasicBlock::SuccessorIssue::IndirectControlFlow)
+      return false;
+    if (known_returns.contains(block->terminator()) || static_pc_returns_to_entry(*block, kernels))
+      continue;
+    const std::vector<IndirectCallFixup> &fixups = block->static_indirect_call_fixups();
+    if (fixups.empty() || !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
+          return !fixup.source_incomplete && block->terminator() != nullptr &&
+                 fixup.source_call_offset == block->terminator()->src_loc() &&
+                 std::ranges::any_of(blocks, [&](const std::unique_ptr<BasicBlock> &target) {
+                   return target->start_offset() == fixup.source_target_offset;
+                 });
+        }))
+      return false;
+  }
+  return true;
+}
+
+bool callable_state_may_be_unsafe(const Instruction &anchor, bool after,
+                                  std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                  std::span<const KernelDescriptorInfo> kernels,
+                                  std::span<const uint8_t> text, rj_code_arch_t arch,
+                                  CallableState state) {
+  if (!has_callable_state(arch, state))
     return false;
   std::unordered_set<const Instruction *> preserving_calls;
   std::unordered_set<const Instruction *> known_returns;
@@ -151,7 +302,7 @@ bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
     if (block->successor_issue() != BasicBlock::SuccessorIssue::None || block->call_edges().empty())
       continue;
     if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
-          return callee_preserves_vector_mode(edge, text, arch, mode);
+          return callee_preserves_state(edge, text, arch, state);
         })) {
       preserving_calls.insert(block->terminator());
     }
@@ -179,31 +330,45 @@ bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
       for (const BasicBlock::CallEdge &edge : block->call_edges())
         known_returns.insert(edge.callee->terminator());
   }
-  // An unresolved transfer can bypass a local MODE clear or add an incoming
-  // path absent from predecessors(). AfterInst must not treat that CFG as complete.
-  if (after) {
+  // An unresolved transfer can bypass a local MODE clear/storage release or
+  // add an incoming path absent from predecessors(). Fail closed for these proofs.
+  if (after || state == CallableState::UnavailableStorage) {
     for (const BasicBlock *block : reachable) {
-      if (block->successor_issue() != BasicBlock::SuccessorIssue::None &&
-          !known_returns.contains(block->terminator()))
+      const BasicBlock::SuccessorIssue issue = block->successor_issue();
+      // Falling off the original text cannot transfer back into an earlier
+      // storage observation. Keep the existing stricter AfterInst MODE gate.
+      if (state == CallableState::UnavailableStorage &&
+          issue == BasicBlock::SuccessorIssue::MissingFallthrough)
+        continue;
+      if (issue != BasicBlock::SuccessorIssue::None &&
+          !known_returns.contains(block->terminator())) {
+        if (state == CallableState::UnavailableStorage &&
+            storage_is_preserved_in_closed_text(blocks, kernels, text, arch)) {
+          return !std::ranges::any_of(reachable, [&](const BasicBlock *candidate) {
+            return std::ranges::any_of(candidate->instructions(),
+                                       [&](const Instruction &inst) { return &inst == &anchor; });
+          });
+        }
         return true;
+      }
     }
   }
   const BasicBlock *owner = nullptr;
-  ModeWrite last_write = ModeWrite::Unchanged;
+  StateWrite last_write = StateWrite::Unchanged;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    last_write = ModeWrite::Unchanged;
+    last_write = StateWrite::Unchanged;
     for (const Instruction &inst : block->instructions()) {
       if (&inst == &anchor) {
         if (after) {
-          const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
-          if (write != ModeWrite::Unchanged)
+          const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
+          if (write != StateWrite::Unchanged)
             last_write = write;
         }
         owner = block.get();
         break;
       }
-      const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
-      if (write != ModeWrite::Unchanged)
+      const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
+      if (write != StateWrite::Unchanged)
         last_write = write;
     }
     if (owner != nullptr)
@@ -211,11 +376,11 @@ bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
   }
   if (owner == nullptr || !reachable.contains(owner))
     return true;
-  if (last_write != ModeWrite::Unchanged)
-    return last_write == ModeWrite::MayEnable;
+  if (last_write != StateWrite::Unchanged)
+    return last_write == StateWrite::Unsafe;
 
-  // Kernel entries start with both modes disabled. Other roots (including
-  // unmodelled indirect entries) are unknown. Backedges into an entry still
+  // Kernel entries start with both modes disabled and descriptor-backed storage.
+  // Other roots (including unmodelled indirect entries) are unknown. Backedges still
   // participate; the partial anchor block is not marked visited as a full block.
   const auto is_entry = [&](const BasicBlock *block) {
     return std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
@@ -226,31 +391,31 @@ bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
                                           owner->predecessors().end());
   if (pending.empty())
     return !is_entry(owner);
-  bool found_disabled_source = is_entry(owner);
+  bool found_safe_source = is_entry(owner);
   std::unordered_set<const BasicBlock *> visited;
   while (!pending.empty()) {
     const BasicBlock *block = pending.back();
     pending.pop_back();
     if (!reachable.contains(block) || !visited.insert(block).second)
       continue;
-    found_disabled_source |= is_entry(block);
-    last_write = ModeWrite::Unchanged;
+    found_safe_source |= is_entry(block);
+    last_write = StateWrite::Unchanged;
     for (const Instruction &inst : block->instructions()) {
-      const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
-      if (write != ModeWrite::Unchanged)
+      const StateWrite write = callable_state_write(inst, text, arch, state, &preserving_calls);
+      if (write != StateWrite::Unchanged)
         last_write = write;
     }
-    if (last_write != ModeWrite::Unchanged) {
-      if (last_write == ModeWrite::MayEnable)
+    if (last_write != StateWrite::Unchanged) {
+      if (last_write == StateWrite::Unsafe)
         return true;
-      found_disabled_source = true;
+      found_safe_source = true;
       continue;
     }
     if (block->predecessors().empty() && !is_entry(block))
       return true;
     pending.insert(pending.end(), block->predecessors().begin(), block->predecessors().end());
   }
-  return !found_disabled_source;
+  return !found_safe_source;
 }
 
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
@@ -607,6 +772,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   }
   if (pt.kind == InstrumentationKind::AfterInst && deallocates_vgprs(anchor, arch)) {
     fail("AfterInst anchor deallocates VGPRs and scratch");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst && anchor.is_mfma()) {
+    fail("AfterInst cannot satisfy MFMA software-managed register hazards");
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {
@@ -1485,18 +1654,27 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
-      bool unsafe_mode = false;
-      for (const VectorMode mode : {VectorMode::GprIndexing, VectorMode::Vskip}) {
-        if (vector_mode_may_be_enabled(*anchor, pt.kind == InstrumentationKind::AfterInst, blocks_,
-                                       out.kernels, text_bytes, arch_, mode)) {
-          out.errors.emplace_back(std::string("probe observation may inherit enabled ") +
-                                  (mode == VectorMode::GprIndexing ? "GPR indexing" : "VSKIP") +
-                                  ", anchor_offset = " + std::to_string(pt.anchor_offset));
-          unsafe_mode = true;
-          break;
+      bool unsafe_state = false;
+      // Dispatch enters a separate stub once. Guest backedges to the original
+      // entry do not revisit this callback and cannot change its initial state.
+      if (pt.kind != InstrumentationKind::KernelEntry) {
+        for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
+                                          CallableState::UnavailableStorage}) {
+          if (callable_state_may_be_unsafe(*anchor, pt.kind == InstrumentationKind::AfterInst,
+                                           blocks_, out.kernels, text_bytes, arch_, state)) {
+            const std::string reason =
+                state == CallableState::UnavailableStorage
+                    ? "cannot prove the VGPR allocation and scratch storage"
+                    : std::string("may inherit enabled ") +
+                          (state == CallableState::GprIndexing ? "GPR indexing" : "VSKIP");
+            out.errors.emplace_back("probe observation " + reason +
+                                    ", anchor_offset = " + std::to_string(pt.anchor_offset));
+            unsafe_state = true;
+            break;
+          }
         }
       }
-      if (unsafe_mode)
+      if (unsafe_state)
         continue;
       auto index = resolve_probe_index(pt, perr);
       if (!index) {

@@ -16,7 +16,8 @@ insert an inline nop or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement,
 callable `AfterInst`, and callable kernel entry/exit observations are supported.
 `AfterInst` requires a callable probe and rejects anchors that change VGPR bank
-selection, may enable GPR indexing or VSKIP, change the VGPR allocation, or deallocate VGPRs and scratch. The
+selection, may enable GPR indexing or VSKIP, change the VGPR allocation, deallocate VGPRs and scratch,
+or carry software-managed MFMA hazards. The
 pre-anchor addressing proof does not establish the post-anchor state, and the
 callback envelope requires allocated VGPRs and scratch. Block boundaries remain
 reserved. Existing scratch spills coexist with an
@@ -118,10 +119,35 @@ path. Unknown writes, unmodelled call effects, and non-kernel roots fail closed.
 Resolved straight-line callees are proven preserving only if they leave MODE and
 the return-link pair untouched. AfterInst rejects incomplete control flow; a
 validated callee return is distinguished from an unresolved indirect transfer.
-AfterInst also rejects `s_alloc_vgpr` conservatively: without an allocation proof,
-its immediate or SGPR-supplied count may leave too few VGPRs for the envelope.
-This restriction does not depend on a static descriptor count proving the old
-allocation was large enough.
+`KernelEntry` instead uses dispatch-entry state: its descriptor stub runs once,
+and guest backedges to the original entry do not execute that callback again.
+
+Callable instruction and exit observations also require storage to remain
+available along every incoming path. Any preceding `s_alloc_vgpr` or recognized
+VGPR/scratch deallocation, including a loop backedge or an unproven call effect,
+fails this check. The anchor itself participates for `AfterInst`. There is no
+sufficient-allocation proof yet, so a later allocation does not clear the unsafe
+state, whether its count is immediate or SGPR-supplied. Static descriptor counts
+describe the initial allocation and do not prove storage after these operations.
+Dispatch-only `KernelEntry` observations use the initial allocation instead.
+When the CFG omits a rewritten return edge, storage can also be proven invariant
+over text containing no storage mutations and only transfers proven to remain
+inside that text. This proof accepts intact return links and contiguous
+negative low-add/high-add-with-carry adjustments of a saved link or freshly read
+PC back to a descriptor entry. Hidden transfers into other helpers are rejected
+because they do not establish those helpers' return-link contexts;
+unknown targets, broken carry chains, and earlier link clobbers remain rejected.
+
+`AfterInst` rejects MFMA and SMFMAC anchors until the Instrumentor can satisfy
+their software-managed read/write hazards. The envelope's load drain does not
+establish matrix-result readiness. This restriction does not prove readiness at
+arbitrary later sites inside a guest's matrix hazard-spacing window.
+
+Copied probe bodies reject instructions that may enable VSKIP on CDNA1–4,
+including unknown MODE bit 28 writes. The epilogue uses vector instructions to
+restore spilled scalar registers, even with `force_full_exec`. This body-wide
+check is conservative: enabling and later clearing VSKIP is also rejected;
+proven clear-only writes remain supported. It does not preserve general MODE.
 
 Both `s_sendmsg` and `s_sendmsghalt` are checked for `MSG_DEALLOC_VGPRS`.
 The checked-in XML gives MSG widths of 9/4/7/7 bits for RDNA3/RDNA3.5/RDNA4/CDNA5,
