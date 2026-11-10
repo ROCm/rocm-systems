@@ -123,9 +123,7 @@ jobs:
     # Privileged self-hosted runner: never auto-run untrusted fork-PR code on
     # it. Mirrors the guard in amdsmi-build.yml.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+    runs-on: lstt-ci-runner
     timeout-minutes: 45
     container:
       image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 # noble, 2026-09-11

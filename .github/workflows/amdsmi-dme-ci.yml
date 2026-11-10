@@ -76,9 +76,7 @@ jobs:
     name: DME Integration * ${{ matrix.os }}
     # Privileged self-hosted GPU runner: never auto-run untrusted fork-PR code on it.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+    runs-on: lstt-ci-runner
     timeout-minutes: 120
     strategy:
       fail-fast: false

@@ -58,9 +58,7 @@ jobs:
     # Privileged self-hosted runner (SYS_MODULE + host /lib/modules): never
     # auto-run untrusted fork-PR code on it. Mirrors the guard other CI jobs use.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
+    runs-on: lstt-ci-runner
     strategy:
       max-parallel: 10
       fail-fast: false
