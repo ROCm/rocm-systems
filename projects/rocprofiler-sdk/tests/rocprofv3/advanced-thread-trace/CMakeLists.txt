@@ -360,6 +360,14 @@ endif()
 # when the decoder is unavailable.
 set(ATT_NO_DETAIL_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-detail")
 
+# Output directories are keyed by PID, so clear runs from earlier builds before
+# validating.
+rocprofiler_add_integration_cleanup_test(
+    rocprofv3-test-att-no-detail
+    DIRECTORIES ${ATT_NO_DETAIL_OUT_DIR}
+    LABELS "integration-tests;thread-trace"
+    FIXTURES_SETUP rocprofv3-test-att-no-detail-clean)
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-no-detail
     COMMAND
@@ -372,6 +380,7 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${IS_DISABLED}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_REQUIRED rocprofv3-test-att-no-detail-clean
     FIXTURES_SETUP rocprofv3-test-att-no-detail)
 
 rocprofiler_add_integration_validate_test(

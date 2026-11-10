@@ -436,9 +436,7 @@ send_overlapping_requests(scan_context_t&             context,
         for(auto& range : ranges)
             if(range.offset_begin < offset) offset = std::max(offset, range.offset_end);
 
-        std::vector<uint8_t> ret_data{};
-        ret_data.resize(offset);
-        std::memcpy(ret_data.data(), scan_data, offset);
+        auto ret_data = std::vector<uint8_t>(scan_data, scan_data + offset);
 
         ROCP_INFO << "Request send: " << chunk_index << " with size " << ret_data.size();
 
@@ -491,6 +489,14 @@ backend_shader_data(agent_state_t&                         state,
             shader_data.chunk_index,
             shader_data.read_offset,
             shader_data.data_size);
+
+        // Still count the chunk and answer a pending request from the previous one, otherwise
+        // later chunks stall in wait_for_prior_chunks and the previous chunk never wakes up.
+        auto context        = scan_context_t{};
+        context.state       = &state;
+        context.chunk_index = shader_data.chunk_index;
+        auto no_ranges      = std::vector<trace_range_t>{};
+        send_overlapping_requests(context, nullptr, 0, no_ranges, true);
         return;
     }
 

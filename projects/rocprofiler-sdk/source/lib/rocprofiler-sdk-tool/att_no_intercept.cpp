@@ -274,6 +274,11 @@ finalize()
 {
     auto lock = std::unique_lock{manager_mutex};
 
+    // Called from both tool_detach and tool_fini; agent_states() aborts once it is released.
+    static bool finalized = false;
+    if(finalized) return;
+    finalized = true;
+
     for(auto& itr : *agent_states())
     {
         auto& state = *itr.second;
