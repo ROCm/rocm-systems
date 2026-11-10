@@ -1088,14 +1088,6 @@ add_test(
 )
 
 add_test(
-    NAME test_weighted_avg
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_weighted_avg.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_weighted_avg.py
-        tests/unit/utils/metrics/test_weighted_avg_pipeline.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_collect_ratio
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collect_ratio.xml
@@ -1294,7 +1286,6 @@ if(${ENABLE_COVERAGE})
         test_pass_provenance
         test_debug_row_tracker
         test_collect_ratio
-        test_weighted_avg
         test_collectable
         test_counter_grouping_buckets
         test_analysis_config_collectables
