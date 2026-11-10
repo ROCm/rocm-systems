@@ -1131,6 +1131,80 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cache_entries
+
+Description: Returns one dictionary per kind of cache on the given GPU.
+`amdsmi_get_gpu_cache_info` returns a separate entry for each number of compute units
+sharing an instance and is limited to `AMDSMI_MAX_CACHE_TYPES` (10) entries; this function
+reports each cache once, has no limit on the number of entries, and each entry also reports
+the cache line size and the range of compute units sharing an instance. Requires a library that provides
+`amdsmi_get_gpu_cache_entries`.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with key `cache` holding a list of dictionaries following the schema below:
+Schema:
+
+```json
+{
+    "cache_properties":
+        {
+            "type" : "array",
+            "items" : {"type" : "string"}
+        },
+    "cache_size": {"type" : "number"},
+    "cache_level": {"type" : "number"},
+    "cache_line_size": {"type" : "number"},
+    "min_num_cu_shared": {"type" : "number"},
+    "max_num_cu_shared": {"type" : "number"},
+    "num_cache_instance": {"type" : "number"}
+}
+```
+
+Field | Description
+---|---
+`cache_properties` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
+`cache_size` | size of one instance of the cache in KB
+`cache_level` | level of cache
+`cache_line_size` | cache line size in bytes; 0 if not reported
+`min_num_cu_shared` | fewest compute units sharing any one instance; 0 if not reported
+`max_num_cu_shared` | most compute units sharing any one instance
+`num_cache_instance` | number of instances of this cache
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cache_entries` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Cache information is not available for this GPU
+- `AMDSMI_STATUS_NO_DATA` - The GPU reported no caches
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            for cache in amdsmi.amdsmi_get_gpu_cache_entries(device)["cache"]:
+                print(cache['cache_level'], cache['cache_size'], cache['cache_line_size'])
+                print(cache['min_num_cu_shared'], cache['max_num_cu_shared'])
+                print(cache['num_cache_instance'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_vbios_info
 
 Description:  Returns the static information for the VBIOS/IFWI on the device.

@@ -8,6 +8,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_get_gpu_cache_entries()` for GPU cache info with one entry per cache and no limit on the number of entries**.  
+  - The caller sizes the buffer: pass `NULL` for `caches` to get the count, then call again with a buffer that large. A buffer that is too small gets the entries that fit, the full count in `num_caches`, and `AMDSMI_STATUS_INSUFFICIENT_SIZE`.
+  - Each `amdsmi_gpu_cache_entry_t` describes one cache: `num_cache_instance` counts all of its instances, and `min_num_cu_shared`/`max_num_cu_shared` give the range of Compute Units sharing an instance, which CU harvesting varies. It also reports `cache_line_size` (bytes). Line size and minimum sharing are 0 where the backend does not report them (WSL).
+  - Python `amdsmi_get_gpu_cache_entries()` and Rust `amdsmi_get_gpu_cache_entries()` wrap it.
+  - `amdsmi_get_gpu_cache_info()`, `amdsmi_gpu_cache_info_t` and `AMDSMI_MAX_CACHE_TYPES` are unchanged, including the separate entry per CU-sharing count.
+
 - **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
   - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
 
