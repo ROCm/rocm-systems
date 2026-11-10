@@ -47,9 +47,9 @@ const char* ncclSymkKernelIdToString(int kernelId) {
 
 namespace {
 
-// Model-function seams. modelMap[] points at per-family functions whose real TUs
-// (ring.cc, tree.cc, ...) are off this link line, so defining them here both links
-// the TU and makes dispatch observable.
+// Model-function seams. modelMap[] points at per-family functions, and defining them here makes
+// dispatch observable. They are renamed below rather than left at external linkage: ring.cc IS on
+// this link line, via tuning-general-test.cc.
 
 enum class ModelKind { None, Tree, Ring, Collnet, Nvls, Pat, Symk, Ce };
 
@@ -80,6 +80,24 @@ ncclResult_t RecordSim(ModelKind kind, struct ncclTuningResult_t* tuning) {
 }
 
 }  // namespace
+
+// Rename every model entry point before defining it. tuning-general-test.cc includes the real
+// ring.cc into this same binary (CMakeLists.txt:323-324), so an unrenamed fake is a second
+// definition of ring.cc:21 and :92. cost_model.cc is included below and its modelMap[] binds
+// through these same macros, so dispatch still lands on the fakes. All seven families are renamed,
+// not just Ring, so the next sibling include does not reintroduce the collision.
+#define ncclTuningTreeModelInit CostModelTreeModelInit
+#define ncclTuningTreeModelSim CostModelTreeModelSim
+#define ncclTuningRingModelInit CostModelRingModelInit
+#define ncclTuningRingModelSim CostModelRingModelSim
+#define ncclTuningCollnetModelInit CostModelCollnetModelInit
+#define ncclTuningCollnetModelSim CostModelCollnetModelSim
+#define ncclTuningNvlsModelInit CostModelNvlsModelInit
+#define ncclTuningNvlsModelSim CostModelNvlsModelSim
+#define ncclTuningPatModelInit CostModelPatModelInit
+#define ncclTuningPatModelSim CostModelPatModelSim
+#define ncclTuningSymkModelSim CostModelSymkModelSim
+#define ncclTuningCeModelSim CostModelCeModelSim
 
 // Name is both the production symbol infix and the ModelKind enumerator; the five match
 // exactly, so one parameter cannot be paired with the wrong family.
