@@ -1,15 +1,14 @@
 #include "ph_ctx.hpp"
-#include "event_query.hpp"
-#include "track_file_store.hpp"
-#include "trace_trim.hpp"
 #include "debug.hpp"
+#include "event_query.hpp"
 #include "file_probe_failure.hpp"
+#include "formats/trace_formats.hpp"
 #include "ph_future.hpp"
-#include "sql_cancel.hpp"
-#include "catalog_aggregate_store.hpp"
-#include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
+#include "sql_cancel.hpp"
+#include "trace_trim.hpp"
+#include "track_file_store.hpp"
 #include "track_read_options.hpp"
 
 #include <algorithm>
@@ -353,12 +352,6 @@ ph_ctx::default_thread_pool_size()
     return std::max<size_t>(1, std::thread::hardware_concurrency() / 2);
 }
 
-size_t
-ph_ctx::default_connection_count()
-{
-    return 8;
-}
-
 std::vector<ph_ctx::accepted_source_t>
 ph_ctx::accept_traces(const std::vector<std::string>& trace_paths)
 {
@@ -406,21 +399,17 @@ ph_ctx::open_sources()
         auto source     = std::make_unique<trace_source_t>();
         source->path    = accepted.path;
         source->uuid    = accepted.uuid;
-        source->catalog = std::make_shared<profiler_hub::reader_catalog_t>();
-        source->pool    = std::make_unique<profiler_hub::common::connection_pool>(
-            source->path,
-            default_connection_count(),
-            source->catalog,
-            source->uuid,
+        source->source  = profiler_hub::open_format_source(profiler_hub::source_request_t{
+            accepted.path,
+            accepted.uuid,
             profiler_hub::reader_types::trace_format_t{
                 accepted.schema,
                 profiler_hub::version_t{ accepted.version.major,
                                          accepted.version.minor,
-                                         accepted.version.patch } });
-        source->connections =
-            std::make_unique<profiler_hub::pooled_connection_source>(*source->pool);
-        source->reader = std::make_unique<profiler_hub::cached_track_reader>(
-            *source->connections, m_thread_pool, m_read_options);
+                                         accepted.version.patch } } });
+        source->catalog = source->source->catalog();
+        source->reader  = std::make_unique<profiler_hub::cached_track_reader>(
+            source->source->track_reads(), m_thread_pool, m_read_options);
         m_sources.push_back(std::move(source));
     }
 }
@@ -458,11 +447,7 @@ ph_ctx::source_for_event(uint32_t        track_id,
     query.unique_identifier = { .id   = static_cast<size_t>(event_id),
                                 .type = type.value() };
     const auto contains = [&query](trace_source_t& held) {
-        const auto track = held.pool->with_connection(
-            [&query](profiler_hub::common::connection& connection) {
-                return connection.reader().track_of(query);
-            });
-        return static_cast<bool>(track);
+        return static_cast<bool>(held.source->track_of(query));
     };
 
     if(const placed_track_t* place = place_of(track_id))
@@ -715,28 +700,9 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     }
     for(uint32_t index = 0; index < m_sources.size(); ++index)
     {
-        trace_source_t& source = *m_sources[index];
-        const bool      rocpd_source =
-            index < m_accepted.size() &&
-            m_accepted[index].schema == profiler_hub::reader_types::trace_schema_t::rocpd;
-        const bool legacy_rocpd = rocpd_source && m_accepted[index].version.major == 2;
-        const bool modern_rocpd = rocpd_source && m_accepted[index].version.major >= 3;
-        if(legacy_rocpd || modern_rocpd)
-        {
-            source.catalog->aggregate_cache_root   = m_cache_directory;
-            source.catalog->aggregate_cache_paths  = cache_paths;
-            source.catalog->aggregate_cache_source = index;
-        }
-        populate_reader_catalog(m_thread_pool, *source.pool, *source.catalog);
-        if(legacy_rocpd && !source.catalog->derived_aggregates_ready)
-        {
-            save_catalog_aggregates(*source.catalog);
-        }
-        if(modern_rocpd && !source.catalog->derived_aggregates_ready)
-        {
-            save_derived_tracks(*source.catalog);
-        }
-        source.catalog->publish_memory_activity_pmc_infos();
+        m_sources[index]->source->load_catalog(
+            m_thread_pool,
+            profiler_hub::catalog_cache_t{ m_cache_directory, cache_paths, index });
         if(stop_requested()) return false;
     }
 
@@ -744,6 +710,10 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     initialize_track_list();
     prepare_track_store();
     if(!load_all_tracks(stop_requested, progress)) return false;
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        source->source->finish_load();
+    }
     attach_track_store();
 
     if(progress) progress(1.0, "Reading node agents");
@@ -925,10 +895,7 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
     source.unique_identifier = { .id   = static_cast<size_t>(event_id),
                                  .type = type.value() };
 
-    const auto correlated = held.pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_correlated_events(source);
-        });
+    const auto correlated = held.source->correlated_events(source);
 
     std::vector<ph_event_t> converted;
     converted.reserve(correlated.size());
@@ -1011,10 +978,7 @@ ph_ctx::get_call_stack(uint32_t track_id, uint64_t event_id, ph_event_type_t eve
     }
 
     const auto source = detail_source(event_id, type.value());
-    auto       stack  = origin.pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_call_stack(source);
-        });
+    auto       stack  = origin.source->call_stack(source);
     if(stack.empty())
     {
         return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
@@ -1049,10 +1013,7 @@ ph_ctx::track_id_of(uint32_t track_id, uint64_t event_id, ph_event_type_t event_
     for(uint32_t index = 0; index < m_sources.size(); ++index)
     {
         trace_source_t& held  = source_at(index);
-        const auto      track = held.pool->with_connection(
-            [&source](profiler_hub::common::connection& connection) {
-                return connection.reader().track_of(source);
-            });
+        const auto      track = held.source->track_of(source);
         if(!track) continue;
         const ph_optional_uint64_t global = global_track_id(held, track);
         if(global.is_valid != 0) return static_cast<uint32_t>(global.value);
@@ -1067,10 +1028,7 @@ ph_ctx::get_region_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_region_details_t{};
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::region);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_region_details(source);
-        });
+    auto details = source_at(place->source_index).source->region_details(source);
     if(!details.has_value())
     {
         return ph_region_details_t{};
@@ -1110,10 +1068,7 @@ ph_ctx::get_kernel_dispatch_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_kernel_dispatch_details_t{};
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::kernel_dispatch);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_kernel_dispatch_details(source);
-        });
+    auto details = source_at(place->source_index).source->kernel_dispatch_details(source);
     if(!details.has_value())
     {
         return ph_kernel_dispatch_details_t{};
@@ -1160,10 +1115,7 @@ ph_ctx::get_memory_copy_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_memory_copy_details_t{};
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::memory_copy);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_memory_copy_details(source);
-        });
+    auto details = source_at(place->source_index).source->memory_copy_details(source);
     if(!details.has_value())
     {
         return ph_memory_copy_details_t{};
@@ -1207,10 +1159,7 @@ ph_ctx::get_memory_alloc_details(uint32_t track_id, uint64_t event_id)
     }
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::memory_allocate);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_memory_alloc_details(source);
-        });
+    auto details = source_at(place->source_index).source->memory_alloc_details(source);
     if(!details.has_value())
     {
         return ph_memory_alloc_details_t{};
@@ -1292,11 +1241,12 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
             *origin.catalog, local, local.match_substring, local.match_partial);
     }
 
-    return origin.pool->with_connection(
-        [&](profiler_hub::common::connection& connection) {
-            return connection.reader().read_table_events(
-                local, event_type, after_id, last_id, rows, capacity);
-        });
+    if(!origin.source->supports_table_events())
+    {
+        return 0;
+    }
+    return origin.source->read_table_events(
+        local, event_type, after_id, last_id, rows, capacity);
 }
 
 bool
@@ -1339,10 +1289,7 @@ ph_ctx::summarize_name_durations(
         profiler_hub::resolve_event_query_strings(
             *origin.catalog, local, local.match_substring, local.match_partial);
     }
-    return origin.pool->with_connection(
-        [&](profiler_hub::common::connection& connection) {
-            return connection.reader().summarize_name_durations(local, event_type, rows);
-        });
+    return origin.source->summarize_name_durations(local, event_type, rows);
 }
 
 bool
@@ -1360,10 +1307,12 @@ ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
     {
         return false;
     }
-    return source_at(source_index).pool->with_connection(
-        [&](profiler_hub::common::connection& connection) {
-            return connection.reader().table_event_id_span(event_type, first_id, last_id);
-        });
+    profiler_hub::format_source& origin = *source_at(source_index).source;
+    if(!origin.supports_table_events())
+    {
+        return false;
+    }
+    return origin.table_event_id_span(event_type, first_id, last_id);
 }
 
 ph_sample_list_t
@@ -1440,11 +1389,7 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
     parts.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
     {
-        parts.push_back(held->pool->with_connection(
-            [&grid](profiler_hub::common::connection& connection) {
-                return connection.reader().get_histogram(
-                    grid.origin, grid.bucket_size, grid.bucket_count);
-            }));
+        parts.push_back(held->source->histogram(grid));
     }
 
     std::size_t track_total = 0;
