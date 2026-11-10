@@ -39,6 +39,7 @@
   } while (0)
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -4460,60 +4461,6 @@ extern "C" int renameat(int olddirfd, const char* oldpath, int newdirfd,
 }
 
 // ---------------------------------------------------------------------------
-// Unit_HRR_RecordAfterCaptureShutdown_Direct
-//
-// The capture shutdown writes the trailer and the manifests, then closes
-// events.bin. A thread already inside a recorded call can reach the buffer in
-// between, and must not land a record after the trailer. Here a second thread
-// is held inside hipGetLastError() until the shutdown reaches its first
-// manifest, and the shutdown is held there until that call returns. The
-// process exits 4 if the call never returned. Unit_HRR_RecordAfterCaptureShutdown
-// checks that events.bin still ends in the trailer.
-// ---------------------------------------------------------------------------
-namespace {
-std::atomic<bool> g_late_in_call{false};
-std::atomic<bool> g_shutdown_held{false};
-std::atomic<bool> g_late_recorded{false};
-
-// The late thread's first clock read inside hipGetLastError(), at the latest
-// the one that timestamps its record.
-void late_record_clock_hook() {
-  t_hrr_clock_hook = nullptr;
-  g_late_in_call = true;
-  for (int ms = 0; ms < 10000 && !g_shutdown_held.load(); ++ms) hrr_sleep_1ms();
-}
-
-void shutdown_rename_hook(const char* path) {
-  static constexpr char kSuffix[] = "/manifest.json";
-  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
-  const size_t len = strlen(path);
-  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
-  if (g_shutdown_held.exchange(true)) return;
-  for (int ms = 0; ms < 10000 && !g_late_recorded.load(); ++ms) hrr_sleep_1ms();
-}
-}  // namespace
-
-TEST_CASE("Unit_HRR_RecordAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
-  // Before the first HIP call, which registers the capture shutdown.
-  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
-  HRR_HIP_CHECK(hipSetDevice(0));
-  (void)hipGetLastError();
-
-  g_hrr_after_capture_shutdown = [] {
-    g_hrr_rename_hook = nullptr;
-    if (!g_late_recorded.load()) _exit(4);
-  };
-  g_hrr_rename_hook = shutdown_rename_hook;
-  std::thread([] {
-    t_hrr_clock_hook = late_record_clock_hook;
-    (void)hipGetLastError();
-    g_late_recorded = true;
-  }).detach();
-  // The capture shutdown runs once this returns.
-  for (int ms = 0; ms < 10000 && !g_late_in_call.load(); ++ms) hrr_sleep_1ms();
-}
-
-// ---------------------------------------------------------------------------
 // pthread_mutex_lock() for this test binary, for the same reason as fsync()
 // above: CLR's std::mutex resolves it here first. The capture shutdown's
 // close() calls it first thing, for the lock flush() has just released. With no
@@ -4531,6 +4478,100 @@ extern "C" int pthread_mutex_lock(pthread_mutex_t* mutex) noexcept {
     real.store(fn, std::memory_order_relaxed);
   }
   return fn(mutex);
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_RecordAfterCaptureShutdown_Direct
+//
+// The capture shutdown writes the trailer and the manifests, then closes
+// events.bin. A thread already inside a recorded call can reach the writer in
+// between, and must not land a record after the trailer, a blob, or an
+// unreplayable API in the manifest. Here two threads are held inside an H2D
+// hipMemcpy() and hipUserObjectCreate(), which the writer notes as
+// unreplayable, until the shutdown has written the trailer. The shutdown is
+// held there, before it writes the manifest, until those calls return. The
+// process exits 4 if one never returned, and 5 if one failed.
+// Unit_HRR_RecordAfterCaptureShutdown checks the archive.
+// ---------------------------------------------------------------------------
+namespace {
+constexpr int kLateCalls = 2;
+std::atomic<int> g_late_in_call{0};
+std::atomic<bool> g_shutdown_held{false};
+std::atomic<int> g_late_recorded{0};
+std::atomic<bool> g_late_failed{false};
+thread_local bool t_late_thread = false;
+thread_local bool t_shutdown_thread = false;
+thread_local bool t_hold_manifest_lock = false;
+unsigned char g_late_bytes[kHrrLateBlobBytes];  // never destroyed: read after exit starts
+int g_late_payload = 0;
+
+// A late thread's first clock read or lock inside its call. The shim's writer
+// takes a lock before it writes a blob, and reads the clock before it takes the
+// lock records take, so this is before either.
+void hold_late_thread() {
+  if (!t_late_thread) return;
+  t_late_thread = false;
+  ++g_late_in_call;
+  for (int ms = 0; ms < 10000 && !g_shutdown_held.load(); ++ms) hrr_sleep_1ms();
+}
+
+// The shutdown's next lock after the trailer's fsync() comes once flush() has
+// released the buffer and blob locks, before the manifest is written.
+void late_mutex_lock_hook() {
+  hold_late_thread();
+  if (!t_hold_manifest_lock) return;
+  t_hold_manifest_lock = false;
+  g_shutdown_held = true;
+  for (int ms = 0; ms < 10000 && g_late_recorded.load() < kLateCalls; ++ms) hrr_sleep_1ms();
+}
+
+// flush() fsyncs events.bin once the trailer is in it, under the lock records take.
+void trailer_fsync_hook(int) {
+  if (!t_shutdown_thread) return;
+  t_shutdown_thread = false;
+  g_hrr_fsync_hook = nullptr;
+  t_hold_manifest_lock = true;
+}
+
+void late_destroy(void*) {}
+
+template <typename Call> void late_call(Call call) {
+  std::thread([call] {
+    t_late_thread = true;
+    t_hrr_clock_hook = hold_late_thread;
+    if (call() != hipSuccess) g_late_failed = true;
+    t_hrr_clock_hook = nullptr;
+    ++g_late_recorded;
+  }).detach();
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_RecordAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kHrrLateBlobBytes));
+  std::memset(g_late_bytes, 0x6d, sizeof(g_late_bytes));
+
+  g_hrr_after_capture_shutdown = [] {
+    g_hrr_mutex_lock_hook = nullptr;
+    if (g_late_recorded.load() < kLateCalls) _exit(4);
+    if (g_late_failed.load()) _exit(5);
+  };
+  t_shutdown_thread = true;
+  g_hrr_fsync_hook = trailer_fsync_hook;
+  g_hrr_mutex_lock_hook = late_mutex_lock_hook;
+  late_call([dev] {
+    return hipMemcpy(dev, g_late_bytes, sizeof(g_late_bytes), hipMemcpyHostToDevice);
+  });
+  late_call([] {
+    hipUserObject_t obj = nullptr;
+    return hipUserObjectCreate(&obj, &g_late_payload, late_destroy, 1,
+                               hipUserObjectNoDestructorSync);
+  });
+  // The capture shutdown runs once this returns.
+  for (int ms = 0; ms < 10000 && g_late_in_call.load() < kLateCalls; ++ms) hrr_sleep_1ms();
 }
 
 // ---------------------------------------------------------------------------

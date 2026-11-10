@@ -403,6 +403,10 @@ inline void hrr_capture_direct(const std::string& direct_case,
 }
 #endif  // HRR_TEST_EXE
 
+// Size of the H2D copy Unit_HRR_RecordAfterCaptureShutdown_Direct makes after
+// the trailer, which no other blob in its archive has.
+inline constexpr size_t kHrrLateBlobBytes = 3001;
+
 // How many children Unit_HRR_ForkWhileRecording_Direct forks. Every other
 // child records a call before it exits, starting with the first, and the
 // roundtrip expects one archive for each of those besides the parent's.

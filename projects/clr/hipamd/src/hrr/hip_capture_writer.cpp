@@ -1405,8 +1405,8 @@ static void warn_unreplayable(const char* api, const char* reason) {
 }
 
 // Staged, not listed: write_event_raw() lists the note under the same lock that
-// accepts the event, so a shim still reached through a wrapped slot after
-// flush() cannot name an API whose event the cut-off drops.
+// accepts the event, so a thread still inside a shim after flush() cannot name an
+// API whose event the cut-off drops.
 void note_unreplayable(const char* api, const char* reason) {
   if (!api) return;
   if (!reason) reason = "(unspecified)";
@@ -1667,8 +1667,8 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   bool due;
   {
     BufWriteGuard lk;
-    // Shims stay reachable during shutdown through slots another component wrapped,
-    // and the reader would replay a record after the trailer as part of the archive.
+    // A thread still inside a shim during shutdown gets here, and the reader would
+    // replay a record after the trailer as part of the archive.
     if (g_events_fd < 0 || g_events_finalized) return;
     if (!charge_archive(payload_len)) {
       stop_at_limit_locked();

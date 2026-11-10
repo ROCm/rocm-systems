@@ -2395,6 +2395,8 @@ HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
  *   - A record made after the capture shutdown has written the trailer, and
  *     before it closes events.bin, is dropped. The file still ends in the
  *     trailer, which counts every event in it.
+ *   - So are the blob and the unreplayable API of such a call: no blob file of
+ *     its size, and no hipUserObjectCreate in the manifest.
  */
 HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_record_after_capture_shutdown"};
@@ -2416,6 +2418,13 @@ HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   REQUIRE(hrr::load_archive(archive.string(), arc));
   CHECK(arc.complete);
   check_ends_in_trailer(archive, arc);
+  CHECK(manifest.find("\"hipUserObjectCreate\"") == std::string::npos);
+  std::error_code ec;
+  for (fs::recursive_directory_iterator it(archive / "blobs", ec), end; !ec && it != end;
+       it.increment(ec)) {
+    INFO("blob " << it->path());
+    CHECK((!it->is_regular_file() || fs::file_size(it->path()) != kHrrLateBlobBytes));
+  }
 }
 
 /**

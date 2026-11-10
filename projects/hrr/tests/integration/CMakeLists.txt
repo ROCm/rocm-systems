@@ -64,13 +64,11 @@
 # stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
 # [.][hrr-direct] workload.
 #
-# hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
-# wrapped keeps its wrapper, nothing is recorded after the trailer, and a failed
-# blob write leaves the archive incomplete, in the parent only across fork().
-# A write that fails only when its file is closed does too, and a call made
-# after the trailer leaves no unreplayable API in the manifest.
-# It reaches the live dispatch table through rocprofiler-register, with
-# hrr_dispatch_tool.cc as the tool library. Linux only.
+# hrr_dispatch_swap_test.cc covers when capture runs and how it shuts down: a
+# profiler attached keeps capture off, and a failed blob write leaves the archive
+# incomplete, in the parent only across fork(). A write that fails only when its
+# file is closed does too. It attaches a profiler through rocprofiler-register,
+# with hrr_dispatch_tool.cc as the tool library. Linux only.
 #
 # hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
 # its hidden [.][hrr-direct] workload registers valid and altered bundle
@@ -231,7 +229,6 @@ if(NOT WIN32)
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_VISIBILITY_PRESET hidden)
-  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
   find_package(Threads REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   target_compile_definitions(hrr-integration-tests PRIVATE
