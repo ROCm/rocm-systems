@@ -2092,7 +2092,7 @@ and simulated host execution:</p>
 <tr>
 <td><code>max_ticks</code></td>
 <td>int</td>
-<td>Maximum simulation ticks (0 = unlimited)</td>
+<td>Finite tick horizon (0 = unlimited). A finite run also stops if an active primary has no queued work before the limit.</td>
 </tr>
 <tr>
 <td><code>num_threads</code></td>
