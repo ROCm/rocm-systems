@@ -15,8 +15,7 @@ Instruction::ExecuteFn current_instruction_execute(size_t instruction_id) noexce
 }
 
 const void *current_isa_operand_backend() noexcept {
-  const IsaExecutionBackend *backend = detail::active_isa_execution_backend;
-  return backend == nullptr ? nullptr : backend->operand_backend;
+  return detail::current_isa_operand_backend_inline();
 }
 
 } // namespace rocjitsu

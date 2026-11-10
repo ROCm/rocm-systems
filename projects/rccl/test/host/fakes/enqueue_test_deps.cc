@@ -22,9 +22,11 @@ int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
 
 // rma.cc owns scheduleRmaTasksToPlan, but rma_fakes.cc also links into binaries that compile the
 // real rma.cc. api_trace.cc owns ncclGetErrorString, and api_trace_fakes.cc does not link here.
+#ifndef RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
 ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) {
   FailLoudUnfaked("enqueue_test_deps", "scheduleRmaTasksToPlan");
 }
+#endif
 const char* ncclGetErrorString(ncclResult_t) { FailLoudUnfaked("enqueue_test_deps", "ncclGetErrorString"); }
 
 void ResetEnqueueTestDeps() {
