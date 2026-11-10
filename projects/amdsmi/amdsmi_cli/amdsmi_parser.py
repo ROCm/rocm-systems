@@ -3415,6 +3415,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
         afid_help = "Generate an AFID (AMD Field ID) given a CPER record file or folder"
+        decode_help = (
+            "Decode a CPER record file and display the full event report\n    Requires --cper-file."
+        )
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
@@ -3423,7 +3426,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             "\n    With --afid: existing folder of CPER records to decode."
         )
         file_limit_help = "Maximum number of current CPER files in target folder\n    Older files beyond limit will be deleted"
-        cper_file_help = "Full path of a retrieved CPER record file to generate the AFID"
+        cper_file_help = (
+            "Full path of a CPER record file.\n"
+            "    With --afid: generate the AFID(s).\n"
+            "    With --decode: display the full event report."
+        )
         follow_help = "Continuously monitor for new CPER entries"
 
         ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)
@@ -3435,6 +3442,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         ras_exclusive_group = ras_parser.add_mutually_exclusive_group(required=True)
         ras_exclusive_group.add_argument("--cper", action="store_true", help=cper_help)
         ras_exclusive_group.add_argument("--afid", action="store_true", help=afid_help)
+        ras_exclusive_group.add_argument("--decode", action="store_true", help=decode_help)
 
         # CPER Arguments remove defaults
         cper_group = ras_parser.add_argument_group("CPER Arguments")

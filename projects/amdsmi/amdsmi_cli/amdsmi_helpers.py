@@ -2897,6 +2897,19 @@ class AMDSMIHelpers:
         afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
         return afids
 
+    def cper_dump_decode(self, cper_file: Union[bytes, Path]) -> dict:
+        """Return the ADDC JSON report for one CPER record as a parsed dict.
+
+        AmdSmiLibraryException propagates to the caller on decode failure.
+        """
+        import json as _json
+
+        if isinstance(cper_file, Path):
+            raw = cper_file.read_bytes()
+        else:
+            raw = cper_file
+        return _json.loads(amdsmi_interface.amdsmi_get_cper_json(raw))
+
     def get_partition_id(self, device_handle, gpu_id=None) -> int:
         partition_id = -1
         try:

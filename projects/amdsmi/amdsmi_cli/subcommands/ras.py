@@ -2,6 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import json
 import logging
 import os
 import sys
@@ -14,6 +15,157 @@ from amdsmi import amdsmi_exception
 
 
 class RasCommands:
+    def _print_decode_human(self, cper_file, addc: dict):
+        """Print the ADDC decode report in amd-smi human-readable style."""
+        source = addc.get("source", {})
+        events = addc.get("events", [])
+
+        def _v(val):
+            return "N/A" if val is None else str(val)
+
+        def _get(d, *keys):
+            for k in keys:
+                if not isinstance(d, dict):
+                    return None
+                d = d.get(k)
+            return d
+
+        print(f"CPER_FILE: {Path(cper_file).name}")
+        print(f"    SCHEMA_VERSION: {_v(addc.get('schema_version'))}")
+        print(f"    TIMESTAMP: {_v(source.get('timestamp'))}")
+        print(f"    PLATFORM_ID: {_v(source.get('platform_id'))}")
+        print(f"    CREATOR_ID: {_v(source.get('creator_id'))}")
+
+        if not events:
+            print("    EVENTS: N/A")
+            return
+
+        for i, ev in enumerate(events):
+            meta = ev.get("metadata", {})
+            plat = ev.get("platform", {})
+            report = ev.get("event_report", {})
+            analysis = ev.get("analysis", {})
+
+            afids = analysis.get("afid", [])
+            afid_str = " ".join(str(a) for a in afids) if afids else "N/A"
+
+            print(f"    EVENT[{i}]:")
+            print(f"        SECTION: {_v(meta.get('section_index', i))}")
+            print(f"        CONTEXT_TYPE: {_v(meta.get('context_type'))}")
+            print(f"        CLASS: {_v(meta.get('event_class'))}")
+            print(f"        PLATFORM: {_v((_get(meta, 'addc_version') or {}).get('name'))}")
+            print(f"        AFID: {afid_str}")
+            print(f"        SEVERITY: {_v(report.get('error_severity'))}")
+            print(f"        FRU: {_v(plat.get('fru'))}")
+            print(f"        TIMESTAMP: {_v(meta.get('timestamp') or source.get('timestamp'))}")
+            print(f"        BANK: {_v(report.get('bank'))}")
+            print(f"        ERROR_TYPE: {_v(report.get('error_type'))}")
+            print(f"        DESCRIPTION: {_v(report.get('error_description'))}")
+            print(f"        INSTANCE: {_v(_get(report, 'error_location', 'instance'))}")
+            print(f"        SOCKET: {_v(_get(report, 'error_location', 'socket'))}")
+            print(f"        DIE: {_v(_get(report, 'error_location', 'die'))}")
+            print(f"        CPU: {_v(_get(report, 'error_location', 'cpu'))}")
+            hbm = _get(report, "error_location", "hbm")
+            if isinstance(hbm, dict):
+                print("        HBM:")
+                print(f"            COL: {_v(hbm.get('col'))}")
+                print(f"            BANK: {_v(hbm.get('bank'))}")
+                print(f"            ROW: {_v(hbm.get('row'))}")
+                print(f"            PC: {_v(hbm.get('pc'))}")
+                print(f"            SID: {_v(hbm.get('sid'))}")
+            else:
+                print(f"        HBM: {_v(hbm)}")
+            print(f"        SYNDROME: {_v(report.get('error_syndrome'))}")
+            print(f"        ADDRESS: {_v(report.get('error_address'))}")
+            print(f"        UC: {_v(_get(report, 'misc_status', 'uc'))}")
+            print(f"        PCC: {_v(_get(report, 'misc_status', 'pcc'))}")
+            print(f"        TCC: {_v(_get(report, 'misc_status', 'tcc'))}")
+            print(f"        DEFERRED: {_v(_get(report, 'misc_status', 'deferred'))}")
+            print(f"        ADDR_VALID: {_v(_get(report, 'misc_status', 'addr_v'))}")
+            print(f"        CECC: {_v(_get(report, 'misc_status', 'cecc'))}")
+            print(f"        UECC: {_v(_get(report, 'misc_status', 'uecc'))}")
+            print(f"        POISON: {_v(_get(report, 'misc_status', 'poison'))}")
+            print(f"        TRANSPARENT: {_v(_get(report, 'misc_status', 'transparent'))}")
+            print(f"        SCRUB: {_v(_get(report, 'misc_status', 'scrub'))}")
+
+    def _decode_to_csv_rows(self, cper_file, addc: dict) -> list:
+        """Flatten each ADDC event into one CSV row dict."""
+        source = addc.get("source", {})
+        schema = addc.get("schema_version", "")
+        rows = []
+
+        def _s(v):
+            return "" if v is None else str(v)
+
+        def _get(d, *keys):
+            for k in keys:
+                if not isinstance(d, dict):
+                    return None
+                d = d.get(k)
+            return d
+
+        for i, ev in enumerate(addc.get("events", [])):
+            meta = ev.get("metadata", {})
+            plat = ev.get("platform", {})
+            report = ev.get("event_report", {})
+            analysis = ev.get("analysis", {})
+            afids = analysis.get("afid", [])
+            afid_val = ",".join(str(a) for a in afids) if afids else ""
+            rows.append(
+                {
+                    "file_name": Path(cper_file).name,
+                    "schema_version": schema,
+                    "timestamp": source.get("timestamp", ""),
+                    "platform_id": source.get("platform_id", ""),
+                    "creator_id": source.get("creator_id", ""),
+                    "event_index": i,
+                    "section": meta.get("section_index", i),
+                    "context_type": meta.get("context_type", ""),
+                    "class": meta.get("event_class", ""),
+                    "platform": (_get(meta, "addc_version") or {}).get("name", ""),
+                    "afid": afid_val,
+                    "severity": report.get("error_severity", ""),
+                    "fru_id": plat.get("fru_id", ""),
+                    "fru_text": plat.get("fru", ""),
+                    "bank": _s(report.get("bank")),
+                    "error_type": _s(report.get("error_type")),
+                    "description": _s(report.get("error_description")),
+                    "instance": _s(_get(report, "error_location", "instance")),
+                    "socket": _s(_get(report, "error_location", "socket")),
+                    "die": _s(_get(report, "error_location", "die")),
+                    "cpu": _s(_get(report, "error_location", "cpu")),
+                    "hbm": (
+                        json.dumps(_get(report, "error_location", "hbm"))
+                        if isinstance(_get(report, "error_location", "hbm"), dict)
+                        else _s(_get(report, "error_location", "hbm"))
+                    ),
+                    "syndrome": _s(report.get("error_syndrome")),
+                    "address": _s(report.get("error_address")),
+                    "uc": _s(_get(report, "misc_status", "uc")),
+                    "pcc": _s(_get(report, "misc_status", "pcc")),
+                    "tcc": _s(_get(report, "misc_status", "tcc")),
+                    "deferred": _s(_get(report, "misc_status", "deferred")),
+                    "addr_valid": _s(_get(report, "misc_status", "addr_v")),
+                    "cecc": _s(_get(report, "misc_status", "cecc")),
+                    "uecc": _s(_get(report, "misc_status", "uecc")),
+                    "poison": _s(_get(report, "misc_status", "poison")),
+                    "transparent": _s(_get(report, "misc_status", "transparent")),
+                    "scrub": _s(_get(report, "misc_status", "scrub")),
+                }
+            )
+        return rows
+
+    def _emit_decode_records(self, cper_file, addc: dict):
+        """Dispatch ADDC decode output by format."""
+        if self.logger.is_human_readable_format():
+            self._print_decode_human(cper_file, addc)
+        elif self.logger.is_json_format():
+            print(json.dumps(addc, indent=4))
+        else:  # CSV
+            rows = self._decode_to_csv_rows(cper_file, addc)
+            self.logger.multiple_device_output = rows
+            self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
+
     def _build_afid_record(self, cper_file, afids=None, code=None):
         """Shared with ``ras --cper``; see AMDSMIHelpers.build_afid_record."""
         return self.helpers.build_afid_record(cper_file, self.logger.format, afids=afids, code=code)
@@ -79,6 +231,10 @@ class RasCommands:
                         " '--afid --folder' requires a folder of pre-existing CPER records."
                     )
                     raise AmdSmiInvalidFilePathException(command, self.logger.format, message)
+        elif args.decode:
+            if not args.cper_file:
+                message = f"Command '{command}' requires '--cper-file'. Run '--help' for more info."
+                raise AmdSmiInvalidCommandException(command, self.logger.format, message)
         elif args.cper:
             if args.folder:
                 folder = Path(args.folder)
@@ -153,6 +309,7 @@ class RasCommands:
         gpu=None,
         cper=None,
         afid=None,
+        decode=None,
         severity=None,
         folder=None,
         file_limit=None,
@@ -187,8 +344,8 @@ class RasCommands:
             args.cper_file = cper_file
         if follow:
             args.follow = follow
-        if args.gpu is None:
-            args.gpu = self.device_handles
+        if decode:
+            args.decode = decode
 
         # Validate all arguments before touching the driver or the filesystem.
         self._validate_ras_args(args)
@@ -217,12 +374,27 @@ class RasCommands:
             self._decode_afid_folder(args)
             return
 
+        if args.decode:
+            try:
+                addc = self.helpers.cper_dump_decode(args.cper_file)
+            except OSError as e:
+                raise AmdSmiInvalidFilePathException(
+                    args.cper_file,
+                    self.logger.format,
+                    f"Unable to read CPER file '{args.cper_file}': {e}",
+                ) from e
+            self._emit_decode_records(args.cper_file, addc)
+            return
+
         if not self.group_check_printed:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
         if not args.cper:
             return
+
+        if getattr(args, "gpu", None) is None:
+            args.gpu = self.device_handles
 
         if not args.gpu:
             return
