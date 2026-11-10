@@ -124,7 +124,6 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
-			../../src/rccl_arch_thresholds.cc \
 			hipify_rccl/rccl_wrap.cc \
 			hipify_rccl/rccl_arch_thresholds.cc \
 			hipify_rccl/collectives.cc \
@@ -192,6 +191,11 @@ hipify:
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
 	cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
+	# Stand in for cmake's configure_file (no GIN backend here): turn the .in's
+	# '#cmakedefine01 X' into '#define X 0'.
+	sed 's|#cmakedefine01 \(.*\)|#define \1 0|' \
+	    hipify_rccl/include/nccl_device/gin/rccl_gin_config.h.in \
+	    > hipify_rccl/include/nccl_device/gin/rccl_gin_config.h
 	# PATCH 3b: The param/ headers (param.h, common.h, utils.h) collide in basename
 	# with include/{param,utils}.h and device/common.h, so the main RCCL build's
 	# add_file_unique() renames the staged copies to *_tmp.h. Sources reference the

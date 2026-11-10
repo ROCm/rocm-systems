@@ -171,6 +171,13 @@ void TestFrequenciesReadWrite::Run(void) {
           // skip the write there and leave every other ASIC on its previous
           // path: an empty clock file on a discrete GPU stays visible instead
           // of being absorbed here.
+          //
+          // FUSION is the driver's own APU bit, so this covers the datacenter
+          // APUs as well -- amdgpu sets AMD_IS_APU for MI300A, and the kernel
+          // turns that into AMDGPU_IDS_FLAGS_FUSION. That is deliberate: those
+          // parts power-gate domains too. The skip stays accounted for either
+          // way, because a device whose clocks were all skipped still fails the
+          // check at the end of this test.
           amdsmi_asic_info_t asic_info = {};
           if (amdsmi_get_gpu_asic_info(processor_handles_[dv_ind], &asic_info) ==
                   AMDSMI_STATUS_SUCCESS &&

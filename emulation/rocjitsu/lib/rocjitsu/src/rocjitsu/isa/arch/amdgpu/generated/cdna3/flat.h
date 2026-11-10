@@ -998,6 +998,61 @@ public:
   Operand saddr;
 };
 
+class ScratchLoadLdsUbyteFlat : public Flat {
+public:
+  ScratchLoadLdsUbyteFlat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+};
+
+class ScratchLoadLdsSbyteFlat : public Flat {
+public:
+  ScratchLoadLdsSbyteFlat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+};
+
+class ScratchLoadLdsUshortFlat : public Flat {
+public:
+  ScratchLoadLdsUshortFlat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+};
+
+class ScratchLoadLdsSshortFlat : public Flat {
+public:
+  ScratchLoadLdsSshortFlat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+};
+
+class ScratchLoadLdsDwordFlat : public Flat {
+public:
+  ScratchLoadLdsDwordFlat(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand addr;
+  Operand flat_scratch;
+  Operand m0;
+  Operand saddr;
+};
+
 } // namespace cdna3
 } // namespace rocjitsu
 

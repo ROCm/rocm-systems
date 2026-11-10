@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -75,6 +76,12 @@ inline bool ordinary_memory(std::string_view name) {
 inline bool safe_inline(const Instruction &inst) {
   if (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR |
                       BARRIER | WRITES_EXEC))
+    return false;
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  // DPP execution temporarily narrows the wave's VGPR write mask. Keep that
+  // wave-wide state stable while an asynchronous MMA may still consult it.
+  if (modifiers.dpp)
     return false;
   const auto name = inst.mnemonic();
   if (name == "s_delay_alu" || name == "s_nop" || name == "v_nop")

@@ -83,9 +83,17 @@ RdcMetricFetcherImpl::RdcMetricFetcherImpl() : task_started_(true) {
 }
 
 RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
-  // Notify the async task to stop
-  task_started_ = false;
+  {
+    // Under the worker's mutex, so a worker between its check and its wait cannot miss the
+    // wake-up and block forever.
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_started_ = false;
+  }
   cv_.notify_all();
+  // Join the worker before the members it uses are destroyed.
+  if (updater_.valid()) {
+    updater_.wait();
+  }
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
@@ -1914,6 +1922,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   value->ts = now();
   value->field_id = field_id;
   value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+  // Most fields are integers and only the string ones set a type. A caller's
+  // value is often uninitialised, so without this a successful integer field
+  // reaches the cache, and the log below, with an arbitrary rdc_field_type_t.
+  value->type = INTEGER;
   if (info.device_type == RDC_DEVICE_TYPE_CPU) {
 // don't care about partition for CPUs
 #ifdef ENABLE_ESMI_LIB
