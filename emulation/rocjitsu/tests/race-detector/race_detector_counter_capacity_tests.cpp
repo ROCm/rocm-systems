@@ -514,6 +514,16 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CapacitiesFollowTheWaitPolicy) {
   EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Tensor), 63); // TENSORcnt: 6 bits.
 }
 
+// gfx1250 has no combined counters, so metadata naming one does not match the
+// target and fails loudly, as on a target whose capacity is not configured.
+TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
+  for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT}) {
+    SCOPED_TRACE(static_cast<int>(counter));
+    auto builder = makeGfx1250Test();
+    EXPECT_THROW(builder.prepareCounterIncrement(kWave, counter), std::logic_error);
+  }
+}
+
 TEST(RaceDetector, Gfx1250CounterCapacity_ArchCapacitiesConfigureSplitCountersOnly) {
   constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_EQ(capacities.loadcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Load));
