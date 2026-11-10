@@ -66,6 +66,7 @@ add_subdirectory(output)
 add_subdirectory(perfetto)
 add_subdirectory(progress)
 add_subdirectory(sdk)
+add_subdirectory(thread_list)
 add_subdirectory(trace_cache)
 
 target_include_directories(

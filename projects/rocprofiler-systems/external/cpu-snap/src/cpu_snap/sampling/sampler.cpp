@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 // sampler.cpp
 //
 // Out-of-line implementations of cpu_snap::sampling::sampler. The
@@ -12,9 +15,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <mutex>
-#include <exception>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -129,13 +132,14 @@ sampler::sampler(config cfg, std::unique_ptr<triggers::i_trigger> backend)
 , m_caps{ probe_sampler_capabilities() }
 , m_backend{ std::move(backend) }
 {
-    auto plan = internal::resolve_plan(std::move(cfg), &probe_perf_open, m_backend != nullptr);
-    m_cfg     = std::move(plan.cfg);
-    m_choice  = std::move(plan.choice);
+    auto plan =
+        internal::resolve_plan(std::move(cfg), &probe_perf_open, m_backend != nullptr);
+    m_cfg                      = std::move(plan.cfg);
+    m_choice                   = std::move(plan.choice);
     const bool unwind_was_auto = plan.unwind_was_auto;
     select_unwinder(m_cfg.perf.unwind, m_cfg.backend, m_unwinder);
     m_threads.emplace(internal::proc_thread_source(), m_cfg.logger, m_cfg.clock,
-                      m_cfg.threads.include_main_thread);
+                      m_cfg.threads.include_main_thread, m_cfg.threads.is_excluded);
 
     if(!m_backend)
     {
@@ -172,7 +176,8 @@ sampler::sampler(config cfg, std::unique_ptr<triggers::i_trigger> backend)
         return "configuration: backend=" + std::string(backend_name(m_cfg.backend)) +
                " clock=" + std::string(clock_name(m_cfg.clock)) +
                " unwind=" + std::string(unwind_name(m_cfg.perf.unwind)) +
-               (unwind_was_auto ? " (auto_best)" : "") + " freq=" + std::to_string(freq) + "Hz";
+               (unwind_was_auto ? " (auto_best)" : "") + " freq=" + std::to_string(freq) +
+               "Hz";
     });
     if(m_cfg.perf.unwind == unwind_mode::dwarf && freq >= k_frame_pointer_hint_freq_hz)
     {
@@ -224,6 +229,7 @@ sampler::start()
     {
         m_paused.store(false, std::memory_order_release);
         {
+            const auto                        guard = hold_rescan_guard();
             const std::lock_guard<std::mutex> lk(m_state_mutex);
             m_streaming.emplace(build_streaming_config());
             m_final_stream_stats = {};
@@ -245,8 +251,9 @@ sampler::start()
     }
 
     internal::emit(m_cfg.logger, m_cfg.clock, log_level::info, [this] {
-        const auto freq = m_cfg.backend == backend_kind::perf ? m_cfg.perf.sample_freq_hz
-                                                              : m_cfg.signal.sample_freq_hz;
+        const auto freq = m_cfg.backend == backend_kind::perf
+                              ? m_cfg.perf.sample_freq_hz
+                              : m_cfg.signal.sample_freq_hz;
         return "sampler started: backend=" + std::string(backend_name(m_cfg.backend)) +
                " freq=" + std::to_string(freq) +
                " unwind=" + std::string(unwind_name(m_cfg.perf.unwind));
@@ -328,14 +335,14 @@ internal::streaming_pipeline::config
 sampler::build_streaming_config()
 {
     return internal::streaming_pipeline::config{
-        .sink                = m_cfg.streaming.sink,
-        .chunk_bytes         = m_cfg.streaming.chunk_bytes,
-        .flags               = internal::streaming_flags_for(m_cfg.perf.unwind, m_cfg.clock),
-        .pid                 = static_cast<std::uint64_t>(::getpid()),
-        .start_unix_ns       = utils::wall_unix_ns_now(),
-        .process_name        = m_cfg.streaming.process_name.empty()
-                                   ? utils::read_proc_self_comm()
-                                   : m_cfg.streaming.process_name,
+        .sink          = m_cfg.streaming.sink,
+        .chunk_bytes   = m_cfg.streaming.chunk_bytes,
+        .flags         = internal::streaming_flags_for(m_cfg.perf.unwind, m_cfg.clock),
+        .pid           = static_cast<std::uint64_t>(::getpid()),
+        .start_unix_ns = utils::wall_unix_ns_now(),
+        .process_name  = m_cfg.streaming.process_name.empty()
+                             ? utils::read_proc_self_comm()
+                             : m_cfg.streaming.process_name,
         .maps_poll_interval  = m_cfg.streaming.maps_poll_interval,
         .checkpoint_interval = m_cfg.streaming.checkpoint_interval,
         .trie_max_nodes      = m_cfg.streaming.trie_max_nodes,
@@ -348,13 +355,21 @@ sampler::build_streaming_config()
 pid_t
 sampler::excluded_tid() const noexcept
 {
-    return m_cfg.threads.exclude_sampler_worker ? m_worker_tid.load(std::memory_order_acquire)
-                                                : pid_t{ -1 };
+    return m_cfg.threads.exclude_sampler_worker
+               ? m_worker_tid.load(std::memory_order_acquire)
+               : pid_t{ -1 };
+}
+
+std::shared_ptr<void>
+sampler::hold_rescan_guard() const
+{
+    return m_cfg.threads.rescan_guard ? m_cfg.threads.rescan_guard() : nullptr;
 }
 
 void
 sampler::rescan_threads()
 {
+    const auto guard   = hold_rescan_guard();
     const auto current = m_threads->poll();
     if(!current)
     {
@@ -363,8 +378,8 @@ sampler::rescan_threads()
     }
 
     const std::lock_guard<std::mutex> lk(m_state_mutex);
-    const auto result = m_threads->rescan(*m_backend, m_streaming ? &*m_streaming : nullptr,
-                                         excluded_tid(), *current);
+    const auto                        result = m_threads->rescan(
+        *m_backend, m_streaming ? &*m_streaming : nullptr, excluded_tid(), *current);
     m_rescan_failures.fetch_add(result.failed_attaches, std::memory_order_relaxed);
 }
 
