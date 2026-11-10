@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cctype>
 #include <cstring>
+#include <string>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -217,6 +219,38 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwa
   REQUIRE(RequireSupportFlagIsBoolean(hipExecAffinityTypeCUCount) == 1);
 }
 
+namespace {
+// The gfx major version of the current device, parsed from gcnArchName. Returns 0 for a
+// name that does not parse, so an unrecognised device carries no expectation.
+int CurrentDeviceGfxMajor() {
+  const auto properties = CurrentDeviceProperties();
+  const std::string arch(properties.gcnArchName);
+
+  const auto start = arch.find("gfx");
+  if (start == std::string::npos) {
+    return 0;
+  }
+
+  auto end = start + 3;
+  while (end < arch.size() && std::isdigit(static_cast<unsigned char>(arch[end]))) {
+    ++end;
+  }
+
+  const std::string digits = arch.substr(start + 3, end - (start + 3));
+  if (digits.empty()) {
+    return 0;
+  }
+
+  // A generic target spells the version out: "gfx9-4-generic", "gfx12-5-generic".
+  if (end < arch.size() && arch[end] == '-') {
+    return std::stoi(digits);
+  }
+
+  // Otherwise it is packed, the stepping already dropped: "gfx90a" and "gfx950" are 9.
+  return digits.size() >= 4 ? std::stoi(digits.substr(0, 2)) : digits[0] - '0';
+}
+}  // namespace
+
 // @asserts: hipDeviceGetExecAffinitySupport - exactly one masking granularity is supported
 HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType) {
   const int cu_granularity = RequireSupportFlagIsBoolean(hipExtExecAffinityTypeGranularityCU);
@@ -224,6 +258,14 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_Is
 
   // A device masks either per-CU or per-WGP, never both and never neither.
   REQUIRE((cu_granularity + wgp_granularity) == 1);
+
+  // That sum is symmetric, so pin which one where it is not configurable: WGP mode is only
+  // ever enabled for gfx10+, so anything older masks per-CU.
+  const int gfx_major = CurrentDeviceGfxMajor();
+  if (gfx_major > 0 && gfx_major < 10) {
+    REQUIRE(cu_granularity == 1);
+    REQUIRE(wgp_granularity == 0);
+  }
 }
 #endif
 
