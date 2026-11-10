@@ -53,6 +53,7 @@ set(TEST_SOURCES_ROOT
 set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/cpu_ppin_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cpu_unit_id_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_c.c
