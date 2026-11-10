@@ -7,6 +7,7 @@
 #include "profiler-hub/cpp/reader_types.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <utility>
@@ -48,9 +49,11 @@ struct pytorch_store_t
     std::map<std::int64_t, std::string>                          process_names;
     std::uint64_t                                                parse_ms{};
     std::uint64_t                                                derive_ms{};
+    load_diag_t                                                  diag{};
 };
 
+// @p cancelled is polled while the file is read; see load_kineto.
 pytorch_store_t
-load_store(const std::string& path);
+load_store(const std::string& path, std::function<bool()> cancelled = {});
 
 }  // namespace profiler_hub::pytorch

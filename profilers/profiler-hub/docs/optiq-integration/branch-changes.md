@@ -165,9 +165,9 @@ so the justification can be typed in directly.
 
 | Change | Files affected | Justification |
 |---|---|---|
-| Added the `PROFILER_HUB_ENABLE_PYTORCH_KINETO` build switch, off by default. Off leaves the PyTorch sources out of the build and does not look for zlib. | `CMakeLists.txt`, `source/CMakeLists.txt` | Like the rocpd switches, a format can be left out of a build. |
+| Added the `PROFILER_HUB_ENABLE_PYTORCH_KINETO` build switch, on by default. Off leaves the PyTorch sources out of the build and does not look for zlib. | `CMakeLists.txt`, `source/CMakeLists.txt` | Like the rocpd switches, a format can be left out of a build. |
 | Added zlib as a dependency, through `cmake/zlib.cmake`: found first, fetched when `PROFILER_HUB_FETCH_DEPENDENCIES` is ON, an error naming that flag otherwise. It joins the installed static target's link requirements only when the switch is on. | `cmake/zlib.cmake`, `CMakeLists.txt`, `cmake/profiler-hub-config.cmake.in` | The Kineto loader reads gzip traces. |
-| Added the Kineto parser: the loader, the category table, and the format check. Nothing calls them yet. | `source/formats/pytorch/`, `source/common/utility.hpp` | The first part of reading PyTorch traces through the format registry. |
+| Added the Kineto parser: the loader, the category table, and the format check. The `pytorch` registry entry calls them. | `source/formats/pytorch/`, `source/common/utility.hpp` | The first part of reading PyTorch traces through the format registry. |
 
 ## Optiq changes
 

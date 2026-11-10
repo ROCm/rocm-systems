@@ -70,10 +70,10 @@ sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
 }  // namespace
 
 pytorch_store_t
-load_store(const std::string& path)
+load_store(const std::string& path, std::function<bool()> cancelled)
 {
     const auto t0    = common::steady_clock_t::now();
-    auto       trace = load_kineto(path);
+    auto       trace = load_kineto(path, std::move(cancelled));
     if(trace.events.empty())
     {
         throw std::runtime_error("no X events with ts and dur in " + path);
@@ -174,6 +174,7 @@ load_store(const std::string& path)
     store.cats          = std::move(trace.cats);
     store.thread_names  = std::move(trace.thread_names);
     store.process_names = std::move(trace.process_names);
+    store.diag          = trace.diag;
     store.derive_ms     = common::elapsed_ms(t_derive);
     return store;
 }

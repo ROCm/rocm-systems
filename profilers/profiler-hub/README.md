@@ -27,7 +27,7 @@ These options apply on Linux and Windows.
 | `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
 | `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
 | `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
-| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | OFF | Build the PyTorch Kineto trace parser. Needs zlib 1.3.2 or newer. OFF leaves its sources out of the build and does not look for zlib |
+| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | ON | Build the PyTorch Kineto trace parser. Needs zlib 1.3.2 or newer. OFF leaves its sources out of the build and does not look for zlib |
 | `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
 | `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
 | `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |

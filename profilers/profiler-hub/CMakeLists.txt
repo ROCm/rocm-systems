@@ -23,7 +23,7 @@ option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_ROCPD_V2 "Read legacy rocpd schema 2 traces" ON)
 option(PROFILER_HUB_ENABLE_ROCPD_V3 "Read rocpd schema 3 traces" ON)
-option(PROFILER_HUB_ENABLE_PYTORCH_KINETO "Read PyTorch Kineto traces" OFF)
+option(PROFILER_HUB_ENABLE_PYTORCH_KINETO "Read PyTorch Kineto traces" ON)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(
     PH_USE_NOMUTEX_OPTIMIZATION

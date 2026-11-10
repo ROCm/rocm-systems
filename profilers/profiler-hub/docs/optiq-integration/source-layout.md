@@ -31,7 +31,7 @@ profiler-hub/
     formats/           format registry
       rocpd_v2/        legacy rocpd (.rpd, schema 2) reader and trim rules
       rocpd_v3/        rocpd schema 3 reader, histogram, tables, trim rules
-      pytorch/         PyTorch Kineto trace parser
+      pytorch/         PyTorch Kineto entry: recogniser, parser, in-memory source
     queries/           fluent SQL builders
     writers/           writer interfaces and schema-3 writers
   tests/
@@ -164,7 +164,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, trims a context's files, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, trims a context's files, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. The pytorch entry is built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO` and has no reader factory or trim. |
 
 ### source/formats/rocpd
 
@@ -194,13 +194,17 @@ profiler-hub/
 
 ### source/formats/pytorch
 
-Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. No registry entry opens these files yet, and nothing calls them.
+Built only with `PROFILER_HUB_ENABLE_PYTORCH_KINETO`. The `pytorch` registry entry in `trace_formats.cpp` recognises, probes and opens a source for these files.
 
 | File | Role | Purpose |
 |---|---|---|
 | `kineto_loader.hpp`, `kineto_loader.cpp` | Reader | Streams a plain or gzip Kineto JSON trace into a flat event list with its names, categories, thread and process names. An optional cancel check is polled on each 1 MiB refill. |
 | `category_class.hpp`, `category_class.cpp` | Reader | Maps a Kineto category name, including the older spellings, to device or host work, launch site, and event type. |
 | `kineto_format.hpp`, `kineto_format.cpp` | Reader | Decides from the first 64 KiB of a trace's text whether it is a Kineto trace. |
+| `kineto_probe.hpp`, `kineto_probe.cpp` | Reader | The entry's recogniser (reads the first two bytes, inflates up to 64 KiB of a gzip file, applies the format check) and its probe, which reports success with version 0.0.0 and no GUIDs. |
+| `pytorch_store.hpp`, `pytorch_store.cpp` | Reader | Parses a file with the loader and groups the events into host-thread and GPU-stream tracks with their rows, sorted by start. Fails on a trace with no usable event. |
+| `pytorch_catalog.hpp`, `pytorch_catalog.cpp` | Reader | Moves the store's strings into the shared catalog and builds its node, process, thread, agent, stream and track entries. |
+| `pytorch_source.hpp`, `pytorch_source.cpp` | Reader | `pytorch_source`, the `format_source` for a Kineto file: parses in `load_catalog`, serves tracks from memory through the connection-source interface, frees the rows in `finish_load`, answers `track_of` from a table of id runs and the histogram from the track reader. Details, correlated events and call stacks answer with nothing; the summary and table queries are declined. |
 
 ## source/queries
 

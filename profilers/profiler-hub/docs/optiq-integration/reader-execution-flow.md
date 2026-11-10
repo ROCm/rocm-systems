@@ -73,7 +73,7 @@ flowchart TB
 
   subgraph fmt ["Format reader"]
     registry["trace_formats registry"]
-    source["format_source<br/>rocpd_source"]
+    source["format_source<br/>rocpd_source or pytorch_source"]
     pool["connection_pool<br/>8 reader_t connections"]
     v2["rocpd_v2_reader"]
     v3["rocpd_v3_reader"]
@@ -185,7 +185,7 @@ sequenceDiagram
   R->>SRC: the rocpd entry opens a rocpd_source
   SRC->>CP: one pool of 8 connections
   CP->>R: create reader for each connection
-  X->>SRC: load_catalog
+  X->>SRC: load_catalog (a Kineto source parses its file here instead, no SQLite)
   SRC->>RD: populate_reader_catalog
   RD->>S: create topology indexes (written into the trace file)
   RD->>S: strings, nodes, processes, threads, agents (in order)

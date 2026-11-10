@@ -165,13 +165,42 @@ downstream consumer of the library.
   `writer_t::register_track_info()` + `trace_environment_t::track_name`)
   are now split out of the plain `thread` track into their own
   `thread_sample` track instead of being merged into it.
-- `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (default OFF) builds the parser for
+- `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (default ON) builds the parser for
   PyTorch Kineto traces. It needs zlib 1.3.2 or newer: found on the system, or
   downloaded when `PROFILER_HUB_FETCH_DEPENDENCIES` is ON. With the option ON and
   `PROFILER_HUB_FETCH_DEPENDENCIES` OFF, configure fails on a system zlib below
   1.3.2 (Ubuntu 22.04 ships 1.2.11, 24.04 ships 1.3). With the option OFF, zlib
   is not looked up. The installed static target lists `ZLIB::ZLIB` as a link
-  requirement when the option is ON. Nothing reads PyTorch traces yet.
+  requirement when the option is ON.
+- PyTorch Kineto traces, plain or gzip JSON, open like any other trace when the
+  option is ON. `ph_probe_file` reports them as `PH_TRACE_SCHEMA_PYTORCH_KINETO`
+  with the file's `schemaVersion` as the major version (0.0.0 when the first
+  64 KiB has no integer `schemaVersion`). The file is parsed on every open, also
+  with a cache directory, whose folder is named `pytorch`. Tracks, events,
+  region, kernel, copy and allocation details, call stacks, correlated events,
+  `ph_event_query_read`, `ph_event_query_id_span` and
+  `ph_event_query_summarize_durations` are served; only `ph_trim_trace` returns
+  `PH_RESULT_UNSUPPORTED_FILE`.
+- `reader_types::trace_schema_t::pytorch_kineto` and
+  `PH_TRACE_SCHEMA_PYTORCH_KINETO`, added after the existing values.
+- A Kineto file serves what it carries in the structures rocpd uses:
+  - Details hold the event's `args` as JSON in `extdata`, with the flow arrows
+    that end on it. `correlation` is the stack id, which `ph_get_correlated_events`
+    joins on, and `External id` is the correlation id. A kernel's grid is in
+    work-items and its group segment size is the file's "shared memory", where the
+    file has it. A copy has its size and addresses, and the agent of its device.
+  - Every `deviceProperties` entry is an agent, with its name as `product_name`
+    and `user_name` and its properties as JSON in `extdata`, also when no event
+    is on that device. The trace's `host_name` is the node's host name, a GPU
+    lane's `thread_name` names its stream, and each stream has a
+    stream-to-hardware link to its device.
+  - Text-valued `pid` and `tid` ("Spans", "PyTorch Profiler") have tracks of
+    their own, with numbers from 2147483647 down. MTIA device events are on
+    stream tracks, and CUDA sync events too, "Stream Wait Event" as a HIP event.
+  - A `[memory]` event is a memory allocation event, and each agent with them has
+    an "ALLOCATED MEMORY" and a "RESERVED MEMORY" track.
+  - The trace-wide members of the file, its iteration markers and the sort indexes
+    are JSON in the `extdata` of processes and threads.
 
 ### Changed
 
