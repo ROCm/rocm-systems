@@ -43,7 +43,6 @@ from utils.utils_counter_defs import (
 PASS_VAR_SEP = "__pass"
 PASS_KEY_COLUMN = "Pass_Key"
 
-METRIC_ROW_REFS_ATTR = "metric_row_refs"
 METRIC_ROW_PASS_ATTR = "metric_row_pass"
 
 _COUNTER_COL_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
