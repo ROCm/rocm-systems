@@ -581,6 +581,21 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
 
 // Scalar memory loads complete out of order (CDNA5 ISA 5.7.1.1), so a full
 // KMcnt does not prove which one completed.
+// A full counter of two-token events is detected even though the wave holds
+// fewer events than the capacity: 15 two-token events plus a two-token issue
+// overflow the 31-token KMcnt. Synthetic ordered events make it observable.
+TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
+  constexpr uint8_t kTokens = amdgpu::MemoryCounterObligation::MAX_COUNTER_INCREMENT;
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
+  const int events = capacity / kTokens;
+  auto builder = makeGfx1250Test();
+  for (int index = 0; index <= events; ++index)
+    builder.counterOp(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM, kTokens);
+
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
+}
+
 TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteScalarLoads) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
   auto builder = makeGfx1250Test();
