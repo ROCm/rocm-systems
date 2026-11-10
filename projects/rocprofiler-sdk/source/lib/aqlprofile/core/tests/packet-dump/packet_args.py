@@ -163,6 +163,12 @@ def resolve_cases(args: argparse.Namespace, counters: list[dict]) -> tuple[
     if not cases:
         scope = f"block {requested_block}" if requested_block else args.gfx
         raise ValueError(f"no PMC events found for {scope}")
+    for block in sorted(skipped.keys() - cases.keys()):
+        print(
+            f"warning: skipping {block}: every {args.gfx} event is a level counter",
+            file=sys.stderr,
+        )
+        del skipped[block]
     return cases, skipped
 
 

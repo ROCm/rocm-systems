@@ -26,6 +26,9 @@ system_page_size();
 std::vector<uintptr_t>
 relocated_allocation_bases(uint64_t seed, size_t random_count);
 
+uint64_t
+relocation_seed();
+
 enum class packet_allocation_role
 {
     output,
@@ -149,8 +152,17 @@ load_le_dword(const uint8_t* bytes);
 uintptr_t
 aql_ib_target(const hsa_ext_amd_aql_pm4_packet_t& packet);
 
+void
+expect_only_ib_target_moved(const hsa_ext_amd_aql_pm4_packet_t& baseline,
+                            uintptr_t                           baseline_command_base,
+                            const hsa_ext_amd_aql_pm4_packet_t& moved,
+                            uintptr_t                           moved_command_base);
+
 std::vector<uint32_t>
 normalize_pmc_read_addresses(const std::vector<uint8_t>& bytes);
+
+std::vector<uintptr_t>
+pmc_read_addresses(const std::vector<uint8_t>& bytes);
 
 bool
 operator==(const packet_allocation& lhs, const packet_allocation& rhs);

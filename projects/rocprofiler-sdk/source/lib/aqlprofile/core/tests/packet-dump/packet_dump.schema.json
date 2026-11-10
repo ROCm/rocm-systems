@@ -402,14 +402,15 @@
       "description": "Exact aqlprofile_pmc_event_t returned by the iterate_data callback.",
       "additionalProperties": false,
       "required": [
-        "block_name",
+        "__implementation_aqlprofile:block_name",
         "block_index",
         "event_id",
         "flags"
       ],
       "properties": {
-        "block_name": {
+        "__implementation_aqlprofile:block_name": {
           "type": "integer",
+          "description": "Legacy AQLProfile block enum value. This is diagnostic implementation metadata and need not match a Rust implementation.",
           "minimum": 0
         },
         "block_index": {

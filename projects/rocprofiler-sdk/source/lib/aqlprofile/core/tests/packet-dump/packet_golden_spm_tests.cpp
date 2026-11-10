@@ -128,28 +128,6 @@ append_spm_event_sweep(nlohmann::ordered_json&                        document,
     }
 }
 
-void
-expect_only_ib_target_moved(const hsa_ext_amd_aql_pm4_packet_t& baseline,
-                            uintptr_t                           baseline_command_base,
-                            const hsa_ext_amd_aql_pm4_packet_t& moved,
-                            uintptr_t                           moved_command_base)
-{
-    constexpr size_t ib_address_lo_dword = 2;
-    constexpr size_t ib_address_hi_dword = 3;
-    const auto*      baseline_bytes      = reinterpret_cast<const uint8_t*>(&baseline);
-    const auto*      moved_bytes         = reinterpret_cast<const uint8_t*>(&moved);
-    for(size_t dword = 0; dword < sizeof(baseline) / sizeof(uint32_t); ++dword)
-    {
-        if(dword == ib_address_hi_dword) continue;
-        const uint32_t mask = dword == ib_address_lo_dword ? 0x3u : 0xFFFFFFFFu;
-        EXPECT_EQ(load_le_dword(baseline_bytes + dword * sizeof(uint32_t)) & mask,
-                  load_le_dword(moved_bytes + dword * sizeof(uint32_t)) & mask)
-            << "dword " << dword;
-    }
-    EXPECT_EQ(aql_ib_target(moved) - moved_command_base,
-              aql_ib_target(baseline) - baseline_command_base);
-}
-
 hsa_status_t
 collect_configurations(const aqlprofile_spm_available_configuration_t* configurations,
                        size_t                                          count,
@@ -234,8 +212,7 @@ TEST_F(aqlprofile_spm_packet_golden_test, dump_spm_packets)
 TEST_F(aqlprofile_spm_packet_golden_test, allocation_bases_only_change_aql_targets)
 {
     const auto parameters       = spm_dump_parameters();
-    const auto allocation_bases = relocated_allocation_bases(
-        static_cast<uint64_t>(::testing::UnitTest::GetInstance()->random_seed()), 16);
+    const auto allocation_bases = relocated_allocation_bases(relocation_seed(), 16);
 
     for(const auto& architecture : get_packet_test_options().spm)
     {

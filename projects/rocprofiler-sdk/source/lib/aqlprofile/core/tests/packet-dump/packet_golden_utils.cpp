@@ -3,11 +3,14 @@
 
 #include "packet_golden_utils.hpp"
 
+#include <gtest/gtest.h>
+
 #include <sys/mman.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <list>
 #include <new>
@@ -57,6 +60,16 @@ relocated_allocation_bases(uint64_t seed, size_t random_count)
     return bases;
 }
 
+// gtest derives the seed from the clock unless --gtest_random_seed is passed.
+uint64_t
+relocation_seed()
+{
+    const int seed = ::testing::UnitTest::GetInstance()->random_seed();
+    std::cout << "relocation seed: " << seed << " (rerun with --gtest_random_seed=" << seed << ")"
+              << std::endl;
+    return static_cast<uint64_t>(seed);
+}
+
 uint32_t
 load_le_dword(const uint8_t* bytes)
 {
@@ -70,6 +83,28 @@ aql_ib_target(const hsa_ext_amd_aql_pm4_packet_t& packet)
     const auto* bytes = reinterpret_cast<const uint8_t*>(&packet);
     return static_cast<uintptr_t>((uint64_t{load_le_dword(bytes + 12)} << 32) |
                                   (load_le_dword(bytes + 8) & 0xFFFFFFFCu));
+}
+
+void
+expect_only_ib_target_moved(const hsa_ext_amd_aql_pm4_packet_t& baseline,
+                            uintptr_t                           baseline_command_base,
+                            const hsa_ext_amd_aql_pm4_packet_t& moved,
+                            uintptr_t                           moved_command_base)
+{
+    constexpr size_t ib_address_lo_dword = 2;
+    constexpr size_t ib_address_hi_dword = 3;
+    const auto*      baseline_bytes      = reinterpret_cast<const uint8_t*>(&baseline);
+    const auto*      moved_bytes         = reinterpret_cast<const uint8_t*>(&moved);
+    for(size_t dword = 0; dword < sizeof(baseline) / sizeof(uint32_t); ++dword)
+    {
+        if(dword == ib_address_hi_dword) continue;
+        const uint32_t mask = dword == ib_address_lo_dword ? 0x3u : 0xFFFFFFFFu;
+        EXPECT_EQ(load_le_dword(baseline_bytes + dword * sizeof(uint32_t)) & mask,
+                  load_le_dword(moved_bytes + dword * sizeof(uint32_t)) & mask)
+            << "dword " << dword;
+    }
+    EXPECT_EQ(aql_ib_target(moved) - moved_command_base,
+              aql_ib_target(baseline) - baseline_command_base);
 }
 
 namespace
@@ -695,19 +730,36 @@ split_pm4_stream(const std::vector<uint8_t>& bytes)
     return packets;
 }
 
-std::vector<uint32_t>
-normalize_pmc_read_addresses(const std::vector<uint8_t>& bytes)
+namespace
 {
-    const auto            packets = split_pm4_stream(bytes);
+struct read_address_field
+{
+    size_t dword_offset = 0;
+    // ACQUIRE_MEM stores its base address shifted right by 8.
+    bool shifted_by_256 = false;
+};
+
+std::vector<uint32_t>
+stream_dwords(const std::vector<uint8_t>& bytes)
+{
+    if(bytes.size() % sizeof(uint32_t) != 0)
+        throw std::runtime_error{"PM4 stream size is not dword aligned"};
+
     std::vector<uint32_t> dwords(bytes.size() / sizeof(uint32_t));
     std::memcpy(dwords.data(), bytes.data(), bytes.size());
+    return dwords;
+}
 
+std::vector<read_address_field>
+pmc_read_address_fields(const std::vector<uint8_t>& bytes, const std::vector<uint32_t>& dwords)
+{
     constexpr uint32_t packet_3_copy             = 0x40;
     constexpr uint32_t packet_3_acquire          = 0x58;
     constexpr uint32_t copy_dst_sel_gfx12_memory = 2;
     constexpr uint32_t copy_dst_sel_gfx9_memory  = 5;
 
-    for(const auto& packet : packets)
+    std::vector<read_address_field> fields{};
+    for(const auto& packet : split_pm4_stream(bytes))
     {
         const size_t   offset        = packet.byte_offset / sizeof(uint32_t);
         const size_t   packet_dwords = packet.byte_size / sizeof(uint32_t);
@@ -717,17 +769,42 @@ normalize_pmc_read_addresses(const std::vector<uint8_t>& bytes)
         if(packet.opcode == packet_3_copy && copy_to_memory)
         {
             if(packet_dwords < 6) throw std::runtime_error{"short COPY_DATA packet"};
-            dwords.at(offset + 4) = 0;
-            dwords.at(offset + 5) = 0;
+            fields.push_back({offset + 4, false});
         }
         else if(packet.opcode == packet_3_acquire)
         {
             if(packet_dwords < 7) throw std::runtime_error{"short ACQUIRE_MEM packet"};
-            dwords.at(offset + 4) = 0;
-            dwords.at(offset + 5) = 0;
+            fields.push_back({offset + 4, true});
         }
     }
+    return fields;
+}
+}  // namespace
+
+std::vector<uint32_t>
+normalize_pmc_read_addresses(const std::vector<uint8_t>& bytes)
+{
+    auto dwords = stream_dwords(bytes);
+    for(const auto& field : pmc_read_address_fields(bytes, dwords))
+    {
+        dwords.at(field.dword_offset)     = 0;
+        dwords.at(field.dword_offset + 1) = 0;
+    }
     return dwords;
+}
+
+std::vector<uintptr_t>
+pmc_read_addresses(const std::vector<uint8_t>& bytes)
+{
+    const auto             dwords = stream_dwords(bytes);
+    std::vector<uintptr_t> addresses{};
+    for(const auto& field : pmc_read_address_fields(bytes, dwords))
+    {
+        const uint64_t value = uint64_t{dwords.at(field.dword_offset)} |
+                               (uint64_t{dwords.at(field.dword_offset + 1)} << 32);
+        addresses.push_back(static_cast<uintptr_t>(field.shifted_by_256 ? value << 8 : value));
+    }
+    return addresses;
 }
 
 aqlprofile_agent_info_v2_t

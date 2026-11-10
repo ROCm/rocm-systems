@@ -324,7 +324,8 @@ samples_json(const pmc_packet_streams&                  streams,
         result.push_back({
             {"callback_event",
              {
-                 {"block_name", static_cast<uint32_t>(sample.event.block_name)},
+                 {"__implementation_aqlprofile:block_name",
+                  static_cast<uint32_t>(sample.event.block_name)},
                  {"block_index", sample.event.block_index},
                  {"event_id", sample.event.event_id},
                  {"flags", {{"raw", hex_dword(sample.event.flags.raw)}}},

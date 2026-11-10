@@ -445,10 +445,42 @@ TEST_F(aqlprofile_packet_golden_test, combined_all_instance_event_id_packet_inva
     }
 }
 
+void
+expect_allocations_moved_with_command_base(const pmc_packet_streams& baseline,
+                                           const pmc_packet_streams& moved)
+{
+    ASSERT_EQ(moved.allocations.size(), baseline.allocations.size());
+    for(size_t index = 0; index < baseline.allocations.size(); ++index)
+    {
+        auto expected = baseline.allocations.at(index);
+        expected.base = expected.base - baseline.command_base + moved.command_base;
+        EXPECT_EQ(moved.allocations.at(index), expected) << "allocation " << index;
+    }
+}
+
+std::vector<uintptr_t>
+output_relative_read_addresses(const pmc_packet_streams& streams)
+{
+    const auto output = std::find_if(
+        streams.allocations.begin(), streams.allocations.end(), [](const auto& allocation) {
+            return allocation.role == packet_allocation_role::output;
+        });
+    if(output == streams.allocations.end())
+        throw std::runtime_error{"PMC packet streams have no output allocation"};
+
+    auto addresses = pmc_read_addresses(streams.read);
+    for(auto& address : addresses)
+    {
+        if(address < output->base || address - output->base >= output->size_bytes)
+            throw std::runtime_error{"PMC READ address is outside the output allocation"};
+        address -= output->base;
+    }
+    return addresses;
+}
+
 TEST_F(aqlprofile_packet_golden_test, allocation_bases_only_change_address_fields)
 {
-    const auto allocation_bases = relocated_allocation_bases(
-        static_cast<uint64_t>(::testing::UnitTest::GetInstance()->random_seed()), 64);
+    const auto allocation_bases = relocated_allocation_bases(relocation_seed(), 64);
 
     for(const auto& architecture : get_packet_test_options().pmc)
     {
@@ -468,7 +500,8 @@ TEST_F(aqlprofile_packet_golden_test, allocation_bases_only_change_address_field
 
                 const auto baseline =
                     generate_pmc_packet_streams(agent, event, deterministic_address_base, false);
-                const auto normalized_baseline = normalize_pmc_read_addresses(baseline.read);
+                const auto normalized_baseline   = normalize_pmc_read_addresses(baseline.read);
+                const auto baseline_read_offsets = output_relative_read_addresses(baseline);
                 for(const uintptr_t allocation_base : allocation_bases)
                 {
                     SCOPED_TRACE(test_case.block + ":" + std::to_string(test_event.id) +
@@ -478,8 +511,23 @@ TEST_F(aqlprofile_packet_golden_test, allocation_bases_only_change_address_field
 
                     EXPECT_EQ(baseline.start, randomized.start);
                     EXPECT_EQ(baseline.stop, randomized.stop);
+                    EXPECT_EQ(baseline.memory_copies, randomized.memory_copies);
+                    expect_allocations_moved_with_command_base(baseline, randomized);
+                    expect_only_ib_target_moved(baseline.aql.start_packet,
+                                                baseline.command_base,
+                                                randomized.aql.start_packet,
+                                                randomized.command_base);
+                    expect_only_ib_target_moved(baseline.aql.read_packet,
+                                                baseline.command_base,
+                                                randomized.aql.read_packet,
+                                                randomized.command_base);
+                    expect_only_ib_target_moved(baseline.aql.stop_packet,
+                                                baseline.command_base,
+                                                randomized.aql.stop_packet,
+                                                randomized.command_base);
                     EXPECT_NE(baseline.read, randomized.read);
                     EXPECT_EQ(normalized_baseline, normalize_pmc_read_addresses(randomized.read));
+                    EXPECT_EQ(baseline_read_offsets, output_relative_read_addresses(randomized));
                 }
             }
         }
