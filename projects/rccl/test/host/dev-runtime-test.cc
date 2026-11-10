@@ -6875,6 +6875,18 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersion_FiltersRequirementsWithCompileTim
   EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
 }
 
+// Branch: useRuntimeVersion does not bypass the compatibility check on the
+// caller's own version; a compile-time version no record serves is refused.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_ReturnsErrorWithoutQueueing) {
+  SplitCompatAtJitFieldVersion();
+  ncclDevCommCompat_v22902 = ncclDevCommCompat{};  // nothing serves kJitFieldVersion
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  EXPECT_NE(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
