@@ -1470,6 +1470,9 @@ TEST(HostDispatchCoverageMicrotest, ProfilesAreReadFromTheDirectoryNamedAfterThe
 {
     // The pairing childProfileFile() set up: profiles live under <coverage dir>/<binary
     // filename>/, and reading them from anywhere else would hand llvm-cov another binary's data.
+    // The export is on unless the caller turned it off, and a consumer that reads the .profraw
+    // files itself does exactly that; these tests pin what writeMergedCoverage does when asked.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 2);
     FakeLlvm llvm;
@@ -1490,6 +1493,7 @@ TEST(HostDispatchCoverageMicrotest, ABinaryThatLeftNoProfilesIsPassedOverSilentl
     // A binary excluded by the run's filter never ran, so it has nothing to export; invoking
     // llvm-profdata on an empty profile list would turn that into a warning about every binary
     // the caller deliberately did not select.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
     FakeLlvm llvm;
@@ -1506,6 +1510,7 @@ TEST(HostDispatchCoverageMicrotest, AFailedMergeDropsOnlyThatBinary)
 {
     // Best effort is the whole contract here: one binary llvm-profdata cannot read must not
     // cost the run the coverage of every other binary beside it.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroBroken", 1);
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
@@ -1526,6 +1531,7 @@ TEST(HostDispatchCoverageMicrotest, AFailedExportLeavesNoPartialTracefileBehind)
     // The redirect creates the tracefile before llvm-cov runs. Leaving the empty file beside
     // merged.profdata would make run_host_tests.sh take the export as done and skip the fallback
     // that would otherwise have recovered this binary's coverage.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroBroken", 1);
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
@@ -1545,6 +1551,7 @@ TEST(HostDispatchCoverageMicrotest, AFailedExportLeavesNoPartialTracefileBehind)
 
 TEST(HostDispatchCoverageMicrotest, EveryExportedBinaryReachesTheMergedTracefile)
 {
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroUtils", 1);
@@ -1563,6 +1570,7 @@ TEST(HostDispatchCoverageMicrotest, NoBinaryExportedMeansNoTracefileAtAll)
 {
     // An empty tracefile reads downstream as a tree with no coverage at all; writing nothing
     // leaves the previous phase's file, and the caller's own fallback, intact.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     FakeLlvm llvm;
 
@@ -1579,6 +1587,7 @@ TEST(HostDispatchCoverageMicrotest, NothingIsSaidAboutAnExportThatHasNothingToEx
     // the two together, and run_host_tests.sh exports the variable either way. Announcing the
     // binaries and then writing no tracefile is indistinguishable from an export that failed
     // for every one of them, so an uninstrumented run says nothing at all.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     FakeLlvm llvm;
 
@@ -1593,6 +1602,7 @@ TEST(HostDispatchCoverageMicrotest, OnlyTheBinariesWithProfilesAreCounted)
 {
     // The progress count is the reader's only estimate of how long this phase will take, so it
     // counts what will actually be exported rather than every binary the run knows of.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
     const ScopedDir dir("rccl-host-dispatch-coverage");
     seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
     FakeLlvm llvm;
