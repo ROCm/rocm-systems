@@ -14,6 +14,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
+  - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its path.
+
 - **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
   - WSL has no KFD, so the call previously returned success with placeholder values; it now reports the data as unsupported.
 
@@ -66,6 +69,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi list` and `amd-smi static` showing a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
   - Affects APUs such as Ryzen AI Max (Strix Halo) under WSL. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
+
+- **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
+  - Copied into `site-packages`, the module could not find its library unless `torch` was imported first. It now loads the wheel's own library, never a system `libamd_smi.so` from another ROCm release.
+
+- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
+  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
 
 - **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.
   - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
@@ -323,11 +332,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed wrong values from PM metrics and register table queries in the Python library**.  
   - The record names were correct, but every value was wrong.
 
-- **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
-  - Copied into site-packages, the module could not load `libamd_smi.so.27` unless `torch` was imported first. It now loads the library from the `_rocm_sdk_core` package on `sys.path` when no usable system library is found, and reuses the copy PyTorch already loaded instead of mapping a second one.
-  - The copy TheRock ships in `rocm-sdk-core` loads only that wheel's library, never a system `libamd_smi.so` from another ROCm release.
-  - The module refuses a library newer than itself, whose structures can be larger than the module allocates, and warns about an older one. `AMDSMI_LIB_OVERRIDE` still loads any library.
-
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` now report `Can not find a device` and exit `196`, like `--gpu`, instead of exiting `1` with a traceback and no parseable `--json`/`--csv` output.
 
@@ -394,9 +398,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
   - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
-
-- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
-  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
