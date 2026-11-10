@@ -13,7 +13,7 @@
  *                                             hipMemAllocationHandleType shHandleType)` -
  * 	Imports an allocation from a requested shareable handle type.
  */
-
+#include "ipc_socket_com.hh"
 #include <hip_test_common.hh>
 #include "hip_vmm_common.hh"
 
@@ -700,64 +700,74 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    REQUIRE(close(fd[1]) == 0);
-    REQUIRE(close(fdSig[0]) == 0);
-    CTX_CREATE();
-    // Wait for parent process to create the socket.
-    size_t size_mem = 0;
-    REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
-    // Open Socket as client
-    ipcSocketCom sockObj(false);
-    hipShareableHdl shHandle;
-    // Signal Parent process that Child is ready to receive msg
-    int sig = 0;
-    REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
-    // receive message from parent provess
-    checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
-    hipMemGenericAllocationHandle_t imported_handle;
-    // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
-              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
-              hipMemHandleTypePosixFileDescriptor));
-    // Allocate virtual address range
-    void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
-    // Set access
-    hipMemAccessDesc accessDesc = {};
-    accessDesc.location.type = hipMemLocationTypeDevice;
-    accessDesc.location.id = 0;
-    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-    // Make the address accessible to GPU 0
-    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    std::vector<int> A_h(N), B_h(N), C_h(N);
-    // Initialize with data
-    for (size_t idx = 0; idx < N; idx++) {
-      A_h[idx] = idx;
-      C_h[idx] = idx * idx;
-    }
-    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-    // Invoke kernel
-    hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                       reinterpret_cast<int*>(ptrA));
-    HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
-    HIP_CHECK(hipDeviceSynchronize());
-    // validate
-    REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
+    try {
+      REQUIRE(close(fd[1]) == 0);
+      REQUIRE(close(fdSig[0]) == 0);
+      CTX_CREATE();
+      // Wait for parent process to create the socket.
+      size_t size_mem = 0;
+      REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+      // Open Socket as client
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+      REQUIRE(sockObj.initialize());
+      hipShareableHdl shHandle;
+      // Signal Parent process that Child is ready to receive msg
+      int sig = 0;
+      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      // receive message from parent provess
+      checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
+      hipMemGenericAllocationHandle_t imported_handle;
+      // import the sareable handle
+      HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+                reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+                hipMemHandleTypePosixFileDescriptor));
+      // Allocate virtual address range
+      void* ptrA;
+      HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+      HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
+      // Set access
+      hipMemAccessDesc accessDesc = {};
+      accessDesc.location.type = hipMemLocationTypeDevice;
+      accessDesc.location.id = 0;
+      accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+      // Make the address accessible to GPU 0
+      HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+      std::vector<int> A_h(N), B_h(N), C_h(N);
+      // Initialize with data
+      for (size_t idx = 0; idx < N; idx++) {
+        A_h[idx] = idx;
+        C_h[idx] = idx * idx;
+      }
+      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+      // Invoke kernel
+      hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                         reinterpret_cast<int*>(ptrA));
+      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+      HIP_CHECK(hipDeviceSynchronize());
+      // validate
+      REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
 
-    // free resources
-    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-    CTX_DESTROY();
-    checkSysCallErrors(sockObj.closeThisSock());
-    REQUIRE(close(fd[0]) == 0);
-    REQUIRE(close(fdSig[1]) == 0);
-    exit(0);
+      // free resources
+      HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+      HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+      CTX_DESTROY();
+      checkSysCallErrors(sockObj.closeThisSock());
+      REQUIRE(close(fd[0]) == 0);
+      REQUIRE(close(fdSig[1]) == 0);
+      exit(0);
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
+    }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -785,7 +795,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg
@@ -825,6 +836,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   // Create data buffer
   std::vector<int> A_h(N), B_h(N), C_h(N);
@@ -838,54 +851,62 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    REQUIRE(close(fd[1]) == 0);
-    REQUIRE(close(fdSig[0]) == 0);
-    CTX_CREATE();
-    // Wait for parent process to create the socket.
-    size_t size_mem = 0;
-    REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
+    try {
+      REQUIRE(close(fd[1]) == 0);
+      REQUIRE(close(fdSig[0]) == 0);
+      CTX_CREATE();
+      // Wait for parent process to create the socket.
+      size_t size_mem = 0;
+      REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
 
-    // Open Socket as client
-    ipcSocketCom sockObj(false);
-    hipShareableHdl shHandle;
+      // Open Socket as client
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+      REQUIRE(sockObj.initialize());
+      hipShareableHdl shHandle;
 
-    // Signal Parent process that Child is ready to receive msg
-    int sig = 0;
-    REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+      // Signal Parent process that Child is ready to receive msg
+      int sig = 0;
+      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
 
-    // receive message from parent provess
-    checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
-    hipMemGenericAllocationHandle_t imported_handle;
+      // receive message from parent provess
+      checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
+      hipMemGenericAllocationHandle_t imported_handle;
 
-    // import the sareable handle
-    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
-              reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
-              hipMemHandleTypePosixFileDescriptor));
-    // Allocate virtual address range
-    void* ptrA;
-    HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-    HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
-    // Set access
-    hipMemAccessDesc accessDesc = {};
-    accessDesc.location.type = hipMemLocationTypeDevice;
-    accessDesc.location.id = 0;
-    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-    // Make the address accessible to GPU 0
-    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-    HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-    // Invoke kernel
-    hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                       reinterpret_cast<int*>(ptrA));
-    HIP_CHECK(hipDeviceSynchronize());
+      // import the sareable handle
+      HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+                reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+                hipMemHandleTypePosixFileDescriptor));
+      // Allocate virtual address range
+      void* ptrA;
+      HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+      HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
+      // Set access
+      hipMemAccessDesc accessDesc = {};
+      accessDesc.location.type = hipMemLocationTypeDevice;
+      accessDesc.location.id = 0;
+      accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+      // Make the address accessible to GPU 0
+      HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+      // Invoke kernel
+      hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                         reinterpret_cast<int*>(ptrA));
+      HIP_CHECK(hipDeviceSynchronize());
 
-    // free resources
-    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-    checkSysCallErrors(sockObj.closeThisSock());
-    REQUIRE(close(fd[0]) == 0);
-    REQUIRE(close(fdSig[1]) == 0);
-    CTX_DESTROY();
-    exit(0);
+      // free resources
+      HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+      HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+      checkSysCallErrors(sockObj.closeThisSock());
+      REQUIRE(close(fd[0]) == 0);
+      REQUIRE(close(fdSig[1]) == 0);
+      CTX_DESTROY();
+      exit(0);
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
+    }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
@@ -925,7 +946,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg
@@ -974,77 +996,87 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
   REQUIRE(pipe(fdpid) == 0);
+  std::string socketName =
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
   auto pid = fork();
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child
-    auto pid2 = fork();
-    if (pid2 == 0) {  // grandchild
-      REQUIRE(close(fd[1]) == 0);
-      REQUIRE(close(fdSig[0]) == 0);
-      // Wait for parent process to create the socket.
-      size_t size_mem = 0;
-      REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
-      CTX_CREATE();
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
+    try {
+      auto pid2 = fork();
+      if (pid2 == 0) {  // grandchild
+        REQUIRE(close(fd[1]) == 0);
+        REQUIRE(close(fdSig[0]) == 0);
+        // Wait for parent process to create the socket.
+        size_t size_mem = 0;
+        REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
+        CTX_CREATE();
 
-      // Open Socket as client
-      ipcSocketCom sockObj(false);
-      hipShareableHdl shHandle;
+        // Open Socket as client
+        ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
+        REQUIRE(sockObj.initialize());
+        hipShareableHdl shHandle;
 
-      // Signal Parent process that Child is ready to receive msg
-      int sig = 0;
-      REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
+        // Signal Parent process that Child is ready to receive msg
+        int sig = 0;
+        REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
 
-      // receive message from parent provess
-      checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
-      hipMemGenericAllocationHandle_t imported_handle;
+        // receive message from parent provess
+        checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
+        hipMemGenericAllocationHandle_t imported_handle;
 
-      // import the sareable handle
-      HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
-                reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
-                hipMemHandleTypePosixFileDescriptor));
-      // Allocate virtual address range
-      void* ptrA;
-      HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-      HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
-      // Set access
-      hipMemAccessDesc accessDesc = {};
-      accessDesc.location.type = hipMemLocationTypeDevice;
-      accessDesc.location.id = 0;
-      accessDesc.flags = hipMemAccessFlagsProtReadWrite;
-      // Make the address accessible to GPU 0
-      HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
-      std::vector<int> A_h(N), B_h(N), C_h(N);
-      // Initialize with data
-      for (size_t idx = 0; idx < N; idx++) {
-        A_h[idx] = idx;
-        C_h[idx] = idx * idx;
+        // import the sareable handle
+        HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+                  reinterpret_cast<void*>(static_cast<uintptr_t>(shHandle)),
+                  hipMemHandleTypePosixFileDescriptor));
+        // Allocate virtual address range
+        void* ptrA;
+        HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+        HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
+        // Set access
+        hipMemAccessDesc accessDesc = {};
+        accessDesc.location.type = hipMemLocationTypeDevice;
+        accessDesc.location.id = 0;
+        accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+        // Make the address accessible to GPU 0
+        HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+        std::vector<int> A_h(N), B_h(N), C_h(N);
+        // Initialize with data
+        for (size_t idx = 0; idx < N; idx++) {
+          A_h[idx] = idx;
+          C_h[idx] = idx * idx;
+        }
+        HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+        // Invoke kernel
+        hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0,
+                           0, reinterpret_cast<int*>(ptrA));
+        HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+        HIP_CHECK(hipDeviceSynchronize());
+        // validate
+        REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+
+        // free resources
+        HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+        HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+        CTX_DESTROY();
+        checkSysCallErrors(sockObj.closeThisSock());
+        REQUIRE(close(fd[0]) == 0);
+        REQUIRE(close(fdSig[1]) == 0);
+        exit(0);
+      } else {
+        int status;
+        REQUIRE(close(fdpid[0]) == 0);
+        REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
+        REQUIRE(wait(&status) >= 0);
+        REQUIRE(status == 0);
+        REQUIRE(close(fdpid[1]) == 0);
+        exit(0);
       }
-      HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
-      // Invoke kernel
-      hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                         reinterpret_cast<int*>(ptrA));
-      HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
-      HIP_CHECK(hipDeviceSynchronize());
-      // validate
-      REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
-
-      // free resources
-      HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-      HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
-      CTX_DESTROY();
-      checkSysCallErrors(sockObj.closeThisSock());
-      REQUIRE(close(fd[0]) == 0);
-      REQUIRE(close(fdSig[1]) == 0);
-      exit(0);
-    } else {
-      int status;
-      REQUIRE(close(fdpid[0]) == 0);
-      REQUIRE(write(fdpid[1], &pid2, sizeof(pid2)) >= 0);
-      REQUIRE(wait(&status) >= 0);
-      REQUIRE(status == 0);
-      REQUIRE(close(fdpid[1]) == 0);
-      exit(0);
+    } catch (...) {
+      std::fprintf(stderr, "child: an assertion or HIP call failed, see the output above\n");
+      _exit(1);
     }
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
@@ -1076,7 +1108,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
                                             hipMemHandleTypePosixFileDescriptor, 0));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg
@@ -1163,13 +1196,15 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
   int fd[2], fdSig[2];
   REQUIRE(pipe(fd) == 0);
   REQUIRE(pipe(fdSig) == 0);
+  std::string socketName =
+    ipcSocketCom<>::generateIPCObjPrefix(Catch::getResultCapture().getCurrentTestName());
 
   auto pid = fork();
   REQUIRE(pid >= 0);
 
   if (pid == 0) {  // child: imports the allocation on device 1 (device 0 on a single GPU machine)
-    // A failing assertion throws a Catch exception, which would otherwise make the forked child
-    // go on running the remaining test cases. Report it and leave with a failure status instead.
+    // A failing assertion throws a Catch exception, in that case we want to exit immediately and
+    // let the parent clean up instead of us, so we use _exit()
     try {
       REQUIRE(close(fd[1]) == 0);
       REQUIRE(close(fdSig[0]) == 0);
@@ -1188,9 +1223,10 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
         REQUIRE(close(fdSig[1]) == 0);
         exit(0);
       }
-      ipcSocketCom sockObj(false);
+      ipcSocketCom<hipShareableHdl> sockObj(false, socketName);
       hipShareableHdl shHandle;
       int sig = 0;
+      REQUIRE(sockObj.initialize());
       REQUIRE(write(fdSig[1], &sig, sizeof(int)) == static_cast<ssize_t>(sizeof(int)));
       checkSysCallErrors(sockObj.recvShareableHdl(&shHandle));
 
@@ -1341,7 +1377,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     hipShareableHdl shareable_handle;
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
-    ipcSocketCom sockObj(true);
+    ipcSocketCom<hipShareableHdl> sockObj(true, socketName);
+    REQUIRE(sockObj.initialize());
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) == static_cast<ssize_t>(sizeof(size_t)));
     int sig = 0;
     // A child that failed before it signalled closes its end of the pipe: read() returns 0 then,
