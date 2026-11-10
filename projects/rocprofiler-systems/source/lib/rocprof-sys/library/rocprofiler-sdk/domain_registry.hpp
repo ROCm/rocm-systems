@@ -5,6 +5,7 @@
 
 #include "common/string_utility.hpp"
 #include "common/version.hpp"
+#include "core/containers/static_vector.hpp"
 
 #include "library/rocprofiler-sdk/buffered/kernel_dispatch.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/event_dropped_events.hpp"
@@ -40,32 +41,12 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
-#include <cstddef>
 #include <stdexcept>
 #include <string_view>
 
 namespace rocprofsys::domains
 {
-
-template <typename T, std::size_t Capacity>
-struct simple_static_vector
-{
-    std::array<T, Capacity> elements{};
-    std::size_t             used = 0;
-
-    constexpr void add(T value) { elements[used++] = value; }
-
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return used; }
-
-    [[nodiscard]] constexpr const T* begin() const noexcept { return elements.data(); }
-
-    [[nodiscard]] constexpr const T* end() const noexcept
-    {
-        return elements.data() + used;
-    }
-};
 
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
@@ -135,33 +116,35 @@ private:
     consteval static auto collect_buffered_domains()
     {
         constexpr auto k_buffered_domains_size = 12;
-        simple_static_vector<buffered_domain_definition<SdkBackend>,
-                             k_buffered_domains_size>
+        container::static_vector<buffered_domain_definition<SdkBackend>,
+                                 k_buffered_domains_size>
             result;
 
-        result.add(buffered::k_kernel_dispatch<SdkBackend, Externals>);
-        result.add(buffered::k_memory_copy<SdkBackend, Externals>);
-        result.add(buffered::k_scratch_memory<SdkBackend, Externals>);
+        result.push_back(buffered::k_kernel_dispatch<SdkBackend, Externals>);
+        result.push_back(buffered::k_memory_copy<SdkBackend, Externals>);
+        result.push_back(buffered::k_scratch_memory<SdkBackend, Externals>);
 
         constexpr auto k_memory_allocation_min_version =
             version{ .major = 0, .minor = 6, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_memory_allocation_min_version)
         {
-            result.add(buffered::k_memory_allocation<SdkBackend, Externals>);
+            result.push_back(buffered::k_memory_allocation<SdkBackend, Externals>);
         }
 
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      version{ .major = 1, .minor = 2, .patch = 2 })
         {
-            result.add(buffered::kfd::k_event_dropped_events<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_event_page_fault<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_event_page_migrate<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_event_queue<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_event_unmap_from_gpu<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_page_fault<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_page_migrate<SdkBackend, Externals>);
-            result.add(buffered::kfd::k_queue<SdkBackend, Externals>);
+            result.push_back(
+                buffered::kfd::k_event_dropped_events<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_event_page_fault<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_event_page_migrate<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_event_queue<SdkBackend, Externals>);
+            result.push_back(
+                buffered::kfd::k_event_unmap_from_gpu<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_page_fault<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_page_migrate<SdkBackend, Externals>);
+            result.push_back(buffered::kfd::k_queue<SdkBackend, Externals>);
         }
 
         return result;
@@ -170,24 +153,24 @@ private:
     consteval static auto collect_callback_domains()
     {
         constexpr auto k_callback_domains_size = 14;
-        simple_static_vector<callback_domain_definition<SdkBackend>,
-                             k_callback_domains_size>
+        container::static_vector<callback_domain_definition<SdkBackend>,
+                                 k_callback_domains_size>
             result;
 
-        result.add(callback::hip::k_compiler_api<SdkBackend, Externals>);
-        result.add(callback::hip::k_runtime_api<SdkBackend, Externals>);
-        result.add(callback::hsa::k_core_api<SdkBackend, Externals>);
-        result.add(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
-        result.add(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
-        result.add(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
-        result.add(callback::rccl::k_rccl_api<SdkBackend, Externals>);
+        result.push_back(callback::hip::k_compiler_api<SdkBackend, Externals>);
+        result.push_back(callback::hip::k_runtime_api<SdkBackend, Externals>);
+        result.push_back(callback::hsa::k_core_api<SdkBackend, Externals>);
+        result.push_back(callback::hsa::k_amd_ext_api<SdkBackend, Externals>);
+        result.push_back(callback::hsa::k_image_ext_api<SdkBackend, Externals>);
+        result.push_back(callback::hsa::k_finalize_ext_api<SdkBackend, Externals>);
+        result.push_back(callback::rccl::k_rccl_api<SdkBackend, Externals>);
 
         constexpr auto k_hip_stream_min_version =
             version{ .major = 0, .minor = 7, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_hip_stream_min_version)
         {
-            result.add(callback::k_hip_stream<SdkBackend, Externals>);
+            result.push_back(callback::k_hip_stream<SdkBackend, Externals>);
         }
 
         constexpr auto k_rocdecode_and_ompt_min_version =
@@ -195,8 +178,8 @@ private:
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_rocdecode_and_ompt_min_version)
         {
-            result.add(callback::k_rocdecode_api<SdkBackend, Externals>);
-            result.add(callback::ompt::k_ompt_api<SdkBackend, Externals>);
+            result.push_back(callback::k_rocdecode_api<SdkBackend, Externals>);
+            result.push_back(callback::ompt::k_ompt_api<SdkBackend, Externals>);
         }
 
         constexpr auto k_rocjpeg_min_version =
@@ -204,7 +187,7 @@ private:
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_rocjpeg_min_version)
         {
-            result.add(callback::k_rocjpeg_api<SdkBackend, Externals>);
+            result.push_back(callback::k_rocjpeg_api<SdkBackend, Externals>);
         }
 
         constexpr auto k_rocshmem_min_version =
@@ -212,7 +195,7 @@ private:
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_rocshmem_min_version)
         {
-            result.add(callback::k_rocshmem_api<SdkBackend, Externals>);
+            result.push_back(callback::k_rocshmem_api<SdkBackend, Externals>);
         }
 
         constexpr auto k_hipfile_min_version =
@@ -220,7 +203,7 @@ private:
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
                      k_hipfile_min_version)
         {
-            result.add(callback::k_hipfile_api<SdkBackend, Externals>);
+            result.push_back(callback::k_hipfile_api<SdkBackend, Externals>);
         }
 
         return result;
