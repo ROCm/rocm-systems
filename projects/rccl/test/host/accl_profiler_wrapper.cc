@@ -3,6 +3,7 @@
 // Thin forwarding functions expose static helpers to AcclProfilerTests.cpp.
 
 #include "accl_profiler.cc"
+#include "accl_net_counters.cc"
 
 extern "C" {
   int test_acclDatatypeSize(const char* dt) { return acclDatatypeSize(dt); }
@@ -61,6 +62,40 @@ extern "C" {
     rec.func = "AllReduce"; rec.algo = "Ring"; rec.proto = "Simple";
     rec.nRanks = 1; rec.nChannels = 1; rec.msgSizeBytes = 4096;
     rec.totalExecUs = 1.0;
-    acclWriteRecord((struct acclCommContext*)ctx, &rec);
+    acclWriteRecord((struct acclCommContext*)ctx, &rec, NULL);
+  }
+
+  // Net-counter test seams: replace the syscalls / whole-snapshot reader.
+  void test_acclNetSetHooks(const struct acclNetHooks* hooks) { gAcclNetHooks = *hooks; }
+  // Drives one RDMA netlink device through open + learn read + read.
+  int test_acclRdmaOpenAndRead(const char* name, uint64_t* first, uint64_t* second,
+                               char names[][ACCL_NET_NAME_LEN], int* nNames) {
+    static char rx[ACCL_NL_BUF_SIZE];
+    struct acclNetDev d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.name, sizeof(d.name), "%s", name);
+    d.nlFd = -1;
+    d.ethFd = -1;
+    int rc = acclRdmaOpen(&d, rx);
+    if (rc == 0) rc = acclRdmaRead(&d, rx, first, 1);
+    if (rc == 0) rc = acclRdmaRead(&d, rx, second, 0) == 0 ? 0 : 2;
+    for (int i = 0; i < d.nRdma; i++) memcpy(names[i], d.rdmaNames[i], ACCL_NET_NAME_LEN);
+    *nNames = d.nRdma;
+    if (d.nlFd >= 0) close(d.nlFd);
+    return rc;
+  }
+  // Drives the ethtool reader on netdev `ifname` through `nReads` reads.
+  int test_acclEthReads(const char* ifname, int nReads, uint64_t out[][ACCL_NET_MAX_ETH],
+                        char names[][ETH_GSTRING_LEN + 1], int* nNames) {
+    struct acclNetDev d;
+    memset(&d, 0, sizeof(d));
+    snprintf(d.netdev, sizeof(d.netdev), "%s", ifname);
+    d.ethFd = 0;
+    int rc = acclEthFetchNames(&d);
+    for (int r = 0; rc == 0 && r < nReads; r++) rc = acclEthRead(&d, out[r]);
+    for (int i = 0; i < d.nEth; i++) memcpy(names[i], d.ethNames[i], ETH_GSTRING_LEN + 1);
+    *nNames = d.nEth;
+    free(d.ethBuf);
+    return rc;
   }
 }

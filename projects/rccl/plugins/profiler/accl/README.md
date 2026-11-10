@@ -11,6 +11,9 @@ to all four key event types for full root-cause triage.
 ncclProfileColl | ncclProfileKernelCh | ncclProfileProxyOp | ncclProfileProxyStep
 ```
 
+`ncclProfileKernelLaunch | ncclProfileP2p` are added with `ACCL_NET_COUNTERS=1`
+(see [Network Counters](#network-counters-opt-in)).
+
 | Event Type | What it captures |
 |---|---|
 | `ncclProfileColl` | Collective lifecycle (host-side start/stop) |
@@ -155,6 +158,71 @@ The report classifies bottlenecks per message size (evaluated in this order):
 - **ENQUEUE-DELAY** — enqueue-to-first-kernel delay dominates (>40%)
 - **GPU-COMPUTE** — kernel time dominates (>50% of wall time)
 - **mixed** — no single component dominates
+
+## Network Counters (opt-in)
+
+With `ACCL_NET_COUNTERS=1` each record also carries NIC counter deltas for that
+collective, from chained snapshots taken by a plugin-owned thread:
+
+```
+read S0 -> coll N -> N completes -> read S1 -> coll N+1 -> ... -> read S2
+delta(N) = S1 - S0, delta(N+1) = S2 - S1
+```
+
+N completes when all its kernel channels and all its proxy ops have stopped.
+Profiler callbacks never read hardware; before N+1's kernel is launched
+(`KernelLaunch` event) the launching thread waits for S1, so the wait is not
+counted as kernel time.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ACCL_NET_COUNTERS` | off | `1` turns it on |
+| `ACCL_NET_DEVICES` | none (required) | RDMA devices to read (port 1), e.g. `rdma0,rdma1` |
+| `ACCL_NET_DEVICE_SELECT` | read all | `local_rank`: read entry `rank % (nranks/nNodes)` of the first communicator only |
+| `ACCL_NET_WAIT_MS` | 1000 | longest wait for a read before launching anyway |
+| `ACCL_NET_GRACE_US` | 1000 | wait at launch for the previous collective's proxy ops |
+
+Sources: RDMA hw counters over RDMA netlink (sysfs `hw_counters` is cached for
+10 ms; one firmware command per read, about 1-2 ms on AINIC); ethtool PFC/pause
+stats, marked `"stale": true` because ionic refreshes them about every 5 s; and
+`rcclTelemetrySwCapture()` (needs `RCCL_TELEMETRY_ENABLE=1`, `NCCL_NET=IB-CAST`).
+
+```json
+"net_counters": {"overlapped": false, "unavailable": false,
+  "before_ts_us": 1700, "after_ts_us": 3900, "after_read_us": 1480,
+  "devices": [{"name": "rdma0",
+    "rdma": {"tx_rdma_ucast_bytes": 4194304, "tx_rdma_ucast_pkts": 1024,
+             "rx_rdma_ucast_bytes": 4194304, "rx_rdma_ucast_pkts": 1024,
+             "resp_rx_outouf_seq": 3},
+    "ethtool": {"stale": true}}],
+  "sw": [{"device_id": 0, "tx_bytes": 4194304, "rx_bytes": 4194304, "cq_errors": 0}]}
+```
+
+- `rdma` lists non-zero deltas plus the ionic volume counters; a counter that
+  went backwards (wrapped) is omitted.
+- `overlapped`: other work (another collective, P2P, or a collective below
+  `ACCL_PROFILER_MIN_SIZE_BYTES`) may have run in the window.
+- `unavailable`: a read failed or timed out, or no device is configured. The
+  collective is never affected.
+- The summary adds `net_counters` (records, overlapped, unavailable,
+  `records_with_read_error`, `queued_at_finalize`, read times, per-device
+  totals). A record not written by finalize clears `complete`.
+
+`accl_report.py` prints a NETWORK COUNTERS table per message size:
+`NETWORK_SUSPECT` (loss/retransmit counters, or ECN/CNP), `CLEAN`, or
+`INCONCLUSIVE` (fewer than 3 clean windows, most windows overlapped/unavailable,
+or non-ionic counter names), with the counters, side and ranks behind it. Loss
+is often visible only on the receiving NIC, so all ranks are pooled.
+
+Caveats:
+- Per-collective numbers need a serialized app, e.g. rccl-tests `-z 1`, and
+  `ACCL_PROFILER_MIN_SIZE_BYTES=0`.
+- Counters are per NIC: ranks sharing a NIC share windows.
+- The read wait (about 1-2 ms per collective) shows up in wall-clock benchmark
+  time, not in `coll_exec_time_us`.
+- With AINIC CTS offload, a remote rank leaving the barrier early can start
+  sending before this rank's read finishes.
+- CUDA graphs are not supported.
 
 ## Requirements
 

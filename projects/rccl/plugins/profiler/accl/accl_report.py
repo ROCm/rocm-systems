@@ -10,6 +10,9 @@ Usage:
 
     # Merge multi-rank files
     python3 accl_report.py compare --baseline dir/baseline/ --candidate dir/candidate/
+
+Records carrying "net_counters" (ACCL_NET_COUNTERS=1) also get a per-size
+network verdict: NETWORK_SUSPECT / CLEAN / INCONCLUSIVE.
 """
 import argparse
 import contextlib
@@ -18,7 +21,7 @@ import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -49,6 +52,7 @@ class Record:
     n_send_ops: int = 0
     n_recv_ops: int = 0
     kernel_events: list = field(default_factory=list)
+    net: Optional[dict] = None
 
 
 def drop_warmup(records: List[Record], warmup: int,
@@ -129,6 +133,7 @@ def parse_jsonl(filepath: str, warmup: int = 5) -> List[Record]:
                 n_proxy_ops=decomp.get('n_proxy_ops', 0),
                 n_send_ops=decomp.get('n_send_ops', 0),
                 n_recv_ops=decomp.get('n_recv_ops', 0),
+                net=obj.get('net_counters'),
             ))
     records = drop_warmup(records, warmup, where=f" {os.path.basename(filepath)}:")
     if not records and warmup > 0:
@@ -348,6 +353,149 @@ def print_single_report(records: List[Record]):
                   f"{agg.mean_n_proxy_ops:6.0f} │ {bottleneck}")
 
 
+# RDMA hw counters (ionic names) that mean the network misbehaved, and the side
+# of a transfer whose NIC counts them. Loss shows up on the receiver
+# (out-of-sequence, out-of-buffer) and as NAKs/retransmits on the sender, so a
+# verdict pools every rank of a size.
+NET_LOSS_COUNTERS = {
+    'tx_rdma_retx_pkts': 'sender',
+    'tx_rdma_retx_bytes': 'sender',
+    'tx_rdma_ack_timeout': 'sender',
+    'req_tx_retry_excd_err': 'sender',
+    'req_rx_pkt_seq_err': 'sender (NAK from receiver)',
+    'req_rx_impl_nak_seq_err': 'sender (NAK from receiver)',
+    'req_rx_rnr_retry_err': 'sender (RNR from receiver)',
+    'resp_rx_outouf_seq': 'receiver',
+    'resp_rx_outof_buf': 'receiver',
+    'resp_tx_pkt_seq_err': 'receiver',
+    'resp_tx_rnr_retry_err': 'receiver',
+    'tx_rdma_ccl_cts_retx_pkts': 'receiver (CTS)',
+    'tx_rdma_ccl_cts_ack_timeout': 'receiver (CTS)',
+    'resp_rx_ccl_cts_outouf_seq': 'sender (CTS)',
+}
+NET_CONGESTION_COUNTERS = {
+    'rx_rdma_ecn_pkts': 'receiver',
+    'tx_rdma_cnp_pkts': 'receiver',
+    'rx_rdma_cnp_pkts': 'sender',
+}
+NET_MIN_USABLE = 3
+
+
+@dataclass
+class NetVerdict:
+    verdict: str
+    n_records: int
+    n_usable: int
+    n_overlapped: int
+    n_unavailable: int
+    tx_bytes_per_coll: float
+    # counter -> (sum of deltas, records hit, sorted ranks)
+    drivers: Dict[str, Tuple[int, int, List[int]]] = field(default_factory=dict)
+    pause_frames: int = 0
+    reason: str = ''
+
+
+def _net_rdma_deltas(net: dict) -> Dict[str, int]:
+    out: Dict[str, int] = defaultdict(int)
+    for dev in net.get('devices') or []:
+        for k, v in (dev.get('rdma') or {}).items():
+            out[k] += v
+    return out
+
+
+def _net_pause_frames(net: dict) -> int:
+    total = 0
+    for dev in net.get('devices') or []:
+        for k, v in (dev.get('ethtool') or {}).items():
+            if k != 'stale' and 'pause' in k and 'us_count' not in k:
+                total += v
+    return total
+
+
+def net_verdicts(records: List[Record]) -> Dict[Tuple[str, int], NetVerdict]:
+    """Per (coll, msg_size) network verdict from per-collective counter deltas.
+
+    Only records with clean windows count: an overlapped window holds another
+    collective's traffic and an unavailable one has no usable delta. ethtool
+    deltas are stale (ionic refreshes them about every 5 s), so they are shown
+    as context and never drive a verdict.
+    """
+    groups: Dict[Tuple[str, int], List[Record]] = defaultdict(list)
+    for r in records:
+        if r.net is not None:
+            groups[(r.coll, r.msg_size)].append(r)
+    result = {}
+    for key, recs in sorted(groups.items()):
+        usable = [r for r in recs
+                  if not r.net.get('overlapped') and not r.net.get('unavailable')]
+        n_over = sum(1 for r in recs if r.net.get('overlapped'))
+        n_unav = sum(1 for r in recs if r.net.get('unavailable'))
+        drivers: Dict[str, Tuple[int, int, List[int]]] = {}
+        tx = 0
+        for name in list(NET_LOSS_COUNTERS) + list(NET_CONGESTION_COUNTERS):
+            total, hits, ranks = 0, 0, set()
+            for r in usable:
+                v = _net_rdma_deltas(r.net).get(name, 0)
+                if v > 0:
+                    total += v
+                    hits += 1
+                    ranks.add(r.rank)
+            if hits:
+                drivers[name] = (total, hits, sorted(ranks))
+        for r in usable:
+            tx += _net_rdma_deltas(r.net).get('tx_rdma_ucast_bytes', 0)
+        v = NetVerdict(
+            verdict='CLEAN', n_records=len(recs), n_usable=len(usable),
+            n_overlapped=n_over, n_unavailable=n_unav,
+            tx_bytes_per_coll=tx / len(usable) if usable else 0.0,
+            drivers=drivers,
+            pause_frames=sum(_net_pause_frames(r.net) for r in usable))
+        loss = [k for k in drivers if k in NET_LOSS_COUNTERS]
+        known = any('tx_rdma_ucast_bytes' in _net_rdma_deltas(r.net) for r in usable)
+        if len(usable) < NET_MIN_USABLE or 2 * len(usable) < len(recs):
+            v.verdict = 'INCONCLUSIVE'
+            v.reason = (f"{len(usable)}/{len(recs)} usable "
+                        f"({n_over} overlapped, {n_unav} unavailable)")
+        elif not known and not drivers:
+            # Counter names are ionic's; another driver would read as clean.
+            v.verdict = 'INCONCLUSIVE'
+            v.reason = 'unknown counter names (not ionic)'
+        elif loss:
+            v.verdict = 'NETWORK_SUSPECT'
+            v.reason = 'loss/retransmit'
+        elif drivers:
+            v.verdict = 'NETWORK_SUSPECT'
+            v.reason = 'congestion signalled (ECN/CNP), no loss'
+        result[key] = v
+    return result
+
+
+def print_net_report(records: List[Record], title: str = ''):
+    verdicts = net_verdicts(records)
+    if not verdicts:
+        return
+    print(f"\n{'='*140}")
+    print(f"  NETWORK COUNTERS{(' - ' + title) if title else ''} "
+          f"(per-collective NIC deltas; ethtool pause frames are stale context only)")
+    print(f"{'='*140}")
+    print(f"{'Coll':>14s} {'Size':>8s} │ {'Usable':>9s} │ {'Verdict':>15s} │ "
+          f"{'TxMB/coll':>10s} {'Pause*':>7s} │ Drivers (sum, records hit, side, ranks)")
+    for (coll, sz), v in verdicts.items():
+        parts = []
+        for name, (total, hits, ranks) in sorted(v.drivers.items(), key=lambda kv: -kv[1][0]):
+            side = NET_LOSS_COUNTERS.get(name) or NET_CONGESTION_COUNTERS.get(name, '')
+            mb = v.tx_bytes_per_coll * v.n_usable / 1e6
+            rate = f", {total / mb:.3g}/MB" if mb > 0 else ''
+            parts.append(f"{name}={total} ({hits}/{v.n_usable}{rate}, {side}, "
+                         f"ranks {','.join(map(str, ranks))})")
+        detail = '; '.join(parts) if parts else (v.reason or '-')
+        if parts and v.reason:
+            detail = f"[{v.reason}] {detail}"
+        print(f"{coll:>14s} {fmt_size(sz):>8s} │ {v.n_usable:>4d}/{v.n_records:<4d} │ "
+              f"{v.verdict:>15s} │ {v.tx_bytes_per_coll / 1e6:10.3f} {v.pause_frames:7d} │ "
+              f"{detail}")
+
+
 def pct_delta(base: float, cand: float) -> str:
     if base == 0:
         return "    N/A"
@@ -549,6 +697,7 @@ def main():
             print(f"Loaded {len(records)} records")
             print_drop_warnings(summaries)
             print_single_report(records)
+            print_net_report(records)
         elif args.cmd == 'compare':
             base = load_dir_or_file(args.baseline, args.warmup)
             cand = load_dir_or_file(args.candidate, args.warmup)
@@ -559,6 +708,8 @@ def main():
             print(f"Baseline: {len(base)} records, Candidate: {len(cand)} records")
             print_drop_warnings(base_summaries + cand_summaries)
             print_compare_report(base, cand, args.threshold)
+            print_net_report(base, 'baseline')
+            print_net_report(cand, 'candidate')
 
 
 if __name__ == '__main__':

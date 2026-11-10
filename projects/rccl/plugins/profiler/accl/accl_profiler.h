@@ -9,6 +9,8 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "accl_net_counters.h"
+
 // Limits
 #define ACCL_MAX_CHANNELS 256
 #define ACCL_MAX_PROXY_OPS 256
@@ -114,6 +116,8 @@ struct acclCollInfo {
 
   // Comm info backpointer
   void*       commCtx;
+
+  struct acclNetCollState net;
 };
 
 // Schema for the "decomposition" JSON object. Drives the acclCompletedRecord
@@ -214,6 +218,8 @@ struct acclCommContext {
   int         nRanks;
   int         nNodes;
   char        commName[256];
+
+  struct acclNetCommStats net;
 
   // Output
   FILE*       outputFile;
