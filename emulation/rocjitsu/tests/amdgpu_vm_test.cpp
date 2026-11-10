@@ -6176,6 +6176,113 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
 }
 
+TEST(CommandProcessorTest, DynamicScratchWaitsForRuntimeReleaseBeforeReadingBacking) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 19;
+  constexpr uint32_t kPrivateBytes = 288;
+  constexpr uint64_t kRing = 0xF0000000;
+  constexpr uint64_t kQueueDescriptor = 0xF0010000;
+  constexpr uint64_t kQueueSignal = 0xE0000000;
+  constexpr uint64_t kCompletion = 0xE0001000;
+  constexpr uint64_t kScratchBacking = 0x00800000;
+  constexpr uint32_t kEventId = 41;
+
+  for (const auto *arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
+                           "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(arch, /*num_cus=*/1, /*num_wf_slots=*/2));
+    fixture.engine->register_as_primary();
+    const auto address_space = fixture.soc_ptr->gpu_vm().register_translated(
+        kProcessId, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
+        std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*fixture.mem()));
+    ASSERT_TRUE(address_space);
+    const auto target = fixture.cu()->arch();
+    const auto endpgm = build_s_endpgm(target);
+    ASSERT_TRUE(endpgm.succeeded());
+    const uint32_t code[] = {endpgm.value()};
+    const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+    fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
+                           kPrivateBytes);
+    kernel_descriptor_t descriptor{};
+    RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                       KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+    const uint32_t wave_size = kernel_wavefront_size(target, descriptor);
+    const uint64_t expected_request = wave_size == 32 ? 0x401 : 1;
+    const uint64_t read_pointer = kQueueDescriptor + offsetof(amd_queue_t, read_dispatch_id);
+    const uint64_t write_pointer = kQueueDescriptor + offsetof(amd_queue_t, write_dispatch_id);
+    fixture.mem()->write64(read_pointer, 0);
+    fixture.mem()->write64(write_pointer, 1);
+    fixture.mem()->write64(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
+                           kQueueSignal);
+    fixture.mem()->write64(kQueueSignal + 8, 0);
+    fixture.mem()->write32(kQueueSignal + 24, kEventId);
+    fixture.mem()->write64(kCompletion + 8, 1);
+    uint32_t requests = 0;
+    amdgpu::InterruptSubscription subscription([&](uint32_t process_id, uint32_t event_id) {
+      if (fixture.mem()->read64(kQueueSignal + 8) != expected_request)
+        return;
+      EXPECT_EQ(process_id, kProcessId);
+      EXPECT_EQ(event_id, kEventId);
+      ++requests;
+    });
+    amdgpu::ComputeQueueConfig queue{};
+    queue.interrupt_sink = subscription.sink();
+    queue.address_space = address_space;
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = kRing;
+    queue.ring_size = amdgpu::kAqlPacketBytes;
+    queue.read_ptr_va = read_pointer;
+    queue.write_ptr_va = write_pointer;
+    queue.doorbell_mode = amdgpu::QueueDoorbellMode::Explicit;
+    queue.uses_kfd_queue_abi = true;
+    queue.queue_desc_va = kQueueDescriptor;
+    const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+    ASSERT_NE(registration, 0u);
+    auto packet = make_dispatch_packet(kernel, 0, wave_size, wave_size);
+    packet.private_segment_size = kPrivateBytes;
+    packet.completion_signal.handle = kCompletion;
+    fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+    fixture.cp()->notify_queue_doorbell(registration, 0);
+    while (requests == 0)
+      ASSERT_TRUE(fixture.engine->step());
+
+    // Sufficient fields can become visible while the host still owns the
+    // descriptor. The inactive signal is the publication boundary.
+    const uint32_t granule = isa_properties(target).compute_tmpring_wavesize_granule;
+    const uint32_t wave_units = (kPrivateBytes * wave_size + granule - 1) / granule;
+    fixture.mem()->write64(
+        kQueueDescriptor + offsetof(amd_queue_t, scratch_backing_memory_location), kScratchBacking);
+    fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, compute_tmpring_size),
+                           1u | (wave_units << 12));
+    const uint64_t passes = fixture.cp()->doorbell_handle_count_for_test();
+    fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+    while (fixture.cp()->doorbell_handle_count_for_test() == passes)
+      ASSERT_TRUE(fixture.engine->step());
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 0u);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), 0u);
+    EXPECT_EQ(fixture.mem()->read64(kCompletion + 8), 1u);
+    EXPECT_EQ(fixture.mem()->read64(kQueueSignal + 8), expected_request);
+
+    // Replacing scratch may invalidate the request's old VM snapshot. The
+    // runtime's acknowledgement must be observed through a current snapshot.
+    ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+    fixture.mem()->write64(kQueueSignal + 8, 0);
+    fixture.cp()->notify_queue_doorbell(registration, 0);
+    while (fixture.mem()->read64(read_pointer) == 0)
+      ASSERT_TRUE(fixture.engine->step());
+    fixture.engine->primary_release();
+    fixture.engine->run();
+    EXPECT_EQ(requests, 1u);
+    EXPECT_EQ(fixture.cp()->accepted_entry_count_for_test(kQueueId, kProcessId), 1u);
+    EXPECT_EQ(fixture.mem()->read64(read_pointer), 1u);
+    EXPECT_EQ(fixture.mem()->read64(kCompletion + 8), 0u);
+    EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+  }
+}
+
 TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegments) {
   using namespace rocjitsu::amdhsa;
   constexpr uint64_t kRing = 0xF0000000;

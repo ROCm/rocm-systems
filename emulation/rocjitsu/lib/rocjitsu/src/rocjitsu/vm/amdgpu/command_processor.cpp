@@ -3719,8 +3719,18 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
       queue.interrupt_sink.deliver(queue.process_id, state.event_id);
       return {.status = AqlAdmissionStatus::Blocked};
 
-    case QueueScratchRequestPhase::WaitingForRuntime:
+    case QueueScratchRequestPhase::WaitingForRuntime: {
+      // Replacing the backing may revoke the request's publication snapshot.
+      const AtomicLoadResult released = transaction_access.atomic_load(
+          state.signal_address + kSignalValueOffset, sizeof(uint64_t));
+      if (released.outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(released.outcome);
+      if (released.value == 0)
+        state.reset();
+      // The replacement may include new mappings. End this transaction so the
+      // next admission takes a VM snapshot after the runtime's release.
       return {.status = AqlAdmissionStatus::Blocked};
+    }
     }
   }
 }
@@ -3945,6 +3955,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const hsa_kernel_dispatch_packet_t &pkt, ComputeQueueRecord &queue,
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
     uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
+  // The runtime owns descriptor fields until it releases a scratch request.
+  if (queue.scratch_request.active())
+    return request_dynamic_scratch(queue, transaction_access, aql_packet_id,
+                                   queue.scratch_request.status);
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
   using namespace rocjitsu::amdhsa;
   const KernelDescriptorReadResult descriptor =
@@ -4158,7 +4172,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
             wave_size == 32 ? kInsufficientScratchWave32 : kInsufficientScratchWave64;
         return request_dynamic_scratch(queue, transaction_access, aql_packet_id, status);
       }
-      queue.scratch_request.reset();
 
       uint32_t queue_properties = 0;
       const VmAccessOutcome properties_outcome =
