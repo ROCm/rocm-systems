@@ -1555,7 +1555,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FullLoadcntCompletesOldestLoad) {
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, LoadcntAtCapacityKeepsOldestLoadPending) {
+TEST_F(Gfx1250CounterCapacityRaceTest, LoadcntBelowCapacityKeepsOldestLoadPending) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
@@ -1642,7 +1642,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesDscnt) {
   EXPECT_FALSE(tensor_load_oldest());
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, FlatAtCapacityKeepsOldestDsReadPending) {
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatBelowCapacityKeepsOldestDsReadPending) {
   ds_read(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 2; ++index)
     ds_read(0, kYoungerAddress);
@@ -1733,7 +1733,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FullDscntCompletesOldestDsRead) {
   EXPECT_FALSE(tensor_load_oldest());
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, DscntAtCapacityKeepsOldestDsReadPending) {
+TEST_F(Gfx1250CounterCapacityRaceTest, DscntBelowCapacityKeepsOldestDsReadPending) {
   ds_read(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 1; ++index)
     ds_read(0, kYoungerAddress);
@@ -1791,7 +1791,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FullAsynccntCompletesOldestAsyncLoad) {
   EXPECT_FALSE(ds_read(0, kOldestAddress));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, AsynccntAtCapacityKeepsOldestAsyncLoadPending) {
+TEST_F(Gfx1250CounterCapacityRaceTest, AsynccntBelowCapacityKeepsOldestAsyncLoadPending) {
   dtl_write(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 1; ++index)
     dtl_write(0, kYoungerAddress);
@@ -1846,7 +1846,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FullTensorcntCompletesOldestTensorLoad) {
   EXPECT_FALSE(ds_read(0, kOldestAddress));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, TensorcntAtCapacityKeepsOldestTensorLoadPending) {
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorcntBelowCapacityKeepsOldestTensorLoadPending) {
   tensor_load_oldest();
   for (int index = 0; index < kCapacity - 1; ++index)
     tensor_load(0, {});
