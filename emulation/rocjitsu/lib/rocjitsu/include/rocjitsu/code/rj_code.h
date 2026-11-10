@@ -3,6 +3,8 @@
 
 /// @file rj_code.h
 /// @brief C API for instruction decoding, executables, code objects, and basic blocks.
+/// @note Allocation failures in rj_code_executable_create(), rj_code_inst_list_create(),
+/// and rj_code_basic_block_list_create() terminate the calling process.
 
 #ifndef ROCJITSU_CODE_RJ_CODE_H_
 #define ROCJITSU_CODE_RJ_CODE_H_
