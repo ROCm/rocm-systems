@@ -76,13 +76,16 @@ in the following table.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
-          the ``minCTAs`` field of ``ncclConfig_t``.
+          the ``minCTAs`` field of ``ncclConfig_t``. The ``minCTAs`` and
+          ``maxCTAs`` config fields can each be set without the other; an
+          unset ``minCTAs`` defaults to ``1``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
     * - | ``NCCL_MAX_CTAS``
         | Maximum number of CTAs (channels) used for a collective. Overrides
-          the ``maxCTAs`` field of ``ncclConfig_t``.
+          the ``maxCTAs`` field of ``ncclConfig_t``. An unset ``maxCTAs``
+          defaults to the maximum channel count of the build.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
@@ -1411,6 +1414,15 @@ threshold table introduced for gfx1250.
           ``RCCL_DDA_A2A_PUSH=0``.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
+
+    * - | ``RCCL_DDA_LL128_A2A_THREADS``
+        | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
+          When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
+          table; no current table sets it, so the kernel uses 256 threads.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``256``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

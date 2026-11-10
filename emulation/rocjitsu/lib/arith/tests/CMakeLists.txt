@@ -186,6 +186,7 @@ target_compile_definitions(
 add_subdirectory(headers)
 
 # Standalone utilities.
+add_subdirectory(benchmark)
 add_subdirectory(cpuinfo)
 
 if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
@@ -219,4 +220,30 @@ foreach(
 )
     set(target "rj_arith_compare_${family}_test")
     rj_arith_add_test(${target} compare/${family}_test.cpp)
+endforeach()
+
+# Integer families share references and contract checks, with explicit API tests.
+foreach(
+    family
+    IN
+    ITEMS
+        half_binary
+        half_ternary
+        add
+        multiply
+        select
+        combined
+        bitfield
+        bit_count
+        boolean
+        mad
+        packed_binary
+        packed_mad
+        shift
+        sad
+        carry
+        mad64
+)
+    set(target "rj_arith_integer_${family}_test")
+    rj_arith_add_test(${target} integer/${family}_test.cpp)
 endforeach()
