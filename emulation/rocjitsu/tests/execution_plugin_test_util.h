@@ -10,14 +10,17 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -27,14 +30,9 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/soc.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -67,9 +65,9 @@ public:
     return cu.sgpr_owner(reg_idx);
   }
 
-  static void route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
-                                amdgpu::Wavefront &wf) {
-    cu.route_memory_inst(inst, wf);
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+                                                   amdgpu::Wavefront &wf) {
+    return cu.route_memory_inst(inst, wf);
   }
 };
 
@@ -128,6 +126,8 @@ public:
                         std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
                         bool exec_masked = true)
       : Instruction("test_mem", nullptr) {
+    size_ = sizeof(encoding_);
+    raw_encoding_ = &encoding_;
     set_memory_issue_info(counter_obligations, exec_masked);
     set_data(std::move(state));
   }
@@ -137,51 +137,63 @@ public:
       std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt,
       bool memory_wait_producer = false)
       : Instruction(mnemonic, nullptr) {
+    size_ = sizeof(encoding_);
+    raw_encoding_ = &encoding_;
     if (memory_wait_producer)
       flags_ |= MEMORY_WAIT_PRODUCER;
-    if (state->tag() == amdgpu::SCALAR_MEM) {
-      const auto &memory = *static_cast<const amdgpu::ScalarMemState *>(state.get());
+    // GCC 15.2 can warn about the vector downcast after inlining a scalar
+    // call when the downcast is guarded only by the pipeline tag.
+    const auto tag = state->tag();
+    if (const auto *scalar = dynamic_cast<const amdgpu::ScalarMemState *>(state.get());
+        tag == amdgpu::SCALAR_MEM && scalar) {
       if (additional_wait_counter_type) {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
              {*additional_wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}},
             false);
       } else {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
       }
-    } else if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::LOCAL_MEM) {
-      const auto &memory = *static_cast<const amdgpu::VectorMemState *>(state.get());
-      const auto completion_class = state->tag() == amdgpu::LOCAL_MEM
-                                        ? amdgpu::MemoryCompletionClass::LDS
-                                        : amdgpu::MemoryCompletionClass::VMEM;
+    } else if (const auto *vector = dynamic_cast<const amdgpu::VectorMemState *>(state.get());
+               (tag == amdgpu::GLOBAL_MEM || tag == amdgpu::LOCAL_MEM) && vector) {
+      const auto completion_class = tag == amdgpu::LOCAL_MEM ? amdgpu::MemoryCompletionClass::LDS
+                                                             : amdgpu::MemoryCompletionClass::VMEM;
       if (additional_wait_counter_type) {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class},
+        set_memory_issue_info({{vector->wait_counter_type, completion_class},
                                {*additional_wait_counter_type, completion_class}});
       } else {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class}});
+        set_memory_issue_info({{vector->wait_counter_type, completion_class}});
       }
     }
     set_data(std::move(state));
   }
+
+private:
+  // These tests inject memory state directly. A valid nop encoding lets race
+  // reports decode the synthetic instruction without depending on code memory.
+  uint32_t encoding_ = S_NOP;
 };
 
 // Routing tests supply a synthetic execution result, but wait tracking needs
 // decoded operands and the pre-execution address registers, as in the issuer.
 inline std::unique_ptr<Instruction>
-prepare_cdna4_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
-                                    std::unique_ptr<amdgpu::VectorMemState> state) {
+prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
+                              std::unique_ptr<amdgpu::VectorMemState> state) {
   for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
     cu.write_vgpr(wave.vgpr_alloc().base, lane, state->per_lane_addr[lane]);
     cu.write_vgpr(wave.vgpr_alloc().base + 1, lane, state->per_lane_addr[lane] >> 32);
   }
-  const auto words = cdna4::build_flat(
-      cdna4::kFlatLoadDwordFlat,
-      {.seg = 0,
-       .addr = 0,
-       .saddr = 0x7F,
-       .vdst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
+  std::array<uint32_t, 3> words{};
+  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
+  } else {
+    const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                           {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = dst});
+    std::ranges::copy(encoded, words.begin());
+  }
+  auto decoder = Decoder::create(cu.arch());
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   if (!load)
     return nullptr;
@@ -255,6 +267,7 @@ struct HookEvent {
   uint32_t cluster_size_x = 0;
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
+  BarrierKind barrier_kind = BarrierKind::Workgroup;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -289,11 +302,16 @@ struct CapturedAccess {
   uint64_t scratch_lane_mask = 0;
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   uint32_t scratch_element_stride_bytes = 0;
   bool non_temporal = false;
   std::vector<uint64_t> element_lane_masks;
   std::vector<uint64_t> addresses;
+  std::vector<std::vector<uint64_t>> image_footprints;
+  std::vector<uint64_t> image_footprint_masks;
   std::vector<uint64_t> pre_routing_addresses;
+  std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
@@ -316,6 +334,11 @@ public:
     const auto counters = CounterObservingPipeline{}.issue_counters(inst);
     accesses.back().issued_counters.assign(counters.types.begin(),
                                            counters.types.begin() + counters.size);
+    if (inst.data()->tag() == amdgpu::GLOBAL_MEM || inst.data()->tag() == amdgpu::LOCAL_MEM) {
+      const auto &addresses = inst.data_as<amdgpu::VectorMemState>()->per_lane_addr;
+      accesses.back().execution_addresses.assign(addresses.begin(),
+                                                 addresses.begin() + access.wavefront_size);
+    }
   }
 
   void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &wf) override {
@@ -362,11 +385,18 @@ public:
     captured.scratch_lane_mask = access.scratch_lane_mask;
     captured.flat_local_lane_mask = access.flat_local_lane_mask;
     captured.flat_dds_lane_mask = access.flat_dds_lane_mask;
+    captured.flat_local_oob_lane_mask = access.flat_local_oob_lane_mask;
+    captured.flat_local_allocation_end = access.flat_local_allocation_end;
     captured.scratch_element_stride_bytes = access.scratch_element_stride_bytes;
     captured.non_temporal = access.non_temporal;
     captured.element_lane_masks.assign(access.element_lane_masks.begin(),
                                        access.element_lane_masks.end());
     captured.addresses.assign(access.addresses.begin(), access.addresses.end());
+    for (const auto &footprint : access.image_sample_footprints) {
+      captured.image_footprints.emplace_back(footprint.addresses.begin(),
+                                             footprint.addresses.end());
+      captured.image_footprint_masks.push_back(footprint.lane_mask);
+    }
     captured.pre_routing_addresses.assign(access.pre_routing_addresses.begin(),
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
@@ -539,12 +569,13 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs, BarrierKind kind) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();
       e.wg_id = wfs[0]->wg_id();
     }
+    e.barrier_kind = kind;
     events.push_back(e);
   }
 };
@@ -633,12 +664,12 @@ inline std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descri
   auto *hash = reinterpret_cast<uint32_t *>(image.data() + hash_offset);
   hash[1] = 2; // nchain: null symbol + kernel descriptor symbol.
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = text_offset - kernel_descriptor_offset;
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   std::memcpy(image.data() + kernel_descriptor_offset, &kd, sizeof(kd));
 
   const std::array<uint32_t, 2> code = {S_NOP, S_ENDPGM};
@@ -653,10 +684,10 @@ struct PluginFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *mem = nullptr;
 
-  explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
-                         uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
-                         uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1,
-                         uint32_t async_helpers = 0) {
+  void initialize(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
+                  uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
+                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0) {
+    util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -691,13 +722,16 @@ struct PluginFixture {
     )",
                                    async_helpers, arch, wavefront_size, cu_range, num_wf_slots,
                                    sgprs_per_wf, vgprs_per_wf, links);
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(load_valid_config_from_string(json, loaded));
     soc = loaded.soc();
     mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
   }
 
   amdgpu::ComputeUnitCore *cu(uint32_t idx = 0) {
@@ -708,13 +742,13 @@ struct PluginFixture {
   uint64_t write_kernel(uint64_t addr, const uint32_t *code, size_t num_words,
                         uint32_t granulated_sgpr_count = 12,
                         uint32_t group_segment_fixed_size = 0) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    granulated_sgpr_count);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       granulated_sgpr_count);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,

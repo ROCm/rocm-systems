@@ -7,8 +7,16 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod exception;
+mod layout;
+mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub use exception::{
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+};
+pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
+pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
 
 use crate::device::gpu::GpuDevice;
@@ -45,20 +53,48 @@ pub unsafe fn ring_doorbell(address: usize, value: u64) {
 /// Driver-owned queue transport and cleanup state, independent of the
 /// selected GPU driver's queue representation.
 pub(crate) struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> {
-    // Drop the queue resource before its shared driver instance.
+    /// Native queue dropped before its shared driver instance.
     inner: Owned<Q>,
+    /// Keeps the exact creating driver alive through queue cleanup.
     driver: Shared<D>,
+    /// Transport addresses cached at queue creation.
     info: QueueTransport,
+    /// Format and publication geometry the backend promised at creation.
+    expectation: QueueTransportExpectation,
+    /// Native teardown completed and cannot still depend on this driver.
+    released: bool,
 }
 
 impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<D, Q> {
-    pub(crate) fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
+    #[allow(unsafe_code)]
+    pub(crate) fn new(
+        driver: Shared<D>,
+        inner: Owned<Q>,
+        request: QueueRequest,
+    ) -> Result<Self, Error> {
         let info = inner.cached_info();
-        Self {
+        let expectation = QueueTransportExpectation::new(request);
+        let mut queue = Self {
             inner,
             driver,
             info,
+            expectation,
+            released: false,
+        };
+        if !info.valid_for(expectation) {
+            // SAFETY: No transport was published, so there are no producers.
+            if unsafe { queue.destroy() }.is_err() {
+                return Err(Error::QueueBackingMayBeLive {
+                    operation: "invalid queue transport could not be retired",
+                    source: None,
+                });
+            }
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "native queue transport violates the requested geometry",
+            });
         }
+        Ok(queue)
     }
 
     pub(crate) fn info(&self) -> QueueTransport {
@@ -76,7 +112,14 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
                 detail: "queue producer must belong to one session",
             });
         }
-        self.inner.map_device(state)
+        let mapped = self.inner.map_device(state)?;
+        if !mapped.valid_for(self.expectation.for_device_mapping()) {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "mapped queue transport violates the requested geometry",
+            });
+        }
+        Ok(mapped)
     }
 
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
@@ -115,7 +158,34 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     #[allow(unsafe_code)]
     pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
-        unsafe { self.inner.destroy() }
+        unsafe { self.inner.destroy()? };
+        self.released = true;
+        Ok(())
+    }
+
+    /// # Safety
+    /// Producers and public transport mappings must be retired. The callback
+    /// may release external queue dependencies after native retirement.
+    #[allow(unsafe_code)]
+    pub(crate) unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller retired producers and retained dependencies until
+        // the native queue is conclusively removed.
+        unsafe { self.inner.destroy_with_retained_transport(callback)? };
+        self.released = true;
+        Ok(())
+    }
+}
+
+impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> Drop for DriverQueue<D, Q> {
+    fn drop(&mut self) {
+        if !self.released {
+            // The native queue may still hold this session after its own Drop
+            // quarantines backing. Keep the creating driver alive as well.
+            std::mem::forget(self.driver.clone());
+        }
     }
 }
 
@@ -126,6 +196,155 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
 /// backing through process teardown because producers may still publish.
 pub struct Queue {
     pub(crate) inner: driver::QueueState,
+}
+
+/// Native queue paired with every frontend-owned address it can still read.
+/// The dependency bundle is released only after explicit native destruction
+/// succeeds. Dropping a live or uncertain queue retains the whole bundle
+/// through process teardown along with its native transport.
+pub struct RetainedQueue<D, Q = Queue> {
+    queue: std::mem::ManuallyDrop<Q>,
+    dependencies: std::mem::ManuallyDrop<D>,
+    retired: bool,
+}
+
+impl<D, Q> RetainedQueue<D, Q> {
+    fn new(queue: Q, dependencies: D) -> Self {
+        Self {
+            queue: std::mem::ManuallyDrop::new(queue),
+            dependencies: std::mem::ManuallyDrop::new(dependencies),
+            retired: false,
+        }
+    }
+
+    fn retire_with_dependencies(
+        &mut self,
+        retire: impl FnOnce(&mut Q, &mut D) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        retire(&mut self.queue, &mut self.dependencies)?;
+        self.retired = true;
+        Ok(())
+    }
+}
+
+impl<D> RetainedQueue<D> {
+    /// Copies the native transport facts while this owner is live.
+    #[must_use]
+    pub fn info(&self) -> QueueTransport {
+        self.queue.info()
+    }
+
+    /// Samples native read and write positions without retiring work.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn progress(&self) -> Result<(u64, u64), Error> {
+        self.queue.progress()
+    }
+
+    /// Maps the retained queue transport into another compatible device view.
+    ///
+    /// # Errors
+    /// Propagates ownership, routing, and native mapping failures.
+    pub fn map_device(&self, device: GpuDevice<'_>) -> Result<QueueTransport, Error> {
+        self.queue.map_device(device)
+    }
+
+    /// Stops native execution while keeping its dependency bundle live.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn inactivate(&mut self) -> Result<(), Error> {
+        self.queue.inactivate()
+    }
+
+    /// Changes the native queue's scheduling priority.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        self.queue.set_priority(priority)
+    }
+
+    /// Changes the native queue's compute-unit mask.
+    ///
+    /// # Errors
+    /// Propagates native queue or device errors.
+    pub fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        self.queue.set_cu_mask(mask)
+    }
+
+    /// Provides separate mutable borrows for a staged scratch update.
+    ///
+    /// # Safety
+    /// The caller must not separate this queue from its active dependencies,
+    /// and must retain each candidate backing before publishing its address.
+    #[allow(unsafe_code)]
+    pub unsafe fn parts_mut(&mut self) -> (&mut Queue, &mut D) {
+        (&mut self.queue, &mut self.dependencies)
+    }
+
+    /// Retires native state after the frontend has stopped all producers and
+    /// public transport mappings. The bundle stays owned until this succeeds.
+    ///
+    /// # Errors
+    /// Leaves the bundle retained if native retirement or cleanup fails.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy(&mut self) -> Result<(), Error> {
+        // SAFETY: The caller upholds the public producer contract.
+        self.retire_with_dependencies(|queue, _| unsafe { queue.destroy() })
+    }
+
+    /// Invokes `callback` once at native retirement while the public control
+    /// mapping and dependency bundle remain live. The callback may release
+    /// backing no longer reachable by the stopped queue.
+    ///
+    /// # Errors
+    /// Leaves remaining dependencies retained on failure.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(&mut D),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller upholds the public producer contract. The
+        // dependency bundle remains live throughout this native call.
+        self.retire_with_dependencies(|queue, dependencies| unsafe {
+            queue.destroy_with_retained_transport(&mut || callback(dependencies))
+        })
+    }
+
+    /// Destroys a queue never published to a producer. A failed cleanup or
+    /// unwind retains its native and external backing through process exit.
+    ///
+    /// # Errors
+    /// Returns the native destruction failure.
+    ///
+    /// # Safety
+    /// No producer has observed the queue or any public transport mapping.
+    #[allow(unsafe_code)]
+    pub unsafe fn abandon_unpublished(mut self) -> Result<(), Error> {
+        // SAFETY: The caller guarantees that the queue was not published.
+        unsafe { self.destroy() }
+    }
+}
+
+impl<D, Q> Drop for RetainedQueue<D, Q> {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        // SAFETY: Native teardown has either succeeded or Queue's destructor
+        // conservatively retains native backing. External dependencies are
+        // released only in the former case and only after the native owner.
+        unsafe { std::mem::ManuallyDrop::drop(&mut self.queue) };
+        if self.retired {
+            unsafe { std::mem::ManuallyDrop::drop(&mut self.dependencies) };
+        }
+    }
 }
 
 /// Keep externally supplied backing alive if native queue creation may have
@@ -280,6 +499,27 @@ impl Queue {
         unsafe { self.inner.destroy() }
     }
 
+    /// Retires the native queue and runs `callback` once before its public
+    /// control mapping is released. The callback can release external backing
+    /// and report that release while the original queue header is still valid.
+    /// Native retirement failure leaves the callback pending for a retry.
+    ///
+    /// # Errors
+    /// Returns a native retirement or backing cleanup failure. The callback
+    /// is not repeated if backing cleanup fails after native retirement.
+    ///
+    /// # Safety
+    /// Producers and public transport mappings must be retired. The callback
+    /// must only release dependencies no longer reachable by the native queue.
+    #[allow(unsafe_code)]
+    pub unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
+        // SAFETY: The caller supplies the producer and dependency contract.
+        unsafe { self.inner.destroy_with_retained_transport(callback) }
+    }
+
     /// Destroys a queue that was never published to producers. The native queue
     /// and externally supplied signal or scratch backing are retained together
     /// if cleanup fails or unwinds; successful cleanup drops both owners.
@@ -333,27 +573,25 @@ impl GpuDevice<'_> {
     /// Creates a queue while carrying every frontend-owned signal and scratch
     /// dependency through native acquisition. A creation error with uncertain
     /// native ownership or an unwind retains `dependencies` until process teardown.
-    /// A successful result returns the dependencies with the queue so the
-    /// frontend can keep them live through queue destruction.
+    /// A successful result retains the dependencies inside the native queue
+    /// owner through explicit destruction.
     ///
     /// # Errors
     /// Returns the same validation and native errors as `create_queue`.
     ///
     /// # Safety
     /// `dependencies` must own all externally supplied GPU addresses in
-    /// `desc`. The caller must keep the returned owner with the queue until
-    /// native destruction proves those addresses are no longer in use, and
-    /// must obey the selected producer publication protocol. Dropping an
-    /// undestroyed queue requires retaining those dependencies through process
-    /// teardown.
+    /// `desc`. The caller must obey the selected producer publication protocol.
     #[allow(unsafe_code)]
     pub unsafe fn create_queue_with_dependencies<D: 'static>(
         &self,
         desc: QueueRequest,
         dependencies: D,
-    ) -> Result<(Queue, D), Error> {
-        // SAFETY: The caller supplies and retains the described backing.
-        retain_create_dependencies(|| unsafe { self.create_queue(desc) }, dependencies)
+    ) -> Result<RetainedQueue<D>, Error> {
+        // SAFETY: The caller supplies backing for every external GPU address.
+        let (queue, dependencies) =
+            retain_create_dependencies(|| unsafe { self.create_queue(desc) }, dependencies)?;
+        Ok(RetainedQueue::new(queue, dependencies))
     }
 }
 
@@ -406,8 +644,8 @@ mod queue_resource_tests {
     impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
 
-        fn driver_instance(&self) -> u64 {
-            1
+        fn driver_instance(&self) -> crate::driver::DriverInstanceId {
+            crate::driver::DriverInstanceId::TEST
         }
 
         fn context_lifetime(&self) -> DriverContextLifetime {
@@ -439,6 +677,7 @@ mod queue_resource_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            aql_control: None,
             sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,
@@ -446,11 +685,20 @@ mod queue_resource_tests {
             write_index_device_address: 0x6000,
             read_index_width: QueueAccessWidth::Bits64,
             write_index_width: QueueAccessWidth::Bits64,
-            index_unit_bytes: 4,
+            index_unit_bytes: 1,
             read_index_wraps: false,
             doorbell_host_address: 0x7000,
             doorbell_device_address: None,
-            doorbell_width: QueueAccessWidth::Bits32,
+            doorbell_width: QueueAccessWidth::Bits64,
+        }
+    }
+
+    fn request() -> QueueRequest {
+        QueueRequest {
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::Sdma,
+            priority: QueuePriority::Normal,
+            device_producer: false,
         }
     }
 
@@ -459,6 +707,56 @@ mod queue_resource_tests {
             kind: ErrorKind::Driver,
             detail,
         }
+    }
+
+    #[test]
+    fn retained_queue_releases_dependencies_only_after_proven_retirement() {
+        struct NativeProbe(Arc<AtomicBool>);
+        impl Drop for NativeProbe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        struct BackingProbe {
+            native_dropped: Arc<AtomicBool>,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for BackingProbe {
+            fn drop(&mut self) {
+                assert!(self.native_dropped.load(Ordering::Acquire));
+                self.drops.fetch_add(1, Ordering::Release);
+            }
+        }
+
+        let native_dropped = Arc::new(AtomicBool::new(false));
+        let backing_drops = Arc::new(AtomicUsize::new(0));
+        let mut uncertain = RetainedQueue::new(
+            NativeProbe(native_dropped.clone()),
+            BackingProbe {
+                native_dropped: native_dropped.clone(),
+                drops: backing_drops.clone(),
+            },
+        );
+        assert!(
+            uncertain
+                .retire_with_dependencies(|_, _| Err(failure("uncertain native destroy")))
+                .is_err()
+        );
+        drop(uncertain);
+        assert!(native_dropped.load(Ordering::Acquire));
+        assert_eq!(backing_drops.load(Ordering::Acquire), 0);
+
+        let native_dropped = Arc::new(AtomicBool::new(false));
+        let mut retired = RetainedQueue::new(
+            NativeProbe(native_dropped.clone()),
+            BackingProbe {
+                native_dropped: native_dropped.clone(),
+                drops: backing_drops.clone(),
+            },
+        );
+        assert!(retired.retire_with_dependencies(|_, _| Ok(())).is_ok());
+        drop(retired);
+        assert_eq!(backing_drops.load(Ordering::Acquire), 1);
     }
 
     impl UserQueueResource for FakeQueue {
@@ -502,9 +800,22 @@ mod queue_resource_tests {
             Ok(())
         }
 
+        unsafe fn destroy_with_retained_transport(
+            &mut self,
+            callback: &mut dyn FnMut(),
+        ) -> Result<(), Error> {
+            // SAFETY: The fake driver has no external transport mappings.
+            unsafe { self.destroy()? };
+            callback();
+            Ok(())
+        }
+
         fn map_device(&self, _: &FakeDevice) -> Result<QueueTransport, Error> {
             self.check()?;
-            Ok(self.info)
+            Ok(QueueTransport {
+                doorbell_device_address: Some(0x8000),
+                ..self.info
+            })
         }
     }
 
@@ -524,7 +835,7 @@ mod queue_resource_tests {
             fail_destroy: true,
             released: false,
         })?;
-        let mut queue = DriverQueue::new(driver.clone(), driver_queue);
+        let mut queue = DriverQueue::new(driver.clone(), driver_queue, request())?;
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(FakeDriver {
             dropped: Arc::new(AtomicBool::new(false)),
@@ -534,7 +845,13 @@ mod queue_resource_tests {
             queue.map_device(&foreign, &state),
             Err(error) if error.kind() == ErrorKind::InvalidArgument
         ));
-        assert_eq!(queue.map_device(&driver, &state)?, transport());
+        assert_eq!(
+            queue.map_device(&driver, &state)?,
+            QueueTransport {
+                doorbell_device_address: Some(0x8000),
+                ..transport()
+            }
+        );
         assert_eq!(queue.progress()?, (0, 0));
         queue.inactivate()?;
         drop(driver);
@@ -548,6 +865,65 @@ mod queue_resource_tests {
         drop(queue);
         assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
         assert!(driver_dropped.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    #[test]
+    fn failed_queue_drop_keeps_its_creating_driver_live() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
+        let queue_drops = Arc::new(AtomicUsize::new(0));
+        let driver = Shared::new(FakeDriver {
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
+        let inner = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+            fail_destroy: true,
+            released: false,
+        })?;
+        let mut queue = DriverQueue::new(driver.clone(), inner, request())?;
+        drop(driver);
+        // SAFETY: This fake never published transport to a producer.
+        assert!(unsafe { queue.destroy() }.is_err());
+        drop(queue);
+        assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+        assert!(!driver_dropped.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_transport_is_retired_before_publication_or_retains_its_owner() -> Result<(), Error> {
+        for fail_destroy in [false, true] {
+            let driver_dropped = Arc::new(AtomicBool::new(false));
+            let queue_drops = Arc::new(AtomicUsize::new(0));
+            let driver = Shared::new(FakeDriver {
+                dropped: driver_dropped.clone(),
+                queue_drops: queue_drops.clone(),
+            })?;
+            let inner = Owned::new(FakeQueue {
+                info: QueueTransport {
+                    index_unit_bytes: 4,
+                    ..transport()
+                },
+                driver_dropped: driver_dropped.clone(),
+                queue_drops: queue_drops.clone(),
+                fail_destroy,
+                released: false,
+            })?;
+            let error = DriverQueue::new(driver.clone(), inner, request())
+                .err()
+                .ok_or_else(|| failure("malformed transport was published"))?;
+            assert_eq!(error.kind(), ErrorKind::DriverContract);
+            assert_eq!(
+                matches!(error, Error::QueueBackingMayBeLive { .. }),
+                fail_destroy
+            );
+            assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+            drop(driver);
+            assert_eq!(driver_dropped.load(Ordering::Relaxed), !fail_destroy);
+        }
         Ok(())
     }
 }

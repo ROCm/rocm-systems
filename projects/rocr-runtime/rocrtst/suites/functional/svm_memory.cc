@@ -771,7 +771,7 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
     hsa_amd_pointer_info_t ptrInfo = {};
     ptrInfo.size = sizeof(ptrInfo);
     ASSERT_SUCCESS(hsa_amd_pointer_info(regions[i].ptr, &ptrInfo, nullptr, nullptr, nullptr));
-    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_SVM);
   }
 
   // Cleanup
@@ -1093,7 +1093,7 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
     hsa_amd_pointer_info_t ptrInfo = {};
     ptrInfo.size = sizeof(ptrInfo);
     ASSERT_SUCCESS(hsa_amd_pointer_info(ptrs[i], &ptrInfo, nullptr, nullptr, nullptr));
-    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+    ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_SVM);
   }
 
   // cleanup

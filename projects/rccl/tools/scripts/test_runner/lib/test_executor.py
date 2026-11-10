@@ -3287,16 +3287,8 @@ class TestExecutor:
         # counters live in the binary itself and must be listed as --object for
         # llvm-cov to attribute that coverage.
         host_test_dir = os.path.join(test_dir, "host")
-        for binary in ["rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit",
-                       "rccl-UnitTestsMicroInit-uncached",
-                       "rccl-UnitTestsMicroInit-faultinj",
-                       "rccl-UnitTestsMicroEnqueue",
-                       "rccl-UnitTestsMicroSymKernels",
-                       "rccl-UnitTestsMicroGinHost",
-                       "rccl-UnitTestsMicroRomeModels",
-                       "rccl-UnitTestsMicroDda"]:
-            binary_path = os.path.join(host_test_dir, binary)
-            if os.path.isfile(binary_path):
+        for binary_path in sorted(glob.glob(os.path.join(host_test_dir, "rccl-UnitTestsMicro*"))):
+            if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found microtest binary: {binary_path}")
@@ -3337,7 +3329,7 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*coll_net.*|.*tuning/nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
             ".*gensrc.*|.*rccl-tests.*"
         )
 

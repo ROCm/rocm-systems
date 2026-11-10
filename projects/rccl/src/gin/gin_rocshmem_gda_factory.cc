@@ -39,17 +39,18 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "gin/gin_rocshmem_gda_ibv_shim.h"
+#include "rocmwrap.h"
 #include "dv_dlopen.h"
+#include "ib_gid_utils.h"
+#include "param.h"
+#include "gin_rocshmem_gda_inspect.h"
 #include <gda/queue_pair_provider.hpp>
-#include <gda/ibv_wrapper.hpp>
+#include "gin/gin_rocshmem_gda_debug_ibv.h"
 #include <gda/gda_enums.hpp>
-#include <gda/debug_gda.hpp>
-#include <envvar.hpp>
-#include <gda/topology.hpp>
 #include <bit.hpp>
 #include <util.hpp>
 #include <constants.hpp>
-#include <rocshmem/rocshmem_common.hpp>
 
 #include <hip/hip_runtime.h>
 #include <hsa/hsa.h>
@@ -79,15 +80,6 @@
 
 using namespace rocshmem;
 
-// Forward declarations for RCCL's IB verbs wrappers (from ibvwrap.h).
-// We declare them here instead of including ibvwrap.h to avoid IB type
-// clashes between RCCL's ibvcore.h and rocshmem's ibv_core.hpp.
-// ncclResult_t is int.
-int wrap_ibv_reg_mr_iova2(struct ibv_mr** ret, struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access);
-int wrap_ibv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
-                           int fd, int access);
-int wrap_ibv_dereg_mr(struct ibv_mr* mr);
-
 ///////////////////////////////////////////////////////////////////////////////
 // Internal types
 ///////////////////////////////////////////////////////////////////////////////
@@ -115,6 +107,40 @@ struct gin_dest_info {
   int qpn;
   int psn;
   union ibv_gid gid;
+  enum ibv_mtu active_mtu;
+};
+
+// Fine-grained device allocator for BNXT QP/CQ buffers. rccl-native replacement
+// for rocSHMEM's HIPAllocatorFinegrained: fine-grained VRAM so the NIC sees GPU
+// writes without a cache flush, plus a DMA-BUF export for GPU-direct registration.
+struct GinFinegrainedAllocator {
+  int allocate(void** ptr, size_t size) {
+    if (hipExtMallocWithFlags(ptr, size, hipDeviceMallocFinegrained) != hipSuccess) {
+      *ptr = nullptr;
+      return -1;
+    }
+    return 0;
+  }
+
+  void deallocate(void* ptr) {
+    if (ptr) (void)hipFree(ptr);
+  }
+
+  // Export a DMA-BUF fd+offset for a device allocation. Returns hipSuccess and
+  // fills fd/offset, or an error (leaving fd=-1) when unsupported. The fd is
+  // owned by the caller. Gated on the optional HSA export symbol being present.
+  hipError_t GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd, uint64_t* dmabuf_offset) {
+    if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) return hipErrorInvalidValue;
+    *dmabuf_fd = -1;
+    *dmabuf_offset = 0;
+    if (pfn_hsa_amd_portable_export_dmabuf == nullptr) return hipErrorNotSupported;
+    int fd = -1;
+    uint64_t offset = 0;
+    if (pfn_hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset) != HSA_STATUS_SUCCESS) return hipErrorInvalidValue;
+    *dmabuf_fd = fd;
+    *dmabuf_offset = offset;
+    return hipSuccess;
+  }
 };
 
 struct rocshmem_gin_qp_set {
@@ -124,6 +150,10 @@ struct rocshmem_gin_qp_set {
   int nRanks;
   int myRank;
   GDAProvider provider;  // GDAProvider enum
+
+  // Preferred NIC device name (e.g. "mlx5_0") from the caller's topology-based
+  // selection; empty means "first usable active device".
+  std::string preferred_nic_name;
 
   // NIC state (owned by this set)
   GinNicDevice nic;
@@ -138,7 +168,7 @@ struct rocshmem_gin_qp_set {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
-  HIPAllocator* qp_allocator = nullptr;
+  GinFinegrainedAllocator* qp_allocator = nullptr;
 #endif
 #if defined(GDA_MLX5)
   mlx5dv_funcs_t mlx5dv{};
@@ -149,6 +179,10 @@ struct rocshmem_gin_qp_set {
   std::vector<struct ibv_qp*> ibv_qps;
   std::vector<struct ibv_cq*> ibv_cqs;
 
+  // Per-peer negotiated MTU; BNXT's GPU SQ needs it for PSN/packet-count math (see
+  // initialize_host_gpu_qp). Set in gin_modify_qps_init_to_rtr.
+  std::vector<enum ibv_mtu> negotiated_mtu;
+
   // QueuePair objects
   QueuePair* host_qps = nullptr;
   QueuePair* gpu_qps = nullptr;
@@ -157,7 +191,11 @@ struct rocshmem_gin_qp_set {
   uint64_t fetch_atomic_dummy;
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
-  uint32_t sq_size = envvar::gda::sq_size;
+  // SQ depth (max_send_wr; CQ sized at 2x), mirroring GDAKI's 2*NET_IB_MAX_REQUESTS.
+  static constexpr uint32_t kSqSize = 512;
+  static_assert((kSqSize & (kSqSize - 1)) == 0, "GIN GDA SQ size must be a power of two (ring index uses a bitmask)");
+  uint32_t sq_size = kSqSize;
+  uint8_t traffic_class = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -253,28 +291,91 @@ static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
   return GDAProvider::UNSET;
 }
 
+// First active port of an opened device, or 0 if none. Shared by device
+// enumeration and open so both accept a NIC on the same criterion (don't assume
+// port 1 — a multi-port NIC may have port 1 down but another port up).
+static int gin_first_active_port(struct ibv_context* ctx, int phys_port_cnt, struct ibv_port_attr* out_attr) {
+  for (int p = 1; p <= phys_port_cnt; p++) {
+    if (gin_ibv_query_port(ctx, p, out_attr) == 0 && out_attr->state == IBV_PORT_ACTIVE) return p;
+  }
+  return 0;
+}
+
+NCCL_PARAM(GinRocshmemRoutableFlidGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
+
+// Selects a GID from query_gid_table() output (matches GDABackend::select_gid_index() logic):
+//   1. IB type: use immediately, preferring the routable-FLID GID when it has a nonzero FLID, as
+//      ncclIbGetGidIndex() does, so cross-subnet peers are reachable
+//   2. Skip link-local (FE80 prefix) and all-zero
+//   3. Prefer RoCEv2 over RoCEv1
+// The table spans all ports and may have holes, so entries are filtered on port_num and the
+// routable GID is matched on gid_index. Callers must use entries[pos].gid_index, never pos.
+// Returns the chosen position, or -1 if no entry is usable.
+static int gin_select_gid_pos(const struct ibv_gid_entry* entries, int n, int port, int routable_gid_index) {
+  const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
+  int selected = -1;
+
+  for (int i = 0; i < n; i++) {
+    if (entries[i].port_num != (uint32_t)port) continue;
+    const union ibv_gid* g = &entries[i].gid;
+    uint32_t gtype = entries[i].gid_type;
+
+    if (gtype == IBV_GID_TYPE_IB) {
+      for (int j = 0; j < n; j++) {
+        if (entries[j].port_num == (uint32_t)port && entries[j].gid_index == (uint32_t)routable_gid_index &&
+            ncclIbGidFlid(entries[j].gid.raw) != 0) {
+          return j;
+        }
+      }
+      return i;
+    }
+
+    if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
+    bool all_zero = true;
+    for (int b = 0; b < 16; b++) {
+      if (g->raw[b] != 0) {
+        all_zero = false;
+        break;
+      }
+    }
+    if (all_zero) continue;
+
+    if (selected == -1 || gtype > entries[selected].gid_type) selected = i;
+  }
+  return selected;
+}
+
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
   struct ibv_device** dev_list = nullptr;
   int ndev = 0;
 
-  dev_list = ibv.get_device_list(&ndev);
+  // Ensure rccl's ibverbs symbols are loaded before any wrap_ibv_* call. The
+  // plugin reaches here only after enumerate (which already does this), but a
+  // direct rocshmem_gin_create_qps caller hits gin_open_ib_device first, so the
+  // get_device_list below would dereference the still-NULL ibv symbol table.
+  if (!gin_ibv_available()) {
+    LOG_ERROR("GIN QP factory: ibverbs symbols unavailable");
+    return -1;
+  }
+
+  dev_list = gin_ibv_get_device_list(&ndev);
   if (!dev_list || ndev == 0) {
     LOG_ERROR("GIN QP factory: no IB devices found (ibverbs get_device_list returned %d)", ndev);
     return -1;
   }
 
-  // Use topology-aware NIC selection (same as GDABackend::select_nics)
-  int gpu_dev = 0;
-  (void)hipGetDevice(&gpu_dev);
-  std::string closest_nic;
-  if (GetClosestNicToGpu(gpu_dev, nullptr, &closest_nic) >= 0) {
-    LOG_TRACE("GIN QP factory: GPU %d closest NIC: %s", gpu_dev, closest_nic.c_str());
+  // NIC affinity is decided by the caller using rccl's topology engine
+  // (ncclTopoGetLocalNet, same as GDAKI) and passed in as a device name. Empty
+  // means no preference — select the first usable active device.
+  const std::string& closest_nic = set->preferred_nic_name;
+  if (!closest_nic.empty()) {
+    LOG_TRACE("GIN QP factory: preferred NIC for this GPU: %s", closest_nic.c_str());
   }
 
-  // Find the selected device (or first active if topology unavailable)
+  // Find the selected device (or first active if no preference given)
   for (int d = 0; d < ndev; d++) {
     // If topology selected a NIC, skip non-matching devices
-    if (!closest_nic.empty() && closest_nic != ibv.get_device_name(dev_list[d])) {
+    if (!closest_nic.empty() && closest_nic != gin_ibv_get_device_name(dev_list[d])) {
       continue;
     }
     struct ibv_context* ctx = nullptr;
@@ -288,31 +389,29 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     }
 #endif
     if (!ctx) {
-      ctx = ibv.open_device(dev_list[d]);
+      ctx = gin_ibv_open_device(dev_list[d]);
     }
     if (!ctx) continue;
 
     struct ibv_device_attr dev_attr;
-    if (ibv.query_device(ctx, &dev_attr) != 0) {
-      ibv.close_device(ctx);
+    if (gin_ibv_query_device(ctx, &dev_attr) != 0) {
+      gin_ibv_close_device(ctx);
       continue;
     }
 
     GDAProvider provider = gin_detect_provider(&dev_attr);
     if (provider == GDAProvider::UNSET) {
       LOG_WARN("GIN QP factory: device %s vendor_id=0x%x not recognized as IONIC/BNXT/MLX5, skipping",
-               ibv.get_device_name(dev_list[d]), dev_attr.vendor_id);
-      ibv.close_device(ctx);
+               gin_ibv_get_device_name(dev_list[d]), dev_attr.vendor_id);
+      gin_ibv_close_device(ctx);
       continue;
     }
 
-    // Check for active port
     struct ibv_port_attr port_attr;
-    int port = 1;
-    if (ibv.query_port(ctx, port, &port_attr) != 0 || port_attr.state != IBV_PORT_ACTIVE) {
-      LOG_WARN("GIN QP factory: device %s port %d not active (state=%d), skipping", ibv.get_device_name(dev_list[d]),
-               port, (int)port_attr.state);
-      ibv.close_device(ctx);
+    int port = gin_first_active_port(ctx, dev_attr.phys_port_cnt, &port_attr);
+    if (port == 0) {
+      LOG_WARN("GIN QP factory: device %s has no active port, skipping", gin_ibv_get_device_name(dev_list[d]));
+      gin_ibv_close_device(ctx);
       continue;
     }
 
@@ -322,65 +421,40 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     set->nic.device_attr = dev_attr;
     set->nic.portinfo = port_attr;
     set->nic.port = port;
-    set->nic.nic_name = ibv.get_device_name(dev_list[d]);
+    set->nic.nic_name = gin_ibv_get_device_name(dev_list[d]);
     set->provider = provider;
 
-    // Select GID — matches GDABackend::select_gid_index() logic:
-    //   1. IB type → use immediately (non-Ethernet)
-    //   2. Skip link-local (FE80 prefix) and all-zero
-    //   3. Prefer RoCEv2 over RoCEv1
     {
-      const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
       int gid_tbl_len = port_attr.gid_tbl_len;
       struct ibv_gid_entry* gid_entries = (struct ibv_gid_entry*)calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
-      ssize_t n = ibv.query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
-      int selected_idx = -1;
-      uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
-
-      for (int i = 0; i < n; i++) {
-        union ibv_gid* g = &gid_entries[i].gid;
-        uint32_t gtype = gid_entries[i].gid_type;
-
-        // IB mode: use immediately
-        if (gtype == IBV_GID_TYPE_IB) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = i;
-          break;
-        }
-
-        // Skip link-local
-        if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
-        // Skip all-zero
-        bool all_zero = true;
-        for (int b = 0; b < 16; b++) {
-          if (g->raw[b] != 0) {
-            all_zero = false;
-            break;
-          }
-        }
-        if (all_zero) continue;
-
-        // First valid, or prefer higher type (RoCEv2 > RoCEv1)
-        if (selected_idx == -1 || gtype > selected_type) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = i;
-        }
+      ssize_t n = gin_ibv_query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
+      // n < 0 (e.g. kernel -EINVAL) also yields pos < 0 via the empty loop. Skip a
+      // device with no usable GID rather than opening it with a zero GID, which
+      // would produce an unreachable endpoint at RTR.
+      int pos = (n < 0) ? -1 : gin_select_gid_pos(gid_entries, (int)n, port,
+                                                  (int)ncclParamGinRocshmemRoutableFlidGidIndex());
+      if (pos < 0) {
+        LOG_WARN("GIN QP factory: device %s port %d has no usable GID, skipping",
+                 gin_ibv_get_device_name(dev_list[d]), port);
+        free(gid_entries);
+        gin_ibv_close_device(ctx);
+        continue;
       }
-      set->nic.gid_type = selected_type;
+      set->nic.gid_type = gid_entries[pos].gid_type;
+      set->nic.gid = gid_entries[pos].gid;
+      set->nic.gid_index = gid_entries[pos].gid_index;
       free(gid_entries);
     }
 
     // Allocate PD
-    set->nic.pd_orig = ibv.alloc_pd(ctx);
+    set->nic.pd_orig = gin_ibv_alloc_pd(ctx);
     if (!set->nic.pd_orig) {
-      ibv.close_device(ctx);
+      gin_ibv_close_device(ctx);
       continue;
     }
 
+    int gpu_dev = -1;
+    (void)hipGetDevice(&gpu_dev);
     LOG_INFO("GIN QP factory: GPU %d using %s port %d (provider=%d) "
              "gid_index=%d gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
              gpu_dev, set->nic.nic_name.c_str(), set->nic.port, set->provider, set->nic.gid_index, set->nic.gid.raw[0],
@@ -388,11 +462,11 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
              set->nic.gid.raw[6], set->nic.gid.raw[7], set->nic.gid.raw[8], set->nic.gid.raw[9], set->nic.gid.raw[10],
              set->nic.gid.raw[11], set->nic.gid.raw[12], set->nic.gid.raw[13], set->nic.gid.raw[14],
              set->nic.gid.raw[15]);
-    ibv.free_device_list(dev_list);
+    gin_ibv_free_device_list(dev_list);
     return 0;
   }
 
-  ibv.free_device_list(dev_list);
+  gin_ibv_free_device_list(dev_list);
   LOG_ERROR("GIN QP factory: no usable IB device found with an active port");
   return -1;
 }
@@ -420,7 +494,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_sqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_rqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_udma_mask);
-      DLSYM_OPT_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
+      DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
       return 0;
     }
 #endif
@@ -493,14 +567,14 @@ static int gin_create_parent_domain(rocshmem_gin_qp_set* set) {
 #if defined(GDA_IONIC)
   if (set->provider == GDAProvider::IONIC) {
     pattr.alloc = gin_pd_alloc_device_uncached;
-    set->nic.pd_parent = ibv.alloc_parent_domain(set->nic.context, &pattr);
+    set->nic.pd_parent = gin_ibv_alloc_parent_domain(set->nic.context, &pattr);
     if (!set->nic.pd_parent) return -1;
 
     set->ionic_dv.pd_set_sqcmb(set->nic.pd_parent, false, false, false);
     set->ionic_dv.pd_set_rqcmb(set->nic.pd_parent, false, false, false);
 
     for (int u = 0; u < 2; u++) {
-      set->nic.pd_uxdma[u] = ibv.alloc_parent_domain(set->nic.context, &pattr);
+      set->nic.pd_uxdma[u] = gin_ibv_alloc_parent_domain(set->nic.context, &pattr);
       if (!set->nic.pd_uxdma[u]) return -1;
       set->ionic_dv.pd_set_sqcmb(set->nic.pd_uxdma[u], false, false, false);
       set->ionic_dv.pd_set_rqcmb(set->nic.pd_uxdma[u], false, false, false);
@@ -513,7 +587,7 @@ static int gin_create_parent_domain(rocshmem_gin_qp_set* set) {
 #if defined(GDA_MLX5)
   if (set->provider == GDAProvider::MLX5) {
     pattr.alloc = gin_pd_alloc_host;
-    set->nic.pd_parent = ibv.alloc_parent_domain(set->nic.context, &pattr);
+    set->nic.pd_parent = gin_ibv_alloc_parent_domain(set->nic.context, &pattr);
     if (!set->nic.pd_parent) return -1;
     return 0;
   }
@@ -541,18 +615,18 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       cq_attr.comp_mask = IBV_CQ_INIT_ATTR_MASK_PD;
 
       memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-      if (set->ionic_dv.create_cq_ex) {
-        ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-        ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-      }
+      ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
+      ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
 
       for (int i = 0; i < n; i++) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
-        struct ibv_cq_ex* cq_ex = nullptr;
-        if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
-        if (!cq_ex) cq_ex = ibv.create_cq_ex(set->nic.context, &cq_attr);
+        // CCQE (collapsed single-entry CQ) is required: the rocSHMEM GDA device
+        // path only consumes collapsed CQs, so create_cq_ex is a mandatory ionic
+        // DV symbol (dlsym'd above, not optional) and there is no plain-CQ
+        // fallback — a missing/failed collapsed CQ is a hard init failure.
+        struct ibv_cq_ex* cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
         if (!cq_ex) return -1;
-        set->ibv_cqs[i] = ibv.cq_ex_to_cq(cq_ex);
+        set->ibv_cqs[i] = gin_ibv_cq_ex_to_cq(cq_ex);
         if (!set->ibv_cqs[i]) return -1;
       }
       return 0;
@@ -563,10 +637,15 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
     {
       set->bnxt_scqs.resize(n);
       set->bnxt_rcqs.resize(n);
-      if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
+      if (!set->qp_allocator) set->qp_allocator = new GinFinegrainedAllocator();
 
       int cqe = 1;  // CQE compression: only need length 1
-      int dmabuf_enabled = ibv.is_dmabuf_supported();
+      // Gate on BOTH the NIC capability and rccl's resolved DMA-BUF gate
+      // (pfn_... is NULL when NCCL_DMABUF_ENABLE=0 or ROCr lacks the export).
+      // Otherwise GetDmabufHandle below returns hipErrorNotSupported and connect
+      // hard-fails instead of falling back to VA registration (dmabuf_fd = 0).
+      int dmabuf_enabled = gin_ibv_is_dmabuf_supported(set->nic.pd_orig) &&
+                           pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
       for (int i = 0; i < n; i++) {
         auto* ctx = set->nic.context;
@@ -682,7 +761,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
         attr.pd = set->nic.pd_uxdma[i & 1];
         attr.send_cq = set->ibv_cqs[i];
         attr.recv_cq = set->ibv_cqs[i];
-        set->ibv_qps[i] = ibv.create_qp_ex(set->nic.context, &attr);
+        set->ibv_qps[i] = gin_ibv_create_qp_ex(set->nic.context, &attr);
         if (!set->ibv_qps[i]) return -1;
       }
       return 0;
@@ -692,7 +771,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
   case GDAProvider::BNXT:
     {
       set->bnxt_qps.resize(n);
-      if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
+      if (!set->qp_allocator) set->qp_allocator = new GinFinegrainedAllocator();
 
       for (int i = 0; i < n; i++) {
         auto* ctx = set->nic.context;
@@ -713,7 +792,9 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
         memset(&set->bnxt_qps[i].mem_info, 0, sizeof(struct bnxt_re_dv_qp_mem_info));
         if (set->bnxt_re_dv.qp_mem_alloc(pd, &ib_qp_attr, &set->bnxt_qps[i].mem_info) != 0) return -1;
 
-        int dmabuf_enabled = ibv.is_dmabuf_supported();
+        // Gate on NIC capability AND rccl's resolved DMA-BUF gate (see CQ path above).
+        int dmabuf_enabled = gin_ibv_is_dmabuf_supported(pd) &&
+                             pfn_hsa_amd_portable_export_dmabuf != nullptr;
 
         void* sq_ptr = nullptr;
         set->qp_allocator->allocate(&sq_ptr, set->bnxt_qps[i].mem_info.sq_len);
@@ -839,10 +920,64 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
       err = set->mlx5dv.modify_qp(set->mlx5_qps[i], &attr, mask, set->nic.gid_type);
     else
 #endif
-      err = ibv.modify_qp(set->ibv_qps[i], &attr, mask);
+      err = gin_ibv_modify_qp(set->ibv_qps[i], &attr, mask);
     if (err) return -1;
   }
   return 0;
+}
+
+static int gin_ibv_mtu_to_int(enum ibv_mtu mtu) {
+  switch (mtu) {
+  case IBV_MTU_256: return 256;
+  case IBV_MTU_512: return 512;
+  case IBV_MTU_1024: return 1024;
+  case IBV_MTU_2048: return 2048;
+  case IBV_MTU_4096: return 4096;
+  default:
+    LOG_WARN("GIN QP factory: invalid ibv_mtu %d", mtu);
+    return 0;
+  }
+}
+
+// Mirrors connect.cc's std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller must have
+// already validated local_mtu.
+static int gin_negotiate_path_mtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
+  if (gin_ibv_mtu_to_int(remote_mtu) == 0) return -1;
+  *out = (local_mtu < remote_mtu) ? local_mtu : remote_mtu;
+  return 0;
+}
+
+// Test-only wrappers declared in gin_rocshmem_gda_inspect.h; no extra build guard needed since
+// this TU only compiles under ENABLE_ROCSHMEM_GIN already.
+extern "C" int ginTestIbvMtuToInt(int mtu) {
+  return gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(mtu));
+}
+
+extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu) {
+  if (gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(local_mtu)) == 0) return -1;
+  enum ibv_mtu out;
+  int rc = gin_negotiate_path_mtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
+  if (rc != 0) return rc;
+  *out_mtu = gin_ibv_mtu_to_int(out);
+  return 0;
+}
+
+static_assert(IBV_GID_TYPE_IB == 0 && IBV_GID_TYPE_ROCE_V1 == 1 && IBV_GID_TYPE_ROCE_V2 == 2,
+              "ginTestSelectGidIndex callers pass these gid_type values");
+
+extern "C" int ginTestSelectGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index,
+                                     const unsigned* port_num, const unsigned* gid_type, int n, int port,
+                                     int routable_gid_index) {
+  std::vector<struct ibv_gid_entry> entries(n);
+  for (int i = 0; i < n; i++) {
+    memset(&entries[i], 0, sizeof(entries[i]));
+    memcpy(entries[i].gid.raw, gid_raw[i], 16);
+    entries[i].gid_index = gid_index[i];
+    entries[i].port_num = port_num[i];
+    entries[i].gid_type = gid_type[i];
+  }
+  int pos = gin_select_gid_pos(entries.data(), n, port, routable_gid_index);
+  return pos < 0 ? -1 : (int)entries[pos].gid_index;
 }
 
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
@@ -850,7 +985,6 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
   attr.min_rnr_timer = 12;
-  attr.path_mtu = set->nic.portinfo.active_mtu;
   attr.ah_attr.port_num = set->nic.port;
 
 #if defined(GDA_IONIC)
@@ -862,17 +996,51 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   int mask = IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_RQ_PSN | IBV_QP_DEST_QPN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC |
              IBV_QP_MIN_RNR_TIMER;
 
+  enum ibv_mtu local_mtu = set->nic.portinfo.active_mtu;
+  if (gin_ibv_mtu_to_int(local_mtu) == 0) {
+    return -1;
+  }
+
+  set->negotiated_mtu.resize(set->nRanks);
+  bool warned_zero_flid = false;
+
   for (int i = 0; i < set->nRanks; i++) {
+    if (gin_negotiate_path_mtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
+      return -1;
+    }
+    set->negotiated_mtu[i] = attr.path_mtu;
+
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
-      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
+      attr.ah_attr.grh.traffic_class = set->traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
+      // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr().
+      bool sameSubnet = (ncclIbGidSubnetPrefix16(set->nic.gid.global.subnet_prefix) ==
+                         ncclIbGidSubnetPrefix16(remote_info[i].gid.global.subnet_prefix));
+      bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
       attr.ah_attr.is_global = 0;
+      memset(&attr.ah_attr.grh, 0, sizeof(attr.ah_attr.grh));
       attr.ah_attr.dlid = remote_info[i].lid;
+      if (needGlobal) {
+        if (!sameSubnet) {
+          uint16_t flid = ncclIbGidFlid(remote_info[i].gid.raw);
+          if (flid != 0) {
+            attr.ah_attr.dlid = flid;
+          } else if (!warned_zero_flid) {
+            warned_zero_flid = true;
+            LOG_WARN("GIN QP factory: remote FLID is zero even though endpoints are on different "
+                     "subnets, using dlid as fallback (further occurrences suppressed)");
+          }
+        }
+        attr.ah_attr.is_global = 1;
+        attr.ah_attr.grh.sgid_index = set->nic.gid_index;
+        attr.ah_attr.grh.hop_limit = 255;
+        memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
+      }
     }
     attr.rq_psn = remote_info[i].psn;
     attr.dest_qp_num = remote_info[i].qpn;
@@ -887,7 +1055,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       err = set->mlx5dv.modify_qp(set->mlx5_qps[i], &attr, mask, set->nic.gid_type);
     else
 #endif
-      err = ibv.modify_qp(set->ibv_qps[i], &attr, mask);
+      err = gin_ibv_modify_qp(set->ibv_qps[i], &attr, mask);
     if (err) return -1;
   }
   return 0;
@@ -923,7 +1091,7 @@ static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set* set, struct gin_dest_i
       err = set->mlx5dv.modify_qp(set->mlx5_qps[i], &attr, mask, set->nic.gid_type);
     else
 #endif
-      err = ibv.modify_qp(set->ibv_qps[i], &attr, mask);
+      err = gin_ibv_modify_qp(set->ibv_qps[i], &attr, mask);
     if (err) return -1;
   }
   return 0;
@@ -1021,7 +1189,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       void*    msntbl      = bnxt_qps[idx].msntbl;
       uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
-      uint32_t mtu         = 128 << nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
+      // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
+      uint32_t mtu         = gin_ibv_mtu_to_int(negotiated_mtu[idx]);
 
       void*    cq_buf   = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;
@@ -1084,14 +1253,13 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                            void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
-  // Note: log_pe_number and device-side logd_constants must be initialized
-  // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
-  // bitcode and can resolve HIP_SYMBOL(logd_constants).
-
+                            void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
+                            rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
   auto* set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
+  set->traffic_class = static_cast<uint8_t>(traffic_class);
+  if (preferred_nic_name != nullptr) set->preferred_nic_name = preferred_nic_name;
 
   // 1. Open IB device and detect provider
   if (gin_open_ib_device(set) != 0) {
@@ -1102,8 +1270,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
   // 2. Load provider-specific DV library
   if (gin_load_dv_library(set) != 0) {
     LOG_ERROR("GIN QP factory: failed to load DV library for provider %d", set->provider);
-    ibv.dealloc_pd(set->nic.pd_orig);
-    ibv.close_device(set->nic.context);
+    gin_ibv_dealloc_pd(set->nic.pd_orig);
+    gin_ibv_close_device(set->nic.context);
     delete set;
     return -1;
   }
@@ -1151,6 +1319,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
       local_infos[i].lid = set->nic.portinfo.lid;
       local_infos[i].psn = 0;
       local_infos[i].gid = set->nic.gid;
+      local_infos[i].active_mtu = set->nic.portinfo.active_mtu;
 #if defined(GDA_MLX5)
       if (set->provider == GDAProvider::MLX5) local_infos[i].qpn = set->mlx5_qps[i].qpn;
       else
@@ -1206,7 +1375,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     if (!set->host_qps) goto fail;
 
     // Register dummy fetch atomic location to return atomic fetch values (never read)
-    set->fetch_atomic_dummy_mr = ibv.reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
+    set->fetch_atomic_dummy_mr = gin_ibv_reg_mr(set->nic.pd_orig, &set->fetch_atomic_dummy,
                                             sizeof(uint64_t), IBV_ACCESS_LOCAL_WRITE);
     if (!set->fetch_atomic_dummy_mr) goto fail;
 
@@ -1237,7 +1406,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
+            nRanks, set->traffic_class);
   *out_qp_set = set;
   return 0;
 
@@ -1255,7 +1425,7 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
   if (qp_set->gpu_qps) (void)hipFree(qp_set->gpu_qps);
 
   // Unregister dummy fetch atomic location
-  if (qp_set->fetch_atomic_dummy_mr) wrap_ibv_dereg_mr(qp_set->fetch_atomic_dummy_mr);
+  if (qp_set->fetch_atomic_dummy_mr) gin_ibv_dereg_mr(qp_set->fetch_atomic_dummy_mr);
 
 #if defined(GDA_BNXT)
   if (qp_set->provider == GDAProvider::BNXT) {
@@ -1308,17 +1478,17 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
   {
     // IONIC and fallback: standard verbs cleanup
     for (auto* qp : qp_set->ibv_qps)
-      if (qp) ibv.destroy_qp(qp);
+      if (qp) gin_ibv_destroy_qp(qp);
     for (auto* cq : qp_set->ibv_cqs)
-      if (cq) ibv.destroy_cq(cq);
+      if (cq) gin_ibv_destroy_cq(cq);
   }
 
   // PDs and device
-  if (qp_set->nic.pd_uxdma[0]) ibv.dealloc_pd(qp_set->nic.pd_uxdma[0]);
-  if (qp_set->nic.pd_uxdma[1]) ibv.dealloc_pd(qp_set->nic.pd_uxdma[1]);
-  if (qp_set->nic.pd_parent) ibv.dealloc_pd(qp_set->nic.pd_parent);
-  if (qp_set->nic.pd_orig) ibv.dealloc_pd(qp_set->nic.pd_orig);
-  if (qp_set->nic.context) ibv.close_device(qp_set->nic.context);
+  if (qp_set->nic.pd_uxdma[0]) gin_ibv_dealloc_pd(qp_set->nic.pd_uxdma[0]);
+  if (qp_set->nic.pd_uxdma[1]) gin_ibv_dealloc_pd(qp_set->nic.pd_uxdma[1]);
+  if (qp_set->nic.pd_parent) gin_ibv_dealloc_pd(qp_set->nic.pd_parent);
+  if (qp_set->nic.pd_orig) gin_ibv_dealloc_pd(qp_set->nic.pd_orig);
+  if (qp_set->nic.context) gin_ibv_close_device(qp_set->nic.context);
 
   if (qp_set->dv_handle) dlclose(qp_set->dv_handle);
 
@@ -1332,7 +1502,7 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set, void* addr, size_t size, i
   int access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
   if (atomic) access |= IBV_ACCESS_REMOTE_ATOMIC;
 
-  struct ibv_mr* mr = ibv.reg_mr(qp_set->nic.pd_orig, addr, size, access);
+  struct ibv_mr* mr = gin_ibv_reg_mr(qp_set->nic.pd_orig, addr, size, access);
   if (!mr) return -1;
 
   *out_mr = mr;
@@ -1365,9 +1535,9 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set, void* addr, size_t siz
 #if 0
       // iova=0: offset-based addressing, no baseAddr needed on device side.
       // Requires NIC support (mlx5 yes, bnxt no as of 2026-06).
-      wrap_ibv_reg_dmabuf_mr(&mr, pd, 0, aligned_size, 0, fd, access);
+      mr = gin_ibv_reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
 #else
-      wrap_ibv_reg_dmabuf_mr(&mr, pd, 0, aligned_size, (uint64_t)addr, fd, access);
+      mr = gin_ibv_reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
 #endif
       if (mr) {
         gin_dmabuf_fd_map[(uintptr_t)mr] = fd;
@@ -1385,9 +1555,9 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set, void* addr, size_t siz
   if (!mr) {
 #if 0
     // iova=0 fallback for NICs that support offset-based addressing
-    wrap_ibv_reg_mr_iova2(&mr, pd, addr, size, 0, access);
+    mr = gin_ibv_reg_mr_iova2(pd, addr, size, 0, access);
 #else
-    wrap_ibv_reg_mr_iova2(&mr, pd, addr, size, (uintptr_t)addr, access);
+    mr = gin_ibv_reg_mr_iova2(pd, addr, size, (uintptr_t)addr, access);
 #endif
   }
   if (!mr) return -1;
@@ -1405,7 +1575,7 @@ void rocshmem_gin_dereg_mr(void* mr) {
     close(it->second);
     gin_dmabuf_fd_map.erase(it);
   }
-  wrap_ibv_dereg_mr((struct ibv_mr*)mr);
+  gin_ibv_dereg_mr((struct ibv_mr*)mr);
 }
 
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {
@@ -1439,40 +1609,53 @@ static bool gin_validate_device(GDAProvider provider, struct ibv_device_attr* de
   return true;
 }
 
-int rocshmem_gin_probe_devices(void) {
-  if (!ibv.is_initialized) return 0;
+// Shared walk behind rocshmem_gin_probe_devices and rocshmem_gin_list_devices:
+// count GIN-capable NICs (recognized vendor, validated, with an active port),
+// optionally recording each one's ibverbs device name into the caller's buffer.
+static int gin_enumerate_devices(char* names, int max_count, int name_stride) {
+  if (!gin_ibv_available()) return 0;
 
   int ndev = 0;
-  struct ibv_device** dev_list = ibv.get_device_list(&ndev);
+  struct ibv_device** dev_list = gin_ibv_get_device_list(&ndev);
   if (!dev_list || ndev == 0) return 0;
 
   int count = 0;
   for (int d = 0; d < ndev; d++) {
-    struct ibv_context* ctx = ibv.open_device(dev_list[d]);
+    struct ibv_context* ctx = gin_ibv_open_device(dev_list[d]);
     if (!ctx) continue;
 
     struct ibv_device_attr dev_attr;
-    if (ibv.query_device(ctx, &dev_attr) != 0) {
-      ibv.close_device(ctx);
+    if (gin_ibv_query_device(ctx, &dev_attr) != 0) {
+      gin_ibv_close_device(ctx);
       continue;
     }
 
     GDAProvider provider = gin_detect_provider(&dev_attr);
     if (provider == GDAProvider::UNSET || !gin_validate_device(provider, &dev_attr)) {
-      ibv.close_device(ctx);
+      gin_ibv_close_device(ctx);
       continue;
     }
 
-    for (int port = 1; port <= dev_attr.phys_port_cnt; port++) {
-      struct ibv_port_attr port_attr;
-      if (ibv.query_port(ctx, port, &port_attr) == 0 && port_attr.state == IBV_PORT_ACTIVE) {
-        count++;
-        break;
+    struct ibv_port_attr port_attr;
+    if (gin_first_active_port(ctx, dev_attr.phys_port_cnt, &port_attr) != 0) {
+      if (names && count < max_count) {
+        const char* devName = gin_ibv_get_device_name(dev_list[d]);
+        char* slot = names + (size_t)count * name_stride;
+        snprintf(slot, name_stride, "%s", devName ? devName : "");
       }
+      count++;
     }
-    ibv.close_device(ctx);
+    gin_ibv_close_device(ctx);
   }
 
-  ibv.free_device_list(dev_list);
+  gin_ibv_free_device_list(dev_list);
   return count;
+}
+
+int rocshmem_gin_probe_devices(void) {
+  return gin_enumerate_devices(nullptr, 0, 0);
+}
+
+int rocshmem_gin_list_devices(char* names, int max_count, int name_stride) {
+  return gin_enumerate_devices(names, max_count, name_stride);
 }

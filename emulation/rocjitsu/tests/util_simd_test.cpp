@@ -9,6 +9,7 @@
 #include "util/simd_test_hooks.h"
 
 #include "util/data_types.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -110,17 +111,20 @@ TEST(UtilSimd, Fp8WideningExhaustsEveryCode) {
 }
 
 TEST(UtilSimd, Native64MaskWorkaroundMacroIsBooleanOverridePoint) {
-  constexpr int workaround = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
-  constexpr int user_override = UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
+  constexpr int workaround = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+  constexpr int user_override = RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE;
   static_assert(workaround == 0 || workaround == 1);
   static_assert(user_override == 0 || user_override == 1);
 
   if constexpr (!user_override) {
+    // Keep the expected policy independent of host_target.h. This reference
+    // checks detection; it does not select a production implementation.
 #if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
-    EXPECT_EQ(workaround, 1);
+    constexpr int kExpectedDefaultMaskFallback = 1;
 #else
-    EXPECT_EQ(workaround, 0);
+    constexpr int kExpectedDefaultMaskFallback = 0;
 #endif
+    EXPECT_EQ(workaround, kExpectedDefaultMaskFallback);
   }
 }
 
@@ -166,7 +170,7 @@ TEST(UtilSimd, Broadcast_F32) {
 
 TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
   SKIP_IF_NO_SIMD();
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   const auto check = []<typename Simd>() {
     constexpr std::size_t W = Simd::size();
     ASSERT_LE(W, 16u) << "exhaustive mask sweep is intentionally bounded";
@@ -185,7 +189,7 @@ TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
   };
 
   check.template operator()<util::native<uint32_t>>();
-#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   check.template operator()<util::native<uint64_t>>();
   check.template operator()<util::narrow32<uint32_t>>();
 #endif
@@ -194,7 +198,7 @@ TEST(UtilSimd, MaskBitBridgeRoundTripsEveryPattern) {
 
 TEST(UtilSimd, MaskBitBridgePortableFallbackRoundTripsEveryPattern) {
   SKIP_IF_NO_SIMD();
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   const uint64_t full = util::mask<uint64_t>(FallbackSimd::size());
   for (uint64_t bits = 0; bits <= full; ++bits) {
     const auto mask = util::simd_mask_from_bits<FallbackSimd>(bits);
@@ -569,7 +573,7 @@ TEST(UtilSimd, FmaF64_VectorMatchesScalar_BitExact) {
   }
 }
 
-// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/fract/
+// native<double>: the f64 unary VOP1 fast path (v_ceil/floor/trunc/rndne/
 // rcp/rsq/sqrt_f64) relies on util::stdx::{ceil,floor,trunc,nearbyint,sqrt} and
 // 1.0/x being bit-identical to the scalar std::* used in the generated bodies.
 // Sweeps full-range random 64-bit patterns, skipping lanes whose result is NaN
@@ -620,11 +624,6 @@ TEST(UtilSimd, RndneF64_VectorMatchesScalar_BitExact) {
   SKIP_IF_NO_SIMD();
   expect_f64_unary_bit_exact([](double x) { return std::nearbyint(x); },
                              [](util::native<double> x) { return util::rndne_simd(x); });
-}
-TEST(UtilSimd, FractF64_VectorMatchesScalar_BitExact) {
-  SKIP_IF_NO_SIMD();
-  expect_f64_unary_bit_exact([](double x) { return x - std::floor(x); },
-                             [](util::native<double> x) { return x - util::floor_simd(x); });
 }
 TEST(UtilSimd, RcpF32MatchesPhysicalHardwareBits) {
   SKIP_IF_NO_SIMD();
