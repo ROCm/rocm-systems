@@ -27,7 +27,7 @@ These options apply on Linux and Windows.
 | `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
 | `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
 | `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
-| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | OFF | Build the PyTorch Kineto trace parser. Needs zlib. OFF leaves its sources out of the build and does not look for zlib |
+| `PROFILER_HUB_ENABLE_PYTORCH_KINETO` | OFF | Build the PyTorch Kineto trace parser. Needs zlib 1.3.2 or newer. OFF leaves its sources out of the build and does not look for zlib |
 | `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
 | `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
 | `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |
@@ -40,7 +40,7 @@ These options apply on Linux and Windows.
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
-- zlib, for PyTorch traces (system package or FetchContent fallback; not needed with `-DPROFILER_HUB_ENABLE_PYTORCH_KINETO=OFF`)
+- zlib 1.3.2 or newer, for PyTorch traces (system package, or fetched when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON`; with `PROFILER_HUB_FETCH_DEPENDENCIES` OFF, configure fails on a system zlib below 1.3.2, such as Ubuntu 22.04's 1.2.11 or 24.04's 1.3; not looked up when `PROFILER_HUB_ENABLE_PYTORCH_KINETO` is OFF)
 
 ### System package dependencies
 
@@ -58,6 +58,8 @@ sudo dnf install sqlite-devel spdlog-devel fmt-devel zlib-devel
 ```bash
 sudo zypper install sqlite3-devel spdlog-devel fmt-devel zlib-devel
 ```
+
+Where the distribution's zlib is older than 1.3.2 (Ubuntu 22.04 and 24.04, RHEL/Rocky 9), configure with `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` or `-DPROFILER_HUB_ENABLE_PYTORCH_KINETO=OFF`.
 
 ### Build
 
@@ -91,7 +93,7 @@ target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 
 ## Windows
 
-A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_json, zlib, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
+A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 and zlib 1.3.2 or newer are fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set; with `PROFILER_HUB_FETCH_DEPENDENCIES` OFF and `PROFILER_HUB_ENABLE_PYTORCH_KINETO` ON, configure fails on a missing or older zlib.
 
 ### Requirements
 
@@ -172,8 +174,9 @@ profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pa
   (default `version-3.45.3`, year folder `SQLITE3_AMALGAMATION_YEAR`). It is built as
   `profiler-hub-sqlite3.dll`, which exports the SQLite C API. Keep that DLL next to
   `profiler-hub.dll` (or on `PATH`) at run time.
-- **Dependencies:** fmt, spdlog, nlohmann_json, zlib, GoogleTest, and Google Benchmark are
-  fetched via CMake `FetchContent` when not found on the system.
+- **Dependencies:** fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are
+  fetched via CMake `FetchContent` when not found on the system. zlib 1.3.2 or newer is
+  fetched the same way only when `PROFILER_HUB_FETCH_DEPENDENCIES` is ON.
 - **Language standard:** library, tests, and benchmarks are built as **C++20**.
 
 ### Installation
