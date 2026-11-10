@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import validate_metric_library  # noqa: E402
 from validate_metric_library import main, validate  # noqa: E402
 
-from rocprof_compute_soc import metric_library  # noqa: E402
+from rocprof_compute_soc.metric_library import loader  # noqa: E402
 
 BASE_METRIC = """\
 compute.valu_util:
@@ -74,9 +74,7 @@ def with_peak_empirical(metric_text, ceiling):
 @pytest.fixture
 def tree(tmp_path, monkeypatch):
     """The synthetic family under tmp_path, as the only metric library chain."""
-    monkeypatch.setattr(
-        metric_library, "METRIC_LIBRARY_PARENT_ARCH", FAMILY_PARENT_ARCH
-    )
+    monkeypatch.setattr(loader, "METRIC_LIBRARY_PARENT_ARCH", FAMILY_PARENT_ARCH)
     for arch, text in FAMILY_COMPUTE_FILES.items():
         write_file(tmp_path / arch / "compute.yaml", text)
     return tmp_path
@@ -91,11 +89,11 @@ def measured(monkeypatch):
 
 
 def test_shipped_library_is_valid():
-    assert validate(metric_library.default_metric_library_dir()) == []
+    assert validate(loader.default_metric_library_dir()) == []
 
 
 def test_main_reports_errors(tree, monkeypatch, capsys):
-    monkeypatch.setattr(metric_library, "default_metric_library_dir", lambda: tree)
+    monkeypatch.setattr(loader, "default_metric_library_dir", lambda: tree)
     assert main() == 0
     write_base_metrics(tree, BASE_METRIC.replace("compute.valu_util", "Bad"))
     assert main() == 1

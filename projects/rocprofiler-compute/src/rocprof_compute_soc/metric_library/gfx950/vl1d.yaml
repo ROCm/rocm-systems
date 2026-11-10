@@ -1,0 +1,203 @@
+vl1d.access_lat_norm:
+  name: vL1D Access Latency Cycles
+  formula: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Calculated as the average number of cycles that a vL1D cache line request spent in
+    the vL1D cache pipeline.
+vl1d.ai:
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
+vl1d.cache_full_stall:
+  name: vL1D Cache Full Stall
+  formula: SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled due to the inflight request counter
+    reaching its maximum capacity, per normalization unit. Indicates the translation
+    cache cannot accept more requests.
+vl1d.cache_miss_stall:
+  name: vL1D Cache Miss Stall
+  formula: SUM(TCP_UTCL1_STALL_MULTI_MISS_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled due to multiple cache misses being
+    arbitrated simultaneously, per normalization unit.
+vl1d.cache_ta_stalled_by_tcp_aggregated:
+  name: L1 Cache - TA Stalled by TCP (Aggregated)
+  formula: 100 * SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
+  unit: Percent
+  description: >-
+    Measures the aggregated impact of TCP events on TA. A high stall rate (>= 10%)
+    indicates that TCP is the bottleneck.
+vl1d.cache_tcp_stalled_by_l2:
+  name: L1 Cache - TCP Stalled by L2
+  formula: 100 * SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
+  unit: Percent
+  description: >-
+    Measures backpressure from L2 (TCC) to L1 (TCP) via TCR. A high stall rate (>=
+    10%) indicates L2 is the bottleneck.
+vl1d.cache_tcp_stalled_by_td:
+  name: L1 Cache - TCP Stalled by TD
+  formula: 100 * SUM(TCP_TD_TCP_STALL_CYCLES_sum) / SUM(TCP_GATE_EN2_sum)
+  unit: Percent
+  description: >-
+    Measures backpressure from TD (texture data) to TCP. A high rate indicates TD
+    cannot consume return data fast enough.
+vl1d.cache_tcp_stalled_by_utcl1:
+  name: L1 Cache - TCP Stalled by UTCL1
+  formula: 100 * SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM(TCP_GATE_EN2_sum)
+  unit: Percent
+  description: >-
+    Measures backpressure from UTCL1 (TLB) to TCP. A high stall rate (>= 10%) indicates
+    UTCL1 is saturated with inflight requests.
+vl1d.cache_tcp_stalled_by_utcl2:
+  name: L1 Cache - TCP Stalled by UTCL2
+  formula: 100 * SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / SUM(TCP_GATE_EN2_sum)
+  unit: Percent
+  description: >-
+    Measures backpressure from UTCL2 to TCP. A high stall rate (>= 10%) indicates
+    UTCL2 misses causing TLB latency.
+vl1d.inflight_req:
+  name: vL1D Inflight Requests
+  formula: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The sum of inflight client-to-UTCL1 translation requests per cycle, per normalization
+    unit. Measures the average number of translation requests actively being processed
+    by the UTCL1 at any given time.
+vl1d.l2_rd_lat_norm:
+  name: vL1D-L2 Read Latency Cycles
+  formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive read requests from the L2 Cache. This number also includes requests for
+    atomics with return values.
+vl1d.l2_wr_lat_norm:
+  name: vL1D-L2 Write Latency Cycles
+  formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive acknowledgement of a write request to the L2 Cache. This number also
+    includes requests for atomics without return values.
+vl1d.lat_fifo_stall:
+  name: vL1D Latency FIFO Stall
+  formula: SUM(TCP_UTCL1_LFIFO_FULL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full, per normalization
+    unit. This FIFO queues requests to the L2 translation cache (UTCL2).
+vl1d.misses_under_translation_miss:
+  name: vL1D Misses under Translation Miss
+  formula: SUM(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of translation requests that missed in the UTCL1 while another miss
+    for the same translation was already being processed, per normalization unit.
+    These are secondary misses that occur before the first miss completes.
+vl1d.resident_page_full_stall:
+  name: vL1D Resident Page Full Stall
+  formula: SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled because the latency-hiding FIFO output
+    indicated a non-resident page, per normalization unit.
+vl1d.serialization_stall:
+  name: vL1D Serialization Stall
+  formula: SUM(TCP_UTCL1_SERIALIZATION_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled due to serializing translation requests
+    through the cache, per normalization unit.
+vl1d.stalled_on_address:
+  name: vL1D Stalled on Address
+  formula: 100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled waiting for the address
+    processing unit to send address information, divided by the number of cycles where
+    the vL1D is active.
+vl1d.stalled_on_data:
+  name: vL1D Stalled on Data
+  formula: 100 * TCP_TCP_TA_DATA_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled waiting for the address
+    processing unit to send write/atomic data, divided by the number of cycles where
+    the vL1D is active.
+vl1d.stalled_on_lat_fifo:
+  name: vL1D Stalled on Latency FIFO
+  formula: 100 * TCP_LFIFO_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled because the latency
+    FIFO (tracking outstanding requests) is full, divided by the number of cycles
+    where the vL1D is active.
+vl1d.stalled_on_rd_return:
+  name: vL1D Stalled on Read Return
+  formula: 100 * TCP_TCR_RDRET_STALL_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled waiting for read data
+    to return from L2 before it can write into the cache, divided by the number of
+    cycles where the vL1D is active.
+vl1d.stalled_on_req_fifo:
+  name: vL1D Stalled on Request FIFO
+  formula: 100 * TCP_RFIFO_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled because the request
+    FIFO (queuing memory requests) is full, divided by the number of cycles where
+    the vL1D is active.
+vl1d.tag_ram_0_req:
+  name: vL1D Tag RAM 0 Requests
+  formula: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 0 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
+vl1d.tag_ram_1_req:
+  name: vL1D Tag RAM 1 Requests
+  formula: SUM(TCP_TAGRAM1_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 1 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
+vl1d.tag_ram_2_req:
+  name: vL1D Tag RAM 2 Requests
+  formula: SUM(TCP_TAGRAM2_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 2 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
+vl1d.tag_ram_3_req:
+  name: vL1D Tag RAM 3 Requests
+  formula: SUM(TCP_TAGRAM3_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 3 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
+vl1d.thrashing_stall:
+  name: vL1D Thrashing Stall
+  formula: SUM(TCP_UTCL1_THRASHING_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled due to cache thrashing (rapid eviction
+    and reload of translations), per normalization unit. This is an estimation when
+    thrashing detection is active.
+vl1d.utcl2_stall:
+  name: UTCL2 Stall
+  formula: SUM(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the UTCL1 was stalled due to running out of request credits
+    for the UTCL2 (L2 translation cache), per normalization unit.
