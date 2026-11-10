@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <initializer_list>
@@ -90,9 +91,111 @@ TEST(cuidtstUnprivileged, HandleByBdfRejectsAnythingButABdf) {
               AMDCUID_STATUS_INVALID_ARGUMENT)
         << "'" << bad << "'";
   }
+  for (const char* bad : {"0000:03:00.0/../../../../etc", "03:00.0", "", "0000:03:00.0 "})
+    EXPECT_EQ(CuidUtilities::canonical_bdf(bad), "") << "'" << bad << "'";
   uint8_t out[16];
   const std::string high_bit = std::string(35, 'a') + "\xe9";
   EXPECT_EQ(CuidUtilities::uuid_string_to_uint8(high_bit, out), AMDCUID_STATUS_INVALID_ARGUMENT);
+}
+
+TEST(cuidtstUnprivileged, CanonicalBdfIsTheSysfsSpelling) {
+  EXPECT_EQ(CuidUtilities::canonical_bdf("0000:a6:00.0"), "0000:a6:00.0");
+  EXPECT_EQ(CuidUtilities::canonical_bdf("0000:A6:00.0"), "0000:a6:00.0");
+  EXPECT_EQ(CuidUtilities::canonical_bdf("00000000:a6:00.0"), "0000:a6:00.0");
+  EXPECT_EQ(CuidUtilities::canonical_bdf("0000ABCD:Ff:1F.7"), "abcd:ff:1f.7");
+  EXPECT_EQ(CuidUtilities::canonical_bdf("00010000:04:00.0"), "10000:04:00.0");
+  EXPECT_EQ(CuidUtilities::canonical_bdf("FFFFFFFF:04:00.0"), "ffffffff:04:00.0");
+}
+
+// Every spelling the BDF validator accepts finds the function its canonical
+// spelling finds.
+TEST(cuidtstUnprivileged, HandleByBdfAcceptsEverySpellingOfOneFunction) {
+  uint32_t count = 0;
+  if (amdcuid_get_all_handles(nullptr, &count) != AMDCUID_STATUS_INSUFFICIENT_SIZE)
+    GTEST_SKIP() << "no components";
+  std::vector<amdcuid_id_t> handles(count);
+  ASSERT_EQ(amdcuid_get_all_handles(handles.data(), &count), AMDCUID_STATUS_SUCCESS);
+  size_t checked = 0;
+  for (const auto& want : handles) {
+    char bdf[32] = {};
+    uint32_t length = sizeof(bdf);
+    if (amdcuid_query_device_property(want, AMDCUID_QUERY_BDF, bdf, &length) !=
+        AMDCUID_STATUS_SUCCESS)
+      continue;
+    amdcuid_device_type_t type = AMDCUID_DEVICE_TYPE_NONE;
+    length = sizeof(type);
+    ASSERT_EQ(amdcuid_query_device_property(want, AMDCUID_QUERY_DEVICE_TYPE, &type, &length),
+              AMDCUID_STATUS_SUCCESS);
+    std::string upper = bdf;
+    for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    std::string padded = bdf;
+    if (padded.find(':') == 4) padded = "0000" + padded;
+    for (const std::string& spelling : {std::string(bdf), upper, padded}) {
+      amdcuid_id_t got{};
+      ASSERT_EQ(amdcuid_get_handle_by_bdf(spelling.c_str(), type, &got), AMDCUID_STATUS_SUCCESS)
+          << spelling;
+      EXPECT_TRUE(SameId(got, want)) << spelling;
+    }
+    ++checked;
+  }
+  if (checked == 0) GTEST_SKIP() << "no PCI component";
+}
+
+// A Component Type that is not assigned is a bad argument; an assigned one this
+// library discovers nothing of is unsupported, before anything is looked up.
+TEST(cuidtstUnprivileged, LookupsAnswerTheTypeBeforeTheAddress) {
+  const auto reserved = static_cast<amdcuid_device_type_t>(0xB);
+  amdcuid_id_t handle{};
+  for (const amdcuid_device_type_t type : {reserved, AMDCUID_DEVICE_TYPE_NONE}) {
+    EXPECT_EQ(amdcuid_get_handle_by_dev_path("/sys/devices/system/cpu/cpu0", type, &handle),
+              AMDCUID_STATUS_INVALID_ARGUMENT)
+        << type;
+    EXPECT_EQ(amdcuid_get_handle_by_bdf("0000:00:00.0", type, &handle),
+              AMDCUID_STATUS_INVALID_ARGUMENT)
+        << type;
+    EXPECT_EQ(amdcuid_get_handle_by_fd(0, type, &handle), AMDCUID_STATUS_INVALID_ARGUMENT) << type;
+  }
+  for (const amdcuid_device_type_t type :
+       {AMDCUID_DEVICE_TYPE_STORAGE, AMDCUID_DEVICE_TYPE_OTHER}) {
+    EXPECT_EQ(amdcuid_get_handle_by_dev_path("/sys/devices/system/cpu/cpu0", type, &handle),
+              AMDCUID_STATUS_UNSUPPORTED)
+        << type;
+    EXPECT_EQ(amdcuid_get_handle_by_bdf("0000:00:00.0", type, &handle), AMDCUID_STATUS_UNSUPPORTED)
+        << type;
+    EXPECT_EQ(amdcuid_get_handle_by_fd(0, type, &handle), AMDCUID_STATUS_UNSUPPORTED) << type;
+  }
+  EXPECT_EQ(amdcuid_generate_hash_key(nullptr), AMDCUID_STATUS_INVALID_ARGUMENT);
+}
+
+// A function discovery lists as one type, looked up as another PCI type, is
+// the wrong type rather than unsupported or absent.
+TEST(cuidtstUnprivileged, HandleByBdfOfAnotherTypeIsTheWrongType) {
+  uint32_t count = 0;
+  if (amdcuid_get_all_handles(nullptr, &count) != AMDCUID_STATUS_INSUFFICIENT_SIZE)
+    GTEST_SKIP() << "no components";
+  std::vector<amdcuid_id_t> handles(count);
+  ASSERT_EQ(amdcuid_get_all_handles(handles.data(), &count), AMDCUID_STATUS_SUCCESS);
+  size_t checked = 0;
+  for (const auto& listed : handles) {
+    char bdf[32] = {};
+    uint32_t length = sizeof(bdf);
+    if (amdcuid_query_device_property(listed, AMDCUID_QUERY_BDF, bdf, &length) !=
+        AMDCUID_STATUS_SUCCESS)
+      continue;
+    amdcuid_device_type_t type = AMDCUID_DEVICE_TYPE_NONE;
+    length = sizeof(type);
+    ASSERT_EQ(amdcuid_query_device_property(listed, AMDCUID_QUERY_DEVICE_TYPE, &type, &length),
+              AMDCUID_STATUS_SUCCESS);
+    for (const amdcuid_device_type_t other :
+         {AMDCUID_DEVICE_TYPE_GPU, AMDCUID_DEVICE_TYPE_NIC, AMDCUID_DEVICE_TYPE_NPU}) {
+      if (other == type) continue;
+      amdcuid_id_t got{};
+      EXPECT_EQ(amdcuid_get_handle_by_bdf(bdf, other, &got), AMDCUID_STATUS_WRONG_DEVICE_TYPE)
+          << bdf << " as type " << other;
+    }
+    ++checked;
+  }
+  if (checked == 0) GTEST_SKIP() << "no PCI component";
 }
 
 // Temporariness is a property of the primary, not of the key: it must be
@@ -293,6 +396,33 @@ TEST(cuidtstUnprivileged, NicLookupBySiblingInterfaceFindsTheFunction) {
   ASSERT_EQ(sibling_status, AMDCUID_STATUS_SUCCESS);
   EXPECT_TRUE(SameId(sibling, kept));
   EXPECT_EQ(known, 1u);
+}
+
+// A directory that looks like a PCI network function but is not one discovery
+// lists has no CUID, and looking it up adds nothing to the inventory.
+TEST(cuidtstUnprivileged, LookupOfAPathDiscoveryDoesNotListAddsNothing) {
+  uint8_t machine_id[16];
+  if (CuidUtilities::host_machine_id(machine_id) != AMDCUID_STATUS_SUCCESS)
+    GTEST_SKIP() << "no machine-id, so no temporary CUID";
+  const ScopedTempDir dir("cuid_phantom_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string& root = dir.path();
+  ASSERT_EQ(mkdir((root + "/pci").c_str(), 0700), 0);
+  MakeFunction(root, "0000:ee:1f.7", "0x020000");
+  const std::string phantom = root + "/pci/0000:ee:1f.7";
+
+  uint32_t before = 0;
+  const amdcuid_status_t listed = amdcuid_get_all_handles(nullptr, &before);
+  ASSERT_TRUE(listed == AMDCUID_STATUS_INSUFFICIENT_SIZE || listed == AMDCUID_STATUS_UNSUPPORTED)
+      << listed;
+  amdcuid_id_t handle{};
+  EXPECT_EQ(amdcuid_get_handle_by_dev_path(phantom.c_str(), AMDCUID_DEVICE_TYPE_NIC, &handle),
+            AMDCUID_STATUS_DEVICE_NOT_FOUND);
+  EXPECT_EQ(amdcuid_get_handle_by_bdf("0000:ee:1f.7", AMDCUID_DEVICE_TYPE_NIC, &handle),
+            AMDCUID_STATUS_DEVICE_NOT_FOUND);
+  uint32_t after = 0;
+  amdcuid_get_all_handles(nullptr, &after);
+  EXPECT_EQ(after, before);
 }
 
 // A property query answers from the handle's device alone: it does not
