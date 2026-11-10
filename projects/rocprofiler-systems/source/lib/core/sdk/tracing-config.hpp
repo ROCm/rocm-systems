@@ -17,7 +17,6 @@
 #include <fmt/format.h>
 #include <iterator>
 #include <optional>
-#include <ranges>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -104,49 +103,32 @@ public:
 private:
     using operation_item = std::pair<std::int32_t, std::string>;
 
-    /// @brief The SDK tracing-name entry of one domain.
-    struct domain_operations
-    {
-        std::string                 name;
-        bool                        has_operations = false;
-        std::vector<operation_item> items;
-    };
-
-    /// @brief Operation selection of one domain.
-    struct operation_selection
-    {
-        /// Selected operation names; std::nullopt when every operation is selected.
-        std::optional<std::vector<std::string>> names = std::nullopt;
-        std::unordered_set<std::int32_t>        backtrace_ids;
-    };
-
     static std::vector<std::string> expand_domain_names();
 
     /// @brief Alias name -> the domains it stands for.
     static const std::unordered_map<std::string, std::vector<std::string>>&
     get_domain_aliases();
 
+    /// @brief Named (id, name) operations of an SDK table entry, "none" excluded.
+    template <typename Entry>
+    static std::vector<operation_item> collect_operation_items(const Entry& entry);
+
+    /// @brief Fills the operation selection of request from the SDK table entry named
+    /// request.name. @return false when the table has no such entry.
     template <typename Table>
-    static std::optional<domain_operations> find_in_table(const Table&     table,
-                                                          std::string_view domain_name);
+    static bool apply_operation_settings(const Table& table, domain_request& request);
 
-    static std::optional<domain_operations> find_domain_operations(
-        std::string_view domain_name);
-
-    static operation_selection select_operations(std::string_view domain_name);
+    /// @brief Names of the operations left after the include/exclude settings;
+    /// std::nullopt when every operation is left.
+    static std::optional<std::vector<std::string>> select_operation_names(
+        const operation_options_env_names& env_names,
+        const std::vector<operation_item>& items);
 
     /// @brief Items matching any pattern of the setting; std::nullopt when the
     /// setting holds no pattern.
     static std::optional<std::vector<operation_item>> matching_operations(
         const std::string&                 operations_setting_env_name,
         const std::vector<operation_item>& items);
-
-    static std::vector<std::pair<std::string, std::regex>> compile_operation_patterns(
-        const std::string& operations_setting_env_name);
-
-    static bool matches_any_operation_pattern(
-        std::string_view operations_setting_env_name, const std::string& operation_name,
-        const std::vector<std::pair<std::string, std::regex>>& patterns);
 
     [[noreturn]] static void finalize_and_throw(std::string_view exception_message);
 
@@ -156,9 +138,6 @@ private:
 
     static operation_options_env_names assemble_operation_env_names(std::string_view name,
                                                                     bool has_operations);
-
-    static const std::unordered_set<std::string_view>&
-    get_domains_to_skip_for_domain_requests();
 
     static const std::unordered_set<std::string_view>&
     get_domains_to_skip_for_operation_options();
@@ -291,57 +270,6 @@ tracing_config<SdkBackend, Externals>::get_operation_settings()
 
 template <policies::tracing_config::backend   SdkBackend,
           policies::tracing_config::externals Externals>
-std::vector<std::pair<std::string, std::regex>>
-tracing_config<SdkBackend, Externals>::compile_operation_patterns(
-    const std::string& operations_setting_env_name)
-{
-    const auto setting_value = Externals::get_setting_value(operations_setting_env_name);
-    // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
-    if(!setting_value)
-    {
-        finalize_and_throw(fmt::format(
-            "tracing_config::compile_operation_patterns: no registered setting '{}'",
-            operations_setting_env_name));
-    }
-    // NOLINTEND(misc-include-cleaner)
-
-    constexpr std::string_view operation_filter_delimiters{ " ,;:\n\t" };
-
-    const auto delimited_patterns =
-        rocprofsys::delimit(*setting_value, operation_filter_delimiters);
-
-    auto compiled_patterns =
-        delimited_patterns | std::views::transform([](const std::string& pattern_text) {
-            return std::pair<std::string, std::regex>{
-                pattern_text, std::regex{ pattern_text, std::regex_constants::icase }
-            };
-        });
-
-    return std::vector<std::pair<std::string, std::regex>>{ compiled_patterns.begin(),
-                                                            compiled_patterns.end() };
-}
-
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
-bool
-tracing_config<SdkBackend, Externals>::matches_any_operation_pattern(
-    std::string_view operations_setting_env_name, const std::string& operation_name,
-    const std::vector<std::pair<std::string, std::regex>>& patterns)
-{
-    return std::ranges::any_of(patterns, [&](const auto& pattern_entry) {
-        const auto& [pattern_text, pattern] = pattern_entry;
-        const bool matched                  = std::regex_search(operation_name, pattern);
-        if(matched)
-        {
-            LOG_DEBUG("{} ('{}') matched: {}", operations_setting_env_name, pattern_text,
-                      operation_name);
-        }
-        return matched;
-    });
-}
-
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
 void
 tracing_config<SdkBackend, Externals>::finalize_and_throw(
     std::string_view exception_message)
@@ -397,16 +325,18 @@ tracing_config<SdkBackend, Externals>::get_domains()
 
     for(auto& name : expand_domain_names())
     {
-        if(get_domains_to_skip_for_domain_requests().contains(name))
+        // Pre-1.0 SDK domain that domain_service has no definition for.
+        if(name == "page_migration")
         {
             continue;
         }
 
-        auto operations = select_operations(name);
-        requests.push_back(
-            { .name                 = std::move(name),
-              .operations           = std::move(operations.names),
-              .backtrace_operations = std::move(operations.backtrace_ids) });
+        auto request = domain_request{ .name = std::move(name) };
+        if(!apply_operation_settings(SdkBackend::get_callback_tracing_names(), request))
+        {
+            apply_operation_settings(SdkBackend::get_buffer_tracing_names(), request);
+        }
+        requests.push_back(std::move(request));
     }
 
     return requests;
@@ -510,104 +440,95 @@ tracing_config<SdkBackend, Externals>::get_domain_aliases()
 
 template <policies::tracing_config::backend   SdkBackend,
           policies::tracing_config::externals Externals>
+template <typename Entry>
+std::vector<typename tracing_config<SdkBackend, Externals>::operation_item>
+tracing_config<SdkBackend, Externals>::collect_operation_items(const Entry& entry)
+{
+    auto items = std::vector<operation_item>{};
+    for(const auto& item : entry.items())
+    {
+        if(item.second && *item.second != "none")
+        {
+            items.emplace_back(item.first, std::string{ *item.second });
+        }
+    }
+    return items;
+}
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
 template <typename Table>
-std::optional<typename tracing_config<SdkBackend, Externals>::domain_operations>
-tracing_config<SdkBackend, Externals>::find_in_table(const Table&     table,
-                                                     std::string_view domain_name)
+bool
+tracing_config<SdkBackend, Externals>::apply_operation_settings(const Table&    table,
+                                                                domain_request& request)
 {
     for(const auto& entry : table)
     {
-        if(utility::string::to_lower(entry.name) != domain_name)
+        if(utility::string::to_lower(entry.name) != request.name)
         {
             continue;
         }
 
-        const auto items = entry.items();
-        auto       named_items =
-            items | std::views::filter([](const auto& item) {
-                return item.second && *item.second != "none";
-            }) |
-            std::views::transform([](const auto& item) {
-                return operation_item{ item.first, std::string{ *item.second } };
-            });
-
-        return domain_operations{ .name           = std::string{ entry.name },
-                                  .has_operations = !entry.operations.empty(),
-                                  .items = { named_items.begin(), named_items.end() } };
-    }
-    return std::nullopt;
-}
-
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
-std::optional<typename tracing_config<SdkBackend, Externals>::domain_operations>
-tracing_config<SdkBackend, Externals>::find_domain_operations(
-    std::string_view domain_name)
-{
-    if(auto found = find_in_table(SdkBackend::get_callback_tracing_names(), domain_name))
-    {
-        return found;
-    }
-    return find_in_table(SdkBackend::get_buffer_tracing_names(), domain_name);
-}
-
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
-typename tracing_config<SdkBackend, Externals>::operation_selection
-tracing_config<SdkBackend, Externals>::select_operations(std::string_view domain_name)
-{
-    const auto domain = find_domain_operations(domain_name);
-    if(!domain)
-    {
-        return {};
-    }
-
-    const auto env_names =
-        assemble_operation_env_names(domain->name, domain->has_operations);
-    if(env_names.is_empty())
-    {
-        return {};
-    }
-
-    auto result = operation_selection{};
-    if(const auto annotated = matching_operations(
-           env_names.operations_annotate_backtrace_env_name, domain->items))
-    {
-        for(const auto& [operation_id, operation_name] : *annotated)
+        const auto env_names =
+            assemble_operation_env_names(entry.name, !entry.operations.empty());
+        if(env_names.is_empty())
         {
-            result.backtrace_ids.insert(operation_id);
+            return true;
         }
-    }
 
-    auto selected = domain->items;
+        const auto items = collect_operation_items(entry);
+
+        if(const auto annotated = matching_operations(
+               env_names.operations_annotate_backtrace_env_name, items))
+        {
+            std::ranges::transform(*annotated,
+                                   std::inserter(request.backtrace_operations,
+                                                 request.backtrace_operations.end()),
+                                   [](const auto& item) { return item.first; });
+        }
+
+        request.operations = select_operation_names(env_names, items);
+        return true;
+    }
+    return false;
+}
+
+template <policies::tracing_config::backend   SdkBackend,
+          policies::tracing_config::externals Externals>
+std::optional<std::vector<std::string>>
+tracing_config<SdkBackend, Externals>::select_operation_names(
+    const operation_options_env_names& env_names,
+    const std::vector<operation_item>& items)
+{
+    auto selected = items;
     if(const auto included =
-           matching_operations(env_names.operations_include_env_name, domain->items))
+           matching_operations(env_names.operations_include_env_name, items))
     {
         selected = *included;
     }
     if(const auto excluded =
-           matching_operations(env_names.operations_exclude_env_name, domain->items))
+           matching_operations(env_names.operations_exclude_env_name, items))
     {
         std::erase_if(selected, [&excluded](const auto& item) {
             return std::ranges::find(*excluded, item) != excluded->end();
         });
     }
 
-    // Everything selected means no narrowing: leave names unset so the domain is
-    // traced in full.
-    if(selected.size() != domain->items.size())
+    // Everything selected means no narrowing: leave operations unset so the domain
+    // is traced in full.
+    if(selected.size() == items.size())
     {
-        std::ranges::sort(selected);
-        auto names = std::vector<std::string>{};
-        names.reserve(selected.size());
-        for(auto& [operation_id, operation_name] : selected)
-        {
-            names.push_back(std::move(operation_name));
-        }
-        result.names = std::move(names);
+        return std::nullopt;
     }
 
-    return result;
+    std::ranges::sort(selected);
+    auto names = std::vector<std::string>{};
+    names.reserve(selected.size());
+    for(auto& item : selected)
+    {
+        names.push_back(std::move(item.second));
+    }
+    return names;
 }
 
 template <policies::tracing_config::backend   SdkBackend,
@@ -617,29 +538,40 @@ tracing_config<SdkBackend, Externals>::matching_operations(
     const std::string&                 operations_setting_env_name,
     const std::vector<operation_item>& items)
 {
-    const auto patterns = compile_operation_patterns(operations_setting_env_name);
-    if(patterns.empty())
+    const auto setting_value = Externals::get_setting_value(operations_setting_env_name);
+    // NOLINTBEGIN(misc-include-cleaner) -- see operation_options_env_names ctor
+    if(!setting_value)
+    {
+        finalize_and_throw(
+            fmt::format("tracing_config::matching_operations: no registered setting '{}'",
+                        operations_setting_env_name));
+    }
+    // NOLINTEND(misc-include-cleaner)
+
+    const auto pattern_texts = rocprofsys::delimit(*setting_value, " ,;:\n\t");
+    if(pattern_texts.empty())
     {
         return std::nullopt;
     }
 
-    auto matched = std::vector<operation_item>{};
-    std::ranges::copy_if(items, std::back_inserter(matched), [&](const auto& item) {
-        return matches_any_operation_pattern(operations_setting_env_name, item.second,
-                                             patterns);
-    });
-    return matched;
-}
+    auto patterns = std::vector<std::regex>{};
+    for(const auto& text : pattern_texts)
+    {
+        patterns.emplace_back(text, std::regex_constants::icase);
+    }
 
-template <policies::tracing_config::backend   SdkBackend,
-          policies::tracing_config::externals Externals>
-const std::unordered_set<std::string_view>&
-tracing_config<SdkBackend, Externals>::get_domains_to_skip_for_domain_requests()
-{
-    // Pre-1.0 SDK domain that domain_service has no definition for.
-    static const auto s_domains =
-        std::unordered_set<std::string_view>{ "page_migration" };
-    return s_domains;
+    auto matched = std::vector<operation_item>{};
+    for(const auto& item : items)
+    {
+        if(std::ranges::any_of(patterns, [&](const auto& pattern) {
+               return std::regex_search(item.second, pattern);
+           }))
+        {
+            LOG_DEBUG("{} matched: {}", operations_setting_env_name, item.second);
+            matched.push_back(item);
+        }
+    }
+    return matched;
 }
 
 template <policies::tracing_config::backend   SdkBackend,
