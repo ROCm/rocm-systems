@@ -60,9 +60,8 @@ def _run_single_pass_metric_default(arch: str) -> Dict[str, Union[int, float]]:
         t0 = time.perf_counter()
         result = try_allocate_single_pass_metrics(soc, set(counters), perfmon_config)
         elapsed = time.perf_counter() - t0
-        assert result is not None, (
-            "single-pass metric allocation returned None (unexpected)"
-        )
+        if result is None:
+            sys.exit("single-pass metric allocation returned None (unexpected)")
         files, _fc, stats = result
         metric_sets, single_pass_metric_count = collect_unique_single_pass_metric_sets(
             soc, counters, perfmon_config
@@ -73,14 +72,11 @@ def _run_single_pass_metric_default(arch: str) -> Dict[str, Union[int, float]]:
         single_pass_metric_sets_without_pass = (
             _count_single_pass_metric_sets_without_pass(files, metric_sets)
         )
-        product_single_pass = single_pass_metric_count
-
     return {
         "passes": stats.bucket_count,
         "pmc_total": len(counters),
         "single_pass_metric_sets_without_pass": single_pass_metric_sets_without_pass,
         "single_pass_metric_count": single_pass_metric_count,
-        "product_single_pass_metrics": product_single_pass,
         "unique_single_pass_metric_sets": len(metric_sets),
         "multi_pass_metric_count": stats.multi_pass_metric_count,
         "unique_multi_pass_metric_sets": stats.unique_multi_pass_metric_sets,
