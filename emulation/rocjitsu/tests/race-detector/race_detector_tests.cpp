@@ -70,6 +70,8 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
        MemoryOrderClass::UNORDERED},
       {MemoryEventType::SCALAR_TO_GLOBAL, amdgpu::WaitCounterType::LGKMCNT,
        MemoryOrderClass::UNORDERED},
+      {MemoryEventType::GDS_ORDERED_COUNT_SOURCE, amdgpu::WaitCounterType::EXPCNT,
+       MemoryOrderClass::UNORDERED},
       {MemoryEventType::LDS_TO_GLOBAL, amdgpu::WaitCounterType::TENSORCNT,
        MemoryOrderClass::TENSOR},
   };
@@ -1152,6 +1154,34 @@ TEST(RaceDetector, VgprWaw_WriteLaneMaskHonorsPendingLoadLanes) {
 
   ASSERT_EQ(b.raceCount(), 1);
   EXPECT_EQ(b.violations().front().lane, 5);
+}
+
+TEST(RaceDetector, OrderedCountExportSourceProtectsOverlappingBytesAndLanes) {
+  std::vector<RaceViolation> reports;
+  RaceDetector detector(
+      1, 8, 8, Dim3d(0), [&](RaceViolation v) { reports.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA1), 64 * 1024);
+  auto &wave = detector.getWaveRaceState(0);
+  constexpr uint64_t lane5 = uint64_t{1} << 5;
+  wave.registerEvent(testInstruction(0), MemoryEventType::GDS_ORDERED_COUNT_SOURCE, {1}, lane5,
+                     /*byteMask=*/0xc);
+  wave.registerEvent(testInstruction(8), MemoryEventType::VGPR_TO_LDS, {2}, lane5, 0xc);
+
+  wave.checkVgprReadLanes(1, lane5, 0xf);
+  wave.checkVgprWriteLanes(1, lane5 >> 1, 0xf);
+  wave.checkVgprWriteLanes(1, lane5, 0x3);
+  wave.checkVgprWrite(1, lane5, 0x3, MemoryOrderClass::GDS);
+  wave.checkVgprWriteLanes(2, lane5, 0xc);
+  EXPECT_TRUE(reports.empty());
+
+  wave.checkVgprWriteLanes(1, lane5 | (lane5 >> 1), 0x6);
+  wave.checkVgprWrite(1, lane5, 0x8, MemoryOrderClass::GDS);
+  ASSERT_EQ(reports.size(), 2u);
+  for (const auto &report : reports) {
+    EXPECT_TRUE(report.isWrite);
+    EXPECT_EQ(report.index, 1);
+    EXPECT_EQ(report.lane, 5);
+  }
 }
 
 TEST(RaceDetector, VgprWaw_SubDwordDisjointBytesNoRace) {

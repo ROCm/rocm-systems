@@ -73,6 +73,12 @@ void WaveRaceState::cancelRoutedIssue(const Instruction &inst) {
     detector->retireEvent(event);
     waveMemoryEvents.pop_back();
   }
+  std::erase_if(barrierPendingEvents, [&](EventId event) {
+    if (event.value < firstRoutedEvent)
+      return false;
+    detector->retireEvent(event);
+    return true;
+  });
   if (priorGdsLocks && gdsVgprLocks.size() > *priorGdsLocks)
     gdsVgprLocks.erase(gdsVgprLocks.begin() + *priorGdsLocks, gdsVgprLocks.end());
   if (priorGdsLocks && !hadGdsExecLock)
@@ -521,14 +527,16 @@ void WaveRaceState::checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
     const MemoryEventType pendingType = detector->events().type(eventId);
     // Same-class writeback can resolve a pending destination WAW. An export
     // still owns its source bytes until its independent EXPCNT event retires.
-    if (!isToVgpr(pendingType) ||
+    const bool lockedSource = pendingType == MemoryEventType::GDS_ORDERED_COUNT_SOURCE;
+    if ((!lockedSource && !isToVgpr(pendingType)) ||
         (detector->events().registerByteMask(eventId, reg) & byteMask) == 0) {
       continue;
     }
 
     uint64_t overlappingLanes = detector->events().registerLanes(eventId, reg, byteMask) & execMask;
-    overlappingLanes =
-        detector->events().conflictingWriteLanes(eventId, writeOrder, overlappingLanes);
+    if (!lockedSource)
+      overlappingLanes =
+          detector->events().conflictingWriteLanes(eventId, writeOrder, overlappingLanes);
     if (overlappingLanes == 0)
       continue;
 

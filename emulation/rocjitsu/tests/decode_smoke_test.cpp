@@ -509,7 +509,7 @@ TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
       {0xBF920000u, "s_trap", ExecutionBlock::BRANCH},
       {0xBE801F00u, "s_rfe_b64", ExecutionBlock::BRANCH},
       // STATUS.COND_DBG_SYS controls the signed PC-relative branch.
-      {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH},
+      {0xBF970001u, "s_cbranch_cdbgsys", ExecutionBlock::BRANCH, 4},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
@@ -1128,7 +1128,7 @@ INSTANTIATE_TEST_SUITE_P(
       return name;
     });
 
-TEST(Rdna2DecodeTest, DecodesSplitOpcodes) {
+TEST(Rdna2DecodeTest, DecodesSplitOpcodesAndPromotedRelativeMoves) {
   const struct {
     std::array<uint32_t, 2> words;
     std::string_view mnemonic;
@@ -1140,6 +1140,11 @@ TEST(Rdna2DecodeTest, DecodesSplitOpcodes) {
       {{0xf19c9f01, 0x00000000}, "image_bvh64_intersect_ray", 231},
       {{0xe8a00000, 0x00200000}, "tbuffer_load_format_d16_x", 8},
       {{0xe2000000, 0x00000000}, "buffer_load_format_d16_x", 128},
+      {{0xd5c30000, 0x00000100}, "v_movrels_b32", 451},
+      {{0xd5c40000, 0x00000100}, "v_movrelsd_b32", 452},
+      {{0xd5c80000, 0x00000100}, "v_movrelsd_2_b32", 456},
+      {{0xf4980000, 0xfa000000}, "s_atc_probe", 38},
+      {{0xf49c0000, 0xfa000000}, "s_atc_probe_buffer", 39},
   };
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
   ASSERT_NE(decoder, nullptr);
@@ -1559,6 +1564,10 @@ TEST(RdnaMimgDecodeTest, Gfx10OpcodeHighBitAndReservedFlatSegments) {
     decoded = decoder->decode_window(interp);
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_EQ(decoded.value()->disassemble(), "v_interp_p1_f32_e64 v4, v1, attr0.y");
+    const std::array<uint32_t, 2> relative{0xd5c30002, 0x02010101};
+    decoded = decoder->decode_window(relative);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), "v_movrels_b32");
   }
 }
 

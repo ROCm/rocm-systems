@@ -874,7 +874,7 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
     assert set(mrisa_scc_accesses) == active_keys
     mismatches = []
     expected_exclusions = {
-        'rdna4': {'S_ALLOC_VGPR', 'S_BARRIER_SIGNAL_ISFIRST'},
+        'rdna4': {'S_ALLOC_VGPR'},
         'cdna5': {'S_ALLOC_VGPR'},
     }
     checked_exclusions = set()
@@ -7085,6 +7085,9 @@ def test_generated_legal_64bit_dpp_uses_masked_commit_for_both_dwords(
             amdgpu_generated_root / _generated_dir_name(arch) / 'vop1.cpp'
         ).read_text()
         decode_body = _generated_decode_body(vop1, 'VCvtF64I32Vop1')
+        if arch == 'cdna2':
+            assert 'only DPP row-select controls' in decode_body
+            continue
         assert 'does not support DPP' in decode_body, arch
 
     cdna5_vop3 = (
@@ -9256,6 +9259,11 @@ def test_legacy_gds_preserves_expcnt_obligations(arch_name, profile):
     assert 'inst_.gds != 0' in ds_info
     assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
     assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+    counts_empty_exec = arch_name in ('rdna3', 'rdna3_5')
+    assert ds_info.endswith(', true, inst_.gds);') == counts_empty_exec
+    assert not codegen._memory_issue_initializer(ds, set()).endswith(
+        ', true, inst_.gds);'
+    )
 
 
 @pytest.mark.parametrize(

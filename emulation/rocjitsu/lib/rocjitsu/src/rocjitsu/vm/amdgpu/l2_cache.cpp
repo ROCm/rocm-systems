@@ -434,6 +434,19 @@ bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwo
   });
 }
 
+bool L2Cache::copy_resident_line(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid) {
+  const uint32_t offset = CacheStore::line_offset(addr);
+  if (dst.size() > LINE_SIZE - offset)
+    return false;
+  auto maintenance_lock = acquire_cache_access();
+  std::lock_guard lock(set_mutex(addr));
+  const auto *tag = cache_.peek(addr, vmid);
+  if (!tag || !CacheStore::bytes_valid(*tag, offset, dst.size()))
+    return false;
+  cache_.read_line(addr, dst.data(), offset, dst.size(), vmid);
+  return true;
+}
+
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                               uint32_t vmid) {
   auto maintenance_lock = acquire_cache_access();

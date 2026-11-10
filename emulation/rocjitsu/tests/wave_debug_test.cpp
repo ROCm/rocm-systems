@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
@@ -144,10 +145,54 @@ TEST(WaveDebugTest, Gfx10TrapDrainsBeforeEnteringPrivilegedHandler) {
   }
 }
 
-TEST(WaveDebugTest, Gfx10CodeEndRaisesIllegalInstruction) {
+TEST(WaveDebugTest, Gfx10TracePriorityAndOrderedEndReportTheIssuingWave) {
   WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  f.gpu_mem.write32(kKernelAddr, 0xbf9f0000u);
+  const uint32_t program[] = {
+      0xbf8f0003, // s_setprio 3
+      0xbf940005, // s_incperflevel 5
+      0xbfa800a5, // s_ttracedata_imm 0xa5
+      0xbf960000, // s_ttracedata
+      0xbf9e0000, // s_endpgm_ordered_ps_done
+  };
+  for (unsigned i = 0; i < std::size(program); ++i)
+    f.gpu_mem.write32(kKernelAddr + i * 4, program[i]);
+  std::vector<uint32_t> trace;
+  f.cu->set_shader_trace_handler(
+      [&](const amdgpu::Wavefront &, uint32_t value) { trace.push_back(value); });
+  uint32_t messages = 0;
+  f.cu->set_sendmsg_handler([&](amdgpu::Wavefront &wave, uint32_t message) {
+    EXPECT_EQ(message, 7u);
+    EXPECT_TRUE(wave.wait_counters().empty());
+    EXPECT_EQ(wave.m0(), 0x1234u);
+    ++messages;
+    return true;
+  });
+  auto *wave = f.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_status_raw((1u << 19) | (1u << 7)); // PERF_EN, TTRACE_EN.
+  wave->set_m0(0x1234u);
+  for (unsigned i = 0; i < 4; ++i)
+    f.cu->step();
+  EXPECT_EQ((wave->status_raw() >> 3) & 3u, 3u);
+  EXPECT_EQ(f.cu->shader_perf_level(5), 1u);
+  EXPECT_EQ(f.cu->shader_perf_level(6), 0u);
+  EXPECT_EQ(trace, (std::vector<uint32_t>{0xa5, 0x1234}));
+  wave->wait_counters().increment(amdgpu::WaitCounterType::VSCNT);
+  f.cu->step();
+  EXPECT_EQ(messages, 0u);
+  EXPECT_EQ(wave->pc, kKernelAddr + 16);
+  wave->release_wait_counter(amdgpu::WaitCounterType::VSCNT);
+  f.cu->step();
+  EXPECT_EQ(messages, 1u);
+  EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(WaveDebugTest, Gfx10SethaltStopsIssueAndCodeEndRaisesIllegalInstruction) {
+  WaveDebugFixture f(ROCJITSU_CODE_ARCH_RDNA1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  f.gpu_mem.write32(kKernelAddr, 0xbf8d0001u);
+  f.gpu_mem.write32(kKernelAddr + 4, 0xbf9f0000u);
   uint32_t interrupts = 0;
   f.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
     ++interrupts;
@@ -157,9 +202,87 @@ TEST(WaveDebugTest, Gfx10CodeEndRaisesIllegalInstruction) {
   auto *wave = f.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   f.cu->step();
+  ASSERT_TRUE(wave->debug_halted());
+  EXPECT_TRUE(wave->status_halt());
+  f.cu->step();
+  EXPECT_EQ(interrupts, 0u);
+  wave->set_status_halt(false);
+  wave->set_debug_halted(false);
+  f.cu->step();
   EXPECT_EQ(interrupts, 1u);
-  EXPECT_EQ(wave->pc, kKernelAddr);
+  EXPECT_EQ(wave->pc, kKernelAddr + 4);
   EXPECT_TRUE(wave->debug_halted());
+}
+
+TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
+  for (bool internal_nop : {false, true})
+    for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+      SCOPED_TRACE(testing::Message() << arch << " internal_nop=" << internal_nop);
+      WaveDebugFixture fixture(arch, 2, 1);
+      ASSERT_TRUE(fixture.cu);
+      constexpr uint32_t owner_pc = 0x1000, peer_pc = 0x3000;
+      fixture.gpu_mem.write32(owner_pc, 0xbfa10002); // s_clause 2 (three VALU instructions)
+      for (unsigned i = 1; i <= 3; ++i)
+        fixture.gpu_mem.write32(owner_pc + 4 * i, 0x7e020281); // v_mov_b32 v1, 1
+      if (internal_nop)
+        fixture.gpu_mem.write32(owner_pc + 8, 0xbf800000); // Internal s_nop counts as one member.
+      fixture.gpu_mem.write32(owner_pc + 16, 0xbf800000);  // s_nop 0
+      fixture.gpu_mem.write32(peer_pc, 0x7e020282);        // v_mov_b32 v1, 2
+      auto *owner = fixture.cu->dispatch_wf(0, owner_pc, 32, 16);
+      ASSERT_NE(owner, nullptr);
+      fixture.cu->step();
+      fixture.cu->step();
+      ASSERT_EQ(owner->pc, owner_pc + 8);
+      auto *peer = fixture.cu->dispatch_wf(1, peer_pc, 32, 16);
+      ASSERT_NE(peer, nullptr);
+      unsigned completed = 0;
+      fixture.cu->set_single_step_handler([&](amdgpu::Wavefront &wave) {
+        EXPECT_EQ(&wave, peer);
+        ++completed;
+        wave.set_debug_single_step(false);
+        wave.set_debug_halted(true);
+        return true;
+      });
+      peer->set_debug_single_step(true);
+      fixture.cu->step();
+      EXPECT_EQ(peer->pc, peer_pc);
+      EXPECT_EQ(completed, 0u);
+      fixture.cu->step();
+      EXPECT_EQ(completed, 1u);
+      EXPECT_EQ(peer->pc, peer_pc + 4);
+      EXPECT_EQ(fixture.cu->read_vgpr(peer->vgpr_alloc().base + 1, 0), 2u);
+    }
+}
+
+TEST(WaveDebugTest, SingleStepWaitsForTheExportGrant) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (uint32_t immediate : {0u, 1u, 2u, 3u}) {
+      SCOPED_TRACE(testing::Message() << arch << " immediate=" << immediate);
+      WaveDebugFixture fx(arch, 1, 1);
+      fx.gpu_mem.write32(kKernelAddr, 0xbf8b0000u | immediate);
+      auto *wave = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      wave->set_status_raw(wave->status_raw() & ~amdgpu::Wavefront::kStatusExportReadyMask);
+      unsigned completed = 0;
+      fx.cu->set_single_step_handler([&](amdgpu::Wavefront &stopped) {
+        ++completed;
+        stopped.set_debug_single_step(false);
+        stopped.set_debug_halted(true);
+        return true;
+      });
+      wave->set_debug_single_step(true);
+      fx.cu->step();
+      if (arch == ROCJITSU_CODE_ARCH_RDNA4 ? (immediate & 2u) != 0 : (immediate & 1u) == 0) {
+        EXPECT_EQ(completed, 0u);
+        EXPECT_EQ(wave->state(), amdgpu::WfState::EXPORT_WAIT);
+        wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusExportReadyMask);
+        fx.cu->step();
+      }
+      EXPECT_EQ(completed, 1u);
+      EXPECT_EQ(wave->pc, kKernelAddr + 4);
+    }
+  }
 }
 
 TEST(WaveDebugTest, Rdna2PrivateMemoryProbeUsesTransferredSpans) {
@@ -292,26 +415,76 @@ TEST(WaveDebugTest, SaveWaveRequiresAContextSaveGrantInTheTrapHandler) {
   }
 }
 
-TEST(WaveDebugTest, Gfx1151PrivilegedDestinations) {
+TEST(WaveDebugTest, Gfx11PixelParametersWaitAndSelectPrimitivePerQuad) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 1, 1);
+    ASSERT_TRUE(fx.cu);
+    fx.gpu_mem.write32(kKernelAddr, 0xce000606); // lds_param_load v6, attr1.z
+    auto *wf = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(1024);
+    wf->set_lds_size(1024);
+    wf->set_m0(128 | (1u << 17)); // primitive 1 begins in quad 2
+    wf->set_exec((1u << 1) | (1u << 7) | (1u << 10));
+    // Attribute 1 follows two 12-DWORD primitive blocks for attribute 0.
+    for (uint32_t word = 0; word < 24; ++word)
+      wf->lds().write32(1024 + 128 + 4 * (24 + word), 100 + word);
+    const uint32_t dest = wf->vgpr_alloc().base + 6;
+    for (unsigned lane = 0; lane < 16; ++lane)
+      fx.cu->write_vgpr(dest, lane, 0xdeadbeef);
+    wf->set_status_raw(wf->status_raw() & ~(1u << 25));
+    fx.cu->step();
+    EXPECT_EQ(wf->pc, kKernelAddr);
+    EXPECT_EQ(wf->state(), amdgpu::WfState::PARAM_WAIT);
+    EXPECT_TRUE(wf->wait_counters().empty());
+    wf->set_status_raw(wf->status_raw() | (1u << 25));
+    fx.cu->step();
+    EXPECT_EQ(wf->pc, kKernelAddr + 4);
+    constexpr std::array<uint32_t, 4> first_primitive_z{102, 106, 110, 0};
+    constexpr std::array<uint32_t, 4> second_primitive_z{114, 118, 122, 0};
+    for (unsigned lane = 0; lane < 16; ++lane) {
+      const auto &expected = lane < 8 ? first_primitive_z : second_primitive_z;
+      EXPECT_EQ(fx.cu->read_vgpr(dest, lane), lane < 12 ? expected[lane % 4] : 0xdeadbeef) << lane;
+    }
+  }
+}
+
+TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
   ASSERT_TRUE(fx.cu);
   const uint32_t words[] = {
       0xbeec0081, // s_mov_b32 ttmp0, 1
       0xbe82006c, // s_mov_b32 s2, ttmp0
       0x806c0100, // s_add_u32 ttmp0, s0, s1
+      0xbfb80005, // s_incperflevel 5
+      0xbfba0000, // s_ttracedata
+      0xbfbb003c, // s_ttracedata_imm 0x3c
+      0xbfb90005, // s_decperflevel 5
   };
   for (size_t i = 0; i < std::size(words); ++i)
     fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
+  wf->set_status_raw(wf->status_raw() | (1u << 19)); // STATUS.PERF_EN
+  wf->set_m0(0x456789ab);
   wf->set_ttmp(0, 0x12345678);
   fx.cu->write_sgpr(wf->sgpr_alloc().base, 0xffffffff);
   fx.cu->write_sgpr(wf->sgpr_alloc().base + 1, 1);
-  for (unsigned i = 0; i < 3; ++i)
+  std::vector<uint32_t> trace;
+  fx.cu->set_shader_trace_handler([&](const auto &source, uint32_t value) {
+    EXPECT_EQ(&source, wf);
+    trace.push_back(value);
+  });
+  for (unsigned i = 0; i < 6; ++i)
     fx.cu->step();
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 2), 0u);
   EXPECT_EQ(wf->ttmp(0), 0x12345678u);
   EXPECT_FALSE(wf->read_scc());
+  EXPECT_EQ(fx.cu->performance_levels()[5], 1u);
+  EXPECT_EQ(trace, (std::vector<uint32_t>{0x456789ab, 0x3c}));
+  fx.cu->step();
+  EXPECT_EQ(fx.cu->performance_levels()[5], 0u);
 }
 
 TEST(WaveDebugTest, Gfx1151IndependentWaits) {
@@ -320,7 +493,7 @@ TEST(WaveDebugTest, Gfx1151IndependentWaits) {
   fx.gpu_mem.write32(kKernelAddr, 0xbcfc0040);      // s_waitcnt_vmcnt null, 0x40
   fx.gpu_mem.write32(kKernelAddr + 4, 0xbf800000);  // s_nop 0
   fx.gpu_mem.write32(kKernelAddr + 8, 0xbd7c0000);  // s_waitcnt_expcnt null, 0
-  fx.gpu_mem.write32(kKernelAddr + 12, 0xbf800000); // s_nop 0
+  fx.gpu_mem.write32(kKernelAddr + 12, 0xbfb50003); // s_setprio 3
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
   wf->wait_counters().vmcnt = 1;
@@ -333,7 +506,152 @@ TEST(WaveDebugTest, Gfx1151IndependentWaits) {
   fx.cu->step();
   ASSERT_EQ(wf->state(), amdgpu::WfState::RUNNING);
   fx.cu->step();
+  EXPECT_EQ((wf->status_raw() >> 3) & 3u, 3u);
+}
+
+TEST(WaveDebugTest, WaitEventUsesTheTargetExportGrantBit) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (uint32_t immediate : {0u, 1u, 2u, 3u}) {
+      SCOPED_TRACE(testing::Message() << arch << " immediate=" << immediate);
+      WaveDebugFixture fx(arch, 1, 1);
+      ASSERT_TRUE(fx.cu);
+      fx.gpu_mem.write32(kKernelAddr, 0xbf8b0000 | immediate);
+      fx.gpu_mem.write32(kKernelAddr + 4, 0x7e020281); // v_mov_b32 v1, 1
+      auto *wf = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      wf->set_status_raw(wf->status_raw() & ~amdgpu::Wavefront::kStatusExportReadyMask);
+      fx.cu->step();
+      const bool waits = arch == ROCJITSU_CODE_ARCH_RDNA4 ? bool(immediate & 2) : !(immediate & 1);
+      EXPECT_EQ(wf->state() == amdgpu::WfState::EXPORT_WAIT, waits);
+      fx.cu->step();
+      EXPECT_EQ(fx.cu->read_vgpr(wf->vgpr_alloc().base + 1, 0), waits ? 0u : 1u);
+      if (waits) {
+        wf->set_status_raw(wf->status_raw() | amdgpu::Wavefront::kStatusExportReadyMask);
+        fx.cu->step();
+        EXPECT_EQ(fx.cu->read_vgpr(wf->vgpr_alloc().base + 1, 0), 1u);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, Gfx1151ExportWaitAndDualSourceLaneMask) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  fx.gpu_mem.write32(kKernelAddr, 0xbf8b0000);     // s_wait_event 0
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xf8000951); // exp dual_src_blend0, v2, off, off, off done
+  fx.gpu_mem.write32(kKernelAddr + 8, 2);
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_status_raw((wf->status_raw() | (1u << 27)) & ~(1u << 8));
+  fx.cu->write_vgpr(wf->vgpr_alloc().base + 2, 0, 42);
+  fx.cu->write_vgpr(wf->vgpr_alloc().base + 2, 1, 99);
+  fx.cu->step();
+  fx.cu->step();
+  EXPECT_TRUE(wf->shader_exports().empty());
+  EXPECT_EQ(wf->state(), amdgpu::WfState::EXPORT_WAIT);
+  wf->set_status_raw(wf->status_raw() | (1u << 8));
+  fx.cu->step();
+  ASSERT_EQ(wf->shader_exports().size(), 1u);
+  const auto &output = wf->shader_exports().front();
+  EXPECT_EQ(output.target, 21u);
+  EXPECT_TRUE(output.done);
+  EXPECT_EQ(output.valid_lanes, 3u);
+  EXPECT_EQ(output.values[0][0], 42u);
+  EXPECT_EQ(output.values[1][0], 99u);
+  EXPECT_EQ(wf->status_raw() & (1u << 27), 0u);
+}
+
+TEST(WaveDebugTest, Gfx1151ExportUsesVgprZeroForAnOutOfRangeComponent) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  fx.gpu_mem.write32(kKernelAddr, 0xf8000803); // exp mrt0 v255, v2, off, off done
+  fx.gpu_mem.write32(kKernelAddr + 4, 0x000002ff);
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(3);
+  for (unsigned lane = 0; lane < 2; ++lane) {
+    fx.cu->write_vgpr(wf->vgpr_alloc().base, lane, 7 + lane);
+    fx.cu->write_vgpr(wf->vgpr_alloc().base + 2, lane, 31 + lane);
+  }
+  fx.cu->step();
+  ASSERT_EQ(wf->shader_exports().size(), 1u);
+  const auto &result = wf->shader_exports().front();
+  EXPECT_EQ(result.valid_lanes, 3u);
+  for (unsigned lane = 0; lane < 2; ++lane) {
+    EXPECT_EQ(result.values[lane][0], 7u + lane);
+    EXPECT_EQ(result.values[lane][1], 31u + lane);
+  }
+}
+
+TEST(WaveDebugTest, LegacyCdnaSetHaltIgnoresBitTwo) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (bool handler : {false, true}) {
+      SCOPED_TRACE(testing::Message() << arch << " handler=" << handler);
+      WaveDebugFixture fx(arch, 1, 1);
+      auto *wave = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      wave->set_in_trap_handler(handler);
+      fx.gpu_mem.write32(kKernelAddr, 0xbf8d0005); // s_sethalt 5
+      fx.cu->step();
+      EXPECT_TRUE(wave->status_halt());
+      EXPECT_EQ(wave->debug_paused(), !handler);
+      EXPECT_EQ(wave->status_raw() & amdgpu::Wavefront::kStatusFatalHaltMask, 0u);
+      // Execute the clear even if the architectural HALT would block issue.
+      auto decoder = Decoder::create(arch);
+      const std::array clear{0xbf8d0004u};
+      auto inst = decoder->decode_window(clear);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+      EXPECT_FALSE(wave->status_halt());
+      EXPECT_FALSE(wave->debug_paused());
+    }
+  }
+}
+
+TEST(WaveDebugTest, Gfx1151FatalHaltBlocksAResumedTrapHandler) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  fx.gpu_mem.write32(kKernelAddr, 0xbf820005);     // s_sethalt 5
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xbfb50002); // s_setprio 2
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_in_trap_handler(true);
+  fx.cu->step();
+  ASSERT_NE(wf->status_raw() & (1u << 23), 0u);
+  wf->set_debug_halted(false);
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kKernelAddr + 4);
+  wf->set_status_raw(wf->status_raw() & ~(1u << 23));
+  wf->set_debug_halted(false);
+  fx.cu->step();
+  EXPECT_EQ((wf->status_raw() >> 3) & 3u, 2u);
+}
+
+TEST(WaveDebugTest, Gfx1151ControlFlowPriorityAndHalt) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  const uint32_t words[] = {
+      0xbfb50003, // s_setprio 3
+      0xbfa80001, // s_cbranch_cdbguser +1
+      0xbfb50000, // s_setprio 0 (skipped)
+      0xbf820001, // s_sethalt 1
+      0xbfb50001, // s_setprio 1 (cannot issue while halted)
+  };
+  for (size_t i = 0; i < std::size(words); ++i)
+    fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_status_raw(wf->status_raw() | (1u << 20));
+  for (int i = 0; i < 5; ++i)
+    fx.cu->step();
+  EXPECT_EQ((wf->status_raw() >> 3) & 3u, 3u);
   EXPECT_EQ(wf->pc, kKernelAddr + 16);
+  EXPECT_TRUE(wf->status_halt());
+  EXPECT_TRUE(wf->debug_halted());
 }
 
 TEST(WaveDebugTest, Gfx1151IllegalPaddingEntersPrivilegedHandler) {
@@ -359,12 +677,73 @@ TEST(WaveDebugTest, Gfx1151IllegalPaddingEntersPrivilegedHandler) {
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 5), 0x12u);
 }
 
-TEST(WaveDebugTest, Rdna4ProtectsTrapWrites) {
+TEST(WaveDebugTest, Gfx1151VinterpWaitsBeforeReadingCoefficients) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA3_5, 1, 1);
+  ASSERT_TRUE(fx.cu);
+  fx.gpu_mem.write32(kKernelAddr, 0xcd000100); // v_interp_p10_f32 v0, v1, v2, v3 wait_exp:1
+  fx.gpu_mem.write32(kKernelAddr + 4, 0x040e0501);
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xcd000700); // wait_exp:7 has no wait.
+  fx.gpu_mem.write32(kKernelAddr + 12, 0x040e0501);
+  auto *wf = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+  wf->set_mode_raw(0x2f0);
+  const unsigned base = wf->vgpr_alloc().base;
+  fx.cu->write_vgpr(base, 0, 0xdeadbeef);
+  fx.cu->write_vgpr(base + 1, 1, 0x40000000); // P10 initially 2.
+  fx.cu->write_vgpr(base + 2, 0, 0x40400000); // I = 3.
+  fx.cu->write_vgpr(base + 3, 0, 0x40800000); // P0 = 4.
+  wf->wait_counters().expcnt = 3;
+  fx.cu->step();
+  ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+  EXPECT_EQ(wf->wait_target().expcnt, 1u);
+  EXPECT_EQ(wf->pc, kKernelAddr);
+  EXPECT_EQ(fx.cu->read_vgpr(base, 0), 0xdeadbeef);
+  wf->release_wait_counter(amdgpu::WaitCounterType::EXPCNT);
+  fx.cu->step();
+  EXPECT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
+  EXPECT_EQ(wf->pc, kKernelAddr);
+  fx.cu->write_vgpr(base + 1, 1, 0x40a00000); // A late parameter return supplies P10 = 5.
+  wf->release_wait_counter(amdgpu::WaitCounterType::EXPCNT);
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kKernelAddr + 8);
+  EXPECT_EQ(fx.cu->read_vgpr(base, 0), 0x41980000); // 5*3+4 = 19.
+  wf->wait_counters().expcnt = 7;
+  fx.cu->step();
+  EXPECT_EQ(wf->pc, kKernelAddr + 16);
+  EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+}
+
+TEST(WaveDebugTest, Gfx12SetprioUpdatesShaderReadableStatePriv) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 1, 1);
+    constexpr std::array<uint32_t, 3> priorities{1, 3, 0};
+    for (size_t i = 0; i < priorities.size(); ++i) {
+      fx.gpu_mem.write32(kKernelAddr + 8 * i, 0xbfb50000u | priorities[i]); // s_setprio
+      fx.gpu_mem.write32(kKernelAddr + 8 * i + 4,
+                         0xb8880b04u); // s_getreg_b32 s8, hwreg(STATE_PRIV,12,2)
+    }
+    auto *wf = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wf, nullptr);
+    for (auto priority : priorities) {
+      ASSERT_TRUE(fx.cu->step());
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 8), priority);
+    }
+  }
+}
+
+TEST(WaveDebugTest, Rdna4ProtectsTrapWritesAndExposesUserPriority) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(fx.cu, nullptr);
   constexpr uint32_t program[] = {
       0x806c81c1u, // s_add_co_u32 ttmp0, -1, 1
       0xbe84006cu, // s_mov_b32 s4, ttmp0
+      0xbfb50003u, // s_setprio 3
+      0xb8850b04u, // s_getreg_b32 s5, hwreg(STATE_PRIV,12,2)
+      0xbf820005u, // s_sethalt 5 (privileged fatal halt)
+      0xbf820001u, // s_sethalt 1
   };
   for (size_t i = 0; i < std::size(program); ++i)
     fx.gpu_mem.write32(kKernelAddr + 4 * i, program[i]);
@@ -377,7 +756,250 @@ TEST(WaveDebugTest, Rdna4ProtectsTrapWrites) {
   EXPECT_FALSE(wf->read_scc());
   EXPECT_EQ(wf->ttmp(0), 0x1234u);
   EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 4), 0x1234u);
+  EXPECT_EQ(fx.cu->read_sgpr(wf->sgpr_alloc().base + 5), 3u);
+  EXPECT_EQ(wf->status_raw() & (1u << 23), 0u);
+  EXPECT_TRUE(wf->status_halt());
+  EXPECT_TRUE(wf->debug_halted());
   EXPECT_EQ(wf->pc, kKernelAddr + sizeof(program));
+}
+
+TEST(WaveDebugTest, Gfx12WakesSleepingPeersInTheSameWorkgroup) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    WaveDebugFixture fx(arch, 3);
+    ASSERT_NE(fx.cu, nullptr);
+    fx.gpu_mem.write32(kKernelAddr, 0xbf838000u);     // s_sleep 0x8000
+    fx.gpu_mem.write32(kKernelAddr + 4, 0xbfb00000u); // s_endpgm
+    fx.gpu_mem.write32(kKernelAddr + 8, 0xbfb40000u); // s_wakeup
+    fx.gpu_mem.write32(kKernelAddr + 12, 0xbfb00000u);
+    fx.cu->begin_workgroup(0, 0, 2);
+    auto *peer = fx.dispatch(kKernelAddr);
+    auto *unrelated = fx.cu->dispatch_wf(1, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
+    ASSERT_NE(peer, nullptr);
+    ASSERT_NE(unrelated, nullptr);
+    for (int i = 0; i < 4; ++i)
+      fx.cu->step();
+    EXPECT_EQ(peer->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+    ASSERT_NE(fx.dispatch(kKernelAddr + 8), nullptr);
+    for (int i = 0; i < 4; ++i)
+      fx.cu->step();
+    EXPECT_TRUE(peer->is_halted());
+    EXPECT_FALSE(peer->sleep_wakeup());
+    EXPECT_EQ(unrelated->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+    EXPECT_EQ(unrelated->pc, kKernelAddr + 4);
+  }
+}
+
+TEST(WaveDebugTest, Gfx12WakeupGivesAnAwakeWaveOneCredit) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    WaveDebugFixture fx(arch, 3);
+    ASSERT_NE(fx.cu, nullptr);
+    fx.cu->begin_workgroup(0, 0, 2);
+    auto *issuer = fx.dispatch(kKernelAddr);
+    auto *peer = fx.dispatch(kKernelAddr);
+    auto *single = fx.cu->dispatch_wf(1, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(peer, nullptr);
+    ASSERT_NE(single, nullptr);
+    auto decoder = Decoder::create(arch);
+    auto issue = [&](amdgpu::Wavefront &wave, uint32_t word) {
+      const std::array<uint32_t, 1> words{word};
+      auto inst = decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.value().get(), wave).succeeded());
+    };
+    constexpr uint32_t wakeup = 0xbfb40000u;
+    auto expect_credit = [&](amdgpu::Wavefront &wave, bool expected) {
+      issue(wave, 0xb8820044u); // s_getreg_b32 s2,hwreg(STATE_PRIV,1,1)
+      EXPECT_EQ(wave.debug_read_sgpr(2), uint32_t(expected));
+    };
+
+    // Only the immediate form accepts bit 15 as an indefinite sleep request.
+    peer->debug_write_sgpr(0, 0x807f);
+    issue(*peer, 0xbe805800u); // s_sleep_var s0
+    EXPECT_EQ(peer->sleep_cycles(), 64u * 127);
+    peer->set_sleep_cycles(0);
+    issue(*peer, 0xbf830000u);
+    EXPECT_EQ(peer->sleep_cycles(), 0u);
+
+    issue(*issuer, 0xbf800000u); // s_nop 0
+    expect_credit(*issuer, false);
+    expect_credit(*peer, false);
+    issue(*single, wakeup);
+    expect_credit(*single, false);
+    for (const uint32_t word : {0xbf830000u, 0xbf83007fu, 0xbf838000u, 0xbe805800u}) {
+      for (const uint32_t count : {0u, 127u}) {
+        peer->debug_write_sgpr(0, count);
+        issue(*issuer, wakeup);
+        issue(*issuer, wakeup);
+        expect_credit(*issuer, arch == ROCJITSU_CODE_ARCH_RDNA4);
+        expect_credit(*peer, true);
+        expect_credit(*single, false);
+        issue(*peer, word);
+        expect_credit(*peer, false);
+        EXPECT_EQ(peer->sleep_cycles(), 0u);
+        issue(*peer, 0xbf83007fu); // A second sleep charges its full delay.
+        EXPECT_EQ(peer->sleep_cycles(), 64u * 127);
+        peer->set_sleep_cycles(0);
+      }
+    }
+
+    // A different wave can credit the issuer on both architectures.
+    issue(*peer, wakeup);
+    expect_credit(*issuer, true);
+
+    // A non-retiring operand error and a rolled-back debug stop preserve the
+    // architectural credit. A retired zero-delay sleep still consumes it.
+    issuer->report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    issuer->issue_sleep_with_credit(0);
+    EXPECT_TRUE(issuer->sleep_wakeup());
+    issuer->clear_instruction_execution_error();
+    const auto old = issuer->debug_stop_state();
+    issuer->debug_trap(0);
+    issuer->restore_debug_stop_state(old);
+    expect_credit(*issuer, true);
+    issue(*issuer, 0xbf830000u);
+    expect_credit(*issuer, false);
+  }
+}
+
+TEST(WaveDebugTest, Gfx1250NamedBarrierWakeTargetsMembersWithoutReleasingWaiters) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5, 5);
+  ASSERT_NE(fx.cu, nullptr);
+  fx.cu->begin_workgroup(0, 0, 4, 2);
+  fx.cu->begin_workgroup(0, 1, 1, 1);
+  auto *sender = fx.dispatch(kKernelAddr);
+  auto *peer = fx.dispatch(kKernelAddr);
+  auto *waiter = fx.dispatch(kKernelAddr);
+  auto *other = fx.dispatch(kKernelAddr);
+  auto *foreign = fx.cu->dispatch_wf(1, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
+  ASSERT_NE(sender, nullptr);
+  ASSERT_NE(peer, nullptr);
+  ASSERT_NE(waiter, nullptr);
+  ASSERT_NE(other, nullptr);
+  ASSERT_NE(foreign, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto issue = [&](amdgpu::Wavefront &wave, uint32_t encoding) {
+    const std::array<uint32_t, 1> code{encoding};
+    auto instruction = decoder->decode_window(code);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(fx.cu->execute_instruction(instruction.value().get(), wave).succeeded());
+  };
+  auto credit = [&](amdgpu::Wavefront &wave) {
+    issue(wave, 0xb8820044u); // s_getreg_b32 s2,hwreg(STATE_PRIV,1,1)
+    return wave.debug_read_sgpr(2);
+  };
+  constexpr uint32_t join_one = 0xbe805281u; // s_barrier_join 1
+  constexpr uint32_t wake_one = 0xbe805781u; // s_wakeup_barrier 1
+  constexpr uint32_t sleep_forever = 0xbf838000u;
+  for (auto *member : {peer, waiter, foreign})
+    issue(*member, join_one);
+  // ID 0 selects other waves in the group that have not joined a named barrier.
+  issue(*other, sleep_forever);
+  issue(*sender, 0xbe805780u); // s_wakeup_barrier 0
+  EXPECT_EQ(other->sleep_cycles(), 0u);
+  EXPECT_EQ(credit(*sender), 0u);
+  EXPECT_EQ(credit(*peer), 0u);
+  EXPECT_EQ(credit(*foreign), 0u);
+  issue(*other, 0xbe805282u);  // s_barrier_join 2
+  issue(*waiter, 0xbf940001u); // s_barrier_wait 1
+  ASSERT_EQ(waiter->state(), amdgpu::WfState::BARRIER);
+  const auto state_before = waiter->barrier_state(1);
+  for (auto *wave : {peer, other, foreign})
+    issue(*wave, sleep_forever);
+
+  for (const uint32_t invalid : {0xbe8057c1u, 0xbe805783u}) {
+    issue(*sender, invalid); // Workgroup and unallocated named barrier IDs.
+    EXPECT_EQ(peer->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  }
+  issue(*sender, wake_one);
+  EXPECT_EQ(peer->sleep_cycles(), 0u);
+  EXPECT_EQ(credit(*peer), 0u);
+  EXPECT_EQ(credit(*sender), 0u);
+  EXPECT_EQ(other->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  EXPECT_EQ(foreign->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  EXPECT_EQ(waiter->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(waiter->barrier_state(1), state_before);
+
+  issue(*sender, join_one);
+  sender->set_m0(0xffffffe1u); // M0[4:0] selects 1; ignore unrelated high bits.
+  issue(*sender, 0xbe80577du); // s_wakeup_barrier m0
+  EXPECT_EQ(credit(*sender), 0u);
+  EXPECT_EQ(credit(*peer), 1u);
+  issue(*peer, sleep_forever);
+  EXPECT_EQ(peer->sleep_cycles(), 0u);
+  EXPECT_EQ(credit(*peer), 0u);
+  issue(*peer, 0xbf83007fu); // s_sleep 127, after the single credit was consumed.
+  EXPECT_EQ(peer->sleep_cycles(), 64u * 127u);
+  EXPECT_EQ(waiter->state(), amdgpu::WfState::BARRIER);
+}
+
+TEST(WaveDebugTest, Gfx1250UnassociatedNamedWakeReportsFailureBeforeChangingAnyPeer) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5, 4);
+  fx.cu->begin_workgroup(0, 0, 3, 1);
+  auto *sender = fx.dispatch(kKernelAddr);
+  auto *joined = fx.dispatch(kKernelAddr);
+  auto *unjoined = fx.dispatch(kKernelAddr);
+  auto *foreign = fx.cu->dispatch_wf(1, kKernelAddr, SGPRS_PER_WF, VGPRS_PER_WF);
+  ASSERT_NE(sender, nullptr);
+  ASSERT_NE(joined, nullptr);
+  ASSERT_NE(unjoined, nullptr);
+  ASSERT_NE(foreign, nullptr);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto issue = [&](amdgpu::Wavefront &wf, uint32_t word, bool supported = true) {
+    auto instruction = decoder->decode_window(std::span(&word, 1));
+    ASSERT_TRUE(instruction.succeeded());
+    const bool in_handler = wf.in_trap_handler();
+    const uint32_t trapsts = wf.trapsts();
+    std::string detail;
+    const auto rc = fx.cu->execute_instruction(instruction.value().get(), wf, &detail);
+    EXPECT_EQ(rc.succeeded(), supported) << detail;
+    if (!supported) {
+      EXPECT_EQ(wf.instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+      EXPECT_NE(detail.find("no named barrier association"), std::string::npos) << detail;
+      EXPECT_EQ(wf.in_trap_handler(), in_handler);
+      EXPECT_EQ(wf.trapsts(), trapsts);
+    }
+  };
+  constexpr uint32_t wake_one = 0xbe805781u; // s_wakeup_barrier 1
+  constexpr uint32_t ordinary_wake = 0xbfb40000u;
+  constexpr uint32_t sleep_forever = 0xbf838000u;
+  sender->set_m0((2u << 16) | 1u);
+  issue(*sender, 0xbe80517du); // s_barrier_init m0
+  issue(*joined, 0xbe805281u); // s_barrier_join 1
+  issue(*joined, sleep_forever);
+  issue(*foreign, sleep_forever);
+  issue(*sender, wake_one, false); // The awake unjoined wave could receive a credit.
+  EXPECT_FALSE(unjoined->sleep_wakeup());
+  EXPECT_EQ(joined->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+
+  issue(*unjoined, 0xbe804e81u); // s_barrier_signal 1; signaling does not join a barrier.
+  const uint32_t signaled = sender->barrier_state(1);
+  EXPECT_EQ((signaled >> 16) & 0x7fu, 1u);
+  issue(*unjoined, sleep_forever);
+  for (bool in_handler : {false, true}) {
+    sender->set_in_trap_handler(in_handler);
+    issue(*sender, wake_one, false);
+  }
+  sender->set_in_trap_handler(false);
+  EXPECT_EQ(unjoined->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  EXPECT_EQ(joined->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
+  EXPECT_EQ(sender->barrier_state(1), signaled);
+
+  issue(*sender, ordinary_wake);
+  issue(*sender, ordinary_wake);
+  ASSERT_TRUE(unjoined->sleep_wakeup());
+  issue(*joined, sleep_forever); // Consume the existing credit, then really sleep.
+  issue(*joined, sleep_forever);
+  issue(*sender, wake_one); // Delivery to the credited unjoined wave has no observable effect.
+  EXPECT_EQ(joined->sleep_cycles(), 0u);
+  EXPECT_TRUE(unjoined->sleep_wakeup());
+  EXPECT_EQ(foreign->sleep_cycles(), amdgpu::Wavefront::kSleepForever);
 }
 
 TEST(WaveDebugTest, Gfx12SleepingWaveRestoresDelayWhenDebugStopIsRolledBack) {
@@ -1109,7 +1731,7 @@ TEST(WaveDebugTest, Cdna2TrapDrainsMemoryAndExposesPrivilegeAndHandlerAddresses)
       0xb883f810u, // s_getreg_b32 s3, hwreg(TBA_LO)
       0xb884f812u, // s_getreg_b32 s4, hwreg(TMA_LO)
       0x806c846cu, // s_add_u32 ttmp0, ttmp0, 4
-      0xbe801f6cu, // s_rfe_b64 ttmp[0:1]
+      0x9580806cu, // s_rfe_restore_b64 ttmp[0:1], 0
   };
   for (uint32_t i = 0; i < handler.size(); ++i)
     fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
@@ -1153,7 +1775,7 @@ TEST(WaveDebugTest, Cdna2FlatBoundsReportOnCompletionAndEnterEnabledHandlerAtNex
                              kSEndpgm};
     for (size_t i = 0; i < code.size(); ++i)
       fx.gpu_mem.write32(kKernelAddr + 4 * i, code[i]);
-    fx.gpu_mem.write32(kTrapHandlerAddr, 0xbe801f6cu); // s_rfe_b64 ttmp[0:1]
+    fx.gpu_mem.write32(kTrapHandlerAddr, 0x9580806cu); // s_rfe_restore_b64 ttmp[0:1], 0
     fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
       return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0x3000, false};
     });
@@ -1287,27 +1909,30 @@ TEST(WaveDebugTest, Cdna2TakenTrapRetiresDependenciesBeforeHandlerReads) {
   }
 }
 
-TEST(WaveDebugTest, Cdna2ScalarSourcesUseLiveWaveState) {
+TEST(WaveDebugTest, Cdna2ConditionalBranchAndScalarSourcesUseLiveWaveState) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2);
   const std::array program{
-      0xbf820001u, // s_branch +1
+      0xbf970001u, // s_cbranch_cdbgsys +1
       0xbeec0081u, // s_mov_b32 ttmp0, 1 (skipped)
       0xbeed0081u, // s_mov_b32 ttmp1, 1 (unprivileged)
       0xbe82014cu, // s_mov_b64 s[2:3], s[76:77] (out of allocation)
       0xbe8401fbu, // s_mov_b64 s[4:5], src_vccz
       0xbe8601fcu, // s_mov_b64 s[6:7], src_execz
+      0xbf8f0002u, // s_setprio 2
+      0xbf8d0001u, // s_sethalt 1
       kSEndpgm,
   };
   for (uint32_t i = 0; i < program.size(); ++i)
     fx.gpu_mem.write32(kKernelAddr + i * 4, program[i]);
   auto *wf = fx.cu->dispatch_wf(0, kKernelAddr, 16, 16);
   ASSERT_NE(wf, nullptr);
+  wf->set_status_raw(1u << 21);
   wf->set_exec(0);
   wf->set_vcc(0);
   const auto base = wf->sgpr_alloc().base;
   fx.cu->write_sgpr(base, 0x11223344);
   fx.cu->write_sgpr(base + 1, 0x55667788);
-  for (unsigned i = 0; i < 5; ++i)
+  for (unsigned i = 0; i < 7; ++i)
     fx.cu->step();
   EXPECT_EQ(wf->ttmp(0), 0u);
   EXPECT_EQ(wf->ttmp(1), 0u);
@@ -1315,6 +1940,12 @@ TEST(WaveDebugTest, Cdna2ScalarSourcesUseLiveWaveState) {
   EXPECT_EQ(fx.cu->read_sgpr(base + 3), 0x55667788u);
   EXPECT_EQ(fx.cu->read_sgpr(base + 4), 1u);
   EXPECT_EQ(fx.cu->read_sgpr(base + 6), 1u);
+  EXPECT_EQ((wf->status_raw() >> 3) & 3, 2u);
+  EXPECT_TRUE(wf->status_halt());
+  EXPECT_FALSE(fx.cu->has_runnable_wfs());
+  EXPECT_EQ(wf->pc, kKernelAddr + 8 * 4);
+  wf->set_status_halt(false);
+  EXPECT_TRUE(fx.cu->has_runnable_wfs());
   fx.cu->step();
   EXPECT_TRUE(wf->is_halted());
 }
@@ -1342,6 +1973,31 @@ TEST(WaveDebugTest, Cdna2DeferredScalarLoadsHonorTtmpWritePermission) {
   }
 }
 
+TEST(WaveDebugTest, Cdna2WakeupTargetsOnlySleepingPeersInTheSameWorkgroup) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA2, 3);
+  fx.gpu_mem.write32(kKernelAddr, 0xbf830000); // s_wakeup
+  auto *issuer = fx.cu->dispatch_wf(3, kKernelAddr, 16, 16);
+  auto *peer = fx.cu->dispatch_wf(3, 0, 16, 16);
+  auto *other = fx.cu->dispatch_wf(3, 0, 16, 16);
+  ASSERT_TRUE(issuer && peer && other);
+  issuer->set_workgroup_dispatch(8, 2);
+  peer->set_workgroup_dispatch(8, 2);
+  other->set_workgroup_dispatch(9, 1);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  const std::array words{0xbf830000u, 0u};
+  auto wake = decoder->decode_window(words);
+  ASSERT_TRUE(wake.succeeded());
+  peer->set_sleep_cycles(100);
+  other->set_sleep_cycles(100);
+  ASSERT_TRUE(fx.cu->execute_instruction(wake.value().get(), *issuer).succeeded());
+  EXPECT_EQ(peer->sleep_cycles(), 0u);
+  EXPECT_EQ(other->sleep_cycles(), 100u);
+  issuer->halt();
+  peer->halt();
+  other->halt();
+}
+
 TEST(WaveDebugTest, Cdna4GetregReadsConfiguredTrapAddressWords) {
   WaveDebugFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1362,7 +2018,7 @@ TEST(WaveDebugTest, Cdna4GetregReadsConfiguredTrapAddressWords) {
   EXPECT_EQ(byte_address(2, 3), 0x9876fedcba00ULL);
 }
 
-TEST(WaveDebugTest, Cdna4UserShaderReadsLiveState) {
+TEST(WaveDebugTest, Cdna4UserShaderReadsLiveStateAndHalts) {
   WaveDebugFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const uint32_t program[] = {
@@ -1370,6 +2026,12 @@ TEST(WaveDebugTest, Cdna4UserShaderReadsLiveState) {
       0xbe8201fc, // s_mov_b64 s[2:3], src_execz
       0xbeee0081, // s_mov_b32 ttmp2, 1
       0xbe84006e, // s_mov_b32 s4, ttmp2
+      0xbf8f0003, // s_setprio 3
+      0xb88508c2, // s_getreg_b32 s5, hwreg(STATUS,3,2)
+      0xbf9a0001, // s_cbranch_cdbgsys_and_user +1
+      0xbe860081, // s_mov_b32 s6, 1
+      0xbf8d0001, // s_sethalt 1
+      0xbf82ffff, // s_branch -1
   };
   for (size_t i = 0; i < std::size(program); ++i)
     fx.gpu_mem.write32(kKernelAddr + 4 * i, program[i]);
@@ -1386,9 +2048,74 @@ TEST(WaveDebugTest, Cdna4UserShaderReadsLiveState) {
   EXPECT_EQ(wave->debug_read_sgpr(3), 0u);
   EXPECT_EQ(wave->ttmp(2), 0xa5u);
   EXPECT_EQ(wave->debug_read_sgpr(4), 0u);
+  EXPECT_EQ(wave->debug_read_sgpr(5), 3u);
+  EXPECT_EQ(wave->debug_read_sgpr(6), 0u);
+  EXPECT_TRUE(wave->status_halt());
+  EXPECT_TRUE(wave->debug_halted());
 }
 
-TEST(WaveDebugTest, Cdna4TrapWaitsAndReturns) {
+TEST(WaveDebugTest, SingleStepCompletesAfterTheFrontendGrant) {
+  enum class Operation { Export, ParameterLoad, DirectLoad };
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const auto op : {Operation::Export, Operation::ParameterLoad, Operation::DirectLoad}) {
+      const bool lds = op != Operation::Export;
+      if (lds && arch == ROCJITSU_CODE_ARCH_RDNA4)
+        continue;
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << static_cast<unsigned>(op));
+      WaveDebugFixture fx(arch);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      const auto exp = arch == ROCJITSU_CODE_ARCH_RDNA4
+                           ? rdna4::build_vexport({.en = 1, .tgt = 0, .done = true})
+                           : rdna3::build_exp({.en = 1, .tgt = 0, .done = true});
+      const auto load = rdna3::build_ldsdir(
+          op == Operation::DirectLoad ? rdna3::kLdsDirectLoadLdsdir : rdna3::kLdsParamLoadLdsdir,
+          {.vdst = 6, .attr_chan = 2, .attr = 1});
+      fx.gpu_mem.write32(kKernelAddr, lds ? load[0] : exp[0]);
+      fx.gpu_mem.write32(kKernelAddr + 4, lds ? 0xbfb00000u : exp[1]);
+      auto *wave = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      if (lds) {
+        wave->set_lds_base(1024);
+        wave->set_lds_size(1024);
+        wave->set_m0(op == Operation::DirectLoad ? 128 | (2u << 16) : 128);
+        wave->lds().write32(1024 + 128, 57);
+        wave->lds().write32(1024 + 128 + 4 * (12 + 2), 123); // attr1 P0.z
+      }
+      const auto ready = lds ? amdgpu::Wavefront::kStatusParamReadyMask
+                             : amdgpu::Wavefront::kStatusExportReadyMask;
+      wave->set_status_raw(wave->status_raw() & ~ready);
+      unsigned stops = 0;
+      fx.cu->set_debug_active(true);
+      fx.cu->set_single_step_handler([&](amdgpu::Wavefront &stepped) {
+        ++stops;
+        stepped.set_debug_single_step(false);
+        stepped.set_debug_halted(true);
+        return true;
+      });
+      wave->set_debug_single_step(true);
+      ASSERT_TRUE(fx.cu->step());
+      EXPECT_EQ(wave->pc, kKernelAddr);
+      EXPECT_EQ(stops, 0u);
+      if (lds) {
+        EXPECT_EQ(wave->state(), amdgpu::WfState::PARAM_WAIT);
+        EXPECT_EQ(wave->debug_read_vgpr(6, 0), 0u);
+      }
+      EXPECT_TRUE(wave->debug_single_step());
+      wave->set_status_raw(wave->status_raw() | ready);
+      fx.cu->step();
+      EXPECT_EQ(stops, 1u);
+      EXPECT_TRUE(wave->debug_halted());
+      EXPECT_EQ(wave->pc, kKernelAddr + (lds ? 4 : 8));
+      if (lds) {
+        EXPECT_EQ(wave->debug_read_vgpr(6, 0), op == Operation::DirectLoad ? 57u : 123u);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, Cdna4TrapWaitsAndReturnsThroughCompatibilityOpcode) {
   for (const uint32_t helpers : {0u, 1u}) {
     SCOPED_TRACE(helpers);
     WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA4, 1,
@@ -1400,7 +2127,7 @@ TEST(WaveDebugTest, Cdna4TrapWaitsAndReturns) {
         0xb8800142, // s_getreg_b32 s0, hwreg(STATUS,5,1)
         0x806c846c, // s_add_u32 ttmp0, ttmp0, 4
         0x826d806d, // s_addc_u32 ttmp1, ttmp1, 0
-        0xbe801f6c, // s_rfe_b64 ttmp[0:1]
+        0x9580046c, // s_rfe_restore_b64 ttmp[0:1], s4
     };
     for (size_t i = 0; i < std::size(handler); ++i)
       fx.gpu_mem.write32(kTrapHandlerAddr + 4 * i, handler[i]);
@@ -2703,6 +3430,53 @@ TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
 
   fx.cu->step(); // s_endpgm -> wave halts
   EXPECT_TRUE(wf->is_halted());
+}
+
+TEST(WaveDebugTest, Gfx10WakeupEndsSleepOnlyInItsWorkgroup) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA2, 3);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fx.gpu_mem.write32(kKernelAddr, 0xbf830000u); // s_wakeup
+  fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+  auto *issuer = fx.dispatch(kKernelAddr);
+  auto *peer = fx.dispatch(kKernelAddr + 4);
+  auto *other = fx.cu->dispatch_wf(1, kKernelAddr + 4, SGPRS_PER_WF, VGPRS_PER_WF);
+  ASSERT_TRUE(issuer && peer && other);
+  issuer->set_workgroup_dispatch(1, 2);
+  peer->set_workgroup_dispatch(1, 2);
+  other->set_workgroup_dispatch(1, 1);
+  peer->set_sleep_cycles(64);
+  other->set_sleep_cycles(64);
+  fx.cu->step();
+  EXPECT_TRUE(peer->is_halted());
+  EXPECT_FALSE(other->is_halted());
+  EXPECT_EQ(other->sleep_cycles(), 63u);
+}
+
+TEST(WaveDebugTest, Gfx10ShaderHaltHonorsPrivilegeAndKeepsTheWaveResident) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fx.gpu_mem.write32(kKernelAddr, 0xbf8d0001u);     // s_sethalt 1
+  fx.gpu_mem.write32(kKernelAddr + 4, 0xbf8d0005u); // s_sethalt 5 (fatal halt)
+  fx.gpu_mem.write32(kKernelAddr + 8, kSEndpgm);
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_in_trap_handler(true);
+  fx.cu->step();
+  EXPECT_TRUE(wave->status_halt());
+  EXPECT_FALSE(wave->debug_paused());
+  fx.cu->step();
+  EXPECT_TRUE(wave->debug_paused());
+  EXPECT_TRUE(fx.cu->has_active_wfs());
+  EXPECT_FALSE(fx.cu->has_runnable_wfs());
+  fx.cu->step();
+  EXPECT_EQ(wave->pc, kKernelAddr + 8);
+  wave->set_shader_halt(4u); // clear FATAL_HALT
+  EXPECT_TRUE(fx.cu->has_runnable_wfs());
+  wave->set_in_trap_handler(false);
+  EXPECT_FALSE(fx.cu->has_runnable_wfs()); // deferred ordinary HALT
+  wave->set_status_halt(false);
+  fx.cu->step();
+  EXPECT_TRUE(wave->is_halted());
 }
 
 TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {

@@ -274,7 +274,9 @@ void VFrexpMantF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_frexp_mant_f32_vop3(*this, wf);
 }
 
-void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_clrexcp_vop3(*this, wf);
+}
 
 void VScreenPartition4seB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_screen_partition_4se_b32_vop3(*this, wf);

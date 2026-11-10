@@ -127,6 +127,7 @@ struct MemoryIssueInfo {
   [[nodiscard]] MemoryIssueInfo for_flat_memory_domains(bool vmem, bool lds) const {
     MemoryIssueInfo result;
     result.exec_masked = exec_masked;
+    result.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations()) {
       switch (obligation.wait_counter_type()) {
       case WaitCounterType::VMCNT:
@@ -152,6 +153,8 @@ struct MemoryIssueInfo {
   std::array<MemoryCounterObligation, MAX_COUNTER_OBLIGATIONS> counter_obligations_{};
   uint8_t num_counter_obligations_ = 0;
   bool exec_masked = true;
+  /// Count this instruction even when its EXEC-controlled data lanes are empty.
+  bool counts_with_empty_exec = false;
 };
 
 } // namespace rocjitsu::amdgpu

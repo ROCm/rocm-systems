@@ -756,6 +756,7 @@ RJ_DECODE_CASE(76, detail, decodeSSendmsgRtnB32Sop1) \
 RJ_DECODE_CASE(77, detail, decodeSSendmsgRtnB64Sop1) \
 RJ_DECODE_CASE(78, detail, decodeSBarrierSignalSop1) \
 RJ_DECODE_CASE(79, detail, decodeSBarrierSignalIsfirstSop1) \
+RJ_DECODE_CASE(80, detail, decodeSGetBarrierStateSop1) \
 RJ_DECODE_CASE(83, detail, decodeSAllocVgprSop1) \
 RJ_DECODE_CASE(88, detail, decodeSSleepVarSop1) \
 RJ_DECODE_CASE(96, detail, decodeSCeilF32Sop1) \
@@ -778,7 +779,7 @@ RJ_DECODE_GAP(6, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(56, 8, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(69, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(75, 1, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(80, 3, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(81, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(84, 4, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(89, 7, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(111, 145, DecoderImpl, decodeInvalid)

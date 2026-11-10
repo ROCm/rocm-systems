@@ -53,6 +53,16 @@ EventId RaceDetector::allocateEventId(
   return eid;
 }
 
+void RaceDetector::attachSrc2Source(EventId id, IntervalSet sourceReads) {
+  if (sourceReads.empty())
+    return;
+  events_.markLdsSourceReads(id);
+  const auto owner =
+      events_.ldsOrder(id) == MemoryOrderClass::LDS ? events_.waveId(id) : WaveId{-1};
+  adjustByteCounts(sourceReads, byteReadCounts, +1, owner);
+  src2Events.push_back({id, std::move(sourceReads)});
+}
+
 void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
 
 bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterType waitCounter) {
@@ -60,6 +70,12 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
 }
 
 void RaceDetector::retireLdsIntervals(EventId eventId) {
+  const auto src2 = std::ranges::find(src2Events, eventId, &Src2Event::id);
+  if (src2 != src2Events.end()) {
+    adjustByteCounts(src2->sourceReads, byteReadCounts, -1);
+    std::iter_swap(src2, src2Events.end() - 1);
+    src2Events.pop_back();
+  }
   const auto &bytes = events_.ldsIntervals(eventId);
   if (!events_.hasLiveLdsIntervals(eventId))
     return;
@@ -117,6 +133,15 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
+  for (const auto &source : src2Events) {
+    const auto id = source.id;
+    if (events_.waveId(id) == wave &&
+        (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                           events_.ldsOrder(id) == currentMemoryOrder)))
+      continue;
+    if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes))
+      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id});
+  }
   for (EventId eventId : ldsReadEvents) {
     if (events_.atomicLdsElementMatches(eventId, atomicBytes))
       continue;

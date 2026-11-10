@@ -682,10 +682,6 @@ inline bool should_skip_inst(std::string_view mn) {
   return mnemonic_has_any_prefix(mn, SKIP_PREFIXES);
 }
 
-constexpr std::array<std::string_view, 3> EXPECTED_RDNA1_UNIMPLEMENTED = {
-    "s_subvector_loop_begin", "s_subvector_loop_end", "s_get_waveid_in_workgroup"};
-constexpr std::array<std::string_view, 2> EXPECTED_RDNA2_UNIMPLEMENTED = {"s_subvector_loop_begin",
-                                                                          "s_subvector_loop_end"};
 constexpr std::array<std::string_view, 0> EXPECTED_NO_UNIMPLEMENTED = {};
 
 struct HarnessExpectation {
@@ -694,11 +690,11 @@ struct HarnessExpectation {
 };
 
 constexpr HarnessExpectation HARNESS_EXPECTATIONS[] = {
-    {"cdna1", EXPECTED_NO_UNIMPLEMENTED},    {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
-    {"cdna3", EXPECTED_NO_UNIMPLEMENTED},    {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
-    {"rdna1", EXPECTED_RDNA1_UNIMPLEMENTED}, {"rdna2", EXPECTED_RDNA2_UNIMPLEMENTED},
-    {"rdna3", EXPECTED_NO_UNIMPLEMENTED},    {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
-    {"rdna4", EXPECTED_NO_UNIMPLEMENTED},    {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna1", EXPECTED_NO_UNIMPLEMENTED}, {"cdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"cdna3", EXPECTED_NO_UNIMPLEMENTED}, {"cdna4", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna1", EXPECTED_NO_UNIMPLEMENTED}, {"rdna2", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna3", EXPECTED_NO_UNIMPLEMENTED}, {"rdna3_5", EXPECTED_NO_UNIMPLEMENTED},
+    {"rdna4", EXPECTED_NO_UNIMPLEMENTED}, {"gfx1250", EXPECTED_NO_UNIMPLEMENTED},
 };
 
 const HarnessExpectation *harness_expectation(std::string_view arch_name) {
@@ -8947,7 +8943,8 @@ TEST(Cdna1ValuTest, AccumulatorInputsAndVectorResults) {
   cu->write_vgpr(base + 2, 0, 0x7f7fffff);
   ASSERT_NO_FATAL_FAILURE(run(0x02000501)); // ADD maximum finite to itself
   EXPECT_EQ(wf->trapsts(), 0x129u);
-  wf->set_trapsts(0x100u);
+  ASSERT_NO_FATAL_FAILURE(run(0x7e006a00)); // CLREXCP preserves the memory violation
+  EXPECT_EQ(wf->trapsts(), 0x100u);
   cu->write_vgpr(base + 1, 0, 0x7fc00000);
   ASSERT_NO_FATAL_FAILURE(run(0xd042006a, 0x00020501)); // Quiet CMP_EQ_F32
   EXPECT_EQ(wf->trapsts(), 0x100u);

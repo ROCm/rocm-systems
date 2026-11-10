@@ -319,6 +319,11 @@ TEST_P(Cdna2VectorRegression, ClassCompareUsesExplicitDestinationAndExecuteMask)
   EXPECT_EQ(wave_->vcc(), old_vcc);
   EXPECT_EQ(cu_->read_sgpr(wave_->sgpr_alloc().base + 6), uint32_t(mask));
   EXPECT_EQ(cu_->read_sgpr(wave_->sgpr_alloc().base + 7), uint32_t(mask >> 32));
+  for (uint32_t word : {0x7e006a00u, 0xd1750000u}) {
+    wave_->set_trapsts(0x9ff);
+    ASSERT_NO_FATAL_FAILURE(execute({word, 0}));
+    EXPECT_EQ(wave_->trapsts(), 0x980u);
+  }
 }
 
 TEST_P(Cdna2VectorRegression, MatrixBroadcastUsesAdjacentBlocks) {

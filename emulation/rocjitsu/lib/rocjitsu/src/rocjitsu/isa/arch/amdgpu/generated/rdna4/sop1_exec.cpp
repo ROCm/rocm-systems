@@ -1119,9 +1119,19 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsg_rtn_b64_sop1(*this, wf);
 }
 
-void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_barrier_signal_sop1(*this, wf);
+}
 
-void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
+  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
+  if (wf.cu().in_multiwave_workgroup())
+    wf.write_scc(wf.barrier_signal(barrier_id, member_count));
+}
 
 void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_alloc_vgpr_sop1(*this, wf);
@@ -1521,6 +1531,10 @@ void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
   registers.write_scalar(sdst, result);
   wf.set_trapsts(wf.trapsts() | causes);
   wf.raise_alu_causes(causes);
+}
+
+void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_get_barrier_state_sop1(*this, wf);
 }
 
 } // namespace rdna4

@@ -1197,6 +1197,9 @@ RJ_DECODE_CASE(447, detail, decodeVFrexpExpI32F32Vop3) \
 RJ_DECODE_CASE(448, detail, decodeVFrexpMantF32Vop3) \
 RJ_DECODE_CASE(449, detail, decodeVClrexcpVop3) \
 RJ_DECODE_CASE(450, detail, decodeVMovreldB32Vop3) \
+RJ_DECODE_CASE(451, detail, decodeVMovrelsB32Vop3) \
+RJ_DECODE_CASE(452, detail, decodeVMovrelsdB32Vop3) \
+RJ_DECODE_CASE(456, detail, decodeVMovrelsd2B32Vop3) \
 RJ_DECODE_CASE(464, detail, decodeVCvtF16U16Vop3) \
 RJ_DECODE_CASE(465, detail, decodeVCvtF16I16Vop3) \
 RJ_DECODE_CASE(466, detail, decodeVCvtU16F16Vop3) \
@@ -1309,7 +1312,8 @@ RJ_DECODE_GAP(424, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(428, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(432, 1, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(434, 1, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(451, 13, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(453, 3, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(457, 7, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(485, 27, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(515, 252, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(770, 1, DecoderImpl, decodeInvalid) \
@@ -1799,8 +1803,10 @@ RJ_DECODE_CASE(31, detail, decodeSGl1InvSmem) \
 RJ_DECODE_CASE(32, detail, decodeSDcacheInvSmem) \
 RJ_DECODE_CASE(36, detail, decodeSMemtimeSmem) \
 RJ_DECODE_CASE(37, detail, decodeSMemrealtimeSmem) \
+RJ_DECODE_CASE(38, detail, decodeSAtcProbeSmem) \
+RJ_DECODE_CASE(39, detail, decodeSAtcProbeBufferSmem) \
 RJ_DECODE_DEFAULT(DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(5, 3, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(13, 18, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(33, 3, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(38, 218, DecoderImpl, decodeInvalid)
+RJ_DECODE_GAP(40, 216, DecoderImpl, decodeInvalid)

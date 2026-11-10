@@ -258,16 +258,29 @@ TEST(CheckpointRestoreErrorsTest, RejectsUnsupportedSplitBarriersAndGraphicsWait
     check();
   }
   for (const auto wait : {fb::GraphicsWait_Export, fb::GraphicsWait_Parameters}) {
-    InvalidCheckpoint record;
-    record.arch = "rdna3_5";
-    record.has_lds_state = true;
-    record.wavefront = true;
-    record.vgpr_lane_count = record.kernel_wave_size = 32;
-    record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
-    record.graphics_wait = wait;
-    test::ScopedTempFile file;
-    ASSERT_TRUE(write_checkpoint(file, record));
-    expect_restore_failure(file.path(), "Unsupported checkpoint graphics wait");
+    for (std::string_view arch : {"cdna3", "rdna3", "rdna3_5", "rdna4"}) {
+      SCOPED_TRACE(arch);
+      InvalidCheckpoint record;
+      record.arch = arch.data();
+      record.has_lds_state = true;
+      record.wavefront = true;
+      record.vgpr_lane_count = record.kernel_wave_size = arch == "cdna3" ? 64 : 32;
+      record.vgpr_bytes = 256 * record.vgpr_lane_count * sizeof(uint32_t);
+      record.graphics_wait = wait;
+      test::ScopedTempFile file;
+      ASSERT_TRUE(write_checkpoint(file, record));
+      if (arch == "cdna3") {
+        expect_restore_failure(file.path(),
+                               "Graphics wait on an incompatible checkpoint architecture");
+        continue;
+      }
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+      const auto *wave = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+      ASSERT_NE(wave, nullptr);
+      EXPECT_EQ(wave->state(), wait == fb::GraphicsWait_Export ? amdgpu::WfState::EXPORT_WAIT
+                                                               : amdgpu::WfState::PARAM_WAIT);
+    }
   }
 }
 
@@ -348,6 +361,213 @@ TEST(CheckpointRestoreErrorsTest, LegacyCdna5RestoresWaveLocalSleepWithoutAGroup
     ASSERT_NE(wave, nullptr);
     EXPECT_EQ(wave->sleep_cycles(), delay);
     EXPECT_EQ(wave->sleep_wakeup(), !delay);
+  }
+}
+
+TEST(CheckpointTest, LegacyGfx1151PartialGraphicsGrantSurvivesRestore) {
+  using amdgpu::Wavefront;
+  for (uint32_t grant : {Wavefront::kStatusExportReadyMask, Wavefront::kStatusParamReadyMask}) {
+    SCOPED_TRACE(grant);
+    InvalidCheckpoint record;
+    record.arch = "rdna3_5";
+    record.wavefront = true;
+    record.kernel_wave_size = record.vgpr_lane_count = 32;
+    record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
+    record.status = grant;
+    record.has_lds_state = true;
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, record));
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    const auto *wave = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->status_raw() &
+                  (Wavefront::kStatusExportReadyMask | Wavefront::kStatusParamReadyMask),
+              grant);
+  }
+}
+
+TEST(CheckpointTest, RetiredShaderExportRowsSurviveASecondExportAfterRestore) {
+  for (const std::string_view target : {"rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(target);
+    InvalidCheckpoint record;
+    record.arch = target.data();
+    record.wavefront = true;
+    record.kernel_wave_size = record.vgpr_lane_count = 32;
+    record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
+    record.has_lds_state = true;
+    const bool gfx12 = target == "rdna4";
+    const auto first = gfx12 ? rdna4::build_vexport({.en = 1, .tgt = 0, .vsrc0 = 4})
+                             : rdna3::build_exp({.en = 1, .tgt = 0, .vsrc0 = 4});
+    const auto second = gfx12 ? rdna4::build_vexport({.en = 1, .tgt = 1, .done = 1, .vsrc0 = 5})
+                              : rdna3::build_exp({.en = 1, .tgt = 1, .done = 1, .vsrc0 = 5});
+    record.program.assign(first.begin(), first.end());
+    record.program.push_back(gfx12 ? 0xbfc40000u : 0xbf89fff0u);
+    record.program.insert(record.program.end(), second.begin(), second.end());
+    record.program.push_back(0xbfb00000);
+    using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+    const auto restore = [](const std::string &path) {
+      rj_vm_t *result = nullptr;
+      EXPECT_EQ(rj_vm_restore_checkpoint(path.c_str(), &result), ROCJITSU_STATUS_SUCCESS);
+      return Vm(result, &rj_vm_destroy);
+    };
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_checkpoint(file, record));
+    auto original = restore(file.path());
+    ASSERT_TRUE(original);
+    auto *cu = original->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = cu->wf(0);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(5);
+    for (unsigned reg : {4u, 5u})
+      for (unsigned lane : {0u, 2u})
+        cu->write_vgpr(wave->vgpr_alloc().base + reg, lane, 0x11220000 + reg * 256 + lane);
+    const auto next = wave->pc + 12;
+    for (unsigned i = 0; i < 32 && wave->pc != next; ++i)
+      ASSERT_TRUE(cu->step());
+    ASSERT_EQ(wave->pc, next);
+    ASSERT_EQ(wave->shader_exports().size(), 1u);
+    test::ScopedTempFile saved;
+    ASSERT_TRUE(saved.initialize("rocjitsu-export-rows-"));
+    ASSERT_EQ(rj_vm_save_checkpoint(original.get(), saved.path().c_str(), 1),
+              ROCJITSU_STATUS_SUCCESS);
+    auto resumed = restore(saved.path());
+    ASSERT_TRUE(resumed);
+    auto *copy = resumed->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_EQ(copy->wf(0)->shader_exports().size(), 1u);
+    for (auto *device : {cu, copy}) {
+      auto *live = device->wf(0);
+      for (unsigned i = 0; i < 32 && live->shader_exports().size() < 2; ++i)
+        ASSERT_TRUE(device->step());
+      ASSERT_EQ(live->shader_exports().size(), 2u);
+      for (unsigned target = 0; target < 2; ++target) {
+        const auto &row = live->shader_exports()[target];
+        EXPECT_EQ(row.target, target);
+        EXPECT_EQ(row.row, 0u);
+        EXPECT_EQ(row.components, 1u);
+        EXPECT_EQ(row.done, bool(target));
+        EXPECT_EQ(row.valid_lanes, 5u);
+        for (unsigned lane : {0u, 2u})
+          EXPECT_EQ(row.values[lane][0], 0x11220000u + (4 + target) * 256 + lane);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, GraphicsGrantMigrationAndHeldFrontendSurvivePublicRestore) {
+  using amdgpu::Wavefront;
+  using amdgpu::WfState;
+  enum class Op { Export, Parameters, WaitEvent };
+  enum class Format { Legacy, ResourceOnly, ExplicitLaunch, CursorOnly, Marked };
+  constexpr uint32_t nop = 0xbf800000, endpgm = 0xbfb00000, wait_event = 0xbf8b0000;
+  constexpr uint32_t unrelated = 1u << 3; // Preserve the low user-priority bit.
+  const auto gfx11_export = rdna3::build_exp({.en = 1, .tgt = 0, .done = 1});
+  const auto gfx12_export = rdna4::build_vexport({.en = 1, .tgt = 0, .done = 1});
+  const auto parameter = rdna3::build_ldsdir(rdna3::kLdsParamLoadLdsdir, {.vdst = 2});
+  for (const std::string_view arch : {"rdna3", "rdna3_5", "rdna4"}) {
+    const bool gfx12 = arch == "rdna4";
+    for (const auto op : {Op::Export, Op::Parameters, Op::WaitEvent}) {
+      if ((gfx12 && op == Op::Parameters) || (op == Op::WaitEvent && arch != "rdna3_5"))
+        continue;
+      const auto mask = op == Op::Parameters ? Wavefront::kStatusParamReadyMask
+                                             : Wavefront::kStatusExportReadyMask;
+      const auto parked = op == Op::Parameters ? WfState::PARAM_WAIT : WfState::EXPORT_WAIT;
+      const auto words = gfx12 ? gfx12_export : gfx11_export;
+      for (const auto format : {Format::Legacy, Format::ResourceOnly, Format::ExplicitLaunch,
+                                Format::CursorOnly, Format::Marked}) {
+        SCOPED_TRACE(testing::Message() << arch << " opcode=" << static_cast<unsigned>(op)
+                                        << " checkpoint format=" << static_cast<unsigned>(format));
+        InvalidCheckpoint record;
+        record.arch = arch.data();
+        record.wavefront = true;
+        record.kernel_wave_size = record.vgpr_lane_count = 32;
+        record.vgpr_bytes = 256 * 32 * sizeof(uint32_t);
+        record.status = unrelated;
+        record.has_lds_state = true;
+        record.has_cp_cursor = format != Format::Legacy;
+        record.has_lds_cursor = format == Format::ResourceOnly || format == Format::Marked;
+        if (format == Format::ExplicitLaunch)
+          record.graphics_wait = fb::GraphicsWait_LaunchDefaults;
+        else if (format == Format::Marked)
+          record.graphics_wait = fb::GraphicsWait_None;
+
+        record.program = {nop};
+        if (op == Op::Parameters)
+          record.program.insert(record.program.end(), parameter.begin(), parameter.end());
+        else if (op == Op::WaitEvent)
+          record.program.push_back(wait_event);
+        else
+          record.program.insert(record.program.end(), words.begin(), words.end());
+        record.program.push_back(endpgm);
+        test::ScopedTempFile legacy;
+        ASSERT_TRUE(write_checkpoint(legacy, record));
+        using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+        const auto restore = [](const std::string &path) {
+          rj_vm_t *result = nullptr;
+          EXPECT_EQ(rj_vm_restore_checkpoint(path.c_str(), &result), ROCJITSU_STATUS_SUCCESS);
+          return Vm(result, &rj_vm_destroy);
+        };
+        const auto wave = [](const Vm &vm) {
+          return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+        };
+        const auto advance = [](const Vm &vm, Wavefront &wf, WfState until) {
+          for (unsigned step = 0; step < 64 && wf.state() != until; ++step) {
+            int active = 0;
+            ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+          }
+          EXPECT_EQ(wf.state(), until);
+        };
+        auto original = restore(legacy.path());
+        ASSERT_TRUE(original);
+        auto *first = wave(original);
+        ASSERT_NE(first, nullptr);
+        const bool legacy_ready = format == Format::Legacy || format == Format::ResourceOnly ||
+                                  format == Format::ExplicitLaunch;
+        const uint32_t standalone =
+            Wavefront::kStatusExportReadyMask | (gfx12 ? 0u : Wavefront::kStatusParamReadyMask);
+        EXPECT_EQ(first->status_raw(), unrelated | (legacy_ready ? standalone : 0u));
+        ASSERT_NO_FATAL_FAILURE(advance(original, *first, legacy_ready ? WfState::HALTED : parked));
+
+        // A current writer must preserve both an ungranted runnable wave and
+        // a parked wave. S_WAIT_EVENT has already advanced the saved PC.
+        for (bool withhold : {false, true}) {
+          auto source = restore(legacy.path());
+          ASSERT_TRUE(source);
+          auto *src = wave(source);
+          ASSERT_NE(src, nullptr);
+          src->set_status_raw(withhold ? src->status_raw() & ~mask : src->status_raw() | mask);
+          const auto save_and_restore = [&](const Vm &vm) {
+            test::ScopedTempFile file;
+            const auto initialized = file.initialize("rocjitsu-graphics-checkpoint-");
+            EXPECT_TRUE(initialized);
+            if (!initialized)
+              return Vm(nullptr, &rj_vm_destroy);
+            EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0),
+                      ROCJITSU_STATUS_SUCCESS);
+            return restore(file.path());
+          };
+          auto copy = save_and_restore(source);
+          ASSERT_TRUE(copy);
+          auto *live = wave(copy);
+          ASSERT_NE(live, nullptr);
+          EXPECT_EQ(live->status_raw(), src->status_raw());
+          ASSERT_NO_FATAL_FAILURE(advance(copy, *live, withhold ? parked : WfState::HALTED));
+          if (!withhold)
+            continue;
+          const auto parked_pc = live->pc;
+          auto resumed = save_and_restore(copy);
+          ASSERT_TRUE(resumed);
+          auto *held = wave(resumed);
+          ASSERT_NE(held, nullptr);
+          EXPECT_EQ(held->state(), parked);
+          int active = 0;
+          ASSERT_EQ(rj_vm_step(resumed.get(), &active), ROCJITSU_STATUS_SUCCESS);
+          EXPECT_EQ(held->pc, parked_pc);
+          held->set_status_raw(held->status_raw() | mask);
+          ASSERT_NO_FATAL_FAILURE(advance(resumed, *held, WfState::HALTED));
+        }
+      }
+    }
   }
 }
 

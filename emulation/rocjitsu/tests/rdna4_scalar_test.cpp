@@ -228,6 +228,73 @@ TEST_F(Rdna4Scalar, Wave64NarrowMaskUpdatesPreserveHighWordAndTestLowWord) {
   }
 }
 
+TEST_F(Rdna4Scalar, SingleWaveBarrierIsfirstPreservesSccAfterWaitResumes) {
+  cu->begin_workgroup(0, 0, 1);
+  constexpr uint32_t wait_km = 0xbfc70000u;
+  constexpr uint32_t signal_words[] = {
+      0xbe804fc1u, // -1, workgroup
+      0xbe804fc2u, // -2, trap barrier in a user wave
+      0xbe804f80u, //  0, no barrier
+  };
+  constexpr uint64_t base = 0x1000;
+  for (unsigned i = 0; i < std::size(signal_words); ++i) {
+    memory.write32(base + i * 8, wait_km);
+    memory.write32(base + i * 8 + 4, signal_words[i]);
+  }
+  uint64_t pc = base;
+  for (const auto signal : signal_words) {
+    const std::array<uint32_t, 4> words{signal};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_FALSE(amdgpu::MemoryWaitScoreboard::result_is_written(*inst, *wave));
+    for (const bool initial : {false, true}) {
+      SCOPED_TRACE(signal);
+      SCOPED_TRACE(initial);
+      wave->pc = pc;
+      wave->write_scc(initial);
+      wave->wait_counters().increment(amdgpu::WaitCounterType::KMCNT);
+      cu->step();
+      ASSERT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+      cu->step();
+      ASSERT_EQ(wave->pc, pc + 4);
+      wave->wait_counters().decrement(amdgpu::WaitCounterType::KMCNT);
+      cu->step();
+      EXPECT_EQ(wave->pc, pc + 8);
+      EXPECT_EQ(wave->read_scc(), initial);
+    }
+    pc += 8;
+  }
+}
+
+TEST_F(Rdna4Scalar, SignalsCompleteBeforePeersWait) {
+  auto *peer = cu->dispatch_wf(0, 0, 106, 16);
+  ASSERT_NE(peer, nullptr);
+  cu->begin_workgroup(0, 0, 2);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbe804fc1)); // s_barrier_signal_isfirst -1
+  EXPECT_TRUE(wave->read_scc());
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbe8250c1)); // s_get_barrier_state s2,-1
+  EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 2), 0x10021u);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbf94ffff)); // s_barrier_wait -1
+  EXPECT_EQ(wave->state(), amdgpu::WfState::BARRIER);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xbe804ec1)); // s_barrier_signal -1
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xb8820084)); // s_getreg_b32 s2,hwreg(STATE_PRIV,2,1)
+  EXPECT_EQ(cu->read_sgpr(peer->sgpr_alloc().base + 2), 1u);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xbf94ffff));
+  EXPECT_EQ(peer->state(), amdgpu::WfState::RUNNING);
+  for (const auto signal : {0xbe804fc2u, 0xbe804f80u}) {
+    const std::array<uint32_t, 4> words{signal};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(amdgpu::MemoryWaitScoreboard::result_is_written(*inst, *wave));
+    for (const bool initial : {false, true}) {
+      wave->write_scc(initial);
+      ASSERT_NO_FATAL_FAILURE(execute(*wave, signal));
+      EXPECT_FALSE(wave->read_scc()); // User -2 and barrier 0 both clear SCC in a multiwave group.
+    }
+  }
+}
+
 TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
   const uint32_t code[] = {
       0xbe804ec1, // s_barrier_signal -1
@@ -236,6 +303,18 @@ TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
       0xbfb00000, // s_endpgm
   };
   ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {1, 1}));
+}
+
+TEST_F(Rdna4Scalar, FirstWorkgroupSignalSelectsExactlyOneWave) {
+  const uint32_t code[] = {
+      0xbf068080, // s_cmp_eq_u32 0, 0
+      0xbe804fc1, // s_barrier_signal_isfirst -1
+      0xbfc70000, // s_wait_kmcnt 0
+      0x98008081, // s_cselect_b32 s0, 1, 0
+      0xbf94ffff, // s_barrier_wait -1
+      0xbfb00000, // s_endpgm
+  };
+  ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {0, 1}));
 }
 
 TEST_F(Rdna4Scalar, SplitWaitsReplacePreviousTargetAndMaskReservedBits) {

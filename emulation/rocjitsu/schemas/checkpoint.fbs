@@ -90,6 +90,16 @@ struct WaveExceptionRegisters {
   gfx12_trap_ctrl: uint32;
 }
 
+/// One graphics export buffer row and its four component values per wave lane.
+table ShaderExportRow {
+  target: ubyte;
+  row: ubyte;
+  components: ubyte;
+  done: bool;
+  valid_lanes: uint64;
+  values: [uint32] (required);
+}
+
 table WavefrontState {
   wf_id: uint32;
   wg_id: uint32;
@@ -158,6 +168,7 @@ table WavefrontState {
   ib_sts2_gfx11: uint32;
   // Distinguish direct memory from the standalone VM's identity mapping.
   uses_internal_address_space: bool = null;
+  shader_exports: [ShaderExportRow];
 }
 
 /// Serialized state of a compute unit.
@@ -202,6 +213,8 @@ table ComputeUnitState {
   rdna4_workgroups: [Rdna4CheckpointGroup];
   // Raw simulation ticks for the shader realtime clock. GFX10 stores these in gfx10_scheduling.
   model_realtime: uint64 = null;
+  // Shader performance counters. Older GFX10 checkpoints use gfx10_scheduling.
+  shader_perf_levels: [uint32];
 }
 
 /// Serialized state of a command processor.

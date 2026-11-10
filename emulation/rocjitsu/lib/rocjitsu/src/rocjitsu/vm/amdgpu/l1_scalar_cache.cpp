@@ -73,6 +73,30 @@ VmAccessOutcome L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid, bool fe
   return VmAccessOutcome::Complete;
 }
 
+void L1ScalarCache::prefetch_resident(uint64_t addr, uint32_t vmid) {
+  synchronize_epoch();
+  if (!l2_)
+    return;
+  const uint64_t line = CacheStore::line_address(addr);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, Mtype::RW);
+  const Mtype policy = mtypes.at(line);
+  if (policy == Mtype::UC || policy == Mtype::CC ||
+      !l2_->can_fetch_range(line, CacheStore::LINE_SIZE, vmid))
+    return;
+  const auto *resident = cache_.peek(line, vmid);
+  if (resident && CacheStore::bytes_valid(*resident, 0, CacheStore::LINE_SIZE))
+    return;
+  std::array<uint8_t, CacheStore::LINE_SIZE> bytes;
+  if (!l2_->copy_resident_line(line, bytes, vmid))
+    return;
+  if (resident)
+    cache_.fill_missing_bytes(line, bytes.data(), vmid);
+  else {
+    cache_.allocate(line, vmid);
+    cache_.fill_line(line, bytes.data(), vmid);
+  }
+}
+
 void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                         uint32_t vmid) {
   simdojo::CacheTag *tag = nullptr;

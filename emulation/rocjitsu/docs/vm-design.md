@@ -685,6 +685,20 @@ external submissions.
 
 ---
 
+### CDNA5 named-barrier wakeups
+
+`S_WAKEUP_BARRIER` targets peers in the issuer's workgroup. Sleeping recipients
+wake immediately, and awake recipients receive one credit for a later sleep.
+A positive ID selects peers associated with that named barrier. ID zero
+selects peers without a named association.
+
+The CDNA5 ISA also allows an unjoined wave to receive a named wake. It
+specifies that `S_BARRIER_SIGNAL` changes the barrier count without recording
+the signaler's identity. When a positive-ID wake could change an unassociated
+peer's sleep or credit, the VM reports an unsupported instruction before
+changing any peer. A peer that is already awake with a credit can keep it
+under either interpretation.
+
 ## Simulation Integration
 
 The hardware hierarchy plugs into simdojo's `SimulationEngine` directly. The C

@@ -387,6 +387,10 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  enum class OrderedAppend { Disabled, PerWave, PerWorkgroup };
+  OrderedAppend ordered_append = OrderedAppend::Disabled;
+  /// Number of distinct compute IDs in the ring's GDS_COMPUTE_MAX_WAVE_ID range.
+  uint32_t ordered_id_count = 4096;
   /// Enable the private-segment wave-offset SGPR at dispatch.
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;

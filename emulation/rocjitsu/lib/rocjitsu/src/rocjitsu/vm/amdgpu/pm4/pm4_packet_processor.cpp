@@ -120,6 +120,17 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         continue;
       }
       auto &ib = submission.buffers.front();
+      if (ib.reset_gds_wave_id) {
+        if (context.arch != ROCJITSU_CODE_ARCH_RDNA1 && context.arch != ROCJITSU_CODE_ARCH_RDNA2)
+          return fail("unsupported GDS wave ID reset on this target");
+        // GFX10's KMD emits this reset only on a compute ring.
+        if (!submission.graphics_engine) {
+          if (!context.reset_gds_wave_id)
+            return fail("missing GDS wave ID reset service");
+          context.reset_gds_wave_id();
+        }
+        ib.reset_gds_wave_id = false;
+      }
       if (!ib.dwords) {
         submission.buffers.pop_front();
         continue;

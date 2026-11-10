@@ -79,7 +79,7 @@ struct RaceWavefrontState : WavefrontState {
     uint32_t bytes;
     uint32_t lane;
   };
-  std::optional<LdsOperandRead> lds_operand_read;
+  std::vector<LdsOperandRead> lds_operand_reads;
 
   // The GFX10 and GFX11 inline image queries write every selected DWORD on the same
   // active lanes. Gather the actual register writes until execution succeeds.

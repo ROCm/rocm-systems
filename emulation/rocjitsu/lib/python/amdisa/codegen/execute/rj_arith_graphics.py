@@ -19,7 +19,7 @@ INTERP_NAMES = {
 def gen_interp(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src, enc_name = ctx.dst_ops, ctx.src_ops, ctx.enc_name
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in INTERP_NAMES:
+    if arch not in ('rdna3', 'rdna3_5', 'rdna4') or mnemonic not in INTERP_NAMES:
         return None
     if enc_name != 'ENC_VINTERP' or len(dst) != 1 or len(src) != 3:
         return None
@@ -34,17 +34,23 @@ def gen_interp(ctx: ExecuteContext) -> str | None:
         '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
     ]
     if half:
-        opsel = 'inst_.op_sel' if arch == 'rdna3' else 'inst_.opsel'
+        opsel = 'inst_.opsel' if arch == 'rdna4' else 'inst_.op_sel'
         terms += [f'(({opsel} & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)']
         terms += [
             f'(({opsel} & {8 if p2 else 4}) ? RJ_ARITH_ALU_HIGH_{"D" if p2 else "C"} : 0u)'
         ]
+    controls = 'wf.cu().arithmetic_flags()'
+    wave32, wave64 = wave_api(api, 32), wave_api(api, 64)
+    if arch == 'rdna3_5':
+        p2_half_rtz = ', '.join(str(b).lower() for b in (p2, half, '_RTZ_' in mnemonic))
+        kernel = f'amdgpu::arith::gfx115_interp<{p2_half_rtz}, '
+        wave32, wave64 = kernel + 'uint32_t>', kernel + 'uint64_t>'
     return '\n'.join(
         [
             '  const uint64_t modifiers = ' + ' | '.join(terms) + ';',
             f'  amdgpu::arith::execute_interp<{str(p2).lower()}, {str(half).lower()}>(',
-            f'      wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            '      wf.cu().arithmetic_flags(), modifiers,',
+            f'      wf, {wave32}, {wave64},',
+            f'      {controls}, modifiers,',
             f'      {dst[0]}, {", ".join(src)});',
         ]
     )

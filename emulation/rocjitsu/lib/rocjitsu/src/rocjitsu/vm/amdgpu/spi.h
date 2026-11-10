@@ -92,6 +92,31 @@ public:
     return info;
   }
 
+  /// Allocate GFX10 ordered IDs only after a workgroup's placement can commit.
+  static void init_ordered_append(ComputeUnitCore &cu, const DispatchEntry &entry,
+                                  std::span<Wavefront *> waves) {
+    using OrderedAppend = DispatchEntry::OrderedAppend;
+    if (entry.ordered_append == OrderedAppend::Disabled)
+      return;
+    const bool per_wave = entry.ordered_append == OrderedAppend::PerWave;
+    // COMPUTE_DISPATCH_INITIATOR assigns a term per wave or per group on this ring.
+    // RDNA1/2's CS SGPR table delivers it in TG_INFO[17:6]. The shader packs that
+    // term into M0 with its counter base before issuing DS_ORDERED_COUNT.
+    const uint32_t base = cu.gws_device().reserve_ordered_ids(
+        entry.process_id, entry.queue_id, per_wave ? entry.wfs_per_workgroup : 1,
+        entry.ordered_id_count);
+    if (!entry.enable_wg_info)
+      return;
+    const uint32_t sgpr =
+        entry.num_user_sgprs + entry.enable_wg_id_x + entry.enable_wg_id_y + entry.enable_wg_id_z;
+    for (auto *wf : waves) {
+      const uint32_t wave = wf->wave_in_group();
+      const uint32_t term = (base + (per_wave ? wave : 0)) % entry.ordered_id_count;
+      cu.write_sgpr(wf->sgpr_alloc().base + sgpr,
+                    workgroup_info(cu.arch(), entry.wfs_per_workgroup, wave, term));
+    }
+  }
+
   /// @brief Enqueue a workgroup from an ACE pipe.
   /// @details WGP-mode requests fail without changing the pending queues.
   /// @param emit_error Destination for failure diagnostics.
@@ -151,6 +176,7 @@ public:
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }
+      init_ordered_append(*cu, *wg.entry, wg_wfs);
       if (on_wg_dispatch)
         on_wg_dispatch(wg.global_wg_id, *wg.entry, std::span<Wavefront *>(wg_wfs));
       q.pop_front();

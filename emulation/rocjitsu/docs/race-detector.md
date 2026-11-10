@@ -188,7 +188,12 @@ races. Some examples:
 
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
-  `s_waitcnt lgkmcnt` insufficient).
+  `s_waitcnt lgkmcnt` insufficient). On GFX10, `DS_ORDERED_COUNT` supplies a
+  whole-wave result under LGKMCNT and an outgoing contribution from the first
+  active lane under EXPCNT. The detector warns when an instruction reads or
+  overwrites the pending result. It also warns when an instruction overwrites
+  the contributing lane of the outgoing VGPR before its EXPCNT event retires.
+  Waiting for one counter leaves the other obligation in effect.
 - **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
   pending scalar-memory load has completed. A later scalar load to the same
   destination is also checked because scalar-memory results can complete out
@@ -333,8 +338,9 @@ proves that the oldest read into `v0` completed. If those pending operations
 belonged to different or unordered classes, the capacity stall would not prove
 which individual event completed.
 
-On RDNA1 and RDNA2, GWS operations hold the contributing source VGPR and EXEC
-until EXPCNT allows an overwrite.
+On RDNA1 and RDNA2, GDS loads and returning atomics expose their destination through
+LGKMCNT. EXPCNT separately protects the source VGPRs and EXEC from overwrite.
+A wait on only one counter releases only its associated dependency.
 
 The detector records the target-specific wait-counter family on every event.
 It handles both the combined wait fields and the standalone counter forms on

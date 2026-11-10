@@ -170,6 +170,8 @@ public:
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
 
+  /// Check a synchronous VALU source against older writers and remember the
+  /// completed read until a barrier publishes it to peer waves.
   void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
                             uint32_t lane);
 

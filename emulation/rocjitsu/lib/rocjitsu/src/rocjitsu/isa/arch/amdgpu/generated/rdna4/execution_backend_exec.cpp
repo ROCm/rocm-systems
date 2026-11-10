@@ -131,6 +131,7 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<SFloorF16Sop1>,
     &execute_with_backend<STruncF16Sop1>,
     &execute_with_backend<SRndneF16Sop1>,
+    &execute_with_backend<SGetBarrierStateSop1>,
     &execute_with_backend<SCmpEqI32Sopc>,
     &execute_with_backend<SCmpLgI32Sopc>,
     &execute_with_backend<SCmpGtI32Sopc>,

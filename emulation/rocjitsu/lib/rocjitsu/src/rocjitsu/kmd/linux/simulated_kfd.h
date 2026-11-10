@@ -456,6 +456,8 @@ public:
   /// requested allocation flags. mapping_flags_for_handle encodes that policy as
   /// COHERENT for the interposer's GEM_VA path.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
+  /// Whether the selected render node executes the GFX10 ordered-append reset ABI.
+  [[nodiscard]] bool supports_pm4_gds_wave_id_reset(uint32_t render_minor) const;
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
   int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.

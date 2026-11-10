@@ -81,6 +81,43 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   (void)previous;
 }
 
+ShaderExportIssue Wavefront::shader_export_issue(const ShaderExportOperands &operands) const {
+  // GFX11.5 section 3.2.3: only DONE or POS0 can issue at zero EXEC.
+  if ((status_raw() & (1u << 18)) || (!exec() && !operands.done && operands.target != 12))
+    return ShaderExportIssue::Skip;
+  return export_ready() ? ShaderExportIssue::Accept : ShaderExportIssue::WaitForReady;
+}
+
+bool Wavefront::export_shader_data(const ShaderExportOperands &operands) {
+  switch (shader_export_issue(operands)) {
+  case ShaderExportIssue::Skip:
+    return true;
+  case ShaderExportIssue::WaitForReady:
+    set_state(WfState::EXPORT_WAIT);
+    return false;
+  case ShaderExportIssue::Accept:
+    break;
+  }
+
+  const uint64_t lanes = operands.source_lanes(exec());
+  const uint8_t row = operands.row_from_m0 ? static_cast<uint8_t>(m0()) : 0;
+  auto previous = std::ranges::find_if(shader_exports_, [&](const ShaderExportRow &entry) {
+    return entry.target == operands.target && entry.row == row;
+  });
+  auto &output = previous == shader_exports_.end() ? shader_exports_.emplace_back() : *previous;
+  output = {operands.target, row, operands.components, operands.done, lanes};
+  RegisterAccess regs(*this);
+  operands.for_each_source(num_vgprs(), [&](unsigned channel, uint16_t source) {
+    for (uint64_t pending = lanes; pending; pending &= pending - 1) {
+      const unsigned lane = std::countr_zero(pending);
+      output.values[lane][channel] = regs.read_vgpr(vgpr_alloc().base + source, lane);
+    }
+  });
+  if (operands.done)
+    set_status_raw(status_raw() & ~(1u << 27)); // MUST_EXPORT
+  return true;
+}
+
 void Wavefront::set_in_trap_handler(bool value) {
   if (in_trap_handler_ == value)
     return;
@@ -126,6 +163,12 @@ bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
 }
 
 uint64_t Wavefront::memory_exec(const Instruction &inst) const {
+  if (inst.flags() & FIRST_ACTIVE_MEMORY_LANE) {
+    if (cu_.arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && !vgpr_destinations_allocated(inst))
+      return 0;
+    const uint64_t active = exec();
+    return active & -active;
+  }
   if ((cu_.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_.arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
       (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
     return 0;

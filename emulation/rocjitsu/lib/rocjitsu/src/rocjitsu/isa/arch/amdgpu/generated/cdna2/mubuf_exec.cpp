@@ -1050,13 +1050,25 @@ void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferInvl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // BUFFER_INVL2 selects remote MTYPE NC lines.
 }
 
 void BufferStoreLdsDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  (wf.m0() & 0xffffu) + inst_.offset, 4, 4);
+  d->store_data.resize(wf.wf_size() * sizeof(uint32_t));
+  for (uint64_t lanes = d->lane_mask; lanes; lanes &= lanes - 1) {
+    const unsigned lane = std::countr_zero(lanes);
+    std::as_const(wf.lds()).read(d->per_lane_lds_addr[lane], d->store_data.data() + lane * 4, 4);
+  }
+  set_data(std::move(d));
 }
 
 void BufferWbinvl1Mubuf::execute_impl(amdgpu::Wavefront &wf) {

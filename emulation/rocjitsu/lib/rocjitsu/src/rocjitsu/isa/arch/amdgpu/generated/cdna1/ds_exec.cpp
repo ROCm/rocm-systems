@@ -3574,5 +3574,516 @@ void DsReadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
+void DsAddSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsSubSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsRsubSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsIncSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsDecSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2I32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2I32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2U32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsAndSrc2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsOrSrc2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsXorSrc2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsWriteSrc2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2F32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2F32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsAddSrc2F32Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::FADD;
+  d->atomic_denorm_mode = 2;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f32();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsAddSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::ADD;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsSubSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SUB;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsRsubSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::RSUB;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsIncSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::INC;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsDecSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2I64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SMIN;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2I64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SMAX;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::UMIN;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2U64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::UMAX;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsAndSrc2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::AND;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsOrSrc2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::OR;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsXorSrc2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::XOR;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsWriteSrc2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::SWAP;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMinSrc2F64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::FMIN;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
+void DsMaxSrc2F64Ds::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 8;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->atomic_op = amdgpu::AtomicOp::FMAX;
+  d->atomic_denorm_mode = 3;
+  d->atomic_lds_denorm_mode = wf.fp_denorm_mode_f16_f64();
+  d->atomic_legacy_minmax = true;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  ds_calculate_src2_addresses(inst_, wf, *d);
+  set_data(std::move(d));
+}
+
 } // namespace cdna1
 } // namespace rocjitsu
