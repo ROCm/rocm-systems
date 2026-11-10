@@ -5,10 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
 #include <cassert>
-#include <ostream>
 #include <span>
-#include <sstream>
-#include <string>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -42,8 +39,6 @@ enum class MemoryEventType {
   /// defaultWaitCounterType and defaultMemoryOrder return those of a tensor DMA
   /// store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
-
-  N
 };
 
 /// Race-detector name for the decoded hardware completion-order classification.
@@ -65,8 +60,7 @@ memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> oblig
   return order;
 }
 
-/// Event direction helpers: "to VGPR" means a load writing into a VGPR,
-/// "from VGPR" means a store reading out of a VGPR.
+/// True if the event loads into a VGPR.
 inline bool isToVgpr(MemoryEventType t) {
   return t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::LDS_TO_VGPR;
 }
@@ -79,18 +73,12 @@ inline bool isToSgpr(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 
 inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO_TTMP; }
 
-inline bool isToScalar(MemoryEventType t) { return isToSgpr(t) || isToTtmp(t); }
-
 inline bool isFromLds(MemoryEventType t) {
   return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL;
 }
 
 /// True if the event touches LDS (read or write).
 inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
-
-inline bool isFromVgpr(MemoryEventType t) {
-  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS;
-}
 
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
@@ -111,8 +99,6 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::LGKMCNT;
   case MemoryEventType::LDS_TO_GLOBAL:
     return amdgpu::WaitCounterType::TENSORCNT;
-  case MemoryEventType::N:
-    break;
   }
   assert(false && "invalid memory event type");
   return amdgpu::WaitCounterType::VMCNT;
@@ -135,37 +121,9 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
     return MemoryOrderClass::UNORDERED;
   case MemoryEventType::LDS_TO_GLOBAL:
     return MemoryOrderClass::TENSOR;
-  case MemoryEventType::N:
-    break;
   }
   assert(false && "invalid memory event type");
   return MemoryOrderClass::UNORDERED;
-}
-
-/// A register reference (type + index).
-class CommonRegister {
-public:
-  enum class Type { SGPR, VGPR, UNKNOWN };
-  Type type;
-  int index;
-
-  static CommonRegister getVgpr(int idx) { return CommonRegister{Type::VGPR, idx}; }
-
-  void appendStr(std::ostream &os) const {
-    char prefix = (type == Type::SGPR) ? 's' : (type == Type::VGPR) ? 'v' : '?';
-    os << prefix << index;
-  }
-
-  std::string str() const {
-    std::ostringstream oss;
-    appendStr(oss);
-    return oss.str();
-  }
-};
-
-inline std::ostream &operator<<(std::ostream &os, const CommonRegister &reg) {
-  reg.appendStr(os);
-  return os;
 }
 
 } // namespace rocjitsu::plugins::race_detector

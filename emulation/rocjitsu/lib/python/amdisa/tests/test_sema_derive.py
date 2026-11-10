@@ -1331,11 +1331,15 @@ class TestDeriveVectorUnary:
             'fp8_f32',
             opsel='inst_.opsel',
             fp8_format_select='inst_.clamp',
+            arch_name='cdna5',
         )
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
+        assert (
+            'util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>(s0), wf.fp16_ovfl())'
+            in cpp
+        )
+        assert 'packed = conversion(s0, s1);' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_pk_fp8_f16_clamp_selects_e5m3_without_fp16_ovfl(self):
@@ -1370,8 +1374,11 @@ class TestDeriveVectorUnary:
         cpp = gen_cvt_fp8(ctx)
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
+        assert (
+            'util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>(s0), seed, wf.fp16_ovfl())'
+            in cpp
+        )
+        assert 'conversion.stochastic(s0, seed)' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):
@@ -1441,19 +1448,20 @@ class TestDeriveVectorUnary:
         ) in cpp
         assert 'util::f32_to_f16' not in cpp
 
-    def test_cvt_sr_pk_f16_bf16_f32_threads_fp16_ovfl(self):
-        for name, helper in (
-            ('V_CVT_SR_PK_F16_F32', 'util::f32_to_f16_sr_mode'),
-            ('V_CVT_SR_PK_BF16_F32', 'util::f32_to_bf16_sr_mode'),
-        ):
+    def test_cvt_sr_pk_f16_bf16_f32_splits_seed_and_threads_fp16_ovfl(self):
+        for name in ('V_CVT_SR_PK_F16_F32', 'V_CVT_SR_PK_BF16_F32'):
             sem = derive_semantics(name, 'ENC_VOP3')
             assert sem is not None
 
             cpp = gen_vector_cvt_pk(
                 ['vdst'], ['src0', 'src1', 'src2'], sem.semantic_class, sem.operation
             )
-            assert f'{helper}(s0, seed_lo, wf.fp16_ovfl())' in cpp
-            assert f'{helper}(s1, seed_hi, wf.fp16_ovfl())' in cpp
+            helper = f'amdgpu::fp_mode::{name.lower().removeprefix("v_")}'
+            assert f'{helper}(s0, static_cast<uint16_t>(seed), wf.fp16_ovfl())' in cpp
+            assert (
+                f'{helper}(s1, static_cast<uint16_t>(seed >> 16), wf.fp16_ovfl())'
+                in cpp
+            )
 
     def test_cvt_sr_f16_bf16_f32_reads_seed_and_threads_fp16_ovfl(self):
         for name, helper in (
@@ -2002,7 +2010,7 @@ class TestDeriveVectorTernary:
             select_max = 'true' if clamp_fn == 'std::max' else 'false'
             assert f'vop3_integer_add_minmax<' in cpp
             assert f', {select_max}>' in cpp
-            assert 'inst_.clamp' not in cpp
+            assert 'inst_.clamp' in cpp
 
     def test_ashr_pk_i8_u8_i32_packs_shifted_saturated_bytes(self):
         cases = [

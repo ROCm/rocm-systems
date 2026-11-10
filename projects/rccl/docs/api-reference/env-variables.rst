@@ -76,13 +76,16 @@ in the following table.
 
     * - | ``NCCL_MIN_CTAS``
         | Minimum number of CTAs (channels) used for a collective. Overrides
-          the ``minCTAs`` field of ``ncclConfig_t``.
+          the ``minCTAs`` field of ``ncclConfig_t``. The ``minCTAs`` and
+          ``maxCTAs`` config fields can each be set without the other; an
+          unset ``minCTAs`` defaults to ``1``.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
     * - | ``NCCL_MAX_CTAS``
         | Maximum number of CTAs (channels) used for a collective. Overrides
-          the ``maxCTAs`` field of ``ncclConfig_t``.
+          the ``maxCTAs`` field of ``ncclConfig_t``. An unset ``maxCTAs``
+          defaults to the maximum channel count of the build.
       - | Positive integer (values ``<= 0`` are ignored).
         | Default: unset (uses the RCCL default).
 
@@ -237,19 +240,20 @@ in the following table.
 
     * - | ``NCCL_RUN_RAS_DIAGNOSTICS``
         | Runs the RAS diagnostics at every communicator initialization. RCCL
-          compares the ``NCCL_*`` environment and the driver version across
-          the ranks and prints a report with the ``NCCL DIAG`` prefix to the
+          compares the ``NCCL_*`` environment, the driver version, and the GPU
+          configuration across the ranks, checks the GPUs for ECC errors and
+          down XGMI links, and prints a report with the ``NCCL DIAG`` prefix to the
           ``stdout`` of the process that hosts rank 0. Requires
           ``NCCL_RAS_ENABLE=1`` (default). See :ref:`using-rccl-ras-diagnostics`.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
     * - | ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
-        | Number of corrected volatile ECC errors at or above which the RAS
-          diagnostics report a GPU. Has no effect when the ECC check reports
-          ``unavailable`` on AMD GPUs.
+        | Number of correctable ECC errors, as reported by AMD SMI, at or above
+          which the RAS diagnostics report a GPU. Uncorrectable and deferred
+          errors are always reported.
       - | ``0``: Corrected errors are not reported (default).
-        | ``N`` > 0: Ranks with at least ``N`` corrected errors are reported.
+        | ``N`` > 0: Ranks with at least ``N`` correctable errors are reported.
 
 .. _check-mode:
 
@@ -1393,6 +1397,15 @@ threshold table introduced for gfx1250.
           ``RCCL_DDA_A2A_PUSH=0``.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
+
+    * - | ``RCCL_DDA_LL128_A2A_THREADS``
+        | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
+          When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
+          table; no current table sets it, so the kernel uses 256 threads.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``256``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
