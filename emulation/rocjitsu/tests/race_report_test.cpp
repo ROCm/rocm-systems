@@ -329,7 +329,8 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
               std::string::npos);
     EXPECT_NE(report.find("workgroup (1, 2, 3)"), std::string::npos);
     if (test.complete) {
-      EXPECT_NE(report.find("Completed for wave 1.\n"), std::string::npos);
+      EXPECT_NE(report.find("Wait requirements satisfied for this operation in wave 1.\n"),
+                std::string::npos);
       EXPECT_EQ(report.find("pending counters"), std::string::npos);
     } else {
       EXPECT_NE(
@@ -415,7 +416,7 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
             "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"
             "  Current access: write at PC 0x200.\n"
             "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
-            "  Completed for wave 1.\n"
+            "  Wait requirements satisfied for this operation in wave 1.\n"
             "  Waves 1 and 0 have not synchronized this access.\n");
 }
 
