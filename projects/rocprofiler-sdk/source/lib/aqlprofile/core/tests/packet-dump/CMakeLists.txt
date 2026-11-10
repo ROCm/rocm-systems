@@ -1,26 +1,30 @@
-set(AQLPROFILE_PACKET_GOLDEN_TEST_SOURCES packet_golden_tests.cpp packet_golden_main.cpp
-                                          packet_golden_utils.cpp packet_golden_json.cpp)
+set(AQLPROFILE_PACKET_GOLDEN_TEST_SOURCES
+    packet_golden_tests.cpp packet_golden_spm_tests.cpp packet_golden_main.cpp
+    packet_golden_utils.cpp packet_golden_json.cpp packet_golden_spm_json.cpp)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(AQLPROFILE_PACKET_ARGS_OUTPUT)
-foreach(AQLPROFILE_PACKET_GFX gfx1201 gfx942)
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/packet_args.py --kind pmc
-                --gfx ${AQLPROFILE_PACKET_GFX}
-        RESULT_VARIABLE AQLPROFILE_PACKET_ARGS_RESULT
-        OUTPUT_VARIABLE AQLPROFILE_PACKET_GFX_ARGS
-        ERROR_VARIABLE AQLPROFILE_PACKET_ARGS_LOG
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
-    if(NOT AQLPROFILE_PACKET_ARGS_RESULT EQUAL 0)
-        message(
-            FATAL_ERROR
-                "Failed to resolve ${AQLPROFILE_PACKET_GFX} packet arguments:\n${AQLPROFILE_PACKET_GFX_ARGS}${AQLPROFILE_PACKET_ARGS_LOG}"
-            )
-    endif()
-    if(AQLPROFILE_PACKET_ARGS_LOG)
-        message(STATUS "[aqlprofile-packet-golden-tests] ${AQLPROFILE_PACKET_ARGS_LOG}")
-    endif()
-    string(APPEND AQLPROFILE_PACKET_ARGS_OUTPUT " ${AQLPROFILE_PACKET_GFX_ARGS}")
+foreach(AQLPROFILE_PACKET_KIND pmc spm)
+    foreach(AQLPROFILE_PACKET_GFX gfx1201 gfx942)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/packet_args.py --kind
+                    ${AQLPROFILE_PACKET_KIND} --gfx ${AQLPROFILE_PACKET_GFX}
+            RESULT_VARIABLE AQLPROFILE_PACKET_ARGS_RESULT
+            OUTPUT_VARIABLE AQLPROFILE_PACKET_GFX_ARGS
+            ERROR_VARIABLE AQLPROFILE_PACKET_ARGS_LOG
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+        if(NOT AQLPROFILE_PACKET_ARGS_RESULT EQUAL 0)
+            message(
+                FATAL_ERROR
+                    "Failed to resolve ${AQLPROFILE_PACKET_KIND} ${AQLPROFILE_PACKET_GFX} packet arguments:\n${AQLPROFILE_PACKET_GFX_ARGS}${AQLPROFILE_PACKET_ARGS_LOG}"
+                )
+        endif()
+        if(AQLPROFILE_PACKET_ARGS_LOG)
+            message(
+                STATUS "[aqlprofile-packet-golden-tests] ${AQLPROFILE_PACKET_ARGS_LOG}")
+        endif()
+        string(APPEND AQLPROFILE_PACKET_ARGS_OUTPUT " ${AQLPROFILE_PACKET_GFX_ARGS}")
+    endforeach()
 endforeach()
 string(STRIP "${AQLPROFILE_PACKET_ARGS_OUTPUT}" AQLPROFILE_PACKET_ARGS_OUTPUT)
 separate_arguments(AQLPROFILE_PACKET_ARGS UNIX_COMMAND "${AQLPROFILE_PACKET_ARGS_OUTPUT}")

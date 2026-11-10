@@ -5,6 +5,7 @@
 
 #include "lib/aqlprofile/aqlprofile.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -20,6 +21,9 @@ inline constexpr uintptr_t userspace_address_limit      = 0x800000000000;
 
 size_t
 system_page_size();
+
+std::vector<uintptr_t>
+relocated_allocation_bases(uint64_t seed, size_t random_count);
 
 enum class packet_allocation_role
 {
@@ -91,6 +95,28 @@ struct pmc_packet_streams
     std::vector<size_t>             unreported_output_offsets{};
 };
 
+using spm_decode_query_results = std::array<uint64_t, AQLPROFILE_SPM_DECODE_QUERY_LAST>;
+
+struct spm_packet_streams
+{
+    std::vector<uint8_t>            start{};
+    std::vector<uint8_t>            stop{};
+    aqlprofile_spm_aql_packets_t    aql{};
+    uintptr_t                       command_base = 0;
+    std::vector<packet_allocation>  allocations{};
+    std::vector<packet_memory_copy> memory_copies{};
+    size_t                          descriptor_allocation_index = 0;
+    size_t                          descriptor_offset_bytes     = 0;
+    std::vector<uint8_t>            descriptor{};
+    spm_decode_query_results        decode_queries{};
+};
+
+struct packet_block
+{
+    hsa_ven_amd_aqlprofile_block_name_t id{};
+    uint32_t                            instance_count = 0;
+};
+
 struct pm4_packet_range
 {
     size_t   byte_offset = 0;
@@ -109,6 +135,18 @@ generate_pmc_packet_streams(aqlprofile_agent_handle_t                  agent,
                             const std::vector<aqlprofile_pmc_event_t>& events,
                             uintptr_t                                  allocation_base,
                             bool                                       capture_samples = true);
+
+spm_packet_streams
+generate_spm_packet_streams(aqlprofile_agent_handle_t                      agent,
+                            const std::vector<aqlprofile_pmc_event_t>&     events,
+                            const std::vector<aqlprofile_spm_parameter_t>& parameters,
+                            uintptr_t                                      allocation_base);
+
+uint32_t
+load_le_dword(const uint8_t* bytes);
+
+uintptr_t
+aql_ib_target(const hsa_ext_amd_aql_pm4_packet_t& packet);
 
 std::vector<uint32_t>
 normalize_pmc_read_addresses(const std::vector<uint8_t>& bytes);
@@ -130,6 +168,9 @@ packet_agent_info(const std::string& gfx);
 
 aqlprofile_agent_handle_t
 register_packet_agent(const std::string& gfx);
+
+packet_block
+query_block(aqlprofile_agent_handle_t agent, const std::string& block);
 
 hsa_ven_amd_aqlprofile_block_name_t
 resolve_block(aqlprofile_agent_handle_t agent, const std::string& block);

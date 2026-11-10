@@ -12,6 +12,7 @@
 #include <list>
 #include <new>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <utility>
 
@@ -28,6 +29,47 @@ system_page_size()
         return static_cast<size_t>(result);
     }();
     return value;
+}
+
+std::vector<uintptr_t>
+relocated_allocation_bases(uint64_t seed, size_t random_count)
+{
+    const size_t page_size = system_page_size();
+    if(deterministic_address_base % page_size != 0 || deterministic_address_stride % page_size != 0)
+        throw std::runtime_error{"deterministic allocation addresses are not page aligned"};
+
+    std::mt19937_64                         generator{seed};
+    std::uniform_int_distribution<uint64_t> high_slot_distribution{1, 1024};
+    std::uniform_int_distribution<uint64_t> low_page_distribution{
+        1, (deterministic_address_stride / page_size) - 1};
+
+    std::vector<uintptr_t> bases = {
+        deterministic_address_base + page_size,
+        deterministic_address_base + deterministic_address_stride - page_size,
+        deterministic_address_base + deterministic_address_stride,
+        deterministic_address_base + deterministic_address_stride + page_size,
+        deterministic_address_base + deterministic_address_stride + 2 * page_size,
+    };
+    for(size_t i = 0; i < random_count; ++i)
+        bases.emplace_back(deterministic_address_base +
+                           (high_slot_distribution(generator) * deterministic_address_stride) +
+                           (low_page_distribution(generator) * page_size));
+    return bases;
+}
+
+uint32_t
+load_le_dword(const uint8_t* bytes)
+{
+    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
+           (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+uintptr_t
+aql_ib_target(const hsa_ext_amd_aql_pm4_packet_t& packet)
+{
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&packet);
+    return static_cast<uintptr_t>((uint64_t{load_le_dword(bytes + 12)} << 32) |
+                                  (load_le_dword(bytes + 8) & 0xFFFFFFFCu));
 }
 
 namespace
@@ -207,21 +249,6 @@ memcpy_memory(void* dst, const void* src, size_t size, void* userdata) noexcept
     }
 }
 
-uint32_t
-load_le_dword(const uint8_t* bytes)
-{
-    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
-           (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
-}
-
-uintptr_t
-aql_ib_target(const hsa_ext_amd_aql_pm4_packet_t& packet)
-{
-    const auto* bytes = reinterpret_cast<const uint8_t*>(&packet);
-    return static_cast<uintptr_t>((uint64_t{load_le_dword(bytes + 12)} << 32) |
-                                  (load_le_dword(bytes + 8) & 0xFFFFFFFCu));
-}
-
 std::optional<std::pair<size_t, size_t>>
 locate_allocation(const packet_capture& capture, const void* pointer, size_t size)
 {
@@ -237,13 +264,82 @@ locate_allocation(const packet_capture& capture, const void* pointer, size_t siz
     return std::nullopt;
 }
 
-std::optional<packet_phase>
-phase_for_destination(uintptr_t destination, const aqlprofile_pmc_aql_packets_t& packets)
+struct command_stream_layout
 {
-    if(destination == aql_ib_target(packets.read_packet)) return packet_phase::read;
-    if(destination == aql_ib_target(packets.start_packet)) return packet_phase::start;
-    if(destination == aql_ib_target(packets.stop_packet)) return packet_phase::stop;
-    return std::nullopt;
+    size_t                          command_index = 0;
+    std::vector<packet_allocation>  allocations{};
+    std::vector<packet_memory_copy> memory_copies{};
+};
+
+command_stream_layout
+classify_command_streams(const packet_capture&                                  capture,
+                         const std::vector<std::pair<packet_phase, uintptr_t>>& ib_targets)
+{
+    if(capture.copies.size() != ib_targets.size())
+        throw std::runtime_error{"aqlprofile generated an unexpected number of command streams"};
+    if(capture.allocation_records.size() != 2)
+        throw std::runtime_error{"aqlprofile generated an unexpected number of allocations"};
+
+    constexpr size_t      missing_index = std::numeric_limits<size_t>::max();
+    command_stream_layout layout{missing_index};
+    std::vector<bool>     phase_found(ib_targets.size(), false);
+    for(size_t i = 0; i < capture.copies.size(); ++i)
+    {
+        const auto& copy     = capture.copies.at(i);
+        const auto  location = locate_allocation(capture, copy.destination, copy.bytes.size());
+        if(!location) throw std::runtime_error{"memory copy destination is not allocated"};
+        if(layout.command_index == missing_index)
+            layout.command_index = location->first;
+        else if(layout.command_index != location->first)
+            throw std::runtime_error{"command streams use different allocations"};
+
+        const auto target =
+            std::find_if(ib_targets.begin(), ib_targets.end(), [&copy](const auto& entry) {
+                return entry.second == reinterpret_cast<uintptr_t>(copy.destination);
+            });
+        if(target == ib_targets.end())
+            throw std::runtime_error{"memory copy does not match an AQL IB target"};
+        phase_found.at(static_cast<size_t>(target - ib_targets.begin())) = true;
+        layout.memory_copies.push_back(
+            {target->first, i, location->first, location->second, copy.bytes.size()});
+    }
+    if(std::find(phase_found.begin(), phase_found.end(), false) != phase_found.end())
+        throw std::runtime_error{"failed to identify packet command streams"};
+
+    for(size_t i = 0; i < capture.allocation_records.size(); ++i)
+    {
+        const auto& allocation = capture.allocation_records.at(i);
+        layout.allocations.push_back({
+            i == layout.command_index ? packet_allocation_role::command
+                                      : packet_allocation_role::output,
+            i,
+            reinterpret_cast<uintptr_t>(allocation.pointer),
+            allocation.size,
+            allocation.flags,
+        });
+    }
+    return layout;
+}
+
+std::vector<uint8_t>
+take_phase_stream(packet_capture&                        capture,
+                  const std::vector<packet_memory_copy>& copies,
+                  packet_phase                           phase)
+{
+    const auto copy = std::find_if(
+        copies.begin(), copies.end(), [phase](const auto& entry) { return entry.phase == phase; });
+    if(copy == copies.end()) throw std::runtime_error{"missing packet phase stream"};
+    return std::move(capture.copies.at(copy->observed_call_index).bytes);
+}
+
+void
+verify_allocations_released(const packet_capture& capture)
+{
+    if(capture.invalid_deallocation ||
+       capture.deallocation_count != capture.allocation_records.size() ||
+       !capture.allocations.empty())
+        throw std::runtime_error{
+            "aqlprofile did not deallocate every packet allocation exactly once"};
 }
 
 struct sample_capture
@@ -383,61 +479,21 @@ generate_pmc_packet_streams(aqlprofile_agent_handle_t                  agent,
     bool packets_deleted = false;
     try
     {
-        if(capture.copies.size() != 3)
-            throw std::runtime_error{
-                "aqlprofile generated an unexpected number of command streams"};
-        if(capture.allocation_records.size() != 2)
-            throw std::runtime_error{"aqlprofile generated an unexpected number of allocations"};
-
-        constexpr size_t missing_index = std::numeric_limits<size_t>::max();
-        size_t           command_index = missing_index;
-        size_t           read_copy     = missing_index;
-        size_t           start_copy    = missing_index;
-        size_t           stop_copy     = missing_index;
+        auto layout =
+            classify_command_streams(capture,
+                                     {
+                                         {packet_phase::read, aql_ib_target(packets.read_packet)},
+                                         {packet_phase::start, aql_ib_target(packets.start_packet)},
+                                         {packet_phase::stop, aql_ib_target(packets.stop_packet)},
+                                     });
 
         pmc_packet_streams result{};
-        result.aql = packets;
-        for(size_t i = 0; i < capture.copies.size(); ++i)
-        {
-            const auto& copy     = capture.copies.at(i);
-            const auto  location = locate_allocation(capture, copy.destination, copy.bytes.size());
-            if(!location) throw std::runtime_error{"memory copy destination is not allocated"};
-            if(command_index == missing_index)
-                command_index = location->first;
-            else if(command_index != location->first)
-                throw std::runtime_error{"command streams use different allocations"};
+        result.aql           = packets;
+        result.command_base  = layout.allocations.at(layout.command_index).base;
+        result.allocations   = std::move(layout.allocations);
+        result.memory_copies = std::move(layout.memory_copies);
 
-            const auto phase =
-                phase_for_destination(reinterpret_cast<uintptr_t>(copy.destination), packets);
-            if(!phase) throw std::runtime_error{"memory copy does not match an AQL IB target"};
-            switch(*phase)
-            {
-                case packet_phase::read: read_copy = i; break;
-                case packet_phase::start: start_copy = i; break;
-                case packet_phase::stop: stop_copy = i; break;
-            }
-            result.memory_copies.push_back(
-                {*phase, i, location->first, location->second, copy.bytes.size()});
-        }
-        if(command_index == missing_index || read_copy == missing_index ||
-           start_copy == missing_index || stop_copy == missing_index)
-            throw std::runtime_error{"failed to identify packet command streams"};
-
-        const size_t output_index = command_index == 0 ? 1 : 0;
-        for(size_t i = 0; i < capture.allocation_records.size(); ++i)
-        {
-            const auto& allocation = capture.allocation_records.at(i);
-            result.allocations.push_back({
-                i == command_index ? packet_allocation_role::command
-                                   : packet_allocation_role::output,
-                i,
-                reinterpret_cast<uintptr_t>(allocation.pointer),
-                allocation.size,
-                allocation.flags,
-            });
-        }
-        result.command_base = result.allocations.at(command_index).base;
-
+        const size_t output_index = layout.command_index == 0 ? 1 : 0;
         if(capture_samples)
         {
             constexpr uint64_t tag_prefix = 0xA5C0000000000000;
@@ -462,21 +518,103 @@ generate_pmc_packet_streams(aqlprofile_agent_handle_t                  agent,
                     result.unreported_output_offsets.emplace_back(slot * sizeof(uint64_t));
         }
 
-        result.read  = std::move(capture.copies.at(read_copy).bytes);
-        result.start = std::move(capture.copies.at(start_copy).bytes);
-        result.stop  = std::move(capture.copies.at(stop_copy).bytes);
+        result.read  = take_phase_stream(capture, result.memory_copies, packet_phase::read);
+        result.start = take_phase_stream(capture, result.memory_copies, packet_phase::start);
+        result.stop  = take_phase_stream(capture, result.memory_copies, packet_phase::stop);
 
         aqlprofile_pmc_delete_packets(handle);
         packets_deleted = true;
-        if(capture.invalid_deallocation ||
-           capture.deallocation_count != capture.allocation_records.size() ||
-           !capture.allocations.empty())
-            throw std::runtime_error{
-                "aqlprofile did not deallocate every packet allocation exactly once"};
+        verify_allocations_released(capture);
         return result;
     } catch(...)
     {
         if(!packets_deleted) aqlprofile_pmc_delete_packets(handle);
+        throw;
+    }
+}
+
+spm_packet_streams
+generate_spm_packet_streams(aqlprofile_agent_handle_t                      agent,
+                            const std::vector<aqlprofile_pmc_event_t>&     events,
+                            const std::vector<aqlprofile_spm_parameter_t>& parameters,
+                            uintptr_t                                      allocation_base)
+{
+    if(events.empty()) throw std::invalid_argument{"SPM event list is empty"};
+
+    packet_capture                          capture{allocation_base};
+    std::vector<aqlprofile_spm_parameter_t> profile_parameters = parameters;
+    const aqlprofile_spm_profile_t          profile{
+        agent,
+        hsa_agent_t{0},
+        events.data(),
+        events.size(),
+        profile_parameters.data(),
+        profile_parameters.size(),
+        0,
+        allocate_memory,
+        deallocate_memory,
+        memcpy_memory,
+        &capture,
+    };
+
+    constexpr uint64_t           unassigned_handle = std::numeric_limits<uint64_t>::max();
+    aqlprofile_handle_t          handle{unassigned_handle};
+    aqlprofile_spm_buffer_desc_t descriptor{};
+    aqlprofile_spm_aql_packets_t packets{};
+    const hsa_status_t           status =
+        aqlprofile_spm_create_packets(&handle, &descriptor, &packets, profile, 0);
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        if(handle.handle != unassigned_handle) aqlprofile_spm_delete_packets(handle);
+        throw std::runtime_error{"aqlprofile_spm_create_packets failed with status " +
+                                 std::to_string(static_cast<int>(status))};
+    }
+
+    bool packets_deleted = false;
+    try
+    {
+        auto layout =
+            classify_command_streams(capture,
+                                     {
+                                         {packet_phase::start, aql_ib_target(packets.start_packet)},
+                                         {packet_phase::stop, aql_ib_target(packets.stop_packet)},
+                                     });
+        const auto descriptor_location =
+            locate_allocation(capture, descriptor.data, descriptor.size);
+        if(!descriptor_location || descriptor_location->first == layout.command_index)
+            throw std::runtime_error{"SPM descriptor is not inside the output allocation"};
+
+        spm_packet_streams result{};
+        result.aql                         = packets;
+        result.command_base                = layout.allocations.at(layout.command_index).base;
+        result.allocations                 = std::move(layout.allocations);
+        result.memory_copies               = std::move(layout.memory_copies);
+        result.descriptor_allocation_index = descriptor_location->first;
+        result.descriptor_offset_bytes     = descriptor_location->second;
+
+        const auto* descriptor_bytes = static_cast<const uint8_t*>(descriptor.data);
+        result.descriptor.assign(descriptor_bytes, descriptor_bytes + descriptor.size);
+        for(size_t query = 0; query < result.decode_queries.size(); ++query)
+        {
+            const hsa_status_t query_status =
+                aqlprofile_spm_decode_query(descriptor,
+                                            static_cast<aqlprofile_spm_decode_query_t>(query),
+                                            &result.decode_queries.at(query));
+            if(query_status != HSA_STATUS_SUCCESS)
+                throw std::runtime_error{"aqlprofile_spm_decode_query failed with status " +
+                                         std::to_string(static_cast<int>(query_status))};
+        }
+
+        result.start = take_phase_stream(capture, result.memory_copies, packet_phase::start);
+        result.stop  = take_phase_stream(capture, result.memory_copies, packet_phase::stop);
+
+        aqlprofile_spm_delete_packets(handle);
+        packets_deleted = true;
+        verify_allocations_released(capture);
+        return result;
+    } catch(...)
+    {
+        if(!packets_deleted) aqlprofile_spm_delete_packets(handle);
         throw;
     }
 }
@@ -638,8 +776,8 @@ register_packet_agent(const std::string& gfx)
     return agent;
 }
 
-hsa_ven_amd_aqlprofile_block_name_t
-resolve_block(aqlprofile_agent_handle_t agent, const std::string& block)
+packet_block
+query_block(aqlprofile_agent_handle_t agent, const std::string& block)
 {
     const aqlprofile_pmc_profile_t profile = {
         agent,
@@ -653,7 +791,13 @@ resolve_block(aqlprofile_agent_handle_t agent, const std::string& block)
     };
     const hsa_status_t status = aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query);
     if(status != HSA_STATUS_SUCCESS) throw std::runtime_error{"failed to resolve block " + block};
-    return static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query.id);
+    return {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query.id), query.instance_count};
+}
+
+hsa_ven_amd_aqlprofile_block_name_t
+resolve_block(aqlprofile_agent_handle_t agent, const std::string& block)
+{
+    return query_block(agent, block).id;
 }
 
 uint32_t

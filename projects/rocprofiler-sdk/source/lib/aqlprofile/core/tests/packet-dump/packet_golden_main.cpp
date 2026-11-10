@@ -54,6 +54,14 @@ append_events(std::vector<packet_test_event>& events, const std::string& csv)
     }
 }
 
+std::vector<packet_test_architecture>&
+architectures_for_kind(packet_test_options& options, const std::string& kind)
+{
+    if(kind == "pmc") return options.pmc;
+    if(kind == "spm") return options.spm;
+    throw std::invalid_argument{"unknown packet-test kind: " + kind};
+}
+
 }  // namespace
 
 packet_test_options&
@@ -66,11 +74,13 @@ get_packet_test_options()
 packet_test_options
 parse_packet_test_options(int argc, char** argv)
 {
-    packet_test_options       options{};
-    packet_test_architecture* current_architecture{};
-    packet_test_case*         current_case{};
+    packet_test_options                    options{};
+    std::vector<packet_test_architecture>* current_architectures = &options.pmc;
+    packet_test_architecture*              current_architecture{};
+    packet_test_case*                      current_case{};
 
     static const option long_options[] = {
+        {"kind", required_argument, nullptr, 'k'},
         {"gfx", required_argument, nullptr, 'g'},
         {"block", required_argument, nullptr, 'b'},
         {"events", required_argument, nullptr, 'e'},
@@ -82,14 +92,19 @@ parse_packet_test_options(int argc, char** argv)
     optind = 1;
     while(true)
     {
-        const int parsed_option = getopt_long(argc, argv, ":g:b:e:s:", long_options, nullptr);
+        const int parsed_option = getopt_long(argc, argv, ":k:g:b:e:s:", long_options, nullptr);
         if(parsed_option == -1) break;
 
         switch(parsed_option)
         {
+            case 'k':
+                current_architectures = &architectures_for_kind(options, optarg);
+                current_architecture  = nullptr;
+                current_case          = nullptr;
+                break;
             case 'g':
-                options.architectures.push_back({optarg, {}});
-                current_architecture = &options.architectures.back();
+                current_architectures->push_back({optarg, {}});
+                current_architecture = &current_architectures->back();
                 current_case         = nullptr;
                 break;
             case 'b':
@@ -120,17 +135,21 @@ parse_packet_test_options(int argc, char** argv)
     if(optind < argc)
         throw std::invalid_argument{"unexpected positional argument: " + std::string{argv[optind]}};
 
-    for(const auto& architecture : options.architectures)
+    for(const auto* architectures : {&options.pmc, &options.spm})
     {
-        if(architecture.gfx.empty()) throw std::invalid_argument{"gfx name cannot be empty"};
-        if(architecture.cases.empty())
-            throw std::invalid_argument{"no blocks specified for " + architecture.gfx};
-
-        for(const auto& test_case : architecture.cases)
+        for(const auto& architecture : *architectures)
         {
-            if(test_case.block.empty()) throw std::invalid_argument{"block name cannot be empty"};
-            if(test_case.events.empty())
-                throw std::invalid_argument{"no events specified for block " + test_case.block};
+            if(architecture.gfx.empty()) throw std::invalid_argument{"gfx name cannot be empty"};
+            if(architecture.cases.empty())
+                throw std::invalid_argument{"no blocks specified for " + architecture.gfx};
+
+            for(const auto& test_case : architecture.cases)
+            {
+                if(test_case.block.empty())
+                    throw std::invalid_argument{"block name cannot be empty"};
+                if(test_case.events.empty())
+                    throw std::invalid_argument{"no events specified for block " + test_case.block};
+            }
         }
     }
     return options;

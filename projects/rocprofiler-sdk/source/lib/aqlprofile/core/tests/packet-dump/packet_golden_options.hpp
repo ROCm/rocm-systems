@@ -28,7 +28,8 @@ struct packet_test_architecture
 
 struct packet_test_options
 {
-    std::vector<packet_test_architecture> architectures{};
+    std::vector<packet_test_architecture> pmc{};
+    std::vector<packet_test_architecture> spm{};
 };
 
 packet_test_options&

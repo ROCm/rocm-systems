@@ -5,18 +5,18 @@
 
 #include "lib/aqlprofile/core/ip_discovery.h"
 
+#include "packet_golden_fixture.hpp"
 #include "packet_golden_json.hpp"
 #include "packet_golden_options.hpp"
 #include "packet_golden_utils.hpp"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
 #include <list>
-#include <random>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -24,17 +24,6 @@ namespace
 {
 namespace fs = std::filesystem;
 using namespace aqlprofile::packet_dump;
-
-constexpr auto* ip_discovery_path_env = "AQLPROFILE_CUSTOM_IP_DISCOVERY_PATH";
-constexpr auto* fixture_root_path_env = "AQLPROFILE_PACKET_FIXTURE_PATH";
-constexpr auto* packet_dump_path_env  = "AQLPROFILE_PACKET_DUMP_PATH";
-
-uint32_t
-load_le_dword(const uint8_t* bytes)
-{
-    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
-           (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
-}
 
 std::vector<size_t>
 differing_dwords(const std::vector<uint8_t>& lhs, const std::vector<uint8_t>& rhs)
@@ -102,35 +91,9 @@ reject_memory_copy(void*, const void*, size_t, void*) noexcept
     return HSA_STATUS_ERROR;
 }
 
-class aqlprofile_packet_golden_test : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        const char* fixture_root_path = std::getenv(fixture_root_path_env);
-        ASSERT_NE(fixture_root_path, nullptr) << fixture_root_path_env << " is not set";
-        fixture_root_path_ = fixture_root_path;
-        ASSERT_TRUE(fs::is_directory(fixture_root_path_)) << fixture_root_path_;
-
-        const char* packet_dump_path = std::getenv(packet_dump_path_env);
-        ASSERT_NE(packet_dump_path, nullptr) << packet_dump_path_env << " is not set";
-        packet_dump_path_ = packet_dump_path;
-    }
-
-    void select_fixture(const std::string& gfx)
-    {
-        const fs::path fixture_path = fixture_root_path_ / gfx;
-        ASSERT_TRUE(fs::is_directory(fixture_path)) << fixture_path;
-        ASSERT_EQ(::setenv(ip_discovery_path_env, fixture_path.c_str(), 1), 0);
-    }
-
-    fs::path fixture_root_path_{};
-    fs::path packet_dump_path_{};
-};
-
 TEST_F(aqlprofile_packet_golden_test, loads_ip_discovery_fixture)
 {
-    for(const auto& architecture : get_packet_test_options().architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);
@@ -146,7 +109,8 @@ TEST_F(aqlprofile_packet_golden_test, loads_ip_discovery_fixture)
 
 TEST_F(aqlprofile_packet_golden_test, copy_failure_releases_packet_allocations)
 {
-    const auto& architecture = get_packet_test_options().architectures.front();
+    if(get_packet_test_options().pmc.empty()) GTEST_SKIP() << "no PMC architectures requested";
+    const auto& architecture = get_packet_test_options().pmc.front();
     select_fixture(architecture.gfx);
     const aqlprofile_agent_handle_t agent     = register_packet_agent(architecture.gfx);
     const auto&                     test_case = architecture.cases.front();
@@ -174,28 +138,33 @@ TEST_F(aqlprofile_packet_golden_test, copy_failure_releases_packet_allocations)
 
 TEST_F(aqlprofile_packet_golden_test, dump_topology)
 {
-    for(const auto& architecture : get_packet_test_options().architectures)
-    {
-        SCOPED_TRACE(architecture.gfx);
-        select_fixture(architecture.gfx);
+    const auto&           options = get_packet_test_options();
+    std::set<std::string> gfx_names{};
+    for(const auto* architectures : {&options.pmc, &options.spm})
+        for(const auto& architecture : *architectures)
+            gfx_names.insert(architecture.gfx);
 
-        const fs::path output_directory = packet_dump_path_ / architecture.gfx;
+    for(const auto& gfx : gfx_names)
+    {
+        SCOPED_TRACE(gfx);
+        select_fixture(gfx);
+
+        const fs::path output_directory = packet_dump_path_ / gfx;
         ASSERT_TRUE(fs::create_directories(output_directory) || fs::is_directory(output_directory));
 
         std::error_code error{};
         fs::remove(output_directory / "topology.json", error);
         ASSERT_FALSE(error);
 
-        write_topology_json(output_directory / (architecture.gfx + "_ip_discovery.json"),
-                            architecture.gfx,
+        write_topology_json(output_directory / (gfx + "_ip_discovery.json"),
+                            gfx,
                             parse_ip_discovery(0xFFFF, 0xFFFF));
     }
 }
 
 TEST_F(aqlprofile_packet_golden_test, dump_packets)
 {
-    const auto& options = get_packet_test_options();
-    for(const auto& architecture : options.architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);
@@ -377,7 +346,7 @@ expect_event_id_packet_invariants(aqlprofile_agent_handle_t           agent,
 
 TEST_F(aqlprofile_packet_golden_test, event_id_packet_invariants_at_instance_zero)
 {
-    for(const auto& architecture : get_packet_test_options().architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);
@@ -394,7 +363,7 @@ TEST_F(aqlprofile_packet_golden_test, event_id_packet_invariants_at_instance_zer
 
 TEST_F(aqlprofile_packet_golden_test, event_id_packet_invariants_at_nonzero_instances)
 {
-    for(const auto& architecture : get_packet_test_options().architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);
@@ -424,7 +393,7 @@ TEST_F(aqlprofile_packet_golden_test, event_id_packet_invariants_at_nonzero_inst
 
 TEST_F(aqlprofile_packet_golden_test, combined_all_instance_event_id_packet_invariants)
 {
-    for(const auto& architecture : get_packet_test_options().architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);
@@ -478,32 +447,10 @@ TEST_F(aqlprofile_packet_golden_test, combined_all_instance_event_id_packet_inva
 
 TEST_F(aqlprofile_packet_golden_test, allocation_bases_only_change_address_fields)
 {
-    const auto&  options   = get_packet_test_options();
-    const size_t page_size = system_page_size();
-    ASSERT_EQ(deterministic_address_base % page_size, 0);
-    ASSERT_EQ(deterministic_address_stride % page_size, 0);
-    std::mt19937_64 generator{
-        static_cast<uint64_t>(::testing::UnitTest::GetInstance()->random_seed())};
-    std::uniform_int_distribution<uint64_t> high_slot_distribution{1, 1024};
-    std::uniform_int_distribution<uint64_t> low_page_distribution{
-        1, (deterministic_address_stride / page_size) - 1};
+    const auto allocation_bases = relocated_allocation_bases(
+        static_cast<uint64_t>(::testing::UnitTest::GetInstance()->random_seed()), 64);
 
-    std::vector<uintptr_t> allocation_bases = {
-        deterministic_address_base + page_size,
-        deterministic_address_base + deterministic_address_stride - page_size,
-        deterministic_address_base + deterministic_address_stride,
-        deterministic_address_base + deterministic_address_stride + page_size,
-        deterministic_address_base + deterministic_address_stride + 2 * page_size,
-    };
-    for(size_t i = 0; i < 64; ++i)
-    {
-        allocation_bases.emplace_back(
-            deterministic_address_base +
-            (high_slot_distribution(generator) * deterministic_address_stride) +
-            (low_page_distribution(generator) * page_size));
-    }
-
-    for(const auto& architecture : options.architectures)
+    for(const auto& architecture : get_packet_test_options().pmc)
     {
         SCOPED_TRACE(architecture.gfx);
         select_fixture(architecture.gfx);

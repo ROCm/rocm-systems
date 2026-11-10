@@ -12,7 +12,6 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
-#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -27,53 +26,12 @@ using ordered_json = nlohmann::ordered_json;
 
 const size_t command_section_alignment_bytes = aql_profile::CommandBufferMgr::Align(1);
 
-uint32_t
-load_le_dword(const uint8_t* bytes)
-{
-    return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
-           (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
-}
-
-std::string
-hex_dword(uint32_t value)
-{
-    std::ostringstream output;
-    output << "0x" << std::hex << std::setfill('0') << std::setw(8) << value;
-    return output.str();
-}
-
 std::string
 hex_address(uint64_t address)
 {
     std::ostringstream output;
     output << "0x" << std::hex << std::setfill('0') << std::setw(16) << address;
     return output.str();
-}
-
-std::string
-hex_offset(uint64_t offset)
-{
-    std::ostringstream output;
-    output << "0x" << std::hex << offset;
-    return output.str();
-}
-
-std::vector<std::string>
-to_hex_dwords(const uint8_t* bytes, size_t size)
-{
-    if(size % sizeof(uint32_t) != 0) throw std::runtime_error{"packet size is not dword aligned"};
-
-    std::vector<std::string> dwords{};
-    dwords.reserve(size / sizeof(uint32_t));
-    for(size_t i = 0; i < size; i += sizeof(uint32_t))
-        dwords.emplace_back(hex_dword(load_le_dword(bytes + i)));
-    return dwords;
-}
-
-std::vector<std::string>
-to_hex_dwords(const std::vector<uint8_t>& bytes)
-{
-    return to_hex_dwords(bytes.data(), bytes.size());
 }
 
 struct decoded_aql_packet
@@ -89,8 +47,7 @@ decode_aql_packet(const hsa_ext_amd_aql_pm4_packet_t& aql,
                   size_t                              stream_size)
 {
     const auto*    aql_bytes = reinterpret_cast<const uint8_t*>(&aql);
-    const uint64_t target    = (uint64_t{load_le_dword(aql_bytes + 12)} << 32) |
-                            (load_le_dword(aql_bytes + 8) & 0xFFFFFFFCu);
+    const uint64_t target    = aql_ib_target(aql);
     if(target < command_base) throw std::runtime_error{"AQL IB target precedes command allocation"};
     if(command_base % command_section_alignment_bytes != 0 ||
        target % command_section_alignment_bytes != 0)
@@ -104,44 +61,6 @@ decode_aql_packet(const hsa_ext_amd_aql_pm4_packet_t& aql,
     if(result.ib_bytes != stream_size)
         throw std::runtime_error{"AQL IB size does not match PM4 stream"};
     return result;
-}
-
-ordered_json
-phase_json(const std::vector<uint8_t>&         stream,
-           const hsa_ext_amd_aql_pm4_packet_t& aql,
-           uintptr_t                           command_base)
-{
-    const auto decoded = decode_aql_packet(aql, command_base, stream.size());
-    return {
-        {"aql_packet",
-         {
-             {"size_bytes", decoded.bytes.size()},
-             {"ib_bytes", decoded.ib_bytes},
-             {"ib_target",
-              {
-                  {"base", "command_base"},
-                  {"offset_bytes", hex_offset(decoded.target_offset)},
-                  {"align_bytes", command_section_alignment_bytes},
-              }},
-             {"uint32_t", to_hex_dwords(decoded.bytes)},
-         }},
-        {"pm4_ib",
-         {
-             {"size_bytes", stream.size()},
-             {"uint32_t", to_hex_dwords(stream)},
-         }},
-    };
-}
-
-std::string_view
-allocation_role_name(packet_allocation_role role)
-{
-    switch(role)
-    {
-        case packet_allocation_role::output: return "output";
-        case packet_allocation_role::command: return "command";
-    }
-    throw std::runtime_error{"unknown packet allocation role"};
 }
 
 std::string_view
@@ -174,11 +93,74 @@ memory_hint_name(uint32_t hint)
     throw std::runtime_error{"unknown packet memory hint"};
 }
 
+struct packet_allocation_bases
+{
+    uintptr_t output  = 0;
+    uintptr_t command = 0;
+};
+
+packet_allocation_bases
+allocation_bases(const std::vector<packet_allocation>& allocations, uintptr_t command_base)
+{
+    std::optional<uintptr_t> output{};
+    std::optional<uintptr_t> command{};
+    for(const auto& allocation : allocations)
+    {
+        auto& base = allocation.role == packet_allocation_role::output ? output : command;
+        if(base) throw std::runtime_error{"duplicate packet allocation role"};
+        base = allocation.base;
+    }
+    if(!output || !command || *command != command_base)
+        throw std::runtime_error{"packet allocation roles are incomplete or inconsistent"};
+    return {*output, *command};
+}
+}  // namespace
+
+std::string
+hex_dword(uint32_t value)
+{
+    std::ostringstream output;
+    output << "0x" << std::hex << std::setfill('0') << std::setw(8) << value;
+    return output.str();
+}
+
+std::string
+hex_offset(uint64_t offset)
+{
+    std::ostringstream output;
+    output << "0x" << std::hex << offset;
+    return output.str();
+}
+
+std::vector<std::string>
+to_hex_dwords(const std::vector<uint8_t>& bytes)
+{
+    if(bytes.size() % sizeof(uint32_t) != 0)
+        throw std::runtime_error{"packet size is not dword aligned"};
+
+    std::vector<std::string> dwords{};
+    dwords.reserve(bytes.size() / sizeof(uint32_t));
+    for(size_t i = 0; i < bytes.size(); i += sizeof(uint32_t))
+        dwords.emplace_back(hex_dword(load_le_dword(bytes.data() + i)));
+    return dwords;
+}
+
+std::string_view
+allocation_role_name(packet_allocation_role role)
+{
+    switch(role)
+    {
+        case packet_allocation_role::output: return "output";
+        case packet_allocation_role::command: return "command";
+    }
+    throw std::runtime_error{"unknown packet allocation role"};
+}
+
 ordered_json
-allocations_json(const pmc_packet_streams& streams)
+allocations_json(const std::vector<packet_allocation>& allocations)
 {
     auto result = ordered_json::array();
-    for(const auto& allocation : streams.allocations)
+    for(const auto& allocation : allocations)
     {
         result.push_back({
             {"id", allocation_role_name(allocation.role)},
@@ -202,12 +184,13 @@ allocations_json(const pmc_packet_streams& streams)
 }
 
 ordered_json
-memory_copies_json(const pmc_packet_streams& streams)
+memory_copies_json(const std::vector<packet_memory_copy>& copies,
+                   const std::vector<packet_allocation>&  allocations)
 {
     auto result = ordered_json::array();
-    for(const auto& copy : streams.memory_copies)
+    for(const auto& copy : copies)
     {
-        const auto& allocation = streams.allocations.at(copy.allocation_index);
+        const auto& allocation = allocations.at(copy.allocation_index);
         result.push_back({
             {"observed_call_index", copy.observed_call_index},
             {"phase", phase_name(copy.phase)},
@@ -222,6 +205,96 @@ memory_copies_json(const pmc_packet_streams& streams)
     return result;
 }
 
+ordered_json
+phase_json(const std::vector<uint8_t>&         stream,
+           const hsa_ext_amd_aql_pm4_packet_t& aql,
+           uintptr_t                           command_base)
+{
+    const auto decoded = decode_aql_packet(aql, command_base, stream.size());
+    return {
+        {"aql_packet",
+         {
+             {"size_bytes", decoded.bytes.size()},
+             {"ib_bytes", decoded.ib_bytes},
+             {"ib_target",
+              {
+                  {"base", "command_base"},
+                  {"offset_bytes", hex_offset(decoded.target_offset)},
+                  {"align_bytes", command_section_alignment_bytes},
+              }},
+             {"uint32_t", to_hex_dwords(decoded.bytes)},
+         }},
+        {"pm4_ib",
+         {
+             {"size_bytes", stream.size()},
+             {"uint32_t", to_hex_dwords(stream)},
+         }},
+    };
+}
+
+ordered_json
+request_json(const packet_test_event& test_event, const std::vector<aqlprofile_pmc_event_t>& events)
+{
+    auto request_events = ordered_json::array();
+    for(const auto& event : events)
+        request_events.push_back({
+            {"event", test_event.name},
+            {"block_index", event.block_index},
+            {"flags", {{"raw", hex_dword(event.flags.raw)}}},
+        });
+    return {
+        {"shape", events.size() == 1 ? "single-entry" : "same-event-instance-sweep"},
+        {"events", std::move(request_events)},
+    };
+}
+
+void
+record_document_bases(ordered_json&                         document,
+                      const std::vector<packet_allocation>& allocations,
+                      uintptr_t                             command_base)
+{
+    const auto current = allocation_bases(allocations, command_base);
+    if(document.at("output_base").is_null() && document.at("command_base").is_null())
+    {
+        document["output_base"]  = hex_address(current.output);
+        document["command_base"] = hex_address(current.command);
+        return;
+    }
+
+    if(document.at("output_base") != hex_address(current.output) ||
+       document.at("command_base") != hex_address(current.command))
+        throw std::runtime_error{"packet allocation bases changed within one dump document"};
+}
+
+void
+write_json(const fs::path& path, const ordered_json& document)
+{
+    const std::string contents  = document.dump(2) + '\n';
+    fs::path          temporary = path;
+    temporary += ".tmp";
+
+    std::ofstream output{temporary, std::ios::trunc};
+    if(!output.is_open()) throw std::runtime_error{"failed to open " + temporary.string()};
+    output << contents;
+    output.close();
+    if(!output)
+    {
+        std::error_code error{};
+        fs::remove(temporary, error);
+        throw std::runtime_error{"failed to write " + temporary.string()};
+    }
+
+    std::error_code error{};
+    fs::rename(temporary, path, error);
+    if(error)
+    {
+        fs::remove(temporary);
+        throw std::runtime_error{"failed to replace " + path.string() + ": " + error.message()};
+    }
+}
+
+namespace
+{
 ordered_json
 samples_json(const pmc_packet_streams&                  streams,
              const std::vector<aqlprofile_pmc_event_t>& requested_events)
@@ -298,73 +371,18 @@ dimensions_json(const std::vector<packet_dimension>& dimensions)
 }
 
 ordered_json
-pmc_request_json(const packet_test_event&                   test_event,
-                 const std::vector<aqlprofile_pmc_event_t>& events)
-{
-    auto request_events = ordered_json::array();
-    for(const auto& event : events)
-        request_events.push_back({
-            {"event", test_event.name},
-            {"block_index", event.block_index},
-            {"flags", {{"raw", hex_dword(event.flags.raw)}}},
-        });
-    return {
-        {"shape", events.size() == 1 ? "single-entry" : "same-event-instance-sweep"},
-        {"events", std::move(request_events)},
-    };
-}
-
-ordered_json
 full_response_json(const pmc_packet_streams&                  streams,
                    const std::vector<aqlprofile_pmc_event_t>& requested_events)
 {
     return {
-        {"allocations", allocations_json(streams)},
-        {"memory_copies", memory_copies_json(streams)},
+        {"allocations", allocations_json(streams.allocations)},
+        {"memory_copies", memory_copies_json(streams.memory_copies, streams.allocations)},
         {"start", phase_json(streams.start, streams.aql.start_packet, streams.command_base)},
         {"read", phase_json(streams.read, streams.aql.read_packet, streams.command_base)},
         {"stop", phase_json(streams.stop, streams.aql.stop_packet, streams.command_base)},
         {"samples", samples_json(streams, requested_events)},
         {"unreported_output_slots", unreported_output_slots_json(streams)},
     };
-}
-
-struct packet_allocation_bases
-{
-    uintptr_t output  = 0;
-    uintptr_t command = 0;
-};
-
-packet_allocation_bases
-allocation_bases(const pmc_packet_streams& streams)
-{
-    std::optional<uintptr_t> output{};
-    std::optional<uintptr_t> command{};
-    for(const auto& allocation : streams.allocations)
-    {
-        auto& base = allocation.role == packet_allocation_role::output ? output : command;
-        if(base) throw std::runtime_error{"duplicate packet allocation role"};
-        base = allocation.base;
-    }
-    if(!output || !command || *command != streams.command_base)
-        throw std::runtime_error{"packet allocation roles are incomplete or inconsistent"};
-    return {*output, *command};
-}
-
-void
-record_document_bases(ordered_json& document, const pmc_packet_streams& streams)
-{
-    const auto current = allocation_bases(streams);
-    if(document.at("output_base").is_null() && document.at("command_base").is_null())
-    {
-        document["output_base"]  = hex_address(current.output);
-        document["command_base"] = hex_address(current.command);
-        return;
-    }
-
-    if(document.at("output_base") != hex_address(current.output) ||
-       document.at("command_base") != hex_address(current.command))
-        throw std::runtime_error{"packet allocation bases changed within one dump document"};
 }
 
 std::string
@@ -458,33 +476,6 @@ topology_json(const std::string& gfx, discovery_table_t ip_discovery)
         {"ip_discovery", {{"dies", std::move(dies)}}},
     };
 }
-
-void
-write_json(const fs::path& path, const ordered_json& document)
-{
-    const std::string contents  = document.dump(2) + '\n';
-    fs::path          temporary = path;
-    temporary += ".tmp";
-
-    std::ofstream output{temporary, std::ios::trunc};
-    if(!output.is_open()) throw std::runtime_error{"failed to open " + temporary.string()};
-    output << contents;
-    output.close();
-    if(!output)
-    {
-        std::error_code error{};
-        fs::remove(temporary, error);
-        throw std::runtime_error{"failed to write " + temporary.string()};
-    }
-
-    std::error_code error{};
-    fs::rename(temporary, path, error);
-    if(error)
-    {
-        fs::remove(temporary);
-        throw std::runtime_error{"failed to replace " + path.string() + ": " + error.message()};
-    }
-}
 }  // namespace
 
 ordered_json
@@ -529,10 +520,10 @@ append_full_pmc_json(ordered_json&                              document,
                      const std::vector<aqlprofile_pmc_event_t>& events,
                      const pmc_packet_streams&                  streams)
 {
-    record_document_bases(document, streams);
+    record_document_bases(document, streams.allocations, streams.command_base);
     const size_t case_index = document.at("pmc").size();
     document["pmc"].push_back({
-        {"request", pmc_request_json(test_event, events)},
+        {"request", request_json(test_event, events)},
         {"response", full_response_json(streams, events)},
     });
     return case_index;
@@ -546,7 +537,7 @@ append_atomic_pmc_json(ordered_json&                              document,
                        size_t                                     baseline_case_index)
 {
     if(events.size() != 1) throw std::invalid_argument{"atomic PMC case must contain one event"};
-    record_document_bases(document, streams);
+    record_document_bases(document, streams.allocations, streams.command_base);
 
     auto              response      = full_response_json(streams, events);
     const std::string baseline      = baseline_response_pointer(document, baseline_case_index);
@@ -554,7 +545,7 @@ append_atomic_pmc_json(ordered_json&                              document,
     response["read"]                = {{"$ref", baseline + "read"}};
     response["stop"]                = {{"$ref", baseline + "stop"}};
     document["pmc"].push_back({
-        {"request", pmc_request_json(test_event, events)},
+        {"request", request_json(test_event, events)},
         {"response", std::move(response)},
     });
 }
@@ -568,7 +559,7 @@ append_instance_sweep_pmc_json(ordered_json&                              docume
 {
     if(events.size() < 2)
         throw std::invalid_argument{"instance-sweep PMC case must contain multiple events"};
-    record_document_bases(document, streams);
+    record_document_bases(document, streams.allocations, streams.command_base);
 
     auto              response          = full_response_json(streams, events);
     const std::string baseline          = baseline_response_pointer(document, baseline_case_index);
@@ -581,7 +572,7 @@ append_instance_sweep_pmc_json(ordered_json&                              docume
         {"$ref", baseline + "unreported_output_slots"},
     };
     document["pmc"].push_back({
-        {"request", pmc_request_json(test_event, events)},
+        {"request", request_json(test_event, events)},
         {"response", std::move(response)},
     });
 }

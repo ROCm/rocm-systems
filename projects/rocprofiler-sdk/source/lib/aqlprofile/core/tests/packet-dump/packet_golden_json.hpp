@@ -14,12 +14,49 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace aqlprofile
 {
 namespace packet_dump
 {
+std::string
+hex_dword(uint32_t value);
+
+std::string
+hex_offset(uint64_t offset);
+
+std::vector<std::string>
+to_hex_dwords(const std::vector<uint8_t>& bytes);
+
+std::string_view
+allocation_role_name(packet_allocation_role role);
+
+nlohmann::ordered_json
+allocations_json(const std::vector<packet_allocation>& allocations);
+
+nlohmann::ordered_json
+memory_copies_json(const std::vector<packet_memory_copy>& copies,
+                   const std::vector<packet_allocation>&  allocations);
+
+nlohmann::ordered_json
+phase_json(const std::vector<uint8_t>&         stream,
+           const hsa_ext_amd_aql_pm4_packet_t& aql,
+           uintptr_t                           command_base);
+
+nlohmann::ordered_json
+request_json(const packet_test_event&                   test_event,
+             const std::vector<aqlprofile_pmc_event_t>& events);
+
+void
+record_document_bases(nlohmann::ordered_json&               document,
+                      const std::vector<packet_allocation>& allocations,
+                      uintptr_t                             command_base);
+
+void
+write_json(const std::filesystem::path& path, const nlohmann::ordered_json& document);
+
 nlohmann::ordered_json
 make_pmc_json_document(const std::string&                   gfx,
                        const packet_test_case&              test_case,

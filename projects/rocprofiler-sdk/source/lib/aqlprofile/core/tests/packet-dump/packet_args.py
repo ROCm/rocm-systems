@@ -35,9 +35,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Resolve rocprofiler-sdk metrics into packet-test arguments"
     )
-    parser.add_argument("--kind", choices=("pmc",), default="pmc")
+    parser.add_argument("--kind", choices=("pmc", "spm"), default="pmc")
     parser.add_argument("--gfx", required=True, help="architecture name, e.g. gfx1201")
-    parser.add_argument("--block", help="optional PMC block name, e.g. SQ")
+    parser.add_argument("--block", help="optional counter block name, e.g. SQ")
     parser.add_argument(
         "--events",
         help="optional comma-separated metric names or numeric event IDs",
@@ -174,11 +174,12 @@ def format_event_arguments(events: list[tuple[str, int]]) -> str:
 
 
 def format_cpp_arguments(
+    kind: str,
     gfx: str,
     cases: dict[str, list[tuple[str, int]]],
     skipped: dict[str, list[tuple[str, int]]],
 ) -> str:
-    arguments = ["--gfx", gfx]
+    arguments = ["--kind", kind, "--gfx", gfx]
     for block in sorted(cases.keys() | skipped.keys()):
         arguments.append("--block")
         arguments.append(block)
@@ -201,7 +202,7 @@ def main() -> None:
         cases, skipped = resolve_cases(args, load_counters(args.config))
     except (KeyError, OSError, TypeError, ValueError) as error:
         raise SystemExit(f"packet argument error: {error}") from error
-    print(format_cpp_arguments(args.gfx, cases, skipped))
+    print(format_cpp_arguments(args.kind, args.gfx, cases, skipped))
 
 
 if __name__ == "__main__":
