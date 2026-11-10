@@ -24,12 +24,12 @@ namespace profiler_hub
 {
 
 /**
- * @brief One trace format's read path behind reader_t.
+ * @brief The rocpd formats' read path behind reader_t, on one SQLite connection.
  *
- * Every format fills the same reader_catalog_t and answers the same queries.
- * Only the storage access behind them differs, so callers above reader_t never
- * see which format they read. A format registers its factory in
- * formats/trace_formats.cpp.
+ * Every rocpd schema fills the same reader_catalog_t and answers the same
+ * queries. Only the SQL behind them differs. The rocpd entry in
+ * formats/trace_formats.cpp registers the factory. A format that does not read
+ * SQLite does not implement this; it implements format_source.
  *
  * The catalog is shared by every connection of one trace source. Pooled
  * readers receive it unbuilt and fill it through build_catalog_category().

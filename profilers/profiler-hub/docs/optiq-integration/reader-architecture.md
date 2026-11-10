@@ -31,6 +31,7 @@ flowchart TB
   end
 
   ctx["ph_ctx"]
+  source["format_source<br/>rocpd_source"]
   pool["connection pool"]
   impl["reader_t<br/>rocpd v2 or v3"]
   mem["cached_track_reader"]
@@ -45,7 +46,7 @@ flowchart TB
   hash --> tl
   future -.-> ctx
   loaded --> ctx
-  ctx --> pool --> impl --> sql
+  ctx --> source --> pool --> impl --> sql
   impl --> catalog
   ctx --> tl
   ctx --> mem
@@ -67,7 +68,7 @@ The reader is built in five layers. Each layer only calls the one below it.
 | C interface | `include/c/profiler_hub.h`, `include/c/profiler_hub_trim.h`, `source/profiler_hub_c_api.cpp` | Checks arguments, runs the call now or on a future, catches exceptions, and maps them to `ph_result_t`. |
 | Context | `source/ph_ctx.cpp`, `source/ph_ctx.hpp` | Owns the opened sources, the published track list, the global track ids, the caches, and every result buffer it hands out. |
 | Caches | `source/cached_track_reader.cpp`, `source/track_file_store.cpp`, `source/catalog_aggregate_store.cpp`, `source/cache_directory.cpp` | Keep timeline data and catalog aggregates in memory or on disk so a second read or a second open does not query SQLite again. |
-| Format reader | `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd/*`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | Turns a format-neutral request into SQL for one rocpd schema. |
+| Format reader | `source/format_source.hpp`, `source/reader.cpp`, `source/reader_impl.hpp`, `source/formats/trace_formats.cpp`, `source/formats/rocpd/*`, `source/formats/rocpd_v2/*`, `source/formats/rocpd_v3/*` | A registry entry opens one source per file. The source answers the context's requests; the rocpd source turns them into SQL for one rocpd schema. |
 | Storage | `source/common/connection_pool.cpp`, `source/storage_impl.cpp`, `source/data_storage/backends/*` | Opens SQLite connections and runs prepared statements. |
 
 ## 2. Core concepts
@@ -75,8 +76,9 @@ The reader is built in five layers. Each layer only calls the one below it.
 ### 2.1 Sources and global track ids
 
 A context opens one or more trace files. Each file, or each GUID inside a
-schema-3 file, becomes one **source**. Every source has its own connection
-pool, its own catalog, and its own `cached_track_reader`.
+schema-3 file, becomes one **source**, opened by its format's registry entry.
+Every source has its own catalog and its own `cached_track_reader`. A rocpd
+source also has its own connection pool.
 
 The visualizer expands a YAML project file into a path list
 (`HubYamlFiles` in Optiq). Profiler-hub only ever sees the list.
@@ -204,9 +206,11 @@ second with a path list and no cache.
    status. One accepted source is created per GUID.
 2. **Load.** `ph_ctx::read_trace` runs on the calling thread, or on the
    context's thread pool when a future is passed:
-   1. `open_sources` builds, per source, a catalog, a connection pool of eight
-      `reader_t` connections, and a `cached_track_reader`.
-   2. `populate_reader_catalog` creates the topology indexes, reads strings,
+   1. `open_sources` opens each source through its registry entry. A rocpd
+      source builds a catalog and a connection pool of eight `reader_t`
+      connections. The context adds a `cached_track_reader` per source.
+   2. Each source's `load_catalog` fills its catalog. For rocpd,
+      `populate_reader_catalog` creates the topology indexes, reads strings,
       nodes, processes, threads, and agents in order, then reads tracks,
       code objects and kernel symbols, streams, queues, and PMC info in
       parallel. If a catalog cache file matches, the grouped scans that build
@@ -222,6 +226,9 @@ second with a path list and no cache.
       - Timeline cache being written: each track is read from SQLite once and
         written to `e<id>.bin` or `s<id>.bin`.
       - No cache folder: each track is read into the in-memory cache.
+
+      Then `finish_load` tells each source that every track is loaded. The
+      rocpd source does nothing.
    7. `attach_track_store` connects the timeline cache to each source's
       `cached_track_reader`, and the node, agent, process, thread, stream,
       queue, and PMC lists are built for the C structs.
@@ -298,7 +305,7 @@ histogram in SQL.
 `ph_get_memory_copy_details`, and `ph_get_memory_alloc_details` share one
 path. The event's track is resolved from `event->track_id`, or by searching
 each source when that id is unknown, and written back into
-`event->track_id`. The details are then read on that source's connection.
+`event->track_id`. The details are then read through that source.
 
 | Detail | Schema 2 | Schema 3 |
 |---|---|---|
