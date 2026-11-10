@@ -183,7 +183,9 @@ __device__ __forceinline__ hipError_t CopyEngineSubmitSignal(
 /// signal, from a kernel or with hipStreamWaitValue64(stream, signal address,
 /// value, hipStreamWaitValueGte).
 ///
-/// Lanes of a wave take turns (see hipExtCopyEngineSubmitLinearOneLane).
+/// Lanes of a wave on distinct engines submit at once. Lanes that share an
+/// engine submit under one reservation, or take turns when non-blocking (see
+/// hipExtCopyEngineSubmitLinearOneLane).
 /// hipErrorNotReady only with HIP_EXT_COPY_ENGINE_SUBMIT_NONBLOCKING.
 static __device__ __forceinline__ hipError_t hipExtCopyEngineSubmitLinear(
     const hipExtCopyEngineDeviceHandle* handle, void* dst, const void* src, uint64_t size,
