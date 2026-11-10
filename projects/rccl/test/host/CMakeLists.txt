@@ -2139,16 +2139,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
 # ---------------------------------------------------------------------------
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_WARP_SPEED
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    RCCL_TEST_ENQUEUE_HOOKS
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # enqueue-test.cc provides these launch-prepare floors directly.
+    RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+    RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
     # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
@@ -2157,6 +2162,8 @@ set(_enq_common_args
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
+rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-warpspeed ${_enq_common_args})
+target_compile_definitions(rccl-UnitTestsMicroEnqueue-warpspeed PRIVATE ENABLE_WARP_SPEED)
 if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
@@ -2555,6 +2562,7 @@ set(_MICRO_TRANSPORT_DEFS
   # Shipping builds set it; it gates whole TUs and net_ib_cast's ncclIbNetCommBase fields.
   ENABLE_FAULT_INJECTION
   COLL_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/coll_net.cc"
+  GENERIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/generic.cc"
   NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
   # graph/connect.cc and diagnostics/p2p.cc keep the original basenames.
   NET_IB_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc"
@@ -2652,6 +2660,10 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportCollNet coll-net-tes
   EXTRA_DEFS
     # transport_stubs.cc would define coll_net.cc a second time
     RCCL_TRANSPORT_STUBS_OMIT_COLL_NET)
+
+# No shared fakes: transport_stubs.cc defines generic.cc's connect functions, so the test TU
+# fakes the transport calls generic.cc makes.
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportGeneric generic-test.cc)
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetSocket net-socket-test.cc
   SOURCES
