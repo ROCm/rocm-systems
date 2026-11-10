@@ -66,6 +66,7 @@ class Insn:
     addr: int
     words: list[int]
     text: str
+    function: str = ""
 
     @property
     def size(self) -> int:
@@ -93,7 +94,8 @@ def disassemble(llvm: str, path: str) -> tuple[list[Insn], list[str]]:
     for line in out.splitlines():
         if m := pattern.match(line):
             words = [int(w, 16) for w in m.group(3).split()]
-            insns.append(Insn(int(m.group(2), 16), words, m.group(1)))
+            current = functions[-1] if functions else ""
+            insns.append(Insn(int(m.group(2), 16), words, m.group(1), current))
         elif m := label.match(line):
             functions.append(m.group(1))
     return insns, functions
@@ -212,6 +214,8 @@ def rewrite(args) -> int:
         kind = classify(insn, args.sites)
         if kind is None:
             continue
+        if args.kernel and not args.kernel.search(insn.function):
+            continue
         if i in covered:
             print(f"skip {insn.addr:#x} {insn.text}: inside s_clause", file=sys.stderr)
             continue
@@ -227,6 +231,10 @@ def rewrite(args) -> int:
             file=sys.stderr,
         )
         sites = sites[:MAX_IMM_ID]
+    if not sites:
+        # Exit code 3 tells callers (e.g. sqtt_site_injector) to keep the original.
+        print("no sites to mark; code object left unchanged")
+        return 3
 
     lines = source_lines(args.llvm, args.input, [insn.addr for insn, _ in sites])
 
@@ -327,6 +335,11 @@ def main() -> int:
         action="append",
         choices=sorted(SITE_KINDS),
         help="Instruction categories to mark (default: lds).",
+    )
+    parser.add_argument(
+        "--kernel",
+        type=re.compile,
+        help="Only mark sites in functions whose (mangled) name matches this regex.",
     )
     parser.add_argument("--llvm", default="/opt/rocm/lib/llvm/bin")
     args = parser.parse_args()

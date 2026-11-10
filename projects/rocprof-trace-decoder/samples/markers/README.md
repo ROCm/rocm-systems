@@ -33,6 +33,13 @@ Available examples:
   Prototype limits: up to 63 sites per code object and stub space limited to
   the page slack after `.text`. `lds_module.cpp` loads a code object with
   `hipModuleLoad` and dumps the kernel output for bit-for-bit comparison.
+- `sqtt_site_injector.cpp` is a rocprofiler-sdk tool that runs
+  `sqtt_site_rewrite.py` on every GPU code object as it is loaded, by wrapping
+  `hsa_code_object_reader_create_from_memory`, so unmodified binaries can be
+  profiled. Set `ROCP_TOOL_LIBRARIES` to the built library and
+  `SQTT_SITE_REWRITE` to the script; `SQTT_SITE_ARGS="--kernel <regex>"`
+  limits rewriting to matching kernels. It works alongside rocprofv3, which
+  appends its own tool library.
 
 The sample input parser derives nonzero code-object IDs from common rocprofiler
 capture filenames such as `code_object_id_7.out`. Each code object is loaded
