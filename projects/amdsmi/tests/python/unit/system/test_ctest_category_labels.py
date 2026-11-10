@@ -91,8 +91,6 @@ class CtestCategoryLabelsTest(unittest.TestCase):
             "gfx90a": "aldebaran",
             "gfx94X": "90400",
             "gfx103X": "sienna_cichlid",
-            "gfx1100": "strix_point",
-            "gfx115X": "strix_point",
         }
         for arch, asic in archs.items():
             with self.subTest(arch=arch):
@@ -114,4 +112,5 @@ class CtestCategoryLabelsTest(unittest.TestCase):
                     command = self.tests[name][0]
                     excluded = command.split("--gtest_filter=", 1)[1].split("-", 1)[1]
                     self.assertEqual(set(excluded.split(":")), expected)
-        self.assertNotIn("ex_gpu_gfx110X", self.archs)
+        for dropped in ("ex_gpu_gfx110X", "ex_gpu_gfx1100", "ex_gpu_gfx115X"):
+            self.assertNotIn(dropped, self.archs)

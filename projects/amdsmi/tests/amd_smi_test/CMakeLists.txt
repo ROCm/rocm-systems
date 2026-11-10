@@ -238,8 +238,6 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
             "ex_gpu_gfx90a"
             "ex_gpu_gfx94X"
             "ex_gpu_gfx103X"
-            "ex_gpu_gfx1100"
-            "ex_gpu_gfx115X"
         )
         list(JOIN _AMDSMI_PYTHON_CATEGORY_LABELS ";" _AMDSMI_PYTHON_GENERIC_LABEL_STRING)
         list(JOIN _AMDSMI_PYTHON_LABELS ";" _AMDSMI_PYTHON_LABEL_STRING)

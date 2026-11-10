@@ -162,31 +162,9 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx103X"
 
-  # Keep the legacy gfx1100 -> strix_point mapping. gfx1103's exclusions were
-  # removed after the APU metrics fix; a gfx110X label would reapply them there.
-  exclude_gpu_gfx1100:
-    test_patterns:
-      - "GpuFunctionalReadOnly.TempRead"
-      - "GpuFunctionalReadOnly.TestFrequenciesRead"
-      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx1100"
-
-  exclude_gpu_gfx115X:
-    test_patterns:
-      - "GpuFunctionalReadOnly.TempRead"
-      - "GpuFunctionalReadOnly.TestFrequenciesRead"
-      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx115X"
+  # gfx1100 and gfx115X have no exclude_gpu block. #14026 removed TempRead,
+  # TestFrequenciesRead, and TestFrequenciesReadWrite from amdsmitst.exclude,
+  # so those GPUs use the generic suite (-LE ex_gpu).
 
 execution_settings:
   default_timeout: 300
