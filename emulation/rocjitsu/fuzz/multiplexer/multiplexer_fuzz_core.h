@@ -20,6 +20,7 @@ enum class FuzzTarget : uint8_t {
   Decode = 0,
   Execution = 1,
   CodeObject = 2,
+  ConcurrentDispatch = 3,
 };
 
 /// @brief One registered multiplexer fuzz destination.
