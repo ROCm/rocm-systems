@@ -4,9 +4,10 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # Presubmit and on-demand ASAN builds. This workflow requests host-asan.
-# TheRock ref below is users/dravindr/host-asan-gfx90a-runner: gfx90a-only
-# host-asan, with llvm-project#5307 cherry-picked onto the amd-llvm pin.
-# A rocm-systems pull request builds and tests host-asan on gfx90a only.
+# TheRock ref below is users/dravindr/host-asan-gfx90a-with-5307: the gfx90a
+# host-asan runner change, plus llvm-project#5307 cherry-picked onto amd-llvm.
+# That pin is not on TheRock#9795. A rocm-systems pull request builds and
+# tests host-asan on gfx90a only.
 #
 # The presubmit is scoped to a runtime-only build (compiler-runtime and
 # runtime-tests), testing the components those stages build (hip-tests,
@@ -62,7 +63,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@9c5948c3056434ec34df4f26984d5e94217f7f36 # gfx90a host-asan + llvm-project#5307
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@dc9d491cff4a6d93d33bab1fea023ba81e71477c # gfx90a host-asan + llvm-project#5307
     with:
       build_variant: "host-asan"
       # Runtime-only build: everything outside these two stages, math-libs
@@ -79,7 +80,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 9c5948c3056434ec34df4f26984d5e94217f7f36 # gfx90a host-asan + llvm-project#5307
+      ref: dc9d491cff4a6d93d33bab1fea023ba81e71477c # gfx90a host-asan + llvm-project#5307
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -99,7 +100,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@9c5948c3056434ec34df4f26984d5e94217f7f36 # gfx90a host-asan + llvm-project#5307
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@dc9d491cff4a6d93d33bab1fea023ba81e71477c # gfx90a host-asan + llvm-project#5307
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -109,7 +110,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 9c5948c3056434ec34df4f26984d5e94217f7f36 # gfx90a host-asan + llvm-project#5307
+      ref: dc9d491cff4a6d93d33bab1fea023ba81e71477c # gfx90a host-asan + llvm-project#5307
     permissions:
       contents: read
       id-token: write
@@ -127,7 +128,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 9c5948c3056434ec34df4f26984d5e94217f7f36 # gfx90a host-asan + llvm-project#5307
+          ref: dc9d491cff4a6d93d33bab1fea023ba81e71477c # gfx90a host-asan + llvm-project#5307
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
