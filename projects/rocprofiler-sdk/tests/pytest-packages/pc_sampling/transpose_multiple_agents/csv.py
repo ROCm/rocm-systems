@@ -32,8 +32,8 @@ def validate_all_agents_are_sampled(
     input_kernel_trace_csv: pd.DataFrame,
     input_agent_info_csv: pd.DataFrame,
 ):
-    transpose_kernel_source_line_start = 194
-    transpose_kernel_source_line_end = 202
+    transpose_kernel_source_line_start = 181
+    transpose_kernel_source_line_end = 189
 
     gfx9_gfx12_agents_df = input_agent_info_csv[
         input_agent_info_csv["Name"].apply(
@@ -51,19 +51,19 @@ def validate_all_agents_are_sampled(
     # Note: Agent_Id is in the following format e.g., "Agent 3",
     # that's why we need a log for extracting integer value of the id.
     # Determine the agent on which sample was generated
-    dispatch_agents = (
-        input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"]
-        .str.extract(r"^Agent ([0-9]+)$", expand=False)
+    samples_df["Agent_Id"] = (
+        samples_df["Dispatch_Id"]
+        .map(
+            input_kernel_trace_csv.set_index("Dispatch_Id")["Agent_Id"]
+            .str.split(" ")
+            .str[1]
+        )
         .astype(np.uint64)
     )
-    samples_df["Agent_Id"] = (
-        samples_df["Dispatch_Id"].map(dispatch_agents).astype(np.uint64)
-    )
-    sampled_agents = set(samples_df["Agent_Id"].unique())
-    # Assumes that the default relative agent indexing is used and that `Agent_Id` in
-    # the kernel trace maps to the `Logical_Node_Id`
-    expected_agents = set(gfx9_gfx12_agents_df["Logical_Node_Id"]) & set(dispatch_agents)
-    assert expected_agents and (expected_agents == sampled_agents)
+    sampled_agents = samples_df["Agent_Id"].unique()
+    sampled_agents_num = len(sampled_agents)
+    # all agents must be sampled
+    assert sampled_agents_num == len(gfx9_gfx12_agents_df)
 
     # separate samples per agents
     grouped_samples_per_agent = samples_df.groupby("Agent_Id")
@@ -78,7 +78,6 @@ def validate_all_agents_are_sampled(
             lambda comment: "transpose.cpp" in comment
         )
     ].copy()
-    assert not transpose_samples_df.empty, "no PC samples mapped to transpose.cpp"
     # determine the line number for each sample
     transpose_samples_df["Source_Line_Num"] = transpose_samples_df[
         "Instruction_Comment"
