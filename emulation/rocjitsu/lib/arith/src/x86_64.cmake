@@ -72,7 +72,30 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bit_count_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bitfield_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/boolean_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/carry_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_ternary_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mad_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mul_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_ternary_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/mad64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/sad_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/shift_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/cndmask_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_trig_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/unary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/ds_routing_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/move_x86_64_v3.cpp
@@ -115,7 +138,22 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bit_count_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bitfield_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/boolean_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/carry_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mul_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_ternary_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/mad64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/cndmask_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp

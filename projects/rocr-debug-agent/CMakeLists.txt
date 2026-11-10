@@ -67,6 +67,7 @@ target_sources(
     PRIVATE
         src/agent_config.cpp
         src/agent_dbgapi_logging.cpp
+        src/agent_dbgapi_utils.cpp
         src/agent_utils.cpp
         src/code_object.cpp
         src/debug_agent.cpp
