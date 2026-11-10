@@ -28,6 +28,9 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/types.h>
+#ifdef CONFIG_IO_URING
+#include <linux/io_uring/cmd.h>
+#endif
 
 #include "sdxi_user.h"
 
@@ -616,10 +619,64 @@ static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 	return ret;
 }
 
+#ifdef CONFIG_IO_URING
+static int sdxi_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
+{
+	struct sdxi_char_dev *sdev = g_sdev;
+	void __user *arg = u64_to_user_ptr(READ_ONCE(cmd->sqe->addr));
+	long ret;
+
+	if (!sdev)
+		return -ENODEV;
+
+	/*
+	 * poll_csb() calls usleep_range() — cannot run in the submission
+	 * path where blocking is forbidden.  Signal io-wq to retry from a
+	 * sleepable worker thread.
+	 */
+	if (issue_flags & IO_URING_F_NONBLOCK)
+		return -EAGAIN;
+
+	mutex_lock(&sdev->lock);
+	switch (cmd->cmd_op) {
+	case SDXI_IOC_MEMCPY:
+		ret = handle_memcpy(sdev, arg);
+		break;
+	case SDXI_IOC_COMPRESS:
+		ret = handle_compress(sdev, arg);
+		break;
+	case SDXI_IOC_DECOMPRESS:
+		ret = handle_decompress(sdev, arg);
+		break;
+	case SDXI_IOC_ELEMWISE:
+		ret = handle_elemwise(sdev, arg);
+		break;
+	case SDXI_IOC_INFO:
+		ret = handle_info(sdev, arg);
+		break;
+	case SDXI_IOC_STATS:
+		ret = handle_stats(sdev, arg);
+		break;
+	case SDXI_IOC_DMABUF_COPY:
+		ret = handle_dmabuf_copy(sdev, arg);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+	}
+	mutex_unlock(&sdev->lock);
+
+	io_uring_cmd_done(cmd, ret, 0, issue_flags);
+	return 0;
+}
+#endif /* CONFIG_IO_URING */
+
 static const struct file_operations sdxi_char_fops = {
 	.owner          = THIS_MODULE,
 	.unlocked_ioctl = sdxi_char_ioctl,
 	.compat_ioctl   = compat_ptr_ioctl,
+#ifdef CONFIG_IO_URING
+	.uring_cmd      = sdxi_uring_cmd,
+#endif
 };
 
 /* ------------------------------------------------------------------ */
