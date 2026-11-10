@@ -1075,7 +1075,8 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutpu
 // A separately constructed plan can name the literal source code instead of
 // an SGPR. The failed vector builder must stop emission without returning bytes.
 TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
-  for (const auto source : {ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
+  for (const ProbeArgSource source :
+       {ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
     SCOPED_TRACE(static_cast<int>(source));
     TrampolinePlan plan = make_probe_plan();
     plan.entry_storage_base = 20;
@@ -1095,14 +1096,17 @@ TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
 }
 
 TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
-  for (const ProbeArgSource source : {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0}) {
+  for (const ProbeArgSource source :
+       {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0, ProbeArgSource::EntryTtmp}) {
     SCOPED_TRACE(static_cast<int>(source));
     TrampolinePlan plan = make_probe_plan();
     plan.entry_storage_base = 20;
     plan.entry_register_captures = {
         {.source_index = 0,
          .sgpr = 22,
-         .source_class = source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR}};
+         .source_class = source == ProbeArgSource::EntrySgpr   ? RegClass::SGPR
+                         : source == ProbeArgSource::EntryTtmp ? RegClass::TTMP
+                                                               : RegClass::VGPR}};
     plan.probe_args = {{source, 0}};
     std::string error;
     ASSERT_TRUE(
@@ -1110,11 +1114,27 @@ TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
         << error;
     plan.entry_register_captures.front().sgpr = kVectorSrcLiteral;
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &error).has_value());
-    const std::string source_name =
-        source == ProbeArgSource::EntrySgpr ? "EntrySgpr" : "EntryVgprLane0";
+    const std::string source_name = source == ProbeArgSource::EntrySgpr   ? "EntrySgpr"
+                                    : source == ProbeArgSource::EntryTtmp ? "EntryTtmp"
+                                                                          : "EntryVgprLane0";
     EXPECT_EQ(error, "probe-call emission: argument 0 (" + source_name +
                          "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
+  }
+}
+
+TEST(TrampolineBuilderPlan, RejectsInvalidAndDuplicateEntryTtmpCaptures) {
+  for (const std::vector<EntryRegisterCapture> &captures :
+       {std::vector<EntryRegisterCapture>{{16, 22, RegClass::TTMP}},
+        std::vector<EntryRegisterCapture>{{9, 22, RegClass::TTMP}, {9, 23, RegClass::TTMP}}}) {
+    TrampolinePlan plan = make_probe_plan();
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = captures;
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9}};
+    std::string error;
+    EXPECT_FALSE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error));
+    EXPECT_EQ(error, "entry register capture is outside the framework-owned register run");
   }
 }
 
