@@ -68,8 +68,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **`amd-smi static --cache` now tells the level-1 data caches apart**.  
+- **`amd-smi static --cache` reports each cache once and tells the level-1 data caches apart**.  
+  - It now uses `amdsmi_get_gpu_cache_entries()`: each cache is one `CACHE_<N>` entry, so entry count and numbering change on GPUs whose caches were split by CU-sharing count (for example MI210 and MI300X), and it shows `CACHE_LINE_SIZE` and `MIN_NUM_CU_SHARED`, or `N/A` where the driver does not report them.
   - `CACHE_ACRONYM` reports `vL1D` (vector), `sL1D` (scalar) and `GL1` (per shader array) instead of `L1D` for every level-1 data cache; `L1I`, `L2` and `L3` are unchanged.
+  - Labels rely on the order KFD lists level-1 caches in (vector data, instruction, scalar data, GL1) and on the scalar data and instruction caches sharing the same Compute Units, not on particular sharing counts, so they stay correct however the driver splits Compute Units between caches.
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
@@ -148,6 +150,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
 ### Resolved Issues
+
+- **Fixed `amd-smi static --cache` splitting one cache into several entries, and printing `N/A` on heavily harvested GPUs**.  
+  - It printed a separate entry for every distinct CU-sharing count within a cache. CU harvesting varies that count from GPU to GPU, so one cache could appear as several rows, and on GPUs with per-shader-array GL1 caches the entries could exceed `AMDSMI_MAX_CACHE_TYPES` (10), at which point the query failed and the CLI printed `N/A`.
 
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
