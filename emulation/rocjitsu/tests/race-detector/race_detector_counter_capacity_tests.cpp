@@ -500,8 +500,8 @@ INSTANTIATE_TEST_SUITE_P(
                                        amdgpu::WaitCounterKind::Km, MemoryOrderClass::VMEM}),
     [](const ::testing::TestParamInfo<SplitCounterCase> &info) { return info.param.name; });
 
-// CDNA5 ISA 5.7.1 sizes each counter in the table "Counter Size Description"
-// and says that "Hardware prevents these counters from overflowing by stalling
+// The counter table in CDNA5 ISA 5.7.1 sizes each counter, and the section says
+// that "Hardware prevents these counters from overflowing by stalling
 // the issue of any instruction that by incrementing the counter would cause it
 // to overflow." An n-bit counter therefore holds at most 2^n - 1 tokens.
 TEST(RaceDetector, Gfx1250CounterCapacity_CapacitiesFollowTheWaitPolicy) {

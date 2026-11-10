@@ -27,8 +27,9 @@ struct CounterCapacities {
   /// Combined counters of the pre-GFX12 targets.
   int vmcnt = 0;
   int lgkmcnt = 0;
-  /// Split counters of gfx1250. On targets without them, the split counter
-  /// names in decoded metadata alias the combined counters instead.
+  /// Split counters of gfx1250. On the pre-GFX12 capacity targets, the split
+  /// counter names in decoded metadata alias the combined counters instead.
+  /// RDNA4 has split counters, but its capacity is not modeled.
   int loadcnt = 0;
   int storecnt = 0;
   int dscnt = 0;
@@ -61,10 +62,10 @@ struct CounterCapacities {
 /// counter model. A zero capacity means that the architecture has no combined
 /// counter of that type.
 ///
-/// gfx1250 (CDNA5) also gets split-counter capacities. CDNA5 ISA 5.7.1 sizes
-/// LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt at 6 bits and KMcnt at 5
-/// bits (table "Counter Size Description"), and hardware stalls issue rather
-/// than overflow a counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
+/// gfx1250 (CDNA5) also gets split-counter capacities. The counter table in
+/// CDNA5 ISA 5.7.1 sizes LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt at 6
+/// bits and KMcnt at 5 bits, and hardware stalls issue rather than overflow a
+/// counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
 /// The wait policy shared with the core memory-wait checker caps a wait at one
 /// below that all-ones value, so its maximum plus one is the same capacity.
 [[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {

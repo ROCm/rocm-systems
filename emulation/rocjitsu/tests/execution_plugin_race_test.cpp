@@ -1405,9 +1405,9 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
 /// race unless the oldest operation is complete.
 class Gfx1250CounterCapacityRaceTest : public TensorDmaRaceTest {
 protected:
-  // LOADcnt, DScnt, ASYNCcnt and TENSORcnt are 6-bit counters (CDNA5 ISA 5.7.1,
-  // table "Counter Size Description"), and issue stalls rather than overflow
-  // one, so each holds 2^6 - 1 tokens.
+  // LOADcnt, DScnt, ASYNCcnt and TENSORcnt are 6-bit counters (the counter
+  // table in CDNA5 ISA 5.7.1), and issue stalls rather than overflow one, so
+  // each holds 2^6 - 1 tokens.
   static constexpr int kCapacity = 63;
   static constexpr uint32_t kOldestAddress = 0;
   static constexpr uint32_t kYoungerAddress = 64;
