@@ -129,6 +129,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
   - They appear as rows with their BDF, and their other fields read ``N/A``. NIC indices are positional, so these rows renumber the AI-NIC cards after them; select a device by BDF where the identity has to be stable.
 
+- **``amd-smi list --json`` and ``--csv`` on a host with GPUs and NICs now print one document**.  
+  - NIC rows are no longer appended to the GPU rows in those formats, so the output stays valid JSON or CSV. Add ``--nic`` to list the NICs, which are the only document in that case. Human-readable output still shows both.
+
+- **``amdsmi_topo_get_link_type()`` now accepts a null ``hops`` for a GPU pair**.  
+  - It returned an invalid-argument status before; the hop count is simply not returned.
+
+- **``amd-smi static`` on a host with NICs now also prints the NIC section**.  
+  - This includes ``--csv``, so a script that reads the GPU-only table now finds NIC rows after it.
+
+- **Human-readable output indents list items that have no ``key: value`` form one level deeper**.  
+  - This applies to every command, not only the NIC ones, so a script that parses the text output sees the new indent.
+
 - **A bare ``--nic`` now selects every NIC**.  
   - A command that takes ``--nic`` now accepts it with no value and reports every discovered NIC.
 
@@ -151,7 +163,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - ``amdsmi_get_nic_fw_info()`` is implemented and its entry layout changed, so callers must recompile and read ``entry.fw.name`` where ``entry.name`` was used; the Python function returns a firmware name to version dictionary. This is an ABI break in ``amdsmi_nic_fw_entry_t`` and ``amdsmi_nic_fw_info_t``, and ``AMDSMI_MAX_NIC_FW`` grows from 16 to 64.
 
 - **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
-  - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library.
+  - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library. A build without the libibverbs headers reads sysfs only, so more drivers show ``N/A``.
 
 - **``amdsmi_get_nic_port_info()`` now keeps ports whose driver is not loaded**.  
   - A port with no driver now keeps its place in the list with its BDF and netdev, so later port indices no longer shift.
@@ -264,6 +276,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Removed the Broadcom NIC and switch device path** (breaking).  
   - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch``, ``topology --nic_topo``, the ``BRCM_NIC`` CMake option and the Python and ``rsmi_*`` Broadcom NIC and switch functions are gone. Broadcom NICs appear through ``--nic`` like every other NIC.
+  - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
 ### Optimized
 

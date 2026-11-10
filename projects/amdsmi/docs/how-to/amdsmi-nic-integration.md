@@ -377,7 +377,7 @@ typedef struct {
 - `subvendor_id`: `/sys/bus/pci/devices/<BDF>/subsystem_vendor`
 - `subsystem_id`: `/sys/bus/pci/devices/<BDF>/subsystem_device`
 - `revision`: `/sys/bus/pci/devices/<BDF>/revision`
-- ``product_name``, ``part_number``, ``serial_number``: VPD data, parsed from ``/sys/bus/pci/devices/<BDF>/vpd`` when present. When the device exposes no sysfs VPD entry, ``product_name`` and ``part_number`` are reported as unavailable; ``serial_number`` falls back to the devlink board serial (``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``) and is reported as unavailable only when that is also absent. The devlink ``DEVLINK_ATTR_INFO_SERIAL_NUMBER`` attribute is deliberately *not* used; it is a MAC-derived EUI, not the physical board serial.
+- ``product_name``, ``part_number``, ``serial_number``: VPD data, parsed from ``/sys/bus/pci/devices/<BDF>/vpd`` when present. When the device exposes no sysfs VPD entry, ``product_name`` and ``part_number`` are reported as unavailable. When VPD is readable but carries no serial number, ``serial_number`` falls back to the devlink board serial (``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``) and is reported as unavailable only when that is also absent. The devlink ``DEVLINK_ATTR_INFO_SERIAL_NUMBER`` attribute is deliberately *not* used; it is a MAC-derived EUI, not the physical board serial.
 
 The NIC type and the capability bitmask are not fields of this struct, which keeps its previous size. Read them with ``amdsmi_get_nic_type()`` and ``amdsmi_get_nic_capability()``. Both come from the discovered device, not sysfs. The capability is a bitmask of ``amdsmi_nic_capability_bits_t``: ``AMDSMI_NIC_CAP_FWCTL`` (firmware-control management function, e.g. Pensando/POLLARA) and ``AMDSMI_NIC_CAP_NETDEV`` (host network port(s) present).
 
@@ -935,6 +935,9 @@ subcommands accept a device selector:
 
 A bare ``--nic`` with no value selects every NIC.
 
+Run the NIC commands as root. PCI VPD (``/sys/bus/pci/devices/<BDF>/vpd``) is readable by root only, so without it
+``product_name``, ``part_number`` and ``serial_number`` read ``N/A``.
+
 The Broadcom-specific options of earlier builds are gone: ``--brcm_nic``, ``--brcm_switch``,
 ``--switch``, ``topology --nic_topo`` and ``topology --nic_switch``. Broadcom NICs are listed and
 queried through ``--nic`` like every other NIC.
@@ -970,7 +973,7 @@ amd-smi metric --nic <ID | BDF | UUID> --port [PORT_NUM] [--extended] [--json]
 **Scopes:**
 
 - ``DEFAULT``: The vendor-tier subset of ``VENDOR_STATISTICS`` (e.g. ``frames_rx_ok`` for ionic, ``rx_pfc_frames`` for bnxt).
-- ``EXTENDED``: The full vendor-specific counter set from the driver (via ``ethtool -S`` plus, for ionic, netlink FEC stats). A superset of ``DEFAULT``. Requires ``--extended``, in text and JSON.
+- ``EXTENDED``: The catalogued vendor-specific counters (via ``ethtool -S`` plus, for ionic, netlink FEC stats). A superset of ``DEFAULT``. A counter the driver reports but the catalogue does not list is not shown, in either scope. Requires ``--extended``, in text and JSON.
 
 ``STATISTICS`` (the standard driver counters, e.g. ``RX_PACKETS``, ``TX_PACKETS``,
 ``RX_BYTES``) is a separate, untiered block; it isn't affected by scope.
@@ -1188,7 +1191,7 @@ sudo amd-smi metric --nic 0 --sensors --json
 | Network port | ``/sys/class/net/<iface>/`` (``address``, ``mtu``, ``carrier``, ``operstate``, ``speed``, ``dev_port``, ``ifindex``, ``type``) |
 | RDMA | ``/sys/class/infiniband/<dev>/`` (``node_guid``, ``node_type``, ``sys_image_guid``, ``fw_ver``, ``ports/<N>/state``, ``ports/<N>/counters/*``) |
 | VPD Data | ``/sys/bus/pci/devices/<BDF>/vpd`` when present (product name, part number, serial number) |
-| Board serial (fallback) | devlink ``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``, the serial-number source when VPD is absent |
+| Board serial (fallback) | devlink ``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``, the serial-number source when VPD is readable but has no serial |
 
 ---
 
@@ -1584,8 +1587,8 @@ generic across vendors.
    ``/sys/bus/pci/devices/<BDF>/vpd`` when the binary VPD blob is exposed. When a
    device does not expose the sysfs VPD entry, product name and part number are
    reported as unavailable. Backends must not shell out to external tools for VPD.
-   For the serial number only, fall back to the devlink board serial
-   (``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``) before giving up; this is a distinct
+   For the serial number only, when VPD is readable but carries none, fall back to the
+   devlink board serial (``DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER``) before giving up; this is a distinct
    physical source, not synthesized data (rule 5), so the fallback is compliant.
    Do not use ``DEVLINK_ATTR_INFO_SERIAL_NUMBER``; it is a MAC-derived EUI.
 
