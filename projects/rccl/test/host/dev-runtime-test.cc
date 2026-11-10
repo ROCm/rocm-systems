@@ -6777,6 +6777,39 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// JIT-compiled device code: ncclDevCommCreate resolves the version the device
+// code was built against, which is the runtime version (not the caller's
+// compile-time reqs.version) when reqs.useRuntimeVersion or NCCL_DEV_API_JIT=1
+// says so. The requirements struct is still interpreted with the compile-time
+// version, since that is the layout the host caller passed.
+
+// Oldest caller that has useRuntimeVersion, so the oldest one it is read from.
+constexpr uint32_t kJitFieldVersion = NCCL_VERSION(2, 31, 0);
+// A caller compiled before the field existed: the byte is past its struct.
+constexpr uint32_t kPreJitFieldVersion = NCCL_VERSION(2, 30, 7);
+static_assert(kJitFieldVersion < NCCL_VERSION_CODE,
+              "the JIT tests need a compile-time version that differs from the runtime version");
+
+class DevCommCreateJitTest : public DevCommCreateTest {
+protected:
+  uint32_t QueuedDeviceCodeVersion() {
+    ncclDevrCommCreateTask* task = ncclIntruQueueHead(&comm->devrState.commCreateTaskQueue);
+    return task != nullptr ? task->deviceCodeVersion : 0;
+  }
+};
+
+// Branch: an AOT caller older than the runtime keeps its own version, so its
+// devComm is later down-converted to the layout its kernels were built with.
+TEST_F(DevCommCreateJitTest, AotCaller_QueuesCompileTimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kJitFieldVersion);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
 // them against the communicator, so a request rejected after the copy must
 // release that copy (NVIDIA/nccl#2225). The in-group task path and the
