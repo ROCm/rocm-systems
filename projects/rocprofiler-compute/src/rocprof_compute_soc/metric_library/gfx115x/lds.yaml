@@ -29,17 +29,16 @@ lds.theoretical_bw:
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Indicates the maximum amount of bytes that could have been loaded from, stored
-    to, or atomically updated in the LDS per unit time (see LDS Bandwidth example
-    for more detail). Does not take into account the execution mask of the wavefront
-    when the instruction was executed.
+    Estimated achieved bandwidth for Local Data Share operations. This reflects the
+    effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS
+    banks per compute unit for high-bandwidth shared memory access.
   peak_empirical: $LDSBw_empirical_peak
 lds.util:
   name: LDS Utilization
   formula: 100 * SUM(SQC_LDS_IDX_ACTIVE_sum) / (SUM(GRBM_GUI_ACTIVE) * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the total CU cycles the LDS was actively executing instructions
-    (including, but not limited to, load, store, atomic and HIP's __shfl operations).
-    Calculated as the ratio of the total number of cycles LDS was active over the
-    total CU cycles.
+    Percentage of the LDS cycle budget across all CUs spent servicing indexed
+    (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because
+    two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on
+    this architecture.

@@ -79,10 +79,8 @@ spi.dispatched_wavefronts:
   formula: AVG(SPI_ALL_WAVE_sum)
   unit: Wavefronts
   description: >-
-    The total number of wavefronts, summed over all workgroups, forming this kernel
-    launch. On AMD Instinct CDNA accelerators and GCN GPUs, the wavefront size is
-    always 64 work-items, so the total number of wavefronts should equal the grid
-    size divided by 64, rounded up.
+    Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe scoped
+    and reads zero for gfx1250 compute dispatches).
 spi.dispatched_workgroups:
   name: Dispatched Workgroups
   formula: AVG(SPI_RA_REQ_ALLOC_sum)

@@ -288,7 +288,6 @@ compute.valu_trans_flops_fp16:
   unit: GFLOP/s
   description: >-
     Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput.
-    TODO: Double check that transcendental ops are executed within ALU.
   peak: $max_sclk * $cu_per_gpu * 64 / 1000
 compute.valu_trans_flops_fp32:
   name: VALU Trans FLOPs (FP32)

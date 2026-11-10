@@ -7,5 +7,8 @@ fabric.hbm_bw:
   name: HBM Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total HBM bandwidth.
+  description: >-
+    Total HBM bandwidth. The peak empirically measured bandwidth reflects peak
+    single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below
+    it.
   peak_empirical: $HBMBw_empirical_peak

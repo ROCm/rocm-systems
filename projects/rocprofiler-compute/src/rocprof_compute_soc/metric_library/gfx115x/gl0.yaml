@@ -99,7 +99,10 @@ gl0.rd_req:
   name: GL0 Read Requests
   formula: SUM(TCP_REQ_READ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    Number of read requests to the GL0 vector cache. High read counts indicate
+    memory-intensive load operations. Compare with hit rate to assess cache
+    effectiveness for read traffic.
 gl0.ta_req_stall:
   name: TA Requests Stall
   formula: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
@@ -119,4 +122,7 @@ gl0.wr_req:
   name: GL0 Write Requests
   formula: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    Number of write requests to the GL0 vector cache. Write traffic may include global
+    memory stores and cache writebacks. High write counts indicate write-intensive
+    workloads.

@@ -708,7 +708,8 @@ with only these edits:
 - plain ASCII (`->` for an arrow, no trademark mark);
 - no sentence about how a panel shows the metric ("also presented as a percent of the
   peak");
-- no panel 3000 `Equation:` sentence, since the `formula` field holds the equation.
+- no panel 3000 `Equation:` sentence, since the `formula` field holds the equation;
+- no TODO note.
 
 Better wording goes to the metric owners in a separate change.
 
