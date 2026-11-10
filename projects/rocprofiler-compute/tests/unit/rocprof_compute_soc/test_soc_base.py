@@ -417,6 +417,25 @@ def test_allocate_seven_sq_plus_one_accum_needs_second_bucket(perfmon_config):
     )
 
 
+def test_allocate_gfx1250_splits_sp_valu_from_sq_vmem():
+    """On gfx1250 the call site applies the SP/SQ family split, so an SP_VALU_*
+    and an SQ_VMEM_* counter never share a bucket, even with SQ room for both."""
+    soc = _make_soc({"SQ": 8}, arch="gfx1250")
+    counters = {"SP_VALU_FLOPS_FP32", "SQ_VMEM_REQ"}
+
+    files, file_count, _ = soc._allocate_perfmon_counter_files(counters)
+
+    assert file_count == 2
+    assert len(files) == 2
+    for counter_file in files:
+        flat = set(flat_counters_in_perfmon_file(counter_file))
+        assert not counters <= flat
+    all_flat: set[str] = set()
+    for counter_file in files:
+        all_flat.update(flat_counters_in_perfmon_file(counter_file))
+    assert all_flat == counters
+
+
 def test_allocate_first_fit_packing(perfmon_config):
     soc = _make_soc(perfmon_config)
     # 3 SQ counters all fit in one bucket (SQ capacity 8)
