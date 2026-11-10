@@ -297,7 +297,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "Allocation role inferred from use: command receives the PM4 copies, output holds the descriptor and the KFD ring buffers.",
+          "description": "Allocation role inferred from use: command receives the PM4 copies, and output is every other allocation. The descriptor lies inside an output allocation.",
           "enum": [
             "output",
             "command"
@@ -376,7 +376,7 @@
     },
     "aql_packet": {
       "type": "object",
-      "description": "Raw 64-byte outer AQL packet containing an INDIRECT_BUFFER command for one phase. AQLProfile leaves the header and completion signal zero.",
+      "description": "Raw 64-byte outer AQL packet containing an INDIRECT_BUFFER command for one phase.",
       "additionalProperties": false,
       "required": [
         "size_bytes",
@@ -500,7 +500,7 @@
     },
     "descriptor": {
       "type": "object",
-      "description": "Raw bytes of the aqlprofile_spm_buffer_desc_t returned by create, read before delete. Decoders treat the contents as opaque and access them through aqlprofile_spm_decode_query and aqlprofile_spm_decode_stream_v1.",
+      "description": "Raw bytes that the data pointer of the aqlprofile_spm_buffer_desc_t returned by create points to (size bytes), read before delete. Decoders treat the contents as opaque and access them through aqlprofile_spm_decode_query and aqlprofile_spm_decode_stream_v1.",
       "additionalProperties": false,
       "required": [
         "allocation",
@@ -547,22 +547,22 @@
       "properties": {
         "AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE": {
           "type": "integer",
-          "description": "Byte size of one complete streamed SPM segment.",
+          "description": "Byte size of one SPM sample segment, computed from the line counts recorded in the descriptor.",
           "minimum": 0
         },
         "AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC": {
           "type": "integer",
-          "description": "Number of per-XCC data buffers delivered to the data callback.",
+          "description": "Number of XCCs recorded in the descriptor.",
           "minimum": 0
         },
         "AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT": {
           "type": "integer",
-          "description": "Number of request events; decode callbacks report this array position, not event_id.",
+          "description": "Number of request events recorded in the descriptor.",
           "minimum": 0
         },
         "AQLPROFILE_SPM_DECODE_QUERY_COUNTER_MAP_BYTE_OFFSET": {
           "type": "integer",
-          "description": "Byte offset of the opaque counter map inside the descriptor.",
+          "description": "Byte offset of the counter map from the start of the descriptor bytes.",
           "minimum": 0
         }
       }
@@ -801,7 +801,7 @@
         },
         "topology": {
           "type": "string",
-          "description": "Relative path of the agent and IP-discovery document used by this dump.",
+          "description": "Relative path of the agent and IP-discovery fixture document for this architecture.",
           "pattern": "^\\.\\./gfx[0-9a-z]+_ip_discovery\\.json$"
         },
         "configurations": {
@@ -856,7 +856,7 @@
         },
         "spm": {
           "type": "array",
-          "description": "Independent SPM request/response cases: every event at each block_index, then one same-event request covering all instances when instance_count is greater than one.",
+          "description": "Independent SPM request/response cases: every event at each block_index, then, for each event, one request covering all instances when instance_count is greater than one.",
           "items": {
             "$ref": "#/$defs/spm_case"
           }
@@ -946,7 +946,7 @@
         },
         "topology": {
           "type": "string",
-          "description": "Relative path of the agent and IP-discovery document used by this query.",
+          "description": "Relative path of the agent and IP-discovery fixture document for this architecture.",
           "pattern": "^\\.\\./gfx[0-9a-z]+_ip_discovery\\.json$"
         },
         "harness": {

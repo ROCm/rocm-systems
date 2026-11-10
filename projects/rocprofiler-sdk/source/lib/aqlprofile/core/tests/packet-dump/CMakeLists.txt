@@ -52,11 +52,20 @@ target_link_libraries(
             GTest::gtest
             nlohmann_json::nlohmann_json)
 
+# ThreadSanitizer only accepts mappings inside its own application ranges, none of which
+# can hold the fixed allocation addresses these tests reserve.
+if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
+    set(AQLPROFILE_PACKET_GOLDEN_DISABLED ON)
+else()
+    set(AQLPROFILE_PACKET_GOLDEN_DISABLED OFF)
+endif()
+
 rocprofiler_add_unit_test(
     TARGET aqlprofile-packet-golden-tests
     SOURCES ${AQLPROFILE_PACKET_GOLDEN_TEST_SOURCES}
     TEST_PREFIX "aqlprofile.packet-golden."
     TEST_LIST aqlprofile_packet_golden_TESTS ARGS ${AQLPROFILE_PACKET_ARGS}
+    DISABLED ${AQLPROFILE_PACKET_GOLDEN_DISABLED}
     TIMEOUT 30
     LABELS "unittests;aqlprofile"
     DATA "fixtures"

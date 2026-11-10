@@ -15,7 +15,8 @@ namespace aqlprofile
 {
 namespace packet_dump
 {
-inline constexpr uintptr_t deterministic_address_base   = 0x100000000000;
+// Above AddressSanitizer's x86-64 shadow memory, which ends at 0x10007fff8000.
+inline constexpr uintptr_t deterministic_address_base   = 0x200000000000;
 inline constexpr uintptr_t deterministic_address_stride = 0x100000000;
 inline constexpr uintptr_t userspace_address_limit      = 0x800000000000;
 

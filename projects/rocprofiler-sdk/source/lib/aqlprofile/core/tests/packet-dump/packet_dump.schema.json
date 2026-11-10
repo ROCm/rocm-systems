@@ -476,7 +476,7 @@
     },
     "aql_packet_reference": {
       "type": "object",
-      "description": "RFC 6901 JSON Pointer to the canonical START AQL packet for another event at the same block index.",
+      "description": "RFC 6901 JSON Pointer to the identical START AQL packet of an earlier case in this document.",
       "additionalProperties": false,
       "required": [
         "$ref"
@@ -532,7 +532,7 @@
     },
     "phase_reference": {
       "type": "object",
-      "description": "RFC 6901 JSON Pointer to a canonical identical READ or STOP phase for another event at the same block index.",
+      "description": "RFC 6901 JSON Pointer to the identical READ or STOP phase of an earlier case in this document.",
       "additionalProperties": false,
       "required": [
         "$ref"
@@ -819,7 +819,7 @@
         },
         "topology": {
           "type": "string",
-          "description": "Relative filename of the agent and IP-discovery document used by this dump.",
+          "description": "Relative filename of the agent and IP-discovery fixture document for this architecture.",
           "pattern": "^gfx[0-9a-z]+_ip_discovery\\.json$"
         },
         "block": {
@@ -969,7 +969,7 @@
         },
         "domain": {
           "type": "integer",
-          "description": "PCI domain used when resolving IP discovery.",
+          "description": "PCI domain in the registered agent information.",
           "minimum": 0,
           "maximum": 4294967295
         },
