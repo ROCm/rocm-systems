@@ -462,7 +462,9 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
           done += p_chunk * PE_size;
         }
       }
-      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / PE_size));
+      // the direct allreduce indexes pWrk by world PE, so bound the piece by the world extent of the team
+      int world_extent = team_obj->tinfo_wrt_world->pe_start + team_obj->tinfo_wrt_world->stride * PE_size;
+      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / world_extent));
       while (done < nreduce) {
         int count = min(piece, nreduce - done);
         if (done > 0) barrier_wave(team);  // pSync is reused: all PEs must have left the previous step
@@ -744,7 +746,9 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
         }
       }
       // Remaining elements: direct allreduce in pieces that fit into pWrk.
-      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / PE_size));
+      // the direct allreduce indexes pWrk by world PE, so bound the piece by the world extent of the team
+      int world_extent = team_obj->tinfo_wrt_world->pe_start + team_obj->tinfo_wrt_world->stride * PE_size;
+      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / world_extent));
       while (done < nreduce) {
         int count = min(piece, nreduce - done);
         if (done > 0) barrier_wg(team);  // pSync is reused: all PEs must have left the previous step
