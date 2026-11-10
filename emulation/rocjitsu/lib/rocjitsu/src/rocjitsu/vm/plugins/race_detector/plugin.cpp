@@ -877,8 +877,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   if (supports_counter_capacity(wf.cu().arch())) {
     // On the pre-GFX12 capacity targets, FLAT's address-dependent admission is
     // applied after routing: before its operands are read, neither memory
-    // domain is guaranteed to be used. On gfx1250 every FLAT counts on both domains, so
-    // it is admitted here like any other memory instruction.
+    // domain is guaranteed to be used. On gfx1250 every FLAT counts on both
+    // domains, so it is admitted here like any other memory instruction.
     if (inst.is_memory_op() &&
         (!inst.mnemonic().starts_with("flat_") || flat_counts_on_both_domains(wf.cu().arch()))) {
       const auto *info = inst.amdgpu_memory_issue_info();
