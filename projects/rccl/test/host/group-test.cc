@@ -73,6 +73,14 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
 
+#include "dev_runtime.h"                  // ncclDevrCommCreateTask, ncclDevCommCompat
+#include "dev_runtime_internal.h"         // ncclDevrTeam, to free the teams the drained create obtains
+#include "fakes/dev_runtime_micro_fakes.h"  // ResetDevRuntimeMicroFakes: dev_runtime.cc is real in this binary
+
+// Compat records owned by the devcomm sources linked into this binary; the
+// devComm drain test below narrows them to make two versions distinguishable.
+extern struct ncclDevCommCompat ncclDevCommCompat_v22902, ncclDevCommCompat_v22907;
+
 namespace {
 
 // Stands in for a real communicator-init job. What's under test is which *thread* runs it.
@@ -1914,6 +1922,104 @@ TEST_F(GroupRegisterSymmetricTest, GroupCleanup_ClearsPendingStagingOfSymRegiste
 
   EXPECT_FALSE(comm_->ceColl.stagingPending);
   EXPECT_EQ(nullptr, ncclGroupCommHead[ncclGroupTaskTypeSymRegister]);
+}
+
+// ncclCommGroupRegisterSymmetric: the commCreateTaskQueue branch, run against the real
+// ncclDevrCommCreateInternal. A queued task carries the version its device code was built
+// against, which differs from task->reqs->version when the device code is JIT-compiled
+// (reqs.useRuntimeVersion); the drain must build the devComm for the task's version.
+class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kCompileTimeVersion = NCCL_VERSION(2, 31, 0);
+  static_assert(kCompileTimeVersion < NCCL_VERSION_CODE, "needs a compile-time version older than the runtime");
+
+  std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclSharedResources> sharedRes_;
+  struct ncclGroupSymmetricJob job_ {};
+  ncclDevComm outDevComm_{};
+  ncclDevCommCompat saved22902_{}, saved22907_{};
+  static int newToOldCalls_;
+
+  void SetUp() override {
+    ResetCeFakes();
+    ResetGroupThreadLocals();
+    ResetDevRuntimeMicroFakes();  // working HIP VMM emulator and dev_runtime seams
+    newToOldCalls_ = 0;
+    saved22902_ = ncclDevCommCompat_v22902;
+    saved22907_ = ncclDevCommCompat_v22907;
+    // The compile-time version down-converts; the runtime version does not.
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kCompileTimeVersion;
+    ncclDevCommCompat_v22902.devCommCopyNewToOld = [](ncclComm_t, void*, ncclDevComm const*) {
+      newToOldCalls_++;
+      return ncclSuccess;
+    };
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kCompileTimeVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+
+    comm_ = std::make_unique<ncclComm>();
+    sharedRes_ = std::make_unique<ncclSharedResources>();
+    comm_->sharedRes = sharedRes_.get();
+    comm_->nRanks = 1;
+    comm_->devrState.lsaSize = 1;
+    comm_->devrState.cftSize = 1;    // ncclDevrInitOnce never ran; it would set both to >= 1
+    comm_->devrState.cftMcSize = 1;
+    comm_->devrState.granularity = 1;
+    ncclIntruQueueConstruct(&comm_->devrState.regTaskQueue);
+    ncclIntruQueueConstruct(&comm_->devrState.commCreateTaskQueue);
+    ncclIntruQueueConstruct(&comm_->ceInitTaskQueue);
+    ncclIntruQueueConstruct(&comm_->rmaCeInitTaskQueue);
+    ncclIntruQueueConstruct(&comm_->suspendTaskQueue);
+    ncclIntruQueueConstruct(&comm_->resumeTaskQueue);
+    job_.comm = comm_.get();
+  }
+
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue)) {
+      struct ncclDevrCommCreateTask* t = ncclIntruQueueDequeue(&comm_->devrState.commCreateTaskQueue);
+      freeDevCommRequirements(t->reqs);
+      free(t);
+    }
+    while (comm_->devrState.teamHead != nullptr) {
+      struct ncclDevrTeam* next = comm_->devrState.teamHead->next;
+      free(comm_->devrState.teamHead);
+      comm_->devrState.teamHead = next;
+    }
+    ncclDevCommCompat_v22902 = saved22902_;
+    ncclDevCommCompat_v22907 = saved22907_;
+    ResetDevRuntimeMicroFakes();
+    // Hand the shared fakes back fail-loud, as the suites sharing this binary expect.
+    ResetHipFakes();
+    ResetNcclFakes();
+    ResetGroupThreadLocals();
+    ResetCeFakes();
+  }
+
+  void QueueCreateTask(uint32_t reqsVersion, uint32_t deviceCodeVersion) {
+    auto* task = static_cast<struct ncclDevrCommCreateTask*>(calloc(1, sizeof(struct ncclDevrCommCreateTask)));
+    task->reqs = static_cast<struct ncclDevCommRequirements*>(calloc(1, sizeof(struct ncclDevCommRequirements)));
+    *task->reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    task->reqs->version = reqsVersion;
+    task->outDevComm = &outDevComm_;
+    task->deviceCodeVersion = deviceCodeVersion;
+    ncclIntruQueueEnqueue(&comm_->devrState.commCreateTaskQueue, task);
+  }
+};
+int GroupRegisterSymmetricDevCommTest::newToOldCalls_ = 0;
+
+// JIT case: compile-time requirements, runtime-version device code. Building for the reqs'
+// version would down-convert and stamp the old version into a devComm the kernels read in
+// the runtime layout.
+TEST_F(GroupRegisterSymmetricDevCommTest, QueuedTask_BuildsForTaskDeviceCodeVersionNotReqsVersion) {
+  QueueCreateTask(/*reqsVersion=*/kCompileTimeVersion, /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
+  EXPECT_EQ(0, newToOldCalls_);
+  EXPECT_EQ(static_cast<uint32_t>(NCCL_VERSION_CODE), outDevComm_.version);
 }
 
 }  // namespace
