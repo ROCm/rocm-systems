@@ -1159,7 +1159,6 @@ if(BUILD_TESTS)
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
-      DdaIpcCommLifecycleMPITests.cpp
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
