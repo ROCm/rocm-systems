@@ -1152,15 +1152,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#benchmarking-planned" class="md-nav__link">
+  <a href="#benchmarking" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Benchmarking (planned)
+        Benchmarking
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Benchmarking (planned)">
+    <nav class="md-nav" aria-label="Benchmarking">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2057,15 +2057,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#benchmarking-planned" class="md-nav__link">
+  <a href="#benchmarking" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Benchmarking (planned)
+        Benchmarking
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Benchmarking (planned)">
+    <nav class="md-nav" aria-label="Benchmarking">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2276,7 +2276,7 @@ setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without <code>RJ_ARITH_SEMANTICS_</code>.
 The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4
 fused floating-point arithmetic, basic floating-point arithmetic and selection,
-division, dot products, conversions, math functions, comparisons, graphics operations and register/lane routing. Other handlers retain their existing
+division, dot products, conversions, math functions, comparisons, integer arithmetic, graphics operations and register/lane routing. Other handlers retain their existing
 implementations.</p>
 <h3 id="guest-fp-controls">Guest FP controls<a class="headerlink" href="#guest-fp-controls" title="Permanent link">&para;</a></h3>
 <p>Guest rounding, denormal handling, and NaN policies are emulated explicitly,
@@ -2353,7 +2353,7 @@ benchmark smoke tests complement these checks. GCC, Clang, portable builds, and
 sanitizers provide broader validation; ordinary tests need no GPU.
 Each <code>*_test.cpp</code> builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.</p>
-<h2 id="benchmarking-planned">Benchmarking (planned)<a class="headerlink" href="#benchmarking-planned" title="Permanent link">&para;</a></h2>
+<h2 id="benchmarking">Benchmarking<a class="headerlink" href="#benchmarking" title="Permanent link">&para;</a></h2>
 <p>No benchmark executable is built at this stage. The following describes its intended interface.</p>
 <h3 id="workloads-and-reported-results">Workloads and reported results<a class="headerlink" href="#workloads-and-reported-results" title="Permanent link">&para;</a></h3>
 <p>The benchmark covers WMMA, DOT, FP, and math entry points across supported CPU
