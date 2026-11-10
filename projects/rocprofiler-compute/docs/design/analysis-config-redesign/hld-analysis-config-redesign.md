@@ -267,9 +267,9 @@ flowchart LR
 
 Layer 2 metric files use file-level inheritance to eliminate per-architecture duplication while keeping files separate. This is not a native YAML feature — it requires a custom PyYAML loader.
 
-A file with a top-level `inherit: <path>` key loads the referenced base file first, then deep-merges the current file's content on top.
+A child arch's file loads the file of the same name from its parent arch first, then deep-merges its own content on top. The parent arch of each arch is set once, in `METRIC_LIBRARY_PARENT_ARCH`.
 
-The merge operations (modify, add, remove with `!remove`, deep merge, replace a list) are specified in the [Phase A LLD](lld-phase-a-metric-library.md#inheritance-loader).
+The merge operations (modify, add, remove with a `remove:` list, deep merge, replace a list) are specified in the [Phase A LLD](lld-phase-a-metric-library.md#inheritance-loader).
 
 **Inheritance hierarchy** -- each arch inherits from its immediate predecessor to minimize diffs:
 
@@ -286,7 +286,7 @@ flowchart LR
 
 The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. gfx1250 is a third standalone base: it shares no identical file with gfx115x. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx942 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
 
-Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only the `inherit` key plus additions, modifications, or removals.
+Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only additions, modifications, or a `remove:` list.
 
 A worked example from the gfx90a files is in the [Phase A LLD](lld-phase-a-metric-library.md#inheritance-loader). The library spells each unit one way, so a drift such as the MI300 `GFLOPs` one above is rejected rather than inherited.
 
@@ -378,9 +378,7 @@ fabric.hbm_rd:
 ```
 
 ```yaml
-# gfx90a/l2.yaml -- inherits from gfx908, overrides only what differs
-inherit: ../gfx908/l2.yaml
-
+# gfx90a/l2.yaml -- merged onto gfx908/l2.yaml, overrides only what differs
 # only the fields that differ from gfx908 are present
 ```
 

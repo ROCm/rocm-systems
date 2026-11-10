@@ -66,8 +66,8 @@ New module `src/utils/layer3_reader.py`.
 `load_views(view_dirs: list[Path], arch: str, library: MetricLibrary) -> list[ViewDefinition]`:
 
 1. Discover `*.yaml` files in each directory in `view_dirs`.
-2. Load each via `yaml.safe_load` (no `inherit` needed for view files -- they are
-   flat by design).
+2. Load each via `yaml.safe_load` (view files do not inherit -- they are flat by
+   design).
 3. Validate against `layer3_schema.py`.
 4. Filter: skip views where `archs` is set and the current arch is not in the list.
    Within each view, skip metric refs where `archs` is set and the arch is not listed.
@@ -264,7 +264,7 @@ below ([cutover timeline](lld-index.md#cutover-timeline)).
 `load_panel_configs()` call:
 
 ```python
-library = load_metric_library(METRIC_LIBRARY_DIR, arch)
+library = MetricLibrary.load(METRIC_LIBRARY_DIR, arch)
 views = load_views(view_dirs, arch, library)
 ac.panel_configs = views_to_panel_configs(views, library)
 ```

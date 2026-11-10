@@ -92,7 +92,7 @@ per-pass files respecting IP-block limits.
 flowchart LR
     L2["Layer 2 YAML<br/>(base arch + {arch}/ overrides)"]
     L3["Layer 3 YAML<br/>(views/)"]
-    LML["load_metric_library()<br/>(metric_library.py)"]
+    LML["MetricLibrary.load()<br/>(rocprof_compute_soc/metric_library)"]
     LV["load_views()<br/>(layer3_reader.py)"]
     V2P["views_to_panel_configs()"]
     BD["build_dfs()<br/>(parser.py, unchanged)"]
@@ -119,7 +119,7 @@ contract is the `OrderedDict[int, dict]` shape that `build_dfs()` expects.
 ```mermaid
 flowchart LR
     L2["Layer 2 YAML<br/>(base arch + {arch}/ overrides)"]
-    LML["load_metric_library()<br/>(metric_library.py)"]
+    LML["MetricLibrary.load()<br/>(rocprof_compute_soc/metric_library)"]
     GCM["get_counters_for_metrics()"]
     PC["perfmon_coalesce()<br/>(soc_base.py, unchanged)"]
     PMC["pmc_perf_*.yaml<br/>(one per hardware pass)"]

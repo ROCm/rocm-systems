@@ -13,9 +13,11 @@ New developer tool `tools/validate_metric_library.py`, following the existing
 `tools/validate_*.py` checks: it loads each arch's metric library through the
 inheritance loader, collects every schema error, and exits 1 if there are any. Every
 `formula`, `peak` and `peak_empirical` must be accepted by the runtime's expression
-parser (`build_eval_string()`). It runs as a pre-commit hook on `metric_library/` files and from
-`master_config_workflow_script.py --validate-only`. As with today's panel files, the
-runtime does not re-validate the files it loads.
+parser (`build_eval_string()`). It runs as a pre-commit hook on `metric_library/` files
+and from `master_config_workflow_script.py --validate-only`. It needs only the standard
+library and the vendored YAML, so the hook runs with the system `python3`, like the
+other `tools/validate_*.py` hooks. As with today's panel files, the runtime does not
+re-validate the files it loads.
 
 `MetricDefinition` fields:
 
@@ -134,47 +136,25 @@ and its [grouping algorithm](../../single-pass_and_multi-pass_metrics/lld-metric
 
 ### Inheritance loader
 
-New module `src/utils/yaml_inherit_loader.py`. A metric library file names its parent
-with a top-level `inherit: <path>` key.
+The loader is part of the metric library package, `src/rocprof_compute_soc/metric_library/`
+(Stage 2). A child arch's file inherits the file of the same name from its parent arch in
+`METRIC_LIBRARY_PARENT_ARCH`. The parent is named once, in that map, and no key in the
+file repeats it.
 
-The design follows GitLab CI
-([YAML optimization docs](https://docs.gitlab.com/ci/yaml/yaml_optimization/)), which
-uses two different mechanisms:
-
-- `extends:` is a key. A job names its parent template, and GitLab deep-merges the
-  parent under the job, with the job's own keys winning. `inherit:` works the same way,
-  except that it names the parent arch's file instead of a template in the same file.
-- `!reference [...]` is a custom tag on a value. `!remove` follows that pattern: it tags
-  a value (`key: !remove`), never a whole document.
-
-A first-line `!inherit <path>` tag would mix the two and is not valid YAML: a document has one root node, so a tagged scalar cannot be followed by a mapping.
-Keeping a tag would need either a loader that strips the first line, which makes the
-files unreadable to other YAML tools (`check-yaml`, `format_yaml.py`, `safe_load`), or a
-tag on the whole root mapping, which needs a custom constructor and is harder to edit.
-With a key, any YAML tool reads the file, and the loader only removes one key.
-
-Native YAML anchors (`&`/`*`) and merge keys (`<<`) are insufficient -- they only
-perform shallow merge, do not work across files, and the merge key is semi-deprecated
-in the YAML spec.
+Files are plain YAML, so every YAML tool reads them (`check-yaml`, `format_yaml.py`,
+`safe_load`). Native YAML anchors (`&`/`*`) and merge keys (`<<`) are insufficient: they
+only perform shallow merge and do not work across files.
 
 **Implementation:** The merge logic is inline, with no new dependency. It must work in
 profile mode, which prohibits pip dependencies (`ProfileModeImportGuard` enforces
 stdlib-only imports), so yaml is imported from the vendored copy
-(`from vendored import yaml`).
+(`from vendored import yaml`) and read with `safe_load`. The repo's `check-yaml`
+pre-commit hook rejects a key that appears twice in one mapping, which plain loading
+would silently keep.
 
-`InheritLoader` subclasses `yaml.SafeLoader`. It registers one custom tag, `!remove`,
-which marks a key for deletion during the merge, and it rejects a key that appears twice
-in one mapping (plain YAML would silently keep the last one, hiding a duplicate metric
-id). The repo's `check-yaml`
-pre-commit hook needs `--unsafe` for the metric library files because of this tag.
-
-To load a file:
-
-1. Resolve the `inherit` path relative to the current file's directory.
-2. Load the parent file recursively, so a chain of any depth works (the chains are in
-   the [HLD](hld-analysis-config-redesign.md#yaml-inheritance)).
-3. Merge the current file's content on top of the parent, applying `!remove` as it
-   goes. Removing a key that the parent does not have is an error.
+To load a file of an arch, read the file of that name in each arch of the chain, base
+first, and merge each onto the result. The merge builds a new mapping and never changes
+its inputs.
 
 **Merge operations:**
 
@@ -182,28 +162,26 @@ To load a file:
 |---|---|---|
 | Modify | Scalar in override | Override replaces base value. |
 | Add | New key in override | Appended to the merged map. Supports adding new metrics, tables, or fields that the parent arch does not have. |
-| Remove | `key: !remove` | The key is deleted from the merged result. Used when a child arch drops a metric (keyed by its id) or a field of one. |
+| Remove | Top-level `remove:` list of ids | The listed ids are left out of the merged result. Used when a child arch drops a metric. Removing an id the parent lacks, or removing and defining one id, is an error. |
 | Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved, in file order. A metric in a child file lists only the fields that change. |
 | Replace | List in override | A list replaces the base list as a whole. |
 
 A mapping or a list cannot be replaced by a value of another kind, nor a scalar by a
-mapping or a list; the loader raises `InheritanceError` naming the file and key. A scalar
-may replace a scalar of another type (gfx90a overrides a string `peak` with a number),
-and a null value on either side may be replaced.
+mapping or a list; the loader raises `MetricLibraryError` naming the file and key. A
+scalar may replace a scalar of another type (gfx90a overrides a string `peak` with a
+number), and a null value on either side may be replaced.
 
 Example, from the gfx90a files:
 
 ```yaml
-# gfx90a/l2.yaml
-inherit: ../gfx908/l2.yaml
+# gfx90a/l2.yaml, merged onto gfx908/l2.yaml
 
 # Modify: a gfx90a L2 request moves 128 bytes instead of 64
 l2.bw:
   formula: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
 ```
 ```yaml
-# gfx90a/compute.yaml
-inherit: ../gfx908/compute.yaml
+# gfx90a/compute.yaml, merged onto gfx908/compute.yaml
 
 # Add: a metric gfx908 cannot compute
 compute.valu_flops:
@@ -217,56 +195,49 @@ compute.valu_flops:
 ```
 
 ```yaml
-# gfx90a/fabric.yaml
-inherit: ../gfx908/fabric.yaml
+# gfx90a/fabric.yaml, merged onto gfx908/fabric.yaml
 
 # Remove: a metric gfx90a no longer shows
-fabric.rd_bw_norm: !remove
+remove:
+  - fabric.rd_bw_norm
 ```
 
-**Cycle detection:** Follow the `inherit` chain from the file to its base, keeping the
-resolved absolute paths seen, then merge from the base down. If a path appears twice,
-raise `InheritanceError` naming the full chain.
-
-**Errors:** the loader raises `InheritanceError` and does not log. The validator collects
-the error of every file; at the cutover, the CLI reports one with `console_error()`.
+**Errors:** the loader raises `MetricLibraryError` and does not log. The validator
+collects the error of every file; at the cutover, the CLI reports one with
+`console_error()`. `arch_chain()` raises `ValueError` for an arch without a library and
+for a cycle in `METRIC_LIBRARY_PARENT_ARCH`.
 
 **No runtime switch in Phase A.** Production does not read Layer 2 before the cutover
 (see [Phase A data flow](#phase-a-data-flow)), and no environment variable or hidden
 option selects it. Production moves to the new path in one step, at Stage 8. A flag
 during Phase A would not lower that risk; it would only add a second path to maintain.
 The risk is covered instead by:
-- the Stage 3 equivalence check, which keeps Layer 2 equal to today's analysis configs
-  on every commit;
+- the Stage 3 sync test, which keeps Layer 2 equal to today's analysis configs on
+  every pull request;
 - the output and metric-value checks before each stage (see
   [Risk mitigation](lld-index.md#risk-mitigation-metric-value-validation)).
 
 ### Tests
 
 - Schema validation (`tools/validate_metric_library.py`): valid files pass; missing
-  required fields, unknown fields, bad ids, duplicate ids, names shared on an arch, a
-  child file that does not inherit from its parent's file, an expression that does not
-  parse and two ids that share a value however written are reported.
-- Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
-  the real `gfx908 -> gfx90a -> gfx942 -> gfx950` chain), cycle detection error.
+  required fields, unknown fields, bad ids, duplicate ids, names and formulas shared on
+  an arch, unsorted keys and an expression that does not parse are reported.
+- Inheritance loader: multi-level chain (4+ deep, matching the real
+  `gfx908 -> gfx90a -> gfx942 -> gfx950` chain), a cycle in the arch map.
 - Merge operations: key modification (override), key addition (new metric in child),
-  removal of a metric or a field (`!remove` deletes from merged result), deep-merge of
-  maps, lists replaced, and errors for removing a missing key, for a duplicate key, for
-  `!remove` with a value and for a mapping or list replaced by another kind.
-- Round-trip: a minimal synthetic YAML family (base + chain of overrides with
-  additions, modifications, and removals) loads correctly and produces the expected
-  merged structure.
-- Equivalence check: Stage 3 compares the library with today's tree, read in the same
-  run, so no snapshot files are needed.
+  removal of a metric (`remove:` list), deep-merge of maps, lists replaced, inputs left
+  unchanged, and errors for removing a missing id, for a malformed `remove:` list, for
+  removing and defining one id and for a mapping or list replaced by another kind.
+- Sync test: Stage 3 compares the library with today's tree, read in the same run, so
+  no snapshot files are needed.
 
 
 ## Stage 2 -- Layer 2 parser
 
 ### MetricLibrary
 
-New module `src/utils/metric_library.py`.
-
-`load_metric_library(metric_dir: Path, arch: str) -> MetricLibrary`:
+New package `src/rocprof_compute_soc/metric_library/`, next to its YAML files and
+README. `MetricLibrary.load(metric_dir: Path, arch: str) -> MetricLibrary`:
 
 1. Resolve the architecture's base arch and inheritance chain:
    ```python
@@ -282,15 +253,15 @@ New module `src/utils/metric_library.py`.
    gfx1150-gfx1153 map to the `gfx115x` directory through `canonical_config_arch()`.
    Each arch's PR adds its own entries to the map. The validator reports an arch in the
    map that has no directory, and a directory that is not in the map.
-2. Load YAML files from `{metric_dir}/{arch}/`. Each file either stands alone (base
-   arch) or has an `inherit` key pointing to the parent arch's file.
-3. The `InheritLoader` (Stage 1) resolves the `inherit` chain recursively and
-   deep-merges overrides on top of the base.
+2. List the YAML files of every arch in the chain, by file name. A file the arch lacks
+   comes from its nearest ancestor.
+3. Merge each file name's files along the chain, base first (Stage 1).
 4. Do not re-validate: `tools/validate_metric_library.py` checks the files at commit
    time.
 5. Collect all metrics into `MetricLibrary.metrics`, keyed by string `id`. Raise
-   `InheritanceError` on duplicate ids, like any other load failure. In Phase A the entries are the loaded mappings, as
-   `load_panel_configs()` returns today; a typed model can come with the cutover.
+   `MetricLibraryError` on duplicate ids, like any other load failure. In Phase A the
+   entries are the loaded mappings, as `load_panel_configs()` returns today; a typed
+   model can come with the cutover.
 6. Load `variables.yaml` (inherited like the metric files) into
    `MetricLibrary.variables`, in file order.
 
@@ -307,13 +278,16 @@ class MetricLibrary:
     variables: dict[str, dict]      # variable name -> {formula}, in file order
     sets: dict[str, SetDefinition]  # Stage 4, sets migration
 
+    @classmethod
+    def load(cls, metric_dir: Path, arch: str) -> "MetricLibrary": ...
+
     def get_counters_for_metrics(
         self, metric_ids: list[str], gpu_series: str
     ) -> set[str]: ...
 ```
 
-The library is cached per arch and shared by every caller, so callers must not change
-it; read-only views come with the cutover (Stage 8).
+Each `load()` reads the files again; a caller loads an arch once and passes the
+library on. Caching comes with the first production caller, at the cutover (Stage 8).
 
 `get_counters_for_metrics()` extracts HW counters from the requested metrics (an id that
 is not a metric of the arch raises `ValueError` naming the ids and the arch):
@@ -332,7 +306,7 @@ is not a metric of the arch raises `ValueError` naming the ids and the arch):
   overrides applied, variable definitions present, duplicate id raises error.
 - Counter extraction: `get_counters_for_metrics()` takes counters from `formula` and
   `peak`, and resolves built-in variables. Equivalence with
-  `detect_counters()` over the whole library is the Stage 3 counter check.
+  `detect_counters()` over the whole library is the Stage 3 counter test.
 - String metric IDs follow the hierarchical convention
   (`{category}.{subcategory}_{name}`).
 
@@ -366,17 +340,20 @@ flowchart LR
     end
     subgraph lib["Metric library, not read in production"]
         ML["metric_library/{arch}/*.yaml"]
-        LML["load_metric_library()"]
+        LML["MetricLibrary.load()"]
         ML --> LML
     end
-    VAL["tools/validate_metric_library.py"]
+    VAL["tools/validate_metric_library.py<br/>schema checks"]
     HOOK["pre-commit hook"]
-    LML --> VAL
-    LPC -.->|"formulas, units, peaks"| VAL
-    DC -.->|counters| VAL
-    GBV -.->|variables| VAL
-    SETS -.->|sets| VAL
-    VAL --> HOOK
+    SYNC["test_metric_library_sync.py<br/>sync test"]
+    CI["CI, from the source tree"]
+    LML --> VAL --> HOOK
+    LML --> SYNC
+    LPC -.->|"formulas, units, peaks"| SYNC
+    DC -.->|counters| SYNC
+    GBV -.->|variables| SYNC
+    SETS -.->|sets| SYNC
+    SYNC --> CI
 ```
 
 Production switches once, at [Stage 8](lld-phase-b-display-view.md#stage-8----cutover).
@@ -394,9 +371,9 @@ At the cutover, counters come from the metrics that the selected views place
 
 ### Validation
 
-`tools/validate_metric_library.py`, for every arch that has a metric library tree, also
-compares the library with today's analysis configs. An arch without a roofline benchmark
-(gfx908) never shows its roofline panel, so the check leaves that panel out and the
+The unit test `tests/unit/rocprof_compute_soc/test_metric_library_sync.py` compares each
+arch's library with today's analysis configs. An arch without a roofline benchmark
+(gfx908) never shows its roofline panel, so the test leaves that panel out and the
 arch's library holds none of the metrics only that panel lists:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
@@ -404,7 +381,7 @@ arch's library holds none of the metrics only that panel lists:
   is a library formula; every library formula is shown by some row. A row that divides
   by the kernel time in seconds shows the GB/s formula scaled by 1e9, its peak too.
   Display variants, listed by positional id and label, write a formula differently; the
-  validator checks each one's equation against its metric.
+  test checks each one's equation against its metric.
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
   listed as unit variants. A row that shows a GB/s metric in seconds says Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
@@ -417,20 +394,22 @@ arch's library holds none of the metrics only that panel lists:
   names its metric id for this check.
 
 The reference side is today's tree, read through the production loaders in the same
-run, so there are no snapshot files. Both trees are source data that cannot change after
-install, so this is a pre-commit check, not an installed test. The tool's own tests are
-`tools/test_validate_metric_library.py`.
+run, so there are no snapshot files. The test is not part of the pre-commit hook: it
+loads the SoC classes and the analysis code, which would slow every commit. CI runs it
+on every pull request from the source tree; it is not registered when tests run from
+an install tree (`TEST_FROM_INSTALL`), which has no `tools/format_yaml.py`.
 
 ### Removal
 
-The equivalence checks are transitional (TODOs in `tools/validate_metric_library.py`) and
-go at the cutover ([cutover timeline](lld-index.md#cutover-timeline)), with the old panel
-files: `detect_counters()` and `get_build_in_vars()` then read the library, so the counter
-and variable checks would compare it with itself, and the row checks (equations, units and
+The sync test is transitional and goes at the cutover
+([cutover timeline](lld-index.md#cutover-timeline)), with the old panel files:
+`detect_counters()` and `get_build_in_vars()` then read the library, so the counter and
+variable checks would compare it with itself, and the row checks (equations, units and
 peaks, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS`) have no panel files left to compare.
 
-The schema checks (file loading, inheritance, fields, id rules, shared formulas and names,
-measured peaks, unit spelling, and one name and unit per id) stay.
+The schema checks of `tools/validate_metric_library.py` (file loading, fields, id rules,
+shared formulas and names, measured peaks, unit spelling, key order, and one name and
+unit per id) stay.
 
 
 ## Stage 4 -- Metric migration
@@ -474,11 +453,11 @@ category and holds exactly the ids of that category (`l2.yaml` holds `l2.*`), so
 names its file. The validator enforces this. The RDNA and gfx1250 bases add files for
 their own categories.
 
-Top-level keys are sorted in every file (after `inherit`): metric ids, and the variable
-names in `variables.yaml`. Where a metric is shown no longer orders the library, and the
-`{category}.{subcategory}_{name}` form keeps related metrics together. `format_yaml.py
---fix` sorts the keys, and its pre-commit hook rejects unsorted files. The order of
-`variables.yaml` does not affect evaluation (see `VariableDefinition`).
+Top-level keys are sorted in every file (a `remove:` list aside): metric ids, and the
+variable names in `variables.yaml`. Where a metric is shown no longer orders the
+library, and the `{category}.{subcategory}_{name}` form keeps related metrics together.
+The validator rejects unsorted files. The order of `variables.yaml` does not affect
+evaluation (see `VariableDefinition`).
 
 Which arch is a base and which arch each child inherits from is set in the
 [HLD](hld-analysis-config-redesign.md#yaml-inheritance) and in
@@ -545,18 +524,10 @@ flowchart TD
   and they are merged into one id (each panel's label becomes a view label in Phase B).
   The exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a
   different measured ceiling; a row whose label names the listed id shows that id.
-- Two ids whose formulas give the same value on one arch, however written
-  (`SUM(a * $cu_per_gpu)` and `SUM(a) * $cu_per_gpu`), are one metric too. The validator
-  evaluates every formula with the runtime evaluator (`build_eval_string()`,
-  `MetricEvaluator` and the built-in variables) on one seeded random dispatch per
-  normalization (`$denom`). Machine values every device of the arch shares are real:
-  the SoC class's (`$lds_banks_per_cu`), and the SPX `$num_xcd` and `$total_l2_chan`
-  where every device has the same XCD count; the values each device reports
-  (`$cu_per_gpu`, `$wave_size`, clocks, ...) and the XCD count of an arch whose devices
-  differ in it are random. `NOISE_CLAMP(x, reference)` counts as `x`,
-  and formulas that give no number (per-channel templates, `CONCAT`) are skipped.
-  `SAME_VALUE_IDS` lists, per arch, the pairs that are different quantities whose
-  formulas coincide there.
+- The validator compares formulas as text, after `format_yaml.py` normalization. A
+  metric whose formula is written differently but computes an existing metric's
+  quantity reuses that metric's id; the metric library README asks contributors and
+  reviewers to check this.
 
 The same holds across archs: a formula has one id on every arch. An arch reuses the id
 that the first arch to show the quantity gave it, and the validator rejects a formula
@@ -669,7 +640,8 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files.
+- **Inheritance.** `sets.yaml` inherits along `METRIC_LIBRARY_PARENT_ARCH` like the
+  metric files.
 - **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
   set's counters fit in one pass.
 - **Transition.** Production `--set` and `--list-sets` keep reading
@@ -692,7 +664,7 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 | Tool | What changes |
 |---|---|
 | `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
-| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys, with the `!remove` tag accepted, and sorts their top-level keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
+| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
 | `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
 | `metric_description_manager.py` | No change in Phase A: the old panel YAMLs stay the documentation source until the cutover (Stage 8), when it reads descriptions from Layer 2. Output format for docs YAMLs is unchanged. |
