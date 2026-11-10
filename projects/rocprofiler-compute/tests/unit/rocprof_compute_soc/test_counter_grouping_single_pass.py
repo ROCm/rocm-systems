@@ -49,6 +49,11 @@ def channels(base, count=2):
     return {f"{base}[{index}]" for index in range(count)}
 
 
+def eval_tool_path() -> Path:
+    """Return the offline pass report next to a source checkout."""
+    return Path(__file__).resolve().parents[3] / "tools" / "eval_single_pass_metrics.py"
+
+
 def bucket_holding(files, group):
     homes = [
         bucket
@@ -390,9 +395,9 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs():
 
 def test_eval_tool_wraps_gfx1250_exclusive_families(tmp_path, monkeypatch) -> None:
     """The offline pass report must use the same gfx1250 family split as profiling."""
-    tool_path = (
-        Path(__file__).resolve().parents[3] / "tools" / "eval_single_pass_metrics.py"
-    )
+    tool_path = eval_tool_path()
+    if not tool_path.is_file():
+        pytest.skip("the offline pass report is not part of an install tree")
     spec = importlib.util.spec_from_file_location("eval_single_pass_metrics", tool_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
