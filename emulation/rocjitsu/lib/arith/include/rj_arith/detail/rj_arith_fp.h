@@ -804,12 +804,12 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user);
 
-// Unary FP64 arithmetic uses the same low/high VGPR layout, Compatibility
-// resolution and host-environment contract as FP64 FMA above. Guest rounding
+// Unary FP64 TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT use the same low/high VGPR
+// layout, Compatibility resolution (Loose) and host-environment contract as FP64
+// FMA above. SQRT/RCP/RSQ share the layout and modifiers but resolve Compatibility
+// to the empirical TRANS-unit model; see their declarations below. Guest rounding
 // controls FRACT subtraction and output scaling; the integral operation itself
-// has the direction named by its mnemonic. FP64 SQRT/RCP/RSQ ignore guest ROUND in
-// their core; it controls SQRT/RSQ OMOD scaling. RCP overflow produces signed
-// infinity independently of ROUND, including during OMOD.
+// has the direction named by its mnemonic.
 // Guest denormal flags control flushing.
 // RDNA3 disables OMOD when IEEE
 // is set or output denormals are preserved; RDNA4 applies OMOD independently.
