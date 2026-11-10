@@ -472,6 +472,12 @@ stream:
       targets: [amd_windows, amd_wsl, nvidia]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_windows) and gfx1201 (amd_wsl) self-skip because the test requires at least 2 GPUs; needs to be re-triaged on nvidia"
     tags: [synchronization, memory, multigpu]
+  Unit_hipStreamMemOps_PeerImport_WaitValueGatedByPeerWrite:
+    <<: *level_default
+    tags: [synchronization, memory, multigpu, vmm, P0]
+  Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices:
+    <<: *level_default
+    tags: [synchronization, memory, multigpu, vmm, P0]
   Unit_hipStreamWaitWriteValue32_Capture:
     <<: *level_default
     disabled:

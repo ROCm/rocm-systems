@@ -7,6 +7,9 @@
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 
+#include <algorithm>
+#include <vector>
+
 /**
  * @addtogroup hipDeviceEnablePeerAccess hipDeviceEnablePeerAccess
  * @{
@@ -103,6 +106,68 @@ HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
     HIP_CHECK_ERROR(hipDeviceEnablePeerAccess(1, 0), hipErrorPeerAccessAlreadyEnabled);
     HIP_CHECK(hipDeviceDisablePeerAccess(1));
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Checks that `hipErrorPeerAccessAlreadyEnabled` is a soft, clearable error.
+ *    Communication libraries enable peer access opportunistically for every rank pair and
+ *    swallow this code, so it must not become sticky:
+ *    -# When peer access is enabled a second time
+ *      - Expected output: return `hipErrorPeerAccessAlreadyEnabled`
+ *    -# When `hipGetLastError` is called afterwards
+ *      - Expected output: returns the same code once, then `hipSuccess`
+ *    -# When an unrelated API call is made afterwards
+ *      - Expected output: return `hipSuccess`, and peer access is still usable
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceEnableDisablePeerAccess.cc
+ * Test requirements
+ * ------------------------
+ *  - PeerToPeer supported
+ *  - Multi-device
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_AlreadyEnabled_ErrorIsClearable) {
+  int deviceCount = HipTest::getGeviceCount();
+  if (deviceCount < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  HIP_CHECK(hipSetDevice(0));
+  int canAccessPeer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+  if (canAccessPeer == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+  }
+
+  // Clear any error left over from an earlier test case in this process.
+  (void)hipGetLastError();
+
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  HIP_CHECK_ERROR(hipDeviceEnablePeerAccess(1, 0), hipErrorPeerAccessAlreadyEnabled);
+
+  // The error must be retrievable exactly once and then cleared.
+  HIP_CHECK_ERROR(hipGetLastError(), hipErrorPeerAccessAlreadyEnabled);
+  HIP_CHECK(hipGetLastError());
+
+  // An unrelated call must succeed, and peer access must actually be in effect.
+  void* peerPtr = nullptr;
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMalloc(&peerPtr, 1024));
+  HIP_CHECK(hipMemset(peerPtr, 0x5a, 1024));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  HIP_CHECK(hipSetDevice(0));
+  std::vector<unsigned char> readback(1024, 0);
+  HIP_CHECK(hipMemcpy(readback.data(), peerPtr, 1024, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(readback.begin(), readback.end(),
+                      [](unsigned char value) { return value == 0x5a; }));
+
+  HIP_CHECK(hipFree(peerPtr));
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceDisablePeerAccess(1));
 }
 
 /**
