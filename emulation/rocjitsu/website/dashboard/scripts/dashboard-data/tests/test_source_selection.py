@@ -120,6 +120,22 @@ def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     assert calls[-1] == f'repos/{REPO}/compare/{minimum_source}...{SOURCE}'
 
 
+def test_manual_source_below_compatibility_floor_rejects(tmp_path):
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    result, _, _ = resolve(
+        tmp_path,
+        responses={
+            f'repos/{REPO}/compare/{minimum_source}...{SOURCE}': {
+                'merge_base_commit': {'sha': SOURCE}
+            },
+        },
+    )
+    assert result.returncode != 0
+    assert '--cpu-thread-budget' in result.stderr
+
+
 def side_responses(**pr_changes):
     pr = {
         'state': 'open',
