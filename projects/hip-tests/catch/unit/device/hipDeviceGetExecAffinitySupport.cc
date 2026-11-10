@@ -4,7 +4,41 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <cctype>
+#include <string>
+
 #include <hip_test_common.hh>
+
+namespace {
+// The gfx major version of a device, parsed from gcnArchName. Returns 0 for a name that
+// does not parse, so an unrecognised device carries no expectation.
+int GfxMajor(const char* gcnArchName) {
+  const std::string arch(gcnArchName);
+
+  const auto start = arch.find("gfx");
+  if (start == std::string::npos) {
+    return 0;
+  }
+
+  auto end = start + 3;
+  while (end < arch.size() && std::isdigit(static_cast<unsigned char>(arch[end]))) {
+    ++end;
+  }
+
+  const std::string digits = arch.substr(start + 3, end - (start + 3));
+  if (digits.empty()) {
+    return 0;
+  }
+
+  // A generic target spells the version out: "gfx9-4-generic", "gfx12-5-generic".
+  if (end < arch.size() && arch[end] == '-') {
+    return std::stoi(digits);
+  }
+
+  // Otherwise it is packed, the stepping already dropped: "gfx90a" and "gfx950" are 9.
+  return digits.size() >= 4 ? std::stoi(digits.substr(0, 2)) : digits[0] - '0';
+}
+}  // namespace
 
 /**
  * @addtogroup hipDeviceGetExecAffinitySupport hipDeviceGetExecAffinitySupport
@@ -29,6 +63,8 @@
  *    -# Each granularity query returns a boolean (0 or 1).
  *    -# The two granularity types are mutually exclusive: exactly one of
  *       `GranularityCU` / `GranularityWGP` is supported on any given device.
+ *    -# The supported one is `GranularityCU` on pre-gfx10 devices, which never enable WGP
+ *       mode. On gfx10+ it is configurable, so only mutual exclusion is checked there.
  * Test source
  * ------------------------
  *  - unit/device/hipDeviceGetExecAffinitySupport.cc
@@ -58,6 +94,16 @@ HIP_TEST_CASE(Unit_hipDeviceGetExecAffinitySupport_Positive) {
 
   // A device masks either per-CU or per-WGP, never both and never neither.
   REQUIRE((cuGranularity + wgpGranularity) == 1);
+
+  // That sum is symmetric, so pin which one where it is not configurable: WGP mode is only
+  // ever enabled for gfx10+, so anything older masks per-CU.
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
+  const int gfxMajor = GfxMajor(props.gcnArchName);
+  if (gfxMajor > 0 && gfxMajor < 10) {
+    REQUIRE(cuGranularity == 1);
+    REQUIRE(wgpGranularity == 0);
+  }
 }
 
 /**
