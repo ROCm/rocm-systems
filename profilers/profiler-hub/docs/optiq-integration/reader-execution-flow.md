@@ -167,8 +167,10 @@ sequenceDiagram
   C->>X: accept_traces(paths), on the caller thread
   loop each path
     X->>P: probe_file
-    P->>S: header, sqlite_master, rocpd_metadata or rocpd_metadata_GUID
-    P-->>X: schema family and version
+    P->>R: first entry that recognises the file
+    R->>S: header, sqlite_master, rocpd_metadata or rocpd_metadata_GUID
+    R-->>P: schema family and version
+    P-->>X: probe result
     X->>R: find factory for trace_format_t
     R-->>X: reader factory, or unsupported
   end

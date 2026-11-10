@@ -94,7 +94,7 @@ downstream consumer of the library.
   is accepted. `ph_ctx_create()` returns `PH_RESULT_UNSUPPORTED_FILE` or
   `PH_RESULT_INVALID_FILE` instead
   of opening an unsupported trace. Another file format is added by
-  registering a detector, and another schema by registering the versions its
+  registering an entry, and another schema by registering the versions its
   reader accepts.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
