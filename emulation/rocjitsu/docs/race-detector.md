@@ -414,21 +414,29 @@ and async stores share ASYNCcnt but complete in order only within their own type
 (CDNA5 ISA 10.8), so a full ASYNCcnt completes the oldest async load only when
 async loads alone fill it, and likewise for stores. Scalar loads complete out of
 order (CDNA5 ISA 5.7.1.1), so a full KMcnt never completes one. A memory
-instruction issued with EXEC zero still applies backpressure, since it counts
-unless every counter it could add to is zero (CDNA5 ISA 3.2.2.1). It also keeps
-its slot, recorded as an event with no registers or LDS bytes, so later capacity
-checks and partial waits count it. Recording the slot is safe even if the
-instruction was skipped: its counters were then zero, so the earlier operations
-on them had completed. Tensor DMA instructions apply TENSORcnt backpressure when
-they issue, before their LDS bytes are checked, so the oldest transfer a full
-TENSORcnt completes does not conflict with the new one. Every generic FLAT
-applies backpressure to both DScnt and LOADcnt or STOREcnt when it issues,
-whichever memory its addresses resolve to, because it increments both (CDNA5 ISA
-5.7.1.3). The slot it takes in a domain its addresses did not use is recorded as
-an event with no registers or LDS bytes, in order with that domain's other
-operations, so later capacity checks and partial waits count it as hardware
-does. The FLAT's own result still depends only on the domains its addresses
-used.
+instruction issued with wave EXEC zero counts unless the counters its encoding
+names are all zero (CDNA5 ISA 3.2.2.1): LOADcnt, STOREcnt, ASYNCcnt and
+TENSORcnt for VMEM, DScnt for LDS, and all of them for FLAT. On those counters
+it applies backpressure and keeps its slot, recorded as an event with no
+registers or LDS bytes, so later capacity checks and partial waits count it.
+That is safe even if the instruction was skipped: those counters were then zero,
+so the earlier operations on them had completed. Its other counters are left
+out: `ds_atomic_async_barrier_arrive_b64` is an LDS instruction that counts on
+ASYNCcnt, so with EXEC zero it may be skipped while async loads are pending, and
+it proves none of them complete. An access whose lanes are all cleared while
+EXEC is active, such as one to an architecturally ignored resource type, keeps
+no slot. `global_inv` counts on LOADcnt, and `global_wb` and `global_wbinv` on
+STOREcnt (CDNA5 ISA 5.7.1.2), and none of them is skipped for EXEC zero (CDNA5
+ISA 3.2.2.1), so each applies backpressure on its counter when it issues. Tensor
+DMA instructions apply TENSORcnt backpressure when they issue, before their LDS
+bytes are checked, so the oldest transfer a full TENSORcnt completes does not
+conflict with the new one. Every generic FLAT applies backpressure to both DScnt
+and LOADcnt or STOREcnt when it issues, whichever memory its addresses resolve
+to, because it increments both (CDNA5 ISA 5.7.1.3). The slot it takes in a
+domain its addresses did not use is recorded as an event with no registers or
+LDS bytes, in order with that domain's other operations, so later capacity
+checks and partial waits count it as hardware does. The FLAT's own result still
+depends only on the domains its addresses used.
 
 The same completion-order distinction is used for nonzero partial waits; a
 zero wait still completes every event on the selected counter. The detector
