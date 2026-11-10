@@ -1668,6 +1668,18 @@ TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitAllowingBothKeepsDsReadPe
   EXPECT_TRUE(tensor_load_oldest());
 }
 
+// Capacity counts the FLAT's slot too. A DS read, a FLAT to global memory and
+// kCapacity - 2 more DS reads fill DScnt, so the next DS read completes the
+// first one.
+TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCountsGlobalFlatSlot) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
 TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsLdsFlatSlot) {
   vmem_load(0, /*vgpr=*/0);
   flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
