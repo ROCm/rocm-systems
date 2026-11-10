@@ -1022,11 +1022,9 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_RetiresStaleRecordWithoutTouchi
   free(stale->ipcInfos);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRcclRefAndLeavesUnregistered) {
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoHeldLocally_DropsOnlyRcclRefAndLeavesUnregistered) {
   ncclReg* reg = Auto(0x10000, 0x2000);
-  void* handle = nullptr;
-  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
-  ASSERT_EQ(handle, reg);
+  ++reg->localRefs;  // someone else also holds the record
   bufferId_ = 8;
 
   // The record still maps the freed allocation on the peers, so the ring must not use it.
@@ -1038,11 +1036,9 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRccl
   EXPECT_TRUE(Retired().empty());
 }
 
-TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoGraphRegistered_DropsOnlyRcclRefAndLeavesUnregistered) {
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoHeldByGraph_DropsOnlyRcclRefAndLeavesUnregistered) {
   ncclReg* reg = Auto(0x10000, 0x2000);
-  void* handle = nullptr;
-  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x10000, /*isGraph=*/true, &handle), ncclSuccess);
-  ASSERT_EQ(handle, reg);
+  ++reg->graphRefs;
   bufferId_ = 8;
 
   EXPECT_EQ(Auto(0x10000, 0x2000), nullptr);
@@ -1097,16 +1093,80 @@ TEST_F(RegisterAutoLocalMicrotest, NestedScope_RestoresOuterVisibility) {
   EXPECT_FALSE(comm_->regCache.rcclAutoVisible);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, UserRegistersSameAllocation_RecordVisibleEverywhere) {
+TEST_F(RegisterAutoLocalMicrotest, UserRegistersInsideAutoRegisteredAllocation_GetsOwnRecord) {
   ncclReg* reg = Auto(0x10000, 0x2000);
   void* handle = nullptr;
-  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
-  ASSERT_EQ(handle, reg);
-  EXPECT_EQ(reg->localRefs, 2);
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x14000), kPage, false, &handle), ncclSuccess);
+  ASSERT_NE(handle, nullptr);
+  EXPECT_NE(handle, reg);
+  EXPECT_FALSE(static_cast<ncclReg*>(handle)->rcclAuto.owned);
+  EXPECT_EQ(reg->localRefs, 1);
+  ASSERT_EQ(Population(), 2);
 
-  ncclReg* found = nullptr;
-  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
-  EXPECT_EQ(found, reg);
+  // Send/recv outside the user's range must stay unregistered on this rank.
+  ncclReg* found = reinterpret_cast<ncclReg*>(0x1);
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x18000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, nullptr);
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x14000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, handle);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, GraphRegistersInsideAutoRegisteredAllocation_GetsOwnRecord) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x14000), kPage, /*isGraph=*/true, &handle), ncclSuccess);
+  ASSERT_NE(handle, nullptr);
+  EXPECT_NE(handle, reg);
+  EXPECT_EQ(static_cast<ncclReg*>(handle)->graphRefs, 1);
+  EXPECT_EQ(reg->graphRefs, 0);
+  EXPECT_EQ(Population(), 2);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, LookupPastRetiredRecord_FindsUserRecordOfNewAllocation) {
+  allocSize_ = 0x40000;
+  ncclReg* stale = Auto(0x40000, kPage);  // [0x40000, 0x80000)
+  ASSERT_NE(stale, nullptr);
+  bufferId_ = 8;
+  void* user = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x60000), 0x40000, false, &user), ncclSuccess);
+  ASSERT_EQ(Population(), 2);
+  ASSERT_EQ(Slot(1), user);
+
+  // The stale record comes first and covers the buffer; the user's record after it covers it too.
+  EXPECT_EQ(Auto(0x70000, kPage), user);
+  EXPECT_EQ(static_cast<ncclReg*>(user)->localRefs, 1);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
+}
+
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_DeregistersNetHandlesButKeepsPeerImports) {
+  ncclReg* stale = Auto(0x10000, 0x2000);
+  ncclIpcRegInfo* import = AddPeerImport(stale);
+  ncclProxyConnector proxyConn = {};
+  auto* netHandle = static_cast<ncclRegNetHandles*>(calloc(1, sizeof(ncclRegNetHandles)));
+  netHandle->handle = reinterpret_cast<void*>(0x1234);
+  netHandle->proxyConn = &proxyConn;
+  stale->netHandleHead = netHandle;
+  stale->state |= NET_REG_COMPLETE;
+  std::vector<void*> netDeregistered;
+  ScopedHook net(g_ncclNetDeregBuffer, [&](ncclComm*, ncclProxyConnector* p, void* h) {
+    EXPECT_EQ(p, &proxyConn);
+    netDeregistered.push_back(h);
+    return ncclSuccess;
+  });
+  bufferId_ = 8;
+
+  ASSERT_NE(Auto(0x10000, 0x2000), nullptr);
+  // A later NET registration at this address must not get the freed allocation's MR from the IB cache.
+  EXPECT_EQ(netDeregistered, (std::vector<void*>{reinterpret_cast<void*>(0x1234)}));
+  EXPECT_EQ(stale->netHandleHead, nullptr);
+  EXPECT_FALSE(stale->state & NET_REG_COMPLETE);
+  EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
+  EXPECT_TRUE(deregistered_.empty());
+
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(netDeregistered.size(), 1u);
+  EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{import}));
 }
 
 TEST_F(RegisterAutoLocalMicrotest, LookupInsideScopeOfReusedAddress_RetiresStaleRecordAndReturnsNothing) {
@@ -1123,7 +1183,7 @@ TEST_F(RegisterAutoLocalMicrotest, LookupInsideScopeOfReusedAddress_RetiresStale
   EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
 }
 
-TEST_F(RegisterAutoLocalMicrotest, UserRegistersReusedAddress_GetsFreshRecord) {
+TEST_F(RegisterAutoLocalMicrotest, UserRegistersReusedAddress_GetsFreshRecordThatTheRingThenUses) {
   ncclReg* stale = Auto(0x10000, 0x2000);
   bufferId_ = 8;
 
@@ -1131,9 +1191,14 @@ TEST_F(RegisterAutoLocalMicrotest, UserRegistersReusedAddress_GetsFreshRecord) {
   ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
   ASSERT_NE(handle, nullptr);
   EXPECT_NE(handle, stale);
+  EXPECT_FALSE(static_cast<ncclReg*>(handle)->rcclAuto.owned);
+  // ncclRegister passes over the hidden record; the next Ring lookup retires it.
+  ASSERT_EQ(Population(), 2);
+  EXPECT_TRUE(Retired().empty());
+
+  EXPECT_EQ(Auto(0x10000, 0x2000), handle);
   ASSERT_EQ(Population(), 1);
   EXPECT_EQ(Slot(0), handle);
-  EXPECT_FALSE(static_cast<ncclReg*>(handle)->rcclAuto.owned);
   EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
 }
 
@@ -1231,10 +1296,9 @@ TEST_F(RegisterAutoLocalMicrotest, Release_TearsDownOwnedAndRetiredRecordsOnly) 
   EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0u);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordTheUserAlsoRegisteredToTheUser) {
+TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordSomeoneElseHoldsToThem) {
   ncclReg* reg = Auto(0x10000, kPage);
-  void* handle = nullptr;
-  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
+  ++reg->localRefs;
   EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
   ASSERT_EQ(Population(), 1);
   EXPECT_EQ(Slot(0), reg);
@@ -1243,12 +1307,10 @@ TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordTheUserAlsoRegistere
   EXPECT_TRUE(deregistered_.empty());
 }
 
-TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordAGraphAlsoRegisteredToTheGraph) {
+TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordAGraphHoldsToTheGraph) {
   ncclReg* reg = Auto(0x10000, kPage);
   AddPeerImport(reg);
-  void* handle = nullptr;
-  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x10000, /*isGraph=*/true, &handle), ncclSuccess);
-  ASSERT_EQ(handle, reg);
+  ++reg->graphRefs;
 
   EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
   ASSERT_EQ(Population(), 1);

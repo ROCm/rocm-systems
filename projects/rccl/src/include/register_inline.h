@@ -20,13 +20,16 @@ static inline ncclResult_t ncclRegFind(struct ncclComm* comm, const void* data, 
     struct ncclReg* reg = cache->slots[slot];
     if ((uintptr_t)data < reg->begAddr) return ncclSuccess;
     if ((uintptr_t)data + size <= reg->endAddr) {
+      if (rcclRegHidden(cache, reg)) continue;
       if (reg->rcclAuto.owned) {
-        // A record only RCCL holds is for the Ring AllReduce/AllGather path that made it: elsewhere the peer's buffer
-        // may be unregistered, and both sides must agree to use registered buffers.
-        if (!cache->rcclAutoVisible && reg->localRefs == 1 && reg->graphRefs == 0) continue;
+        int population = cache->population;
         bool stale = false;
         NCCLCHECK(rcclRegCheckOwned(comm, data, reg, &stale));
-        if (stale) return ncclSuccess;
+        if (stale) {
+          // A later record, such as a user registration of the new allocation, may still cover data.
+          if (cache->population < population) slot--;
+          continue;
+        }
       }
       *outReg = reg;
       return ncclSuccess;

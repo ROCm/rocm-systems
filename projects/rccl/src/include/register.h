@@ -95,6 +95,13 @@ struct rcclRegAutoScope {
   rcclRegAutoScope& operator=(const rcclRegAutoScope&) = delete;
 };
 
+// RCCL: true for a record only RCCL holds while no rcclRegAutoScope is open. ncclRegFind and ncclRegister pass over
+// it: elsewhere the peer's buffer may be unregistered, and sharing it would widen a user or graph registration to
+// RCCL's whole allocation.
+static inline bool rcclRegHidden(const struct ncclRegCache* cache, const struct ncclReg* reg) {
+  return reg->rcclAuto.owned && !cache->rcclAutoVisible && reg->localRefs == 1 && reg->graphRefs == 0;
+}
+
 ncclResult_t ncclRegCleanup(struct ncclComm* comm);
 // Returns in *reg the cache record covering [buff, buff + size), creating one owned by RCCL for the buffer's whole
 // allocation when the user has not registered it. *reg is NULL when the buffer cannot be registered; that is not an

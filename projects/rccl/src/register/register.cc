@@ -101,6 +101,7 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
       *handle = regSlot;
       goto exit;
     } else if ((cache->slots[slot]->begAddr <= begAddr) && (cache->slots[slot]->endAddr >= endAddr)) {
+      if (rcclRegHidden(cache, cache->slots[slot])) continue;
       if (cache->slots[slot]->rcclAuto.owned) {
         bool stale = false;
         NCCLCHECK(rcclRegCheckOwned(comm, data, cache->slots[slot], &stale));
@@ -120,7 +121,7 @@ exit:
   return ncclSuccess;
 }
 
-static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
+static void regNetCleanup(struct ncclComm* comm, struct ncclReg* reg) {
   if (reg->state & NET_REG_COMPLETE) {
     struct ncclRegNetHandles* netHandle = reg->netHandleHead;
     struct ncclRegNetHandles* netHandlePrev;
@@ -134,6 +135,12 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
       free(netHandlePrev);
     }
   }
+  reg->netHandleHead = NULL;
+  reg->state &= ~NET_REG_COMPLETE;
+}
+
+static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
+  regNetCleanup(comm, reg);
   if (reg->state & NVLS_REG_COMPLETE) {
     NCCLCHECK(ncclNvlsUbDeregister(comm, reg));
   }
@@ -253,11 +260,9 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   *reg = NULL;
   if (buff == NULL || size == 0) return ncclSuccess;
 
+  rcclRegAutoScope visible(&comm->regCache);
   // ncclRegFind drops a record whose allocation was freed and the address reused, so a hit is safe to use.
-  {
-    rcclRegAutoScope visible(&comm->regCache);
-    NCCLCHECK(ncclRegFind(comm, buff, size, reg));
-  }
+  NCCLCHECK(ncclRegFind(comm, buff, size, reg));
   if (*reg) return ncclSuccess;
 
   // The record covers the buffer's whole allocation: peers import the whole allocation anyway, later calls on
@@ -328,6 +333,10 @@ ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct n
   while (cache->slots[slot] != reg) slot++;
   memmove(cache->slots + slot, cache->slots + slot + 1, (cache->population - slot - 1) * sizeof(struct ncclReg*));
   cache->population -= 1;
+  // The IB MR cache matches on address alone, so a live NET registration would hand this record's MR, still backed
+  // by the freed pages, to the next registration at the address. Unlike unmapping peer imports, this is a local
+  // proxy call and does not wait on peer kernels.
+  regNetCleanup(comm, reg);
   reg->rcclAuto.retiredNext = cache->rcclRetired;
   cache->rcclRetired = reg;
   cache->rcclRetiredBytes += reg->endAddr - reg->begAddr;
