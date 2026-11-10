@@ -8969,6 +8969,9 @@ int hipGetStreamDeviceId(hipStream_t stream);
  *  @defgroup Graph Graph Management
  *  @{
  *  This section describes the graph management types & functions of HIP runtime API.
+ *
+ *  @note hipGraph_t objects are not thread-safe. It is the user's responsibility to ensure that
+ *  multiple threads do not concurrently access the same hipGraph_t.
  */
 
 /**
