@@ -23,15 +23,15 @@ MEMORY_CHART_ARCHS = common.memory_chart_archs()
 def sample_values(arch: str) -> dict[str, float]:
     """A distinct, plausible value for every memory chart metric of an arch."""
     values = {}
-    for name, unit in panel_units(PanelConfigs.for_arch(arch)).items():
-        seed = zlib.crc32(name.encode()) % 97
+    for metric_id, unit in panel_units(PanelConfigs.for_arch(arch)).items():
+        seed = zlib.crc32(metric_id.encode()) % 97
         kind = display_unit(unit).kind
         if kind == "percent":
-            values[name] = 1.5 + seed
+            values[metric_id] = 1.5 + seed
         elif kind == "bandwidth":
-            values[name] = (seed + 1) * 4.25e9
+            values[metric_id] = (seed + 1) * 4.25e9
         else:
-            values[name] = seed + 2.0
+            values[metric_id] = seed + 2.0
     return values
 
 
@@ -92,6 +92,12 @@ def box_rows(lines, title):
     left = lines[top].rindex("╭", 0, col)
     bottom = next(i for i in range(top + 1, len(lines)) if lines[i][left] == "╰")
     return top, bottom, left
+
+
+def text_box_edge(lines, text):
+    """Row of *text* and the left edge of the box it is written in."""
+    row = next(i for i, line in enumerate(lines) if f" {text} " in line)
+    return row, lines[row].rindex("│", 0, lines[row].index(text))
 
 
 VALUE_SETS = {
@@ -229,11 +235,20 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 # ---------------------------------------------------------------------------
 
 
-def test_gfx950_shows_io_bandwidth_on_attached_blocks():
-    output = render("gfx950", {"xGMI Read BW": 2e9, "PCIe Atomic BW": 3e9})
+def test_gfx950_shows_io_bandwidth_above_and_below_the_grid():
+    output = render("gfx950", {"3.1.35": 2e9, "3.1.40": 3e9})  # xGMI Read, PCIe Atomic
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)
     assert re.search(r"\|\|  Atomic BW\s+3\.000 GB/s", output)
     assert output.index("xGMI") < output.index("Compute Units") < output.index("PCIe")
+
+
+def test_blocks_above_and_below_the_grid_line_up_with_their_column():
+    lines = render("gfx950").splitlines()
+    fabric_left = box_rows(lines, "Data Fabric")[2]
+    assert text_box_edge(lines, "xGMI (to Peer GPU)")[1] == fabric_left
+    assert text_box_edge(lines, "PCIe (to CPU or Non-xGMI connected GPU)")[1] == (
+        fabric_left
+    )
 
 
 @pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx942"])
@@ -256,7 +271,7 @@ def test_stall_metrics_get_a_bar(gpu_arch, label):
 
 def test_item_bar_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
-    no_bar = common.with_metric_change(data, "L2 Hit", bar=False)
+    no_bar = common.with_metric_change(data, "3.1.25", bar=False)  # L2 Hit
     assert count_bars(render_layout(tmp_path, "gfx942", no_bar)) == (
         count_bars(render("gfx942")) - 1
     )
@@ -264,7 +279,7 @@ def test_item_bar_follows_the_layout(tmp_path):
 
 def test_arrow_style_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
-    inline = common.with_metric_change(data, "VL1_L2 Read BW", style="inline")
+    inline = common.with_metric_change(data, "3.1.16", style="inline")  # VL1_L2 Read
     assert not re.search(r"Read BW\s+: ", render("gfx942"))
     assert re.search(r"Read BW\s+: ", render_layout(tmp_path, "gfx942", inline))
 
