@@ -1164,24 +1164,28 @@ TEST_F(CollectivesMicrotest, AllReduceWithBias_EnqueuesTheAccumulatorWithoutADec
   EXPECT_EQ(1u, fake.enqueued.size());
 }
 
-// gfx950 single-node comms use one chunk and one slice step; other arches only shrink the slices.
+// Ring/Simple steps per arch and rcclUseOneSlice: gfx950 single-node comms use one chunk and one slice
+// step; gfx942 and gfx1250 single-node comms only shrink the slices.
+struct RingSimpleStepsCase {
+  const char* arch;
+  int oneSlice;
+  int arChunk, arSlice, agChunk, agSlice, rsChunk, rsSlice;
+};
+const RingSimpleStepsCase kRingSimpleStepsCases[] = {
+    {"gfx942", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
+     REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
+    {"gfx942", 1, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLGATHER_CHUNKSTEPS,
+     ALLGATHER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS_SINGLE_NODE},
+    {"gfx950", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
+     REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
+    {"gfx950", 1, 1, 1, 1, 1, 1, 1},
+    {"gfx1250", 1, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLGATHER_CHUNKSTEPS,
+     ALLGATHER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS_SINGLE_NODE},
+};
+
 TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
-  struct Case {
-    const char* arch;
-    int oneSlice;
-    int arChunk, arSlice, agChunk, agSlice, rsChunk, rsSlice;
-  };
-  const std::vector<Case> cases = {
-      {"gfx942", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
-       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
-      {"gfx942", 1, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLGATHER_CHUNKSTEPS,
-       ALLGATHER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS_SINGLE_NODE},
-      {"gfx950", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
-       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
-      {"gfx950", 1, 1, 1, 1, 1, 1, 1},
-  };
   float acc[kCount] = {};
-  for (const Case& tc : cases) {
+  for (const RingSimpleStepsCase& tc : kRingSimpleStepsCases) {
     SCOPED_TRACE(std::string(tc.arch) + " oneSlice=" + std::to_string(tc.oneSlice));
     SetArch(tc.arch);
     comm_->rcclUseOneSlice = tc.oneSlice;
@@ -1209,23 +1213,9 @@ TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
 // one-slice kernels need: gfx950 single-node runs one step per chunk, so the default 4/2 steps
 // put data at the wrong 512 KiB offset or fault.
 TEST_F(CollectivesMicrotest, ConfigEntryPoints_UseThePlainSliceSteps) {
-  struct Case {
-    const char* arch;
-    int oneSlice;
-    int arChunk, arSlice, agChunk, agSlice, rsChunk, rsSlice;
-  };
-  const std::vector<Case> cases = {
-      {"gfx942", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
-       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
-      {"gfx942", 1, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLGATHER_CHUNKSTEPS,
-       ALLGATHER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS_SINGLE_NODE},
-      {"gfx950", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
-       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
-      {"gfx950", 1, 1, 1, 1, 1, 1, 1},
-  };
   ncclCollConfig_t config{};
   config.maxCTAs = 8;
-  for (const Case& tc : cases) {
+  for (const RingSimpleStepsCase& tc : kRingSimpleStepsCases) {
     SCOPED_TRACE(std::string(tc.arch) + " oneSlice=" + std::to_string(tc.oneSlice));
     SetArch(tc.arch);
     comm_->rcclUseOneSlice = tc.oneSlice;

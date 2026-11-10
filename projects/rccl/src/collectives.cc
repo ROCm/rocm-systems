@@ -155,9 +155,7 @@ const char* ncclProtoToString(int proto) {
   }
 }
 
-// The Ring/Simple AllGather, AllReduce and ReduceScatter kernels pick their slice layout from
-// comm->rcclUseOneSlice (device/all_gather.h, all_reduce.h, reduce_scatter.h), so every call that
-// enqueues one of them must pass the chunk and slice steps that layout was built for.
+// Steps must match the slice layout that device/{all_gather,all_reduce,reduce_scatter}.h pick from rcclUseOneSlice.
 static void rcclRingSimpleSteps(const ncclComm* comm, ncclFunc_t func, int* chunkSteps, int* sliceSteps) {
   int singleNodeSliceSteps;
   switch (func) {
