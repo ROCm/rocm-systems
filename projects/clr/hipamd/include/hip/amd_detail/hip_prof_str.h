@@ -514,7 +514,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipExtMemcpyBatchAsync = 492,
   HIP_API_ID_hipMemcpy3DWithAttributesAsync = 493,
   HIP_API_ID_hipMemcpyWithAttributesAsync = 494,
-  HIP_API_ID_LAST = 494,
+  HIP_API_ID_hipArrayGetSparseProperties = 495,
+  HIP_API_ID_LAST = 495,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -555,6 +556,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipArrayDestroy: return "hipArrayDestroy";
     case HIP_API_ID_hipArrayGetDescriptor: return "hipArrayGetDescriptor";
     case HIP_API_ID_hipArrayGetInfo: return "hipArrayGetInfo";
+    case HIP_API_ID_hipArrayGetSparseProperties: return "hipArrayGetSparseProperties";
     case HIP_API_ID_hipChooseDeviceR0000: return "hipChooseDeviceR0000";
     case HIP_API_ID_hipChooseDeviceR0600: return "hipChooseDeviceR0600";
     case HIP_API_ID_hipConfigureCall: return "hipConfigureCall";
@@ -1043,6 +1045,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipArrayDestroy", name) == 0) return HIP_API_ID_hipArrayDestroy;
   if (strcmp("hipArrayGetDescriptor", name) == 0) return HIP_API_ID_hipArrayGetDescriptor;
   if (strcmp("hipArrayGetInfo", name) == 0) return HIP_API_ID_hipArrayGetInfo;
+  if (strcmp("hipArrayGetSparseProperties", name) == 0) return HIP_API_ID_hipArrayGetSparseProperties;
   if (strcmp("hipChooseDeviceR0000", name) == 0) return HIP_API_ID_hipChooseDeviceR0000;
   if (strcmp("hipChooseDeviceR0600", name) == 0) return HIP_API_ID_hipChooseDeviceR0600;
   if (strcmp("hipConfigureCall", name) == 0) return HIP_API_ID_hipConfigureCall;
@@ -1574,6 +1577,11 @@ typedef struct hip_api_data_s {
       unsigned int flags__val;
       hipArray_t array;
     } hipArrayGetInfo;
+    struct {
+      hipArraySparseProperties* sparseProperties;
+      hipArraySparseProperties sparseProperties__val;
+      hipArray_t array;
+    } hipArrayGetSparseProperties;
     struct {
       int* device;
       int device__val;
@@ -4540,6 +4548,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipArrayGetInfo.extent = (hipExtent*)extent; \
   cb_data.args.hipArrayGetInfo.flags = (unsigned int*)flags; \
   cb_data.args.hipArrayGetInfo.array = (hipArray_t)array; \
+};
+// hipArrayGetSparseProperties[('hipArraySparseProperties*', 'sparseProperties'), ('hipArray_t', 'array')]
+#define INIT_hipArrayGetSparseProperties_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipArrayGetSparseProperties.sparseProperties = (hipArraySparseProperties*)sparseProperties; \
+  cb_data.args.hipArrayGetSparseProperties.array = (hipArray_t)array; \
 };
 // hipChooseDeviceR0000[('int*', 'device'), ('const hipDeviceProp_tR0000*', 'prop')]
 #define INIT_hipChooseDeviceR0000_CB_ARGS_DATA(cb_data) { \
@@ -7572,6 +7585,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipArrayGetInfo.extent) data->args.hipArrayGetInfo.extent__val = *(data->args.hipArrayGetInfo.extent);
       if (data->args.hipArrayGetInfo.flags) data->args.hipArrayGetInfo.flags__val = *(data->args.hipArrayGetInfo.flags);
       break;
+// hipArrayGetSparseProperties[('hipArraySparseProperties*', 'sparseProperties'), ('hipArray_t', 'array')]
+    case HIP_API_ID_hipArrayGetSparseProperties:
+      if (data->args.hipArrayGetSparseProperties.sparseProperties) data->args.hipArrayGetSparseProperties.sparseProperties__val = *(data->args.hipArrayGetSparseProperties.sparseProperties);
+      break;
 // hipChooseDeviceR0000[('int*', 'device'), ('const hipDeviceProp_tR0000*', 'prop')]
     case HIP_API_ID_hipChooseDeviceR0000:
       if (data->args.hipChooseDeviceR0000.device) data->args.hipChooseDeviceR0000.device__val = *(data->args.hipChooseDeviceR0000.device);
@@ -9541,6 +9558,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipArrayGetInfo.flags == NULL) oss << ", flags=NULL";
       else { oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetInfo.flags__val); }
       oss << ", array="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetInfo.array);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipArrayGetSparseProperties:
+      oss << "hipArrayGetSparseProperties(";
+      if (data->args.hipArrayGetSparseProperties.sparseProperties == NULL) oss << "sparseProperties=NULL";
+      else { oss << "sparseProperties="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetSparseProperties.sparseProperties__val); }
+      oss << ", array="; roctracer::hip_support::detail::operator<<(oss, data->args.hipArrayGetSparseProperties.array);
       oss << ")";
     break;
     case HIP_API_ID_hipChooseDeviceR0000:
