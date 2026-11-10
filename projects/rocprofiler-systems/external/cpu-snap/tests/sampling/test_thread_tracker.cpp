@@ -1,10 +1,15 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "cpu_snap/error.hpp"
@@ -20,8 +25,8 @@ using internal::thread_tracker;
 class fake_trigger final : public triggers::i_trigger
 {
 public:
-    std::vector<pid_t>      attached;
-    std::vector<pid_t>      detached;
+    std::vector<pid_t>        attached;
+    std::vector<pid_t>        detached;
     std::unordered_set<pid_t> failing;
     std::unordered_set<pid_t> tracked;
 
@@ -45,29 +50,33 @@ public:
         out.assign(tracked.begin(), tracked.end());
     }
 
-    bool can_provide(unwind::capture_kind) const noexcept override { return true; }
-    void close_all() noexcept override {}
-    void enable_all() noexcept override {}
-    void disable_all() noexcept override {}
+    bool        can_provide(unwind::capture_kind) const noexcept override { return true; }
+    void        close_all() noexcept override {}
+    void        enable_all() noexcept override {}
+    void        disable_all() noexcept override {}
     std::size_t tracked_tids() const noexcept override { return tracked.size(); }
-    int wait(int) noexcept override { return 0; }
+    int         wait(int) noexcept override { return 0; }
     void drain_into(internal::streaming_pipeline&, unwind::unwinder&) noexcept override {}
 };
 
 class ThreadTrackerTest : public ::testing::Test
 {
 protected:
-    thread_tracker make(bool include_main = true)
+    thread_tracker make(bool                       include_main = true,
+                        std::function<bool(pid_t)> excluded     = {})
     {
         return thread_tracker(
-            [this] { return threads; }, [this](const log_record& r) { logs.emplace_back(r.message); },
-            clock_kind::monotonic, include_main);
+            [this] { return threads; },
+            [this](const log_record& r) { logs.emplace_back(r.message); },
+            clock_kind::monotonic, include_main, std::move(excluded));
     }
 
     std::size_t count_logs(const std::string& needle) const
     {
-        return static_cast<std::size_t>(std::ranges::count_if(
-            logs, [&](const std::string& m) { return m.find(needle) != std::string::npos; }));
+        return static_cast<std::size_t>(
+            std::ranges::count_if(logs, [&](const std::string& m) {
+                return m.find(needle) != std::string::npos;
+            }));
     }
 
     internal::rescan_result rescan(thread_tracker& t)
@@ -89,6 +98,33 @@ TEST_F(ThreadTrackerTest, InitialAttachSkipsExcludedTid)
     EXPECT_EQ(trig.attached, (std::vector<pid_t>{ 10, 12 }));
 }
 
+TEST_F(ThreadTrackerTest, ExcludedTidsAreNeverAttached)
+{
+    threads = std::vector<thread_entry>{ { 10, 1 }, { 11, 2 }, { 12, 3 } };
+    auto t  = make(true, [](pid_t tid) { return tid == 11; });
+    t.attach_initial(trig, -1);
+    EXPECT_EQ(trig.attached, (std::vector<pid_t>{ 10, 12 }));
+
+    threads->push_back({ 13, 4 });
+    rescan(t);
+    EXPECT_FALSE(trig.is_tracked(11));
+    EXPECT_TRUE(trig.is_tracked(13));
+}
+
+TEST_F(ThreadTrackerTest, TrackedTidThatBecomesExcludedIsDetached)
+{
+    threads       = std::vector<thread_entry>{ { 10, 1 }, { 11, 2 } };
+    bool excluded = false;
+    auto t        = make(true, [&](pid_t tid) { return excluded && tid == 11; });
+    t.attach_initial(trig, -1);
+    ASSERT_TRUE(trig.is_tracked(11));
+
+    excluded = true;
+    rescan(t);
+    EXPECT_FALSE(trig.is_tracked(11));
+    EXPECT_TRUE(trig.is_tracked(10));
+}
+
 TEST_F(ThreadTrackerTest, InitialAttachThrowsWhenListingFails)
 {
     threads.reset();
@@ -102,7 +138,7 @@ TEST_F(ThreadTrackerTest, RescanAttachesNewAndDetachesExited)
     auto t  = make();
     t.attach_initial(trig, -1);
 
-    threads = std::vector<thread_entry>{ { 11, 2 }, { 12, 3 } };
+    threads        = std::vector<thread_entry>{ { 11, 2 }, { 12, 3 } };
     const auto res = rescan(t);
     EXPECT_EQ(res.failed_attaches, 0U);
     EXPECT_EQ(trig.detached, (std::vector<pid_t>{ 10 }));
@@ -115,7 +151,7 @@ TEST_F(ThreadTrackerTest, RescanWithPipelineNull)
     threads = std::vector<thread_entry>{ { 10, 1 } };
     auto t  = make();
     t.attach_initial(trig, -1);
-    threads = std::vector<thread_entry>{};
+    threads      = std::vector<thread_entry>{};
     auto current = t.poll();
     EXPECT_NO_THROW(t.rescan(trig, nullptr, -1, *current));
     EXPECT_EQ(trig.detached, (std::vector<pid_t>{ 10 }));
@@ -145,8 +181,8 @@ TEST_F(ThreadTrackerTest, UnchangedStartTicksAreNotRecycled)
 
 TEST_F(ThreadTrackerTest, AttachFailureCountedAndLoggedOncePerTid)
 {
-    auto t = make();
-    threads = std::vector<thread_entry>{ { 10, 1 } };
+    auto t       = make();
+    threads      = std::vector<thread_entry>{ { 10, 1 } };
     trig.failing = { 10 };
 
     for(int i = 0; i < 3; ++i)
@@ -179,8 +215,8 @@ TEST_F(ThreadTrackerTest, ListingFailureLoggedOnceUntilSuccess)
 
 TEST_F(ThreadTrackerTest, ResetForgetsLoggedFailuresAndStartTicks)
 {
-    auto t = make();
-    threads = std::vector<thread_entry>{ { 10, 1 } };
+    auto t       = make();
+    threads      = std::vector<thread_entry>{ { 10, 1 } };
     trig.failing = { 10 };
     (void) rescan(t);
     EXPECT_EQ(count_logs("cannot attach"), 1U);
