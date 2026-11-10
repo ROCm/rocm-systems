@@ -168,7 +168,15 @@ jobs:
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
-          python3 -m venv "${COCO_VENV}"
+          # Debian/Ubuntu ship ensurepip separately (pythonX.Y-venv), and not
+          # every runner image has it: bootstrap pip into a pip-less venv instead.
+          if ! python3 -m venv "${COCO_VENV}"; then
+            echo "::warning::python3 -m venv failed on $(hostname) (pythonX.Y-venv not installed?); bootstrapping pip with get-pip.py."
+            python3 -m venv --clear --without-pip "${COCO_VENV}"
+            python3 -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \
+              https://bootstrap.pypa.io/get-pip.py "${CI_SCRATCH}/get-pip.py"
+            "${COCO_VENV}/bin/python3" "${CI_SCRATCH}/get-pip.py" --quiet
+          fi
           "${COCO_VENV}/bin/python3" -m pip install -e .
           # Surfaces a packaging problem here rather than after the queue.
           "${COCO_VENV}/bin/coco" --help > /dev/null
