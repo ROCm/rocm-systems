@@ -9,12 +9,15 @@
 #include "hip_global.hpp"
 #include <algorithm>
 #include <cstddef>
-#include <limits>
+#include <cstring>
 #include <unordered_map>
 #include <mutex>
 #include "hip_code_object.hpp"
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
+#include "device/codeobject/compressed_bundle.hpp"
+#include "device/codeobject/elf_header.hpp"
+#include "device/codeobject/offload_bundle.hpp"
 #include "amd_hsa_elf.hpp"
 #include "hip_comgr_helper.hpp"
 
@@ -105,109 +108,6 @@ void ListAllDeviceWithNoCOFromBundle(
   }
 }
 
-static std::string TargetGenericMap(const std::string& input) {
-  const static std::unordered_map<std::string, std::string> target_map{
-      // clang-format off
-      {"amdgcn-amd-amdhsa--gfx900" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx902" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx904" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx906" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx909" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx90c" , "amdgcn-amd-amdhsa--gfx9-generic"   },
-      {"amdgcn-amd-amdhsa--gfx942" , "amdgcn-amd-amdhsa--gfx9-4-generic" },
-      {"amdgcn-amd-amdhsa--gfx950" , "amdgcn-amd-amdhsa--gfx9-4-generic" },
-      {"amdgcn-amd-amdhsa--gfx1010", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1011", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1012", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1013", "amdgcn-amd-amdhsa--gfx10-1-generic"},
-      {"amdgcn-amd-amdhsa--gfx1030", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1031", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1032", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1033", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1034", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1035", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1036", "amdgcn-amd-amdhsa--gfx10-3-generic"},
-      {"amdgcn-amd-amdhsa--gfx1100", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1101", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1102", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1103", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1150", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1151", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1152", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1153", "amdgcn-amd-amdhsa--gfx11-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1170", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1171", "amdgcn-amd-amdhsa--gfx11-7-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
-      {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
-      // clang-format on
-  };
-  if (auto i = target_map.find(input); i != target_map.end()) {
-    return i->second;
-  }
-  return {};
-}
-
-// For sramecc and xnack
-static std::string TargetFeatureCheck(const std::string& input, const std::string &feature) {
-  if (input.find(feature) != std::string::npos) {
-    auto feature_p = feature + "+";  // feature present eg: xnack+
-    auto feature_m = feature + "-";  // feature absent eg: xnack-
-    if (input.find(feature_p) != std::string::npos) {
-      return feature_p;
-    } else if (input.find(feature_m) != std::string::npos) {
-      return feature_m;
-    }
-  }
-  return "";
-}
-
-static std::string TargetToGeneric(const std::string &input) {
-  auto sramecc = TargetFeatureCheck(input, "sramecc");
-  auto xnack = TargetFeatureCheck(input, "xnack");
-
-  // Remove all features
-  size_t index = input.find_first_of(":");
-  std::string name_without_feature = input.substr(0, index);
-
-  // Look up generic name
-  auto generic_name = TargetGenericMap(name_without_feature);
-  if (generic_name.empty()) {
-    return generic_name;  // No generic exists
-  }
-
-  // reappend feature
-  if (!sramecc.empty()) {
-    generic_name += ":";
-    generic_name += sramecc;
-  }
-  if (!xnack.empty()) {
-    generic_name += ":";
-    generic_name += xnack;
-  }
-  return generic_name;
-}
-
-static bool IsCodeObjectUncompressed(const void* image, size_t image_size) {
-  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleUncompressedMagicStr) - 1;
-  if (image_size < magic_size) {
-    return false;
-  }
-  return std::memcmp(image,
-                     reinterpret_cast<const void*>(symbols::kOffloadBundleUncompressedMagicStr),
-                     magic_size) == 0;
-}
-
-static bool IsCodeObjectCompressed(const void* image, size_t image_size) {
-  constexpr size_t magic_size = sizeof(symbols::kOffloadBundleCompressedMagicStr) - 1;
-  if (image_size < magic_size) {
-    return false;
-  }
-  return std::memcmp(image,
-                     reinterpret_cast<const void*>(symbols::kOffloadBundleCompressedMagicStr),
-                     magic_size) == 0;
-}
-
 static bool IsCodeObjectElf(const void* image, size_t image_size) {
   if (image_size < sizeof(amd::Elf64_Ehdr)) {
     return false;
@@ -216,251 +116,167 @@ static bool IsCodeObjectElf(const void* image, size_t image_size) {
   return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
-static size_t GetUncompressedImageSize(const void* image, size_t image_bound) {
-  if (image == nullptr) {
-    return 0;
+static bool UncompressAndPopulateCodeObject(
+    const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
+    std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
+  // Decompress the bundle once for all devices, copy out only the selected code objects and
+  // free the rest
+  std::vector<char> bundle;
+  std::string error;
+  if (!amd::codeobject::DecompressBundle(image, image_bound, bundle, &error)) {
+    LogPrintfError("Rejecting compressed fat binary: %s", error.c_str());
+    return false;
   }
 
-  // Pointer loads have no length. Walk only the same 4 KiB header window COMGR uses.
-  constexpr size_t kMetadataSize = 4096;
-  const size_t metadata_bound = std::min(image_bound, kMetadataSize);
-  constexpr size_t kHeaderFixedSize =
-      offsetof(symbols::ClangOffloadBundleUncompressedHeader, desc);
-  constexpr size_t kEntryFixedSize = 3 * sizeof(uint64_t);
-  if (metadata_bound < kHeaderFixedSize + kEntryFixedSize) {
-    return 0;
+  const std::vector<std::string> targets(unique_isa_names.begin(), unique_isa_names.end());
+  std::vector<amd::codeobject::CodeObjectRef> found;
+  if (!amd::codeobject::LookupCodeObjects(bundle.data(), bundle.size(), bundle.size(), targets,
+                                          found)) {
+    LogError("Rejecting compressed fat binary: malformed offload bundle header");
+    return false;
   }
 
-  const auto* bytes = static_cast<const uint8_t*>(image);
-  const auto* header = static_cast<const symbols::ClangOffloadBundleUncompressedHeader*>(image);
-  constexpr uint64_t max_entries = 4096;
-  constexpr uint64_t max_bundle_id_size = 4096;
-  if (header->numOfCodeObjects == 0 || header->numOfCodeObjects > max_entries) {
-    return 0;
-  }
-
-  size_t image_size = 0;
-  const auto* entry_address = reinterpret_cast<const uint8_t*>(&header->desc[0]);
-  for (uint64_t i = 0; i < header->numOfCodeObjects; ++i) {
-    const size_t entry_offset = static_cast<size_t>(entry_address - bytes);
-    if (entry_offset > metadata_bound || metadata_bound - entry_offset < kEntryFixedSize) {
-      return 0;
+  for (size_t i = 0; i < targets.size(); ++i) {
+    const amd::codeobject::CodeObjectRef& item = found[i];
+    if (item.size == 0) {
+      continue;
     }
-    const auto* entry = reinterpret_cast<const symbols::ClangOffloadBundleInfo*>(entry_address);
-    if (entry->bundleEntryIdSize > max_bundle_id_size ||
-        entry->bundleEntryIdSize > metadata_bound - entry_offset - kEntryFixedSize ||
-        entry->offset > std::numeric_limits<size_t>::max() ||
-        entry->size > std::numeric_limits<size_t>::max() ||
-        static_cast<size_t>(entry->offset) >
-            std::numeric_limits<size_t>::max() - static_cast<size_t>(entry->size)) {
-      return 0;
+    if (item.offset > bundle.size() || item.size > bundle.size() - item.offset) {
+      LogPrintfError(
+          "Rejecting compressed fat binary: code object for isa '%s' is out of bounds "
+          "(offset=%llu size=%llu bundle size=%zu)",
+          targets[i].c_str(), static_cast<unsigned long long>(item.offset),
+          static_cast<unsigned long long>(item.size), bundle.size());
+      return false;
     }
-    image_size = std::max(image_size,
-                          static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size));
-    entry_address += kEntryFixedSize + entry->bundleEntryIdSize;
+    // Released with the other code object allocations in ~FatBinaryInfo
+    char* data = new char[item.size];
+    std::memcpy(data, bundle.data() + item.offset, item.size);
+    code_obj_map[targets[i]] = std::make_pair(data, static_cast<size_t>(item.size));
   }
-
-  const size_t descriptor_size = static_cast<size_t>(entry_address - bytes);
-  return std::max(image_size, descriptor_size);
+  return true;
 }
 
-static bool UncompressAndPopulateCodeObject(
+/**
+ * Size of a compressed bundle whose format DecompressBundle doesn't know, read the way it has
+ * always been read for comgr: the 32-bit total size of the version 2 header.
+ * @returns 0 if it is smaller than that header or larger than @p image_bound.
+ */
+static size_t UnknownCompressedBundleSize(const void* image, size_t image_bound) {
+  constexpr size_t kTotalSizeOffset = 8;
+  constexpr size_t kHeaderSize = 24;
+  if (image_bound < kHeaderSize) {
+    return 0;
+  }
+  uint32_t total_size = 0;
+  std::memcpy(&total_size, static_cast<const char*>(image) + kTotalSizeOffset,
+              sizeof(total_size));
+  return (total_size < kHeaderSize || total_size > image_bound) ? 0 : total_size;
+}
+
+// Unbundles a compressed bundle in a format newer than DecompressBundle reads with comgr, which
+// follows LLVM's bundler.
+static bool UnbundleWithComgr(
     const void* image, size_t image_size, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
-  auto remove_file_extension = [](const std::string& input) -> std::string {
-    size_t index = input.find_last_of(".");
-    std::string ret = input.substr(0, index);
-    return ret;
-  };
-
-  std::vector<std::string> bundle_ids_str;
-  std::vector<const char*> bundle_ids;
-  bundle_ids_str.reserve(unique_isa_names.size());
-  bundle_ids.reserve(unique_isa_names.size());
-  for (const auto& isa_name : unique_isa_names) {
-    const std::string& bis =
-        bundle_ids_str.emplace_back(std::string(symbols::kOffloadKindHipv4_) + isa_name);
-    bundle_ids.push_back(bis.c_str());
+  // Entries are requested as "hipv4-<isa>"; comgr names each one "hipfatbin-hipv4-<isa>.<ext>"
+  std::vector<std::string> ids;
+  std::vector<const char*> id_ptrs;
+  ids.reserve(unique_isa_names.size());
+  id_ptrs.reserve(unique_isa_names.size());
+  for (const std::string& isa_name : unique_isa_names) {
+    id_ptrs.push_back(ids.emplace_back(symbols::kOffloadKindHipv4_ + isa_name).c_str());
   }
 
-  bool passed = false;
-  do {
-    comgr_helper::ComgrDataSetUniqueHandle bundled_co, unbundled_co;
-    comgr_helper::ComgrDataUniqueHandle input_bundle;
-    if (auto comgr_status = bundled_co.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in creating bundled_co");
-      break;
-    }
-
-    if (auto comgr_status = unbundled_co.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in creating unbundled_co");
-      break;
-    }
-
-    if (auto comgr_status = input_bundle.Create(AMD_COMGR_DATA_KIND_OBJ_BUNDLE);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in creating input bundle");
-      break;
-    }
-
-    if (auto comgr_status =
-            amd::Comgr::set_data(input_bundle.get(), image_size, static_cast<const char*>(image));
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in setting image data to bundle");
-      break;
-    }
-
-    if (auto comgr_status = amd::Comgr::set_data_name(input_bundle.get(), symbols::kHipFatBinName);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in setting image data to bundle");
-      break;
-    }
-
-    if (auto comgr_status = amd::Comgr::data_set_add(bundled_co.get(), input_bundle.get());
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in adding data set");
-      break;
-    }
-
-    comgr_helper::ComgrActionInfoUniqueHandle unbundle_action;
-    if (auto comgr_status = unbundle_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in creating unbundle action");
-      break;
-    }
-
-    if (auto comgr_status = amd::Comgr::action_info_set_bundle_entry_ids(
-            unbundle_action.get(), bundle_ids.data(), bundle_ids.size());
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Error in setting bundle entry ids");
-      break;
-    }
-
-    if (auto comgr_status = amd::Comgr::do_action(AMD_COMGR_ACTION_UNBUNDLE, unbundle_action.get(),
-                                                  bundled_co.get(), unbundled_co.get());
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Failed to unbundle code object");
-      break;
-    }
-
-    size_t count = 0;
-    if (auto comgr_status = amd::Comgr::action_data_count(unbundled_co.get(),
-                                                          AMD_COMGR_DATA_KIND_EXECUTABLE, &count);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogError("Failed to get data count of unbundled code object");
-      break;
-    }
-
-    for (size_t i = 0; i < count; i++) {
+  // Every comgr call returns a status; the first failure ends the unbundle
+  amd_comgr_status_t status = AMD_COMGR_STATUS_SUCCESS;
+  const auto ok = [&status](amd_comgr_status_t result) {
+    status = result;
+    return result == AMD_COMGR_STATUS_SUCCESS;
+  };
+  comgr_helper::ComgrDataSetUniqueHandle input, output;
+  comgr_helper::ComgrDataUniqueHandle bundle;
+  comgr_helper::ComgrActionInfoUniqueHandle action;
+  size_t count = 0;
+  if (ok(input.Create()) && ok(output.Create()) &&
+      ok(bundle.Create(AMD_COMGR_DATA_KIND_OBJ_BUNDLE)) &&
+      ok(amd::Comgr::set_data(bundle.get(), image_size, static_cast<const char*>(image))) &&
+      ok(amd::Comgr::set_data_name(bundle.get(), symbols::kHipFatBinName)) &&
+      ok(amd::Comgr::data_set_add(input.get(), bundle.get())) && ok(action.Create()) &&
+      ok(amd::Comgr::action_info_set_bundle_entry_ids(action.get(), id_ptrs.data(),
+                                                      id_ptrs.size())) &&
+      ok(amd::Comgr::do_action(AMD_COMGR_ACTION_UNBUNDLE, action.get(), input.get(),
+                               output.get())) &&
+      ok(amd::Comgr::action_data_count(output.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, &count))) {
+    constexpr size_t kEntryNameSize = sizeof(symbols::kOffloadHipV4FatBinName_) - 1;
+    for (size_t i = 0; i < count; ++i) {
       amd_comgr_data_t item;
-      if (auto comgr_status = amd::Comgr::action_data_get_data(
-              unbundled_co.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, i, &item);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data unbundled code object");
+      if (!ok(amd::Comgr::action_data_get_data(output.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, i,
+                                               &item))) {
         break;
       }
-      comgr_helper::ComgrDataUniqueHandle item_handle(item);
-
-      size_t item_name_size = 0;
-      if (auto comgr_status =
-              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data size");
+      const comgr_helper::ComgrDataUniqueHandle entry(item);
+      size_t name_size = 0;
+      size_t size = 0;
+      if (!ok(amd::Comgr::get_data_name(entry.get(), &name_size, nullptr))) break;
+      std::string name(name_size, '\0');
+      if (!ok(amd::Comgr::get_data_name(entry.get(), &name_size, name.data())) ||
+          !ok(amd::Comgr::get_data(entry.get(), &size, nullptr))) {
         break;
       }
-
-      std::string item_bundle_id(item_name_size, 0);
-      if (auto comgr_status =
-              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data");
+      // An entry named otherwise can't be matched to a target
+      if (size == 0 ||
+          std::strncmp(name.c_str(), symbols::kOffloadHipV4FatBinName_, kEntryNameSize) != 0) {
+        continue;
+      }
+      // Released with the other code object allocations in ~FatBinaryInfo
+      char* data = new char[size];
+      if (!ok(amd::Comgr::get_data(entry.get(), &size, data))) {
+        delete[] data;
         break;
       }
-
-      size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
-          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-        LogError("Failed to get data size");
-        break;
-      }
-
-      if (item_size > 0) {
-        char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to get data");
-          break;
-        }
-
-        std::string bundle_entry = remove_file_extension(
-            std::string(item_bundle_id.c_str() + sizeof(symbols::kOffloadHipV4FatBinName_) - 1));
-        code_obj_map[bundle_entry] = std::make_pair(item_data, item_size);
-      }
+      const std::string isa(name.c_str() + kEntryNameSize);
+      code_obj_map[isa.substr(0, isa.find_last_of('.'))] = std::make_pair(data, size);
     }
-    passed = true;
-  } while (0);
-
-  return passed;
+  }
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    LogPrintfError("comgr failed to unbundle the compressed fat binary (status %d)", status);
+    return false;
+  }
+  return true;
 }
 
 static bool PopulateCodeObjectMap(
     const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
-  bool passed = false;
-  do {
-    comgr_helper::ComgrDataUniqueHandle data_object;
-    if (auto comgr_status = data_object.Create(AMD_COMGR_DATA_KIND_FATBIN);
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Creating data object failed with status %d ", comgr_status);
-      break;
-    }
+  // There is no encoded total size for an uncompressed bundle. Read the header only within the
+  // first 4 KB of the readable image range.
+  const size_t header_size = std::min<size_t>(4096, image_bound);
+  const std::vector<std::string> targets(unique_isa_names.begin(), unique_isa_names.end());
+  std::vector<amd::codeobject::CodeObjectRef> found;
+  if (!amd::codeobject::LookupCodeObjects(image, header_size, image_bound, targets, found)) {
+    LogError("Rejecting fat binary: malformed offload bundle header");
+    return false;
+  }
 
-    // There is no encoded total size for an uncompressed bundle. Limit COMGR's
-    // header lookup to the readable image range.
-    const size_t header_size = std::min<size_t>(4096, image_bound);
-    if (auto comgr_status = amd::Comgr::set_data(data_object.get(), header_size,
-                                                 reinterpret_cast<const char*>(image));
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
-      break;
-    }
-
-    // Create a query list using COMGR info for unique ISAs.
-    std::vector<amd_comgr_code_object_info_t> query_list_array;
-    query_list_array.reserve(unique_isa_names.size());
-    for (const auto& isa_name : unique_isa_names) {
-      auto& item = query_list_array.emplace_back();
-      item.isa = isa_name.c_str();
-      item.size = 0;
-      item.offset = 0;
-    }
-
-    // Look up the code object info passing the query list.
-    if (auto comgr_status = amd::Comgr::lookup_code_object(
-            data_object.get(), query_list_array.data(), unique_isa_names.size());
-        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-      LogPrintfError("Setting data from file slice failed with status %d ", comgr_status);
-      break;
-    }
-
-    for (const auto& item : query_list_array) {
-      if (item.size > 0) {
-        if (item.offset > image_bound || item.size > image_bound - item.offset) {
-          LogPrintfError(
-              "Rejecting fat binary: code object for isa '%s' is out of bounds "
-              "(offset=%llu size=%zu image bound=%zu)",
-              item.isa, static_cast<unsigned long long>(item.offset), item.size, image_bound);
-          return false;
-        }
-
-        // Map the offset pointer and size from the image
-        auto loc = reinterpret_cast<const char*>(image) + static_cast<size_t>(item.offset);
-        code_obj_map[item.isa] = std::make_pair(loc, item.size);
+  for (size_t i = 0; i < targets.size(); ++i) {
+    const amd::codeobject::CodeObjectRef& item = found[i];
+    if (item.size > 0) {
+      if (item.offset > image_bound || item.size > image_bound - item.offset) {
+        LogPrintfError(
+            "Rejecting fat binary: code object for isa '%s' is out of bounds "
+            "(offset=%llu size=%llu image bound=%zu)",
+            targets[i].c_str(), static_cast<unsigned long long>(item.offset),
+            static_cast<unsigned long long>(item.size), image_bound);
+        return false;
       }
-    }
 
-    passed = true;
-  } while (0);
-  return passed;
+      // Map the offset pointer and size from the image
+      auto loc = reinterpret_cast<const char*>(image) + static_cast<size_t>(item.offset);
+      code_obj_map[targets[i]] = std::make_pair(loc, static_cast<size_t>(item.size));
+    }
+  }
+  return true;
 }
 
 hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
@@ -481,7 +297,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   // Pointer inputs (hipModuleLoadData) carry no length, so no bound is known.
   // File loads below set the exact size.
-  size_t image_bound = amd::Elf::kUnknownSize;
+  size_t image_bound = amd::codeobject::kUnknownSize;
   if (image_ != nullptr) {
     if (!amd::Os::FindFileNameFromAddress(image_, &fname_, &foffset_)) {
       fname_ = std::string("");
@@ -506,8 +322,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   guarantee(image_ != nullptr, "Image cannot be nullptr, file:%s did not map for some reason",
             fname_.c_str());
 
-  const bool is_compressed = IsCodeObjectCompressed(image_, image_bound);
-  const bool is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
+  const bool is_compressed = amd::codeobject::IsCompressedBundle(image_, image_bound);
+  const bool is_uncompressed = amd::codeobject::IsOffloadBundle(image_, image_bound);
   const bool is_elf =
       !is_compressed && !is_uncompressed && IsCodeObjectElf(image_, image_bound);
   // Save the input during the initial/current-device load. Later non-current
@@ -521,9 +337,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   size_t image_size = image_bound;
   if (is_elf) {
-    image_size = amd::Elf::getElfSize(image_, image_bound);
+    image_size = amd::codeobject::ElfImageSize(image_, image_bound);
     if (image_size == 0) {
-      if (image_bound == amd::Elf::kUnknownSize) {
+      if (image_bound == amd::codeobject::kUnknownSize) {
         LogError("Invalid ELF code object: failed self-consistency validation");
       } else {
         LogPrintfError("Invalid ELF code object: failed size/bounds validation, image size: %zu",
@@ -532,25 +348,20 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       return hipErrorInvalidImage;
     }
   } else if (is_compressed) {
-    constexpr size_t kCompressedHeaderSize =
-        offsetof(symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
-    if (image_bound < kCompressedHeaderSize) {
-      LogError("Compressed fat binary header is truncated");
-      return hipErrorInvalidImage;
-    }
-    const auto* header =
-        static_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image_);
-    image_size = header->totalSize;
-    if (image_size < kCompressedHeaderSize || image_size > image_bound) {
-      LogPrintfError("Rejecting compressed fat binary: totalSize=%llu is outside [%llu, %llu]",
-                     static_cast<unsigned long long>(image_size),
-                     static_cast<unsigned long long>(kCompressedHeaderSize),
-                     static_cast<unsigned long long>(image_bound));
-      return hipErrorInvalidImage;
+    // Without a copy, DecompressBundle checks the recorded size against the bound; version 1
+    // records none, so it can't be copied
+    if (save_image_data) {
+      image_size = amd::codeobject::IsKnownCompressedBundle(image_, image_bound)
+                       ? amd::codeobject::CompressedBundleSize(image_, image_bound)
+                       : UnknownCompressedBundleSize(image_, image_bound);
+      if (image_size == 0) {
+        LogError("Compressed fat binary header has no valid total size");
+        return hipErrorInvalidImage;
+      }
     }
   } else {
     if (save_image_data) {
-      image_size = GetUncompressedImageSize(image_, image_bound);
+      image_size = amd::codeobject::OffloadBundleSize(image_, image_bound);
       if (image_size == 0) {
         LogError("Invalid uncompressed fat binary: failed to determine image size");
         return hipErrorInvalidImage;
@@ -585,7 +396,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   for (auto device : devices) {
     std::string device_name = device->devices()[0]->isa().isaName();
     unique_isa_names.insert(device_name);
-    auto generic_name = TargetToGeneric(device_name);
+    auto generic_name = amd::codeobject::TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       unique_isa_names.insert(generic_name);
     }
@@ -593,13 +404,28 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
-    if (!UncompressAndPopulateCodeObject(image_, image_size, unique_isa_names, code_obj_map)) {
-      return hipErrorInvalidImage;
+    bool unbundled = false;
+    if (amd::codeobject::IsKnownCompressedBundle(image_, image_bound)) {
+      unbundled =
+          UncompressAndPopulateCodeObject(image_, image_bound, unique_isa_names, code_obj_map);
+    } else {
+      // A newer bundler format: comgr reads it
+      const size_t bundle_size = UnknownCompressedBundleSize(image_, image_bound);
+      if (bundle_size == 0) {
+        LogError("Rejecting compressed fat binary: unknown format without a valid total size");
+        return hipErrorInvalidImage;
+      }
+      uint16_t version = 0;
+      std::memcpy(&version, static_cast<const char*>(image_) + 4, sizeof(version));
+      LogPrintfInfo("Compressed fat binary version %u is unbundled by comgr", version);
+      unbundled = UnbundleWithComgr(image_, bundle_size, unique_isa_names, code_obj_map);
     }
-    // For compressed code objects, we use comgr to extract and make a copy.
-    // Track these to release later
+    // The extracted code objects are copies; track them to release later, also on failure
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
+    if (!unbundled) {
+      return hipErrorInvalidImage;
+    }
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
@@ -613,7 +439,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
                            code_obj_map.find(spirv_isa_name_empty) != code_obj_map.end();
     for (auto device : devices) {
       std::string device_name = device->devices()[0]->isa().isaName();
-      auto generic_target_name = TargetToGeneric(device_name);   // Generic Code Object
+      auto generic_target_name = amd::codeobject::TargetToGeneric(device_name);   // Generic Code Object
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
@@ -844,7 +670,7 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
     arch_list.push_back(device_name);
 
     // Add generic fallback arch-name
-    auto generic_name = TargetToGeneric(device_name);
+    auto generic_name = amd::codeobject::TargetToGeneric(device_name);
     if (!generic_name.empty()) {
       arch_list.push_back(generic_name);
     }

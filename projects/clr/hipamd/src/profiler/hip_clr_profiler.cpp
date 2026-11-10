@@ -54,11 +54,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// Forward-declare CLR's comgr-based demangler (defined in hip_comgr_helper.cpp).
-namespace hip { namespace helpers {
-bool demangleName(const std::string& mangledName, std::string& demangledName);
-} }
-
 
 HIP_PUBLIC_API void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
                                                               uint32_t operation_id, void* data));
@@ -556,8 +551,8 @@ static void PreDemangleKernelNames() {
   for (auto& kv : g_kernel_names) {
     if (kv.second.size() > 0 && kv.second[0] == '_') {
       std::string demangled;
-      if (hip::helpers::demangleName(kv.second, demangled))
-        kv.second = std::move(demangled);
+      amd::Os::CxaDemangle(kv.second, &demangled);
+      kv.second = std::move(demangled);
     }
   }
 }
@@ -1507,8 +1502,8 @@ static void PfChunkCallback(const hipApiRecordExt* records, uint32_t count, uint
     for (auto& kv : g_kernel_names) {
       if (kv.second.size() > 0 && kv.second[0] == '_') {
         std::string demangled;
-        if (hip::helpers::demangleName(kv.second, demangled))
-          kv.second = std::move(demangled);
+        amd::Os::CxaDemangle(kv.second, &demangled);
+        kv.second = std::move(demangled);
       }
     }
   }
