@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -398,11 +399,11 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitTheP
   for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
                  Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
     auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
-    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter))
+    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0))
       << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
     for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
                          ncclFuncAlltoAllv}) {
-      EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f)) << "collAPI=" << int(f);
+      EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f, /*peer=*/0)) << "collAPI=" << int(f);
     }
   }
 }
@@ -410,13 +411,14 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitTheP
 TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
   auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
   g_rcclUseAinicValue = false;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "not AINIC";
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0)) << "not AINIC";
   g_rcclUseAinicValue = true;
   comm->config.nChannelsPerNetPeer = 2;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "NCCL_NCHANNELS_PER_NET_PEER set";
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0))
+    << "NCCL_NCHANNELS_PER_NET_PEER set";
   comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
   comm->nNodes = 1;
-  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter, /*peer=*/0)) << "single node";
 }
 
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
@@ -427,6 +429,18 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
   task.collAPI = ncclFuncScatter;
   EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
+}
+
+TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterLimit) {
+  g_rcclUseAinicValue = true;
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  comm->p2pNet = 1;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  task.root = 1;
+  task.bytes = 64 << 20;
+
+  EXPECT_EQ(1, rcclP2pReservationChannels(comm.get(), /*recv=*/nullptr, &task));
 }
 
 // ===========================================================================
@@ -5269,6 +5283,7 @@ struct Gfx1250AddP2pScene {
   std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
   std::vector<ncclChannelPeer> peers;
   std::vector<ncclChannelPeer*> peerSlots;
+  std::array<ncclPeerInfo, 4> peerInfo{};
   char llBuf[8]{};
   char ll128Buf[8]{};
   char sendMem[8]{};
@@ -5277,15 +5292,22 @@ struct Gfx1250AddP2pScene {
   ncclTaskP2p sendTask{};
   int planTotalTasks[2]{1, 1};
 
-  Gfx1250AddP2pScene() {
+  Gfx1250AddP2pScene(int nChannels = 4, int channelsPerPeer = 1) {
     InstallSendRecvDevFuncIds();
     ncclComm* c = bp.c();
     c->rank = 0;
     c->nRanks = 4;
     c->nNodes = 1;
     c->cudaArch = 1250;
-    c->p2pnChannels = 4;
-    c->p2pnChannelsPerPeer = 1;
+    c->isAllDirectP2p = true;
+    c->isAllCudaP2p = true;
+    c->peerInfo = peerInfo.data();
+    for (auto& peer : peerInfo) {
+      peer.hostHash = 1;
+      peer.hasFineGrain = true;
+    }
+    c->p2pnChannels = nChannels;
+    c->p2pnChannelsPerPeer = channelsPerPeer;
     c->p2pChannelShiftSize = 0;
     c->p2pChunkSize = 128 << 10;
     c->ll128LineElems = 16;
@@ -5298,30 +5320,42 @@ struct Gfx1250AddP2pScene {
     topo->ll128Enabled = true;
     c->topo = topo.get();
 
-    peers.resize(4);
-    peerSlots.resize(4);
-    for (int i = 0; i < 4; ++i) {
-      peerSlots[i] = &peers[i];
-      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
-        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
-        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
-        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
-        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+    peers.resize(nChannels * c->nRanks);
+    peerSlots.resize(nChannels * c->nRanks);
+    for (int ch = 0; ch < nChannels; ++ch) {
+      for (int rank = 0; rank < c->nRanks; ++rank) {
+        int slot = ch * c->nRanks + rank;
+        peerSlots[slot] = &peers[slot];
+        for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+          peers[slot].send[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+          peers[slot].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+          peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+          peers[slot].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+        }
       }
+      c->channels[ch].peers = &peerSlots[ch * c->nRanks];
     }
-    for (int ch = 0; ch < 4; ++ch) c->channels[ch].peers = peerSlots.data();
 
     recvTask.collAPI = ncclFuncRecv;
     recvTask.func = ncclFuncRecv;
+    recvTask.root = 1;
     sendTask.collAPI = ncclFuncSend;
     sendTask.func = ncclFuncSend;
+    sendTask.root = 1;
   }
 
   ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
     struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
-    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+    int channelsPerPeer = bp.c()->p2pnChannelsPerPeer;
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/channelsPerPeer, /*nChannelsMax=*/channelsPerPeer,
+                        /*p2pRound=*/0,
                         /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
                         /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  ncclConnector* Conn(int channel, bool send, int connIndex = 1) {
+    int slot = channel * bp.c()->nRanks + 1;
+    return send ? &peers[slot].send[connIndex] : &peers[slot].recv[connIndex];
   }
 
   int p2pWorkCount() {
@@ -5337,6 +5371,18 @@ struct Gfx1250AddP2pScene {
       if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
     }
     return nullptr;
+  }
+};
+
+struct ScopedP2pCeEnv {
+  const char* saved = std::getenv("NCCL_P2P_USE_CUDA_MEMCPY");
+  std::string old = saved == nullptr ? "" : saved;
+  bool hadOld = saved != nullptr;
+
+  ScopedP2pCeEnv() { setenv("NCCL_P2P_USE_CUDA_MEMCPY", "1", 1); }
+  ~ScopedP2pCeEnv() {
+    if (hadOld) setenv("NCCL_P2P_USE_CUDA_MEMCPY", old.c_str(), 1);
+    else unsetenv("NCCL_P2P_USE_CUDA_MEMCPY");
   }
 };
 }  // namespace
@@ -5406,6 +5452,150 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_DirectCeUsesExplicitConnectorAndMinimumStepAcrossParts) {
+  ScopedP2pCeEnv ce;
+  SetParam("P2P_LL128_ENABLE", 0);
+  Gfx1250AddP2pScene sc(/*nChannels=*/4, /*channelsPerPeer=*/2);
+  constexpr int kCeStep = 2 << 20;
+  constexpr ssize_t kBytes = ssize_t(64) << 20;
+  for (int ch = 0; ch < 2; ++ch) {
+    auto* send = sc.Conn(ch, /*send=*/true, NCCL_CONN_IDX_P2P_CE);
+    auto* recv = sc.Conn(ch, /*send=*/false, NCCL_CONN_IDX_P2P_CE);
+    send->useCe = recv->useCe = true;
+    send->conn.stepSize = recv->conn.stepSize = ch == 0 ? 4 << 20 : kCeStep;
+    send->proxyConn.proxyProgress =
+      reinterpret_cast<decltype(send->proxyConn.proxyProgress)>(0x1);
+  }
+  g_proxySaveOpJustInquire = true;
+
+  ASSERT_EQ(ncclSuccess, sc.add(kBytes, kBytes));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  ASSERT_EQ(2, work->nSendChannels);
+  ASSERT_EQ(2, work->nRecvChannels);
+  EXPECT_EQ(kCeStep, u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(kCeStep, u32fp8Decode(work->recvChunkSize_u32fp8));
+
+  for (int ch = 0; ch < 2; ++ch) {
+    int sendOps = 0, recvOps = 0;
+    for (ncclProxyOp* op = ChannelProxyHead(sc.bp, ch); op != nullptr; op = op->enqNext) {
+      if (op->pattern == ncclPatternSend) {
+        sendOps++;
+        EXPECT_EQ(kCeStep, op->chunkSize);
+        EXPECT_EQ(16, op->nsteps);
+      } else if (op->pattern == ncclPatternRecv) {
+        recvOps++;
+        EXPECT_EQ(kCeStep, op->chunkSize);
+        EXPECT_EQ(16, op->nsteps);
+      }
+    }
+    EXPECT_EQ(1, sendOps) << ch;
+    EXPECT_EQ(1, recvOps) << ch;
+  }
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_FeatureOnLoweredCollectiveStaysOnKernelConnector) {
+  ScopedP2pCeEnv ce;
+  SetParam("P2P_LL128_ENABLE", 0);
+  Gfx1250AddP2pScene sc;
+  sc.sendTask.collAPI = ncclFuncAlltoAll;
+  sc.recvTask.collAPI = ncclFuncAlltoAll;
+  constexpr int kKernelStep = 128 << 10;
+  sc.Conn(0, /*send=*/true)->conn.stepSize = kKernelStep;
+  sc.Conn(0, /*send=*/false)->conn.stepSize = kKernelStep;
+  sc.Conn(0, /*send=*/true, NCCL_CONN_IDX_P2P_CE)->conn.stepSize = 4 << 20;
+  sc.Conn(0, /*send=*/false, NCCL_CONN_IDX_P2P_CE)->conn.stepSize = 4 << 20;
+
+  ASSERT_EQ(NCCL_CONN_IDX_P2P_CE, rcclP2pTaskConnIndex(sc.bp.c(), ncclFuncSend, /*peer=*/1));
+  ASSERT_EQ(1, rcclP2pTaskConnIndex(sc.bp.c(), ncclFuncAlltoAll, /*peer=*/1));
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/64 << 20, /*recvBytes=*/64 << 20));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(kKernelStep, u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(kKernelStep, u32fp8Decode(work->recvChunkSize_u32fp8));
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_MixedDirectSendCollectiveRecvUsesDirectionLocalConnectors) {
+  ScopedP2pCeEnv ce;
+  SetParam("P2P_LL128_ENABLE", 0);
+  Gfx1250AddP2pScene sc;
+  sc.recvTask.collAPI = ncclFuncAlltoAll;
+  constexpr int kCeStep = 4 << 20;
+  constexpr int kKernelStep = 128 << 10;
+  auto* send = sc.Conn(0, /*send=*/true, NCCL_CONN_IDX_P2P_CE);
+  send->useCe = true;
+  send->conn.stepSize = kCeStep;
+  sc.Conn(0, /*send=*/false)->conn.stepSize = kKernelStep;
+
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/64 << 20, /*recvBytes=*/64 << 20));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(NCCL_CONN_IDX_P2P_CE, work->sendConnIndex);
+  EXPECT_EQ(1, work->recvConnIndex);
+  EXPECT_EQ(kCeStep, u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(kKernelStep, u32fp8Decode(work->recvChunkSize_u32fp8));
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_CopyEngineClampsGlobalChunkToConnectorStep) {
+  ScopedP2pCeEnv ce;
+  SetParam("P2P_LL128_ENABLE", 0);
+  SetParam("CHUNK_SIZE", 32 << 20);
+  Gfx1250AddP2pScene sc;
+  constexpr int kCeStep = 4 << 20;
+  for (bool send : {false, true}) {
+    auto* conn = sc.Conn(0, send, NCCL_CONN_IDX_P2P_CE);
+    conn->useCe = true;
+    conn->conn.stepSize = kCeStep;
+  }
+
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/64 << 20, /*recvBytes=*/64 << 20));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(kCeStep, u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(kCeStep, u32fp8Decode(work->recvChunkSize_u32fp8));
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskConnIndex_CopyEngineRequiresLocalDirectPeer) {
+  ScopedP2pCeEnv ce;
+  Gfx1250AddP2pScene sc;
+  ncclComm* comm = sc.bp.c();
+  EXPECT_EQ(NCCL_CONN_IDX_P2P_CE, rcclP2pTaskConnIndex(comm, ncclFuncSend, /*peer=*/1));
+
+  comm->isAllDirectP2p = false;
+  EXPECT_EQ(1, rcclP2pTaskConnIndex(comm, ncclFuncSend, /*peer=*/1));
+
+  comm->isAllDirectP2p = true;
+  comm->peerInfo[1].hostHash = 2;
+  EXPECT_EQ(1, rcclP2pTaskConnIndex(comm, ncclFuncSend, /*peer=*/1));
+  comm->peerInfo[1].hostHash = 1;
+  comm->peerInfo[1].hasFineGrain = false;
+  EXPECT_EQ(1, rcclP2pTaskConnIndex(comm, ncclFuncSend, /*peer=*/1));
+  EXPECT_EQ(1, rcclP2pTaskConnIndex(comm, ncclFuncSend, /*peer=*/comm->rank));
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_FeatureOnP2pNetKeepsTheFullPeerTile) {
+  ScopedP2pCeEnv ce;
+  SetParam("P2P_LL128_ENABLE", 0);
+  Gfx1250AddP2pScene sc(/*nChannels=*/32, /*channelsPerPeer=*/32);
+  sc.bp.c()->p2pNet = 1;
+
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/64 << 20, /*recvBytes=*/64 << 20));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(32, work->nSendChannels);
+  EXPECT_EQ(32, work->nRecvChannels);
+}
+
+TEST_F(EnqueueMicrotest, P2pReservationChannels_UsesCeCapButKeepsP2pNetTile) {
+  ScopedP2pCeEnv ce;
+  Gfx1250AddP2pScene sc(/*nChannels=*/64, /*channelsPerPeer=*/64);
+  sc.sendTask.bytes = sc.recvTask.bytes = 64 << 20;
+  EXPECT_EQ(16, rcclP2pReservationChannels(sc.bp.c(), &sc.recvTask, &sc.sendTask));
+
+  sc.bp.c()->p2pNet = 1;
+  EXPECT_EQ(64, rcclP2pReservationChannels(sc.bp.c(), &sc.recvTask, &sc.sendTask));
 }
 
 TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {

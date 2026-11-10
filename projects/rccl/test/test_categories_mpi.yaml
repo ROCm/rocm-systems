@@ -149,6 +149,7 @@ test_categories:
     description: "P2P workflow with explicit P2P enabled and CUDA memcpy."
     test_patterns:
       - "P2pMPITest.P2pWorkflow"
+      - "P2pMPITest.P2pWithMemcpyTest"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
@@ -157,6 +158,7 @@ test_categories:
       - "NCCL_P2P_USE_CUDA_MEMCPY=1"
       - "NCCL_LEGACY_CUDA_REGISTER=1"
       - "NCCL_P2P_DISABLE=0"
+      - "NCCL_PROTO=Simple"
   quick_env_p2p_ipc_small_buffer:
     description: "P2P IPC registration with very small buffer and SHM disabled."
     test_patterns:
