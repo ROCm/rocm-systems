@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -797,4 +799,17 @@ bool CuidUtilities::is_valid_bdf(const std::string& bdf) {
   const char* t = bdf.c_str() + colon;
   return t[0] == ':' && is_hex(t[1]) && is_hex(t[2]) && t[3] == ':' && t[4] >= '0' && t[4] <= '1' &&
          is_hex(t[5]) && t[6] == '.' && t[7] >= '0' && t[7] <= '7';
+}
+
+std::string CuidUtilities::canonical_bdf(const std::string& bdf) {
+  if (!is_valid_bdf(bdf)) return "";
+  const size_t colon = bdf.find(':');
+  const unsigned long segment = std::strtoul(bdf.substr(0, colon).c_str(), nullptr, 16);
+  char segment_text[9];
+  const int written = std::snprintf(segment_text, sizeof(segment_text), "%04lx", segment);
+  if (written < 0 || written >= static_cast<int>(sizeof(segment_text))) return "";
+  std::string out = segment_text + bdf.substr(colon);
+  std::transform(out.begin(), out.end(), out.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return out;
 }
