@@ -163,11 +163,17 @@ do_host_tests() {
   )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
-  local rc=0 entry exe name xml profdir
+  local rc=0 entry exe name xml xml_base logs profdir
   for entry in "${binaries[@]}"; do
     name="${entry%%:*}"
     xml="${entry#*:}"; xml="${xml%%:*}"
     profdir="${entry##*:}"
+    xml_base="${xml##*/}"
+    if [ "$xml_base" = "$xml" ]; then
+      logs="${xml_base%.*}.logs"
+    else
+      logs="${xml%/*}/${xml_base%.*}.logs"
+    fi
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
@@ -176,7 +182,7 @@ do_host_tests() {
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
     # Start this binary's log directory empty.
-    rm -rf "${xml%.*}.logs"
+    rm -rf "$logs"
     # Direct this binary's llvm profiles into the subdir `coverage` reads back.
     mkdir -p "$profdir"
     export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
@@ -197,7 +203,7 @@ do_host_tests() {
         | tee -a "$LOG_FILE"
       rc=1
     fi
-    append_child_logs "${xml%.*}.logs"
+    append_child_logs "$logs"
   done
   return "$rc"
 }
