@@ -501,12 +501,6 @@ typedef CUjit_option hipJitOption;
 typedef CUlibraryOption hipLibraryOption;
 typedef CUdevice hipDevice_t;
 typedef enum cudaDeviceP2PAttr hipDeviceP2PAttr;
-typedef enum hipExecAffinityType {
-  hipExecAffinityTypeCUCount = 0,
-  hipExecAffinityTypeMax,
-  hipExtExecAffinityTypeGranularityCU = 0x1000,
-  hipExtExecAffinityTypeGranularityWGP = 0x1001,
-} hipExecAffinityType;
 #define hipDevP2PAttrPerformanceRank cudaDevP2PAttrPerformanceRank
 #define hipDevP2PAttrAccessSupported cudaDevP2PAttrAccessSupported
 #define hipDevP2PAttrNativeAtomicSupported cudaDevP2PAttrNativeAtomicSupported
