@@ -124,8 +124,11 @@ struct CpuInfo {
 };
 
 enum GpuType  : uint32_t { kGpuUnknown = 0, kGpuIntegrated = 1, kGpuDiscrete = 2, kGpuVirtual = 3 };
-enum MemType  : uint32_t { kMemUnknown = 0, kMemHbm = 0x20, kMemHbm2 = 0x21, kMemHbm3 = 0x22,
-                           kMemHbm3e = 0x23, kMemGddr6 = 0x13 };
+// SqttMemoryType values (sparse, from pal/shared/inc/sqtt_file_format.h).  Note these differ
+// from the RDF chunk's dense TraceMemoryType — see MemKindToTraceMemType below.
+enum MemType  : uint32_t { kMemUnknown = 0, kMemDdr5 = 0x5, kMemHbm = 0x20, kMemHbm2 = 0x21,
+                           kMemHbm3 = 0x22, kMemHbm3e = 0x23, kMemGddr6 = 0x13,
+                           kMemLpddr5 = 0x31 };
 enum GfxIpLevel : uint32_t {
   kGfxNone  = 0x0, kGfx10_1 = 0x7, kGfx10_3 = 0x9,
   kGfx11_0  = 0xC, kGfx11_5 = 0xD, kGfx12   = 0x10,
@@ -262,6 +265,166 @@ static SqttVersion GfxVerToSqttVersion(uint32_t maj, uint32_t min) {
   if (maj == 11)             return kSqtt3_2;
   if (maj == 12)             return kSqtt3_3;
   return kSqttNone;
+}
+
+// Backend-neutral memory technology.  The legacy SQTT chunk and the RDF chunk number these
+// differently, so each call site maps this through one of the two helpers below.
+enum MemKind : uint32_t {
+  kKindUnknown = 0, kKindGddr6, kKindHbm2, kKindHbm3, kKindDdr5, kKindLpddr5
+};
+
+// ASIC constants RGP needs that no HSA/KFD query exposes.  PAL is in the same position and
+// hardcodes them per-GFXIP in InitializeGpuChipProperties (gfx9Device.cpp:5751-5764,
+// gfx12Device.cpp:212-221), so mirror those values here rather than invent our own.
+struct AsicConstants {
+  uint32_t vectorL1CacheSizePerCu;  // bytes; the TCP, shown by RGP as "L0 vector cache" on RDNA
+  uint32_t gl1CacheSizePerSa;       // bytes; 0 = unknown
+  uint32_t instCacheSizePerCu;      // bytes; 0 = unknown
+  uint32_t scalarCacheSizePerCu;    // bytes; 0 = unknown
+  uint32_t minSgprAlloc;            // SGPRs; 0 = unknown
+  uint32_t sgprAllocGranularity;    // SGPRs; 0 = unknown
+  uint32_t hardwareContexts;        // 0 = unknown
+  MemKind  memKind;
+  uint32_t memoryOpsPerClock;       // 0 = unknown; RGP then hides the bandwidth and type rows
+};
+
+// memOpsPerClock values come from PAL's MemoryOpsPerClockTable (pal/src/core/device.cpp:63-82).
+static uint32_t MemKindToOpsPerClock(MemKind kind) {
+  switch (kind) {
+    case kKindGddr6:  return 16;
+    case kKindHbm2:   return 2;
+    case kKindHbm3:   return 2;
+    case kKindDdr5:   return 4;
+    case kKindLpddr5: return 8;
+    default:          return 0;
+  }
+}
+
+static AsicConstants GfxVerToAsicConstants(uint32_t maj, uint32_t min, bool is_apu) {
+  AsicConstants c = {};
+  // INST_CACHE_BANK_SIZE_KBYTES * INST_NUM_BANKS and DATA_CACHE_BANK_SIZE_KBYTES * DATA_NUM_BANKS.
+  // gfx9 and gfx12 agree on all three, so this holds for every GFXIP we support.
+  //
+  // vectorL1 is the TCP and must come from here, NOT from HSA_AGENT_INFO_CACHE_SIZE[0]: KFD
+  // reports 32 KiB as the node's level-1 cache on gfx12, which is a different quantity from
+  // PAL's tcpSizeInBytes (16 KiB, gfx12Device.cpp:217 — and unlike gl1c/inst/scalar it is never
+  // overridden by the Windows KMD).  Using the KFD number puts 32 KB in RGP's "L0 vector cache
+  // size per compute unit" row where PAL shows 16 KB.
+  if (maj >= 9 && maj <= 12) {
+    c.vectorL1CacheSizePerCu = 16u * 1024u;
+    c.instCacheSizePerCu     = 32u * 1024u;
+    c.scalarCacheSizePerCu   = 16u * 1024u;
+    c.hardwareContexts       = 8;   // gfx9Device.cpp:6019 and gfx12Device.cpp:368
+  }
+  // GL1 (TCC-side L1) per shader array.  gfx10 = 128 KiB (gfx9Device.cpp:5920), gfx11 and
+  // gfx12 = 256 KiB.  Note gfx12Device.cpp:220 statically sets 0 with the comment "Navi4x do
+  // not have GL1 cache", but that default is overridden on every real OS by the KMD —
+  // wddmDevice.cpp:8238 (hwFeatures2.Gl1cPerSa) and amdgpuDevice.cpp:1706 — and a PAL capture
+  // on gfx1201 reports 256 KiB.  RGP independently agrees: it substitutes 256 KiB for a zero
+  // on gfx11+ (rgp_data_asic_parameters.cpp:83-101).  So follow the hardware, not the default.
+  if (maj == 10)                 { c.gl1CacheSizePerSa = 128u * 1024u; }
+  else if (maj == 11 || maj == 12) { c.gl1CacheSizePerSa = 256u * 1024u; }
+  // Gfx10NumSgprsPerWave (gfx9Chip.h:135).  PAL only sets these on gfx10+ (gfx9Device.cpp:5913,
+  // :5979 and gfx12Device.cpp:341-342); true gfx9 leaves them unset, so leave them 0 there too.
+  if (maj >= 10 && maj <= 12) {
+    c.sgprAllocGranularity = 128;
+    c.minSgprAlloc         = c.sgprAllocGranularity;
+  }
+  // No HSA, KFD or thunk attribute reports the DRAM technology, so infer it from the GFXIP the
+  // way PAL's per-OS TranslateMemoryType() effectively does.  Unknown parts stay at 0, which
+  // makes RGP hide the affected rows rather than display a wrong number.
+  if (is_apu) {
+    c.memKind = kKindDdr5;
+  } else if (maj >= 10 && maj <= 12) {
+    c.memKind = kKindGddr6;   // Navi2x/3x/4x discrete
+  } else if (maj == 9) {
+    c.memKind = (min == 4) ? kKindHbm3 : kKindHbm2;  // gfx9.4 = MI300
+  }
+  c.memoryOpsPerClock = MemKindToOpsPerClock(c.memKind);
+  return c;
+}
+
+// SqttMemoryType, for the legacy .rgp chunk.
+static MemType MemKindToSqttMemType(MemKind kind) {
+  switch (kind) {
+    case kKindGddr6:  return kMemGddr6;
+    case kKindHbm2:   return kMemHbm2;
+    case kKindHbm3:   return kMemHbm3;
+    case kKindDdr5:   return kMemDdr5;
+    case kKindLpddr5: return kMemLpddr5;
+    default:          return kMemUnknown;
+  }
+}
+
+// The DevDriver GPU identifier carried by every RDF trace chunk: function | device<<8 |
+// bus<<16 (union PciId, pal/inc/core/palPlatform.h:80).  This is NOT the PCI device id — that
+// has its own separate field in AsicInfo.  RGP ties the chunks of a trace together by this
+// value, so every chunk must report the same thing PAL would.
+static uint32_t MakeDevDriverPciId(const amd::device::Info& info) {
+  return ((info.deviceTopology_.pcie.function & 0xFFu)      ) |
+         ((info.deviceTopology_.pcie.device   & 0xFFu) <<  8) |
+         ((info.deviceTopology_.pcie.bus      & 0xFFu) << 16);
+}
+
+// PCI revision ID — RGP renders it as the low byte of "Device ID (and revision)", so a Navi48
+// shows 7550C0 rather than 755000.  HSA cannot supply it: HSA_AMD_AGENT_INFO_ASIC_REVISION is a
+// 4-bit KFD capability field (hsakmttypes.h) that structurally cannot hold a value like 0xC0,
+// and rocdevice.cpp never fills device::Info::pcieRevisionId_ on the ROCr path (only the PAL
+// backend does, paldevice.cpp).  Ask the OS instead.  Returns 0 if unavailable, which leaves
+// the chunk exactly as it was before.
+static uint32_t QueryPciRevisionId(uint32_t domain, uint32_t bus, uint32_t dev, uint32_t fn,
+                                   uint32_t device_id) {
+  constexpr uint32_t kAmdPciVendorId = 0x1002;
+#if defined(_WIN32)
+  (void)domain; (void)bus; (void)dev; (void)fn;
+  // Device instance keys are named "VEN_1002&DEV_7550&SUBSYS_88111EAE&REV_C0".  Matching on
+  // vendor+device is enough: two boards sharing a PCI device ID also share its revision, so
+  // the BDF is not needed to disambiguate them.
+  HKEY key = nullptr;
+  if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Enum\\PCI", 0, KEY_READ,
+                    &key) != ERROR_SUCCESS) {
+    return 0;
+  }
+  char prefix[32] = {};
+  snprintf(prefix, sizeof(prefix), "VEN_%04X&DEV_%04X", kAmdPciVendorId, device_id);
+  const size_t prefix_len = strlen(prefix);
+  uint32_t rev = 0;
+  for (DWORD i = 0; rev == 0; ++i) {
+    char name[256];
+    DWORD len = sizeof(name);
+    if (RegEnumKeyExA(key, i, name, &len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) {
+      break;  // ERROR_NO_MORE_ITEMS
+    }
+    if (_strnicmp(name, prefix, prefix_len) != 0) continue;
+    const char* tag = strstr(name, "&REV_");
+    if (tag != nullptr) rev = static_cast<uint32_t>(strtoul(tag + 5, nullptr, 16));
+  }
+  RegCloseKey(key);
+  return rev;
+#else
+  (void)device_id;
+  char path[80] = {};
+  snprintf(path, sizeof(path), "/sys/bus/pci/devices/%04x:%02x:%02x.%x/revision",
+           domain, bus, dev, fn);
+  FILE* f = fopen(path, "r");
+  if (f == nullptr) return 0;
+  unsigned rev = 0;
+  const int n = fscanf(f, "%x", &rev);  // the file holds e.g. "0xc0"
+  fclose(f);
+  return (n == 1) ? static_cast<uint32_t>(rev) : 0u;
+#endif
+}
+
+// TraceMemoryType, for the RDF chunk (dense; see pal/src/gpuUtil/asicInfoTraceSource.h:54-73).
+static uint32_t MemKindToTraceMemType(MemKind kind) {
+  switch (kind) {
+    case kKindGddr6:  return 9;
+    case kKindHbm2:   return 11;
+    case kKindHbm3:   return 12;
+    case kKindDdr5:   return 5;
+    case kKindLpddr5: return 14;
+    default:          return 0;
+  }
 }
 
 } // namespace RgpFile
@@ -1129,10 +1292,6 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
   Hsa::agent_get_info(device->getBackendDevice(),
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH),
                       &mem_width);
-  uint32_t asic_rev = 0;
-  Hsa::agent_get_info(device->getBackendDevice(),
-                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
-                      &asic_rev);
   uint32_t max_waves_per_cu = 0;
   Hsa::agent_get_info(device->getBackendDevice(),
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
@@ -1150,6 +1309,21 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
   Hsa::agent_get_info(device->getBackendDevice(),
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
                       &phys_cu_total);
+  // Cache sizes, indexed [CacheLevel-1]: [0] = L1 per CU, [1] = L2 total, [2] = L3 (MALL /
+  // Infinity Cache).  Only [2] is used -- it is per-ASIC (Navi44 32 MB, Navi48 64 MB) so a
+  // table would be guesswork, and it matches PAL's mallSizeInBytes exactly.  [0] is NOT the
+  // TCP size PAL reports (see GfxVerToAsicConstants) and [1] already arrives via l2CacheSize_.
+  // Base HSA enum, so unlike the HSA_AMD_* queries above it needs no cast.  Instruction and
+  // scalar caches never appear here at all: ROCr drops every cache carrying the Instruction
+  // bit (amd_gpu_agent.cpp InitCacheList).
+  uint32_t cache_sizes[4] = {};
+  Hsa::agent_get_info(device->getBackendDevice(), HSA_AGENT_INFO_CACHE_SIZE, cache_sizes);
+  // APU vs discrete, used to pick the memory technology below.
+  uint8_t mem_props[8] = {};
+  Hsa::agent_get_info(device->getBackendDevice(),
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES),
+                      mem_props);
+  const bool is_apu = (mem_props[0] & HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU) != 0;
 
   // CPU info chunk — vendor/brand/cores left zero (not exposed via HSA for compute).
   CpuInfo cpu = {};
@@ -1183,7 +1357,8 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
     asic.maxMemoryClock             = mem_mhz    * 1000000ULL;
     asic.gpuTimestampFrequency      = ts_freq;
     asic.deviceId                   = static_cast<int32_t>(di.pcieDeviceId_);
-    asic.deviceRevisionId           = static_cast<int32_t>(asic_rev);
+    // deviceRevisionId is the PCI revision byte, filled from the OS further down — not
+    // HSA_AMD_AGENT_INFO_ASIC_REVISION, which is a different (4-bit) quantity.
     asic.vgprsPerSimd               = static_cast<int32_t>(di.vgprsPerSimd_);
     asic.minimumVgprAlloc           = static_cast<int32_t>(di.vgprAllocGranularity_);
     asic.vgprAllocGranularity       = static_cast<int32_t>(di.vgprAllocGranularity_);
@@ -1192,11 +1367,29 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
     asic.wavefrontsPerSimd          = static_cast<int32_t>(waves_per_simd);
     asic.ldsSize                    = static_cast<int32_t>(isa.localMemSizePerCU());
     asic.gfxIpLevel                 = GfxVerToIpLevel(maj, min);
-    asic.gpuType                    = kGpuDiscrete;
-    asic.memoryChipType             = kMemHbm2;
+    asic.gpuType                    = is_apu ? kGpuIntegrated : kGpuDiscrete;
     asic.vramBusWidth               = static_cast<int32_t>(mem_width);
     asic.vramSize                   = static_cast<int64_t>(di.globalMemSize_);
     asic.l2CacheSize                = static_cast<int32_t>(di.l2CacheSize_);
+    // Caches and memory config RGP shows in its System information pane.  Only the MALL is
+    // queryable; the rest come from the per-GFXIP table, as they do in PAL.
+    const AsicConstants ac          = GfxVerToAsicConstants(maj, min, is_apu);
+    asic.l1CacheSize                = static_cast<int32_t>(ac.vectorL1CacheSizePerCu);
+    asic.mallCacheSize              = cache_sizes[2];
+    asic.gl1CacheSize               = ac.gl1CacheSizePerSa;
+    asic.instructionCacheSize       = ac.instCacheSizePerCu;
+    asic.scalarCacheSize            = ac.scalarCacheSizePerCu;
+    asic.memoryChipType             = MemKindToSqttMemType(ac.memKind);
+    asic.memoryOpsPerClock          = ac.memoryOpsPerClock;
+    asic.minimumSgprAlloc           = static_cast<int32_t>(ac.minSgprAlloc);
+    asic.sgprAllocGranularity       = static_cast<int32_t>(ac.sgprAllocGranularity);
+    asic.hardwareContexts           = static_cast<int32_t>(ac.hardwareContexts);
+    // PAL: primsPerClock = numShaderEngines (gfx9Device.cpp:7090, gfx12Device.cpp:570).
+    asic.primsPerClock              = static_cast<float>(se_count);
+    asic.deviceRevisionId           = static_cast<int32_t>(
+        QueryPciRevisionId(di.pciDomainID, di.deviceTopology_.pcie.bus,
+                           di.deviceTopology_.pcie.device, di.deviceTopology_.pcie.function,
+                           di.pcieDeviceId_));
     // LDS allocation granularity in bytes.  GFX10.3 uses 256 DWORDs (1024 B);
     // all other supported GFX (9/10.1/11/12) use 128 DWORDs (512 B).
     asic.ldsGranularity             = (maj == 10 && min >= 3) ? 1024u : 512u;
@@ -1463,7 +1656,7 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         const bool instr_enabled = ((detail_mask >> se.se_index) & 1u) != 0;
 
         SqttDataHeader hdr = {};
-        hdr.pciId                     = di.pcieDeviceId_;
+        hdr.pciId                     = RgpFile::MakeDevDriverPciId(di);
         hdr.shaderEngine              = se.se_index;
         hdr.sqttVersion               = sqtt_ver;
         hdr.instrumentationVersionSpec = 1;  // instrumentation spec version (API-agnostic)
@@ -1580,10 +1773,6 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         Hsa::agent_get_info(device_->getBackendDevice(),
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH),
                             &ai_mem_width);
-        uint32_t ai_asic_rev = 0;
-        Hsa::agent_get_info(device_->getBackendDevice(),
-                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
-                            &ai_asic_rev);
         uint32_t ai_max_waves = 0;
         Hsa::agent_get_info(device_->getBackendDevice(),
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
@@ -1608,6 +1797,15 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         Hsa::agent_get_info(device_->getBackendDevice(),
                             static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
                             &ai_phys_cu_total);
+        // Cache sizes, indexed [CacheLevel-1].  Only [2] (L3 = MALL / Infinity Cache) is used;
+        // see the matching comment in BuildRgpFileBlob.  Base HSA enum, so no cast.
+        uint32_t ai_cache_sizes[4] = {};
+        Hsa::agent_get_info(device_->getBackendDevice(), HSA_AGENT_INFO_CACHE_SIZE, ai_cache_sizes);
+        uint8_t ai_mem_props[8] = {};
+        Hsa::agent_get_info(device_->getBackendDevice(),
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES),
+                            ai_mem_props);
+        const bool ai_is_apu = (ai_mem_props[0] & HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU) != 0;
 
         const device::Info& ai_di    = device_->info();
         const amd::Isa&     ai_isa   = device_->isa();
@@ -1632,14 +1830,23 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
                                        ? static_cast<uint16_t>((1u << ai_cu_per_sa) - 1u) : 0u;
 
         RdfAsicInfo ai = {};
-        ai.pciId                      = ai_di.pcieDeviceId_;
+        // pciId is the DevDriver GPU identifier, not the PCI device ID: function | device<<8 |
+        // bus<<16 (union PciId, pal/inc/core/palPlatform.h:80).  The PCI device ID goes in
+        // deviceId below.
+        ai.pciId                      = RgpFile::MakeDevDriverPciId(ai_di);
         ai.shaderCoreClockFrequency   = ai_engine_mhz * 1000000ULL;
         ai.memoryClockFrequency       = ai_mem_mhz    * 1000000ULL;
         ai.gpuTimestampFrequency      = ai_ts_freq;
         ai.maxShaderCoreClock         = ai_engine_mhz * 1000000ULL;
         ai.maxMemoryClock             = ai_mem_mhz    * 1000000ULL;
         ai.deviceId                   = static_cast<int32_t>(ai_di.pcieDeviceId_);
-        ai.deviceRevisionId           = static_cast<int32_t>(ai_asic_rev);
+        // PCI revision byte from the OS; HSA_AMD_AGENT_INFO_ASIC_REVISION is a different
+        // (4-bit) quantity and cannot carry it.
+        ai.deviceRevisionId           = static_cast<int32_t>(
+            RgpFile::QueryPciRevisionId(ai_di.pciDomainID, ai_di.deviceTopology_.pcie.bus,
+                                        ai_di.deviceTopology_.pcie.device,
+                                        ai_di.deviceTopology_.pcie.function,
+                                        ai_di.pcieDeviceId_));
         ai.vgprsPerSimd               = static_cast<int32_t>(ai_di.vgprsPerSimd_);
         ai.sgprsPerSimd               = ai_sgprs;
         ai.shaderEngines              = ai_se_count;
@@ -1651,7 +1858,7 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         ai.wavefrontsPerSimd          = static_cast<int32_t>(ai_wpsimd);
         ai.minimumVgprAlloc           = static_cast<int32_t>(ai_di.vgprAllocGranularity_);
         ai.vgprAllocGranularity       = static_cast<int32_t>(ai_di.vgprAllocGranularity_);
-        ai.gpuType                    = 2;  // TraceGpuType::Discrete
+        ai.gpuType                    = ai_is_apu ? 1u : 2u;  // TraceGpuType Integrated / Discrete
         ai.gfxIpLevel.major           = static_cast<uint16_t>(ai_gfx_maj);
         ai.gfxIpLevel.minor           = static_cast<uint16_t>(ai_gfx_min);
         ai.gfxIpLevel.stepping        = static_cast<uint16_t>(ai_isa.versionStepping());
@@ -1660,13 +1867,24 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         ai.l2CacheSize                = static_cast<int32_t>(ai_di.l2CacheSize_);
         ai.ldsSize                    = static_cast<int32_t>(ai_isa.localMemSizePerCU());
         strncpy(ai.gpuName, ai_di.boardName_, sizeof(ai.gpuName) - 1);
-        ai.memoryChipType             = 10;  // PAL TraceMemoryType::Hbm2 (matches what AsicInfoTraceSource writes)
+        // Caches and memory config RGP shows in its System information pane.  Only the MALL is
+        // queryable; the rest come from the per-GFXIP table, as they do in PAL.
+        // A zero memoryOpsPerClock makes RGP hide both the bandwidth and the memory-type rows.
+        const RgpFile::AsicConstants ai_ac =
+            RgpFile::GfxVerToAsicConstants(ai_gfx_maj, ai_gfx_min, ai_is_apu);
+        ai.l1CacheSize                = static_cast<int32_t>(ai_ac.vectorL1CacheSizePerCu);
+        ai.mallCacheSize              = ai_cache_sizes[2];
+        ai.gl1CacheSize               = ai_ac.gl1CacheSizePerSa;
+        ai.instCacheSize              = ai_ac.instCacheSizePerCu;
+        ai.scalarCacheSize            = ai_ac.scalarCacheSizePerCu;
+        ai.memoryChipType             = RgpFile::MemKindToTraceMemType(ai_ac.memKind);
+        ai.memoryOpsPerClock          = ai_ac.memoryOpsPerClock;
+        ai.minimumSgprAlloc           = static_cast<int32_t>(ai_ac.minSgprAlloc);
+        ai.sgprAllocGranularity       = static_cast<int32_t>(ai_ac.sgprAllocGranularity);
+        ai.hardwareContexts           = static_cast<int32_t>(ai_ac.hardwareContexts);
+        // PAL: primsPerClock = numShaderEngines (gfx12Device.cpp:570).
+        ai.primsPerClock              = static_cast<float>(ai_se_count);
         ai.ldsGranularity             = (ai_gfx_maj == 10 && ai_gfx_min >= 3) ? 1024u : 512u;
-        // GL1 cache size per shader array — mirrors PAL gfx9Device.cpp hardcoded values.
-        // gfx12+ have no GL1 cache (0). gfx11 = 256 KiB, gfx10 = 128 KiB.
-        if (ai_gfx_maj == 11)       { ai.gl1CacheSize = 256u * 1024u; }
-        else if (ai_gfx_maj == 10)  { ai.gl1CacheSize = 128u * 1024u; }
-        else                        { ai.gl1CacheSize = 0u; }
         for (uint32_t se = 0; se < static_cast<uint32_t>(ai_se_count) && se < 32u; ++se) {
           for (uint32_t sa = 0; sa < ai_sa_per_se && sa < 2u; ++sa) {
             ai.cuMask[se][sa] = ai_cu_mask;
@@ -1720,7 +1938,7 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
                       "RdfClockCalib size mismatch with TraceChunkClockCalibration");
 
         RdfClockCalib cc = {};
-        cc.pciId        = device_->info().pcieDeviceId_;
+        cc.pciId        = RgpFile::MakeDevDriverPciId(device_->info());
         cc.cpuTimestamp = GetSystemTimestamp();  // fallback if no GPU tick harvested
         cc.gpuTimestamp = 0;
         // Anchor on the first dispatch that produced a valid GPU tick: pair its CPU
@@ -1766,7 +1984,7 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
       {
         static const char kQueueInfoChunkId[kRdfIdentifierSize]  = "QueueInfo";
         static const char kQueueEventChunkId[kRdfIdentifierSize] = "QueueEvent";
-        const uint32_t qi_pci_id = device_->info().pcieDeviceId_;
+        const uint32_t qi_pci_id = RgpFile::MakeDevDriverPciId(device_->info());
 
         // One QueueInfo entry: compute queue, queue_id=0 (no OS context).
         struct RdfQueueInfo {
@@ -2157,7 +2375,7 @@ uint64_t RocUberTraceCaptureMgr::AddElfBinary(const void* /*exe_binary*/, size_t
     entry.elf.assign(static_cast<const uint8_t*>(elf_binary),
                      static_cast<const uint8_t*>(elf_binary) + elf_binary_size);
     entry.original_hash = original_hash;
-    entry.pci_id        = device_->info().pcieDeviceId_;
+    entry.pci_id        = RgpFile::MakeDevDriverPciId(device_->info());
     pending_elfs_.push_back(std::move(entry));
     fprintf(stderr, "[CLR-Uber] AddElfBinary: buffered ELF hash=0x%llx size=%zu\n",
             static_cast<unsigned long long>(original_hash), elf_binary_size);
@@ -2274,7 +2492,7 @@ void RocUberTraceCaptureMgr::AddKernelLoadEvent(uint64_t api_hash,
   // Accumulate — all entries are flushed as a single COLoadEvent chunk in
   // FlushKernelLoadEvents() because RGP only reads one COLoadEvent chunk per file.
   std::lock_guard<std::mutex> traceLock(trace_mutex_);
-  const uint32_t pci_id = device_->info().pcieDeviceId_;
+  const uint32_t pci_id = RgpFile::MakeDevDriverPciId(device_->info());
   pending_load_events_.push_back({pci_id, 0u, base_address, api_hash, 0u,
                                   GetSystemTimestamp()});
 }
