@@ -62,6 +62,9 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
             amdgpu::WaitCounterType::LGKMCNT);
   EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_GLOBAL),
             amdgpu::WaitCounterType::TENSORCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_ATOMIC), amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_ATOMIC_TO_VGPR),
+            amdgpu::WaitCounterType::LGKMCNT);
 
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR), MemoryOrderClass::VMEM);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_GLOBAL), MemoryOrderClass::VMEM);
@@ -72,6 +75,8 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_GLOBAL), MemoryOrderClass::TENSOR);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_ATOMIC), MemoryOrderClass::LDS);
+  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_ATOMIC_TO_VGPR), MemoryOrderClass::LDS);
 }
 
 // ---- VGPR races (vmcnt) ----
@@ -336,6 +341,69 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_TRUE(violations.empty());
+  }
+}
+
+// ---- LDS atomics ----
+
+namespace {
+// Register a one-lane LDS atomic at `address` for wave 0. A returning atomic
+// has a destination VGPR; a non-returning one does not.
+EventId registerLdsAtomic(RaceDetector &detector, bool returning, uint32_t address) {
+  IntervalSet intervals;
+  intervals.append(static_cast<int>(address), static_cast<int>(address) + 4);
+  return detector.allocateEventId(
+      WaveId{0}, testInstruction(0),
+      returning ? MemoryEventType::LDS_ATOMIC_TO_VGPR : MemoryEventType::LDS_ATOMIC,
+      returning ? std::vector<uint32_t>{1} : std::vector<uint32_t>{}, /*execMask=*/1, 0xf,
+      std::move(intervals), amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+}
+} // namespace
+
+TEST(RaceDetector, LdsAtomicConflictsWithPlainAccessesFromOtherWaves) {
+  for (const bool returning : {false, true}) {
+    SCOPED_TRACE(returning ? "returning" : "non-returning");
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), /*ldsSizeBytes=*/64 * 1024);
+    const EventId event = registerLdsAtomic(detector, returning, 64);
+
+    detector.validateRead(64, WaveId{1}, 0, 4);
+    ASSERT_EQ(violations.size(), 1u);
+    EXPECT_FALSE(violations[0].isWrite);
+    detector.validateWrite(64, WaveId{1}, 0, 4);
+    ASSERT_EQ(violations.size(), 2u);
+    EXPECT_TRUE(violations[1].isWrite);
+
+    // Atomics from different waves do not race with each other.
+    violations.clear();
+    detector.validateAtomic(64, WaveId{1}, 0, 4, MemoryOrderClass::LDS);
+    EXPECT_TRUE(violations.empty());
+
+    // Retirement removes the event from both live lists.
+    detector.retireEvent(event);
+    EXPECT_TRUE(detector.getLdsReadEvents().empty());
+    EXPECT_TRUE(detector.getLdsWriteEvents().empty());
+    detector.validateRead(64, WaveId{1}, 0, 4);
+    detector.validateWrite(64, WaveId{1}, 0, 4);
+    EXPECT_TRUE(violations.empty());
+  }
+}
+
+TEST(RaceDetector, LdsAtomicConflictsWithPendingPlainAccessesFromOtherWaves) {
+  for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
+    SCOPED_TRACE(static_cast<int>(type));
+    std::vector<RaceViolation> violations;
+    RaceDetector detector(
+        2, 8, 8, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
+        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4), /*ldsSizeBytes=*/64 * 1024);
+    IntervalSet intervals;
+    intervals.append(64, 68);
+    detector.allocateEventId(WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+                             amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+    detector.validateAtomic(64, WaveId{1}, 0, 4, MemoryOrderClass::LDS);
+    EXPECT_EQ(violations.size(), 1u);
   }
 }
 

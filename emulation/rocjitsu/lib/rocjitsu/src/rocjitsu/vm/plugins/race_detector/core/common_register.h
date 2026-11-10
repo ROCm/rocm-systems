@@ -43,6 +43,14 @@ enum class MemoryEventType {
   /// store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
 
+  /// LDS atomic that returns no value, such as `ds_add_u32`. It reads and
+  /// writes its LDS bytes, so it conflicts with plain LDS reads and writes
+  /// from other waves, but not with other LDS atomics.
+  LDS_ATOMIC,
+  /// LDS atomic that also returns the previous value to VGPRs, such as
+  /// `ds_add_rtn_u32`.
+  LDS_ATOMIC_TO_VGPR,
+
   N
 };
 
@@ -68,11 +76,16 @@ memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> oblig
 /// Event direction helpers: "to VGPR" means a load writing into a VGPR,
 /// "from VGPR" means a store reading out of a VGPR.
 inline bool isToVgpr(MemoryEventType t) {
-  return t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::LDS_TO_VGPR;
+  return t == MemoryEventType::GLOBAL_TO_VGPR || t == MemoryEventType::LDS_TO_VGPR ||
+         t == MemoryEventType::LDS_ATOMIC_TO_VGPR;
+}
+
+inline bool isLdsAtomic(MemoryEventType t) {
+  return t == MemoryEventType::LDS_ATOMIC || t == MemoryEventType::LDS_ATOMIC_TO_VGPR;
 }
 
 inline bool isToLds(MemoryEventType t) {
-  return t == MemoryEventType::VGPR_TO_LDS || t == MemoryEventType::GLOBAL_TO_LDS;
+  return t == MemoryEventType::VGPR_TO_LDS || t == MemoryEventType::GLOBAL_TO_LDS || isLdsAtomic(t);
 }
 
 inline bool isToSgpr(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO_SGPR; }
@@ -82,14 +95,15 @@ inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 inline bool isToScalar(MemoryEventType t) { return isToSgpr(t) || isToTtmp(t); }
 
 inline bool isFromLds(MemoryEventType t) {
-  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL;
+  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL || isLdsAtomic(t);
 }
 
 /// True if the event touches LDS (read or write).
 inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
 inline bool isFromVgpr(MemoryEventType t) {
-  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS;
+  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS ||
+         t == MemoryEventType::LDS_ATOMIC;
 }
 
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
@@ -105,6 +119,8 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::VMCNT;
   case MemoryEventType::LDS_TO_VGPR:
   case MemoryEventType::VGPR_TO_LDS:
+  case MemoryEventType::LDS_ATOMIC:
+  case MemoryEventType::LDS_ATOMIC_TO_VGPR:
   case MemoryEventType::GLOBAL_TO_SGPR:
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
@@ -128,6 +144,8 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
     return MemoryOrderClass::VMEM;
   case MemoryEventType::LDS_TO_VGPR:
   case MemoryEventType::VGPR_TO_LDS:
+  case MemoryEventType::LDS_ATOMIC:
+  case MemoryEventType::LDS_ATOMIC_TO_VGPR:
     return MemoryOrderClass::LDS;
   case MemoryEventType::GLOBAL_TO_SGPR:
   case MemoryEventType::GLOBAL_TO_TTMP:

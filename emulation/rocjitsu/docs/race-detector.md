@@ -199,6 +199,12 @@ races. Some examples:
   can emit such a pair without a DS wait (on gfx1250, LLVM may place only
   `s_wait_kmcnt 0` between a `ds_load_b32` and a `global_load_async_to_lds_b32`
   to the same dword), and the detector reports it.
+- **LDS atomics**: an LDS atomic (`ds_add_u32`, `ds_add_rtn_u32`,
+  `ds_cmpst_rtn_b32`, `ds_wrxchg_rtn_b32`, `ds_append`, or a FLAT atomic to
+  the LDS aperture) both reads and writes its bytes, whether or not it returns
+  a value. It is reported against an overlapping plain LDS read or write from
+  another wave, in either order, without an intervening `s_barrier`. Two
+  atomics never race with each other.
 - **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
   `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
   including the issuing one, that reads a load's destination or overwrites a

@@ -534,7 +534,8 @@ void WaveRaceState::checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
 // representative lane for the violation report.
 void WaveRaceState::checkVgprReadAllLanes(int reg) const {
   if (getRegEventCount(MemoryEventType::GLOBAL_TO_VGPR, reg) != 0 ||
-      getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0) {
+      getRegEventCount(MemoryEventType::LDS_TO_VGPR, reg) != 0 ||
+      getRegEventCount(MemoryEventType::LDS_ATOMIC_TO_VGPR, reg) != 0) {
     for (EventId eid : vgprMemoryEvents[reg]) {
       if (isToVgpr(detector->events().type(eid)) &&
           (detector->events().registerByteMask(eid, reg) & 0xF) != 0) {
