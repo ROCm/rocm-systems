@@ -961,8 +961,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1025,8 +1025,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1089,8 +1089,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1153,8 +1153,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1217,8 +1217,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1281,8 +1281,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1345,8 +1345,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_o_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1409,8 +1409,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1473,8 +1473,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1538,8 +1538,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlg_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1603,8 +1603,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ngt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1668,8 +1668,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nle_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1733,8 +1733,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_neq_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1798,8 +1798,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlt_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1863,8 +1863,8 @@ VCmpxLtF64Vopc::VCmpxLtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1909,8 +1909,8 @@ VCmpxEqF64Vopc::VCmpxEqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -1955,8 +1955,8 @@ VCmpxLeF64Vopc::VCmpxLeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2001,8 +2001,8 @@ VCmpxGtF64Vopc::VCmpxGtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2047,8 +2047,8 @@ VCmpxLgF64Vopc::VCmpxLgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2093,8 +2093,8 @@ VCmpxGeF64Vopc::VCmpxGeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2139,8 +2139,8 @@ VCmpxOF64Vopc::VCmpxOF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_o_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2185,8 +2185,8 @@ VCmpxUF64Vopc::VCmpxUF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_u_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2231,8 +2231,8 @@ VCmpxNgeF64Vopc::VCmpxNgeF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nge_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2278,8 +2278,8 @@ VCmpxNlgF64Vopc::VCmpxNlgF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlg_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2325,8 +2325,8 @@ VCmpxNgtF64Vopc::VCmpxNgtF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ngt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2372,8 +2372,8 @@ VCmpxNleF64Vopc::VCmpxNleF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nle_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2419,8 +2419,8 @@ VCmpxNeqF64Vopc::VCmpxNeqF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_neq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -2466,8 +2466,8 @@ VCmpxNltF64Vopc::VCmpxNltF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_nlt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3341,8 +3341,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3405,8 +3405,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3469,8 +3469,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3533,8 +3533,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3597,8 +3597,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3661,8 +3661,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3725,8 +3725,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3789,8 +3789,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3853,8 +3853,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3917,8 +3917,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -3981,8 +3981,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4045,8 +4045,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4109,8 +4109,8 @@ VCmpxLtI64Vopc::VCmpxLtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4155,8 +4155,8 @@ VCmpxEqI64Vopc::VCmpxEqI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4201,8 +4201,8 @@ VCmpxLeI64Vopc::VCmpxLeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4247,8 +4247,8 @@ VCmpxGtI64Vopc::VCmpxGtI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4293,8 +4293,8 @@ VCmpxNeI64Vopc::VCmpxNeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4339,8 +4339,8 @@ VCmpxGeI64Vopc::VCmpxGeI64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_i64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4385,8 +4385,8 @@ VCmpxLtU64Vopc::VCmpxLtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_lt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4431,8 +4431,8 @@ VCmpxEqU64Vopc::VCmpxEqU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_eq_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4477,8 +4477,8 @@ VCmpxLeU64Vopc::VCmpxLeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_le_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4523,8 +4523,8 @@ VCmpxGtU64Vopc::VCmpxGtU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_gt_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4569,8 +4569,8 @@ VCmpxNeU64Vopc::VCmpxNeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ne_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4615,8 +4615,8 @@ VCmpxGeU64Vopc::VCmpxGeU64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_ge_u64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4729,8 +4729,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_class_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(32, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
@@ -4794,8 +4794,8 @@ VCmpxClassF64Vopc::VCmpxClassF64Vopc(const MachineInst *inst)
     : Vopc("v_cmpx_class_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vopc)),
       exec(64, OperandType::OPR_EXEC, 126),
-      src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
+      src0(64, Operand::UnpackedSource{}, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      vsrc1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       sdst_exec(64, OperandType::OPR_SDST_EXEC, 126) {
   dst_operands_[0] = &exec;
   src_operands_[0] = &src0;
