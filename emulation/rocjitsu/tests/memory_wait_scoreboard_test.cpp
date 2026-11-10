@@ -4263,6 +4263,16 @@ TEST(MemoryWaitFootprintTest, NarrowDsAndBufferStoresCheckOnlyConsumedBytes) {
   check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases);
 }
 
+TEST(MemoryWaitFootprintTest, WriteLaneChecksOnlyTheSelectedDestinationLane) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    // All four targets encode v_writelane_b32 v3, s2, 7 identically. Also exercise
+    // a dynamic selector in s5. The common fixture includes sparse and empty EXEC.
+    check_vector_footprints(arch, 32, 16, {{0xd7610003, 0x02010e02}, {0xd7610003, 0x02000a02}}, 0,
+                            0, [](Wavefront &wave) { wave.debug_write_sgpr(5, 19); });
+  }
+}
+
 TEST(MemoryWaitFootprintTest, Cdna4HazardsMatchObservedVectorAccesses) {
   std::vector<std::vector<uint32_t>> cases;
   auto add = [&](auto words) { cases.emplace_back(words.begin(), words.end()); };
@@ -4336,7 +4346,7 @@ TEST(MemoryWaitFootprintTest, ValuPermutationsCheckConsumedLanesBeforeExecution)
       1u << 7, {0, 1u << 2, 0}, {1u << 7, 0, 0});
   add(cdna5::build_vop3(cdna5::kVPermlaneDownB32Vop3,
                         {.vdst = 1, .src0 = 258, .src1 = 133, .src2 = 136}),
-      1u << 7, {0, 0, 0}, {1u << 7, 0, 0});
+      1u << 7, {0, 1u << 7, 0}, {1u << 7, 0, 0});
   add(cdna5::build_vop1(cdna5::kVPermlane16SwapB32Vop1, {.src0 = 258, .vdst = 1}), 1,
       {1u << 16, 0, 0}, {0, 1, 0});
   add(cdna5::build_vop1(cdna5::kVPermlane16SwapB32Vop1, {.src0 = 258, .vdst = 1}), 1u << 16,
@@ -4632,6 +4642,52 @@ TEST(MemoryWaitFootprintTest, Dpp8InactiveFetchDoesNotUseDestinationExecAsSource
       cases.push_back(
           {(0x3fu << 25) | (destination << 17) | (1u << 9) | marker, 2u | (selection << 8)});
   check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA5, 32, 256, cases);
+}
+
+TEST_F(MemoryWaitScoreboardTest, ReverseSubtractDpp8FetchesTheMinuendFromTheSelectedLane) {
+  GpuMemory memory("subrev_memory");
+  L2Cache l2("subrev_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "subrev_cu", config, &memory, &l2));
+  auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u << 1);
+  auto decoder = Decoder::create(config.arch);
+  // v_subrev_co_ci_u32_e64_dpp v6, s12, v4, v5, vcc_lo dpp8:[1,2,3,4,5,6,7,0] fi:1
+  std::array<uint32_t, 3> words{0xd5220c06, 0x01aa0aea, 0x1f58d104};
+  auto vector = decoder->decode_window(words);
+  ASSERT_TRUE(vector.succeeded());
+  for (unsigned reg : {4u, 5u})
+    for (unsigned lane : {1u, 2u}) {
+      state.clear();
+      hazards.clear();
+      load(reg, WaitCounterKind::Ds, 1u << lane);
+      state.check_instruction(*vector.value(), *wf);
+      EXPECT_EQ(!hazards.empty(), (reg == 4 && lane == 1) || (reg == 5 && lane == 2))
+          << "v" << reg << "[" << lane << "]";
+    }
+
+  // Changing v5 to s5 produces a zero minuend and consumes no pending s5 value.
+  words[1] = 0x01a80aea;
+  auto scalar = decoder->decode_window(words);
+  ASSERT_TRUE(scalar.succeeded());
+  state.clear();
+  hazards.clear();
+  state.add({state.issue(WaitCounterKind::Km),
+             0x100,
+             ~uint64_t{0},
+             {RegClass::SGPR, 5, 1},
+             WaitCounterKind::Km,
+             0xf});
+  state.check_instruction(*scalar.value(), *wf);
+  EXPECT_TRUE(hazards.empty());
 }
 
 TEST(MemoryWaitFootprintTest, SdwaChecksSelectedBytesWithoutPreservationReads) {

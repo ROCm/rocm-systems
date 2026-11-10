@@ -296,6 +296,7 @@ def test_packed_integer_selector_mapping_and_compatibility(arch):
         assert 'rj_arith_' + name.lower() + '_w64' in body
         assert '(high & 1) ? 0u : RJ_ARITH_PK_HI_A_LOW' in body
         assert ('high_c ? 0u : RJ_ARITH_PK_HI_C_LOW' in body) == (count == 3)
+        assert 'packed_integer_negations(wf.cu().arch(), inst_)' in body
         assert 'RJ_ARITH_PK_NEG' not in body
         assert 'arithmetic_flags()' in body
 

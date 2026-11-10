@@ -77,7 +77,10 @@ int bitfield(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const 
         });
   }
 
-  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(RJ_ARITH_ALU_CLAMP))) {
+  constexpr bool is_align =
+      Op == rocjitsu::arith::Bitfield::AlignBit || Op == rocjitsu::arith::Bitfield::AlignByte;
+  constexpr uint64_t allowed = RJ_ARITH_ALU_CLAMP | (is_align ? RJ_ARITH_ALU_HIGH_C : 0u);
+  if (int error = rocjitsu::arith::validate(flags, mode & ~allowed)) {
     return error;
   }
   if (!exec_mask) {
@@ -89,6 +92,15 @@ int bitfield(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const 
   }
   if constexpr (Op != rocjitsu::arith::Bitfield::Reverse && Op != rocjitsu::arith::Bitfield::Mask) {
     cp = c[0];
+  }
+  uint32_t high_counts[32];
+  if constexpr (is_align) {
+    if (mode & RJ_ARITH_ALU_HIGH_C) {
+      for (int lane = 0; lane < 32; ++lane) {
+        high_counts[lane] = cp[lane] >> 16;
+      }
+      cp = high_counts;
+    }
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
