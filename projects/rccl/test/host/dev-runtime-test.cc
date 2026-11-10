@@ -7420,6 +7420,17 @@ TEST_F(DevrCommCreateInternalJitTest, RuntimeDeviceCodeVersion_WritesRuntimeLayo
   EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
 }
 
+// Contrast: older AOT device code is down-converted through its own record,
+// and the caller's buffer is only ever written by that converter.
+TEST_F(DevrCommCreateInternalJitTest, CompileTimeDeviceCodeVersion_DownConvertsThroughItsRecord) {
+  ASSERT_EQ(CreateFor(kJitFieldVersion), ncclSuccess);
+
+  ASSERT_EQ(NewToOldCalls().size(), 1u);
+  EXPECT_EQ(NewToOldCalls()[0].dst, static_cast<void*>(&outDevComm));
+  EXPECT_EQ(NewToOldCalls()[0].srcVersion, kJitFieldVersion);
+  EXPECT_EQ(outDevComm.magic, 0u);  // the runtime layout never landed in the caller's buffer
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
