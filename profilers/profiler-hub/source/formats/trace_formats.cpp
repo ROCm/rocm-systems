@@ -13,6 +13,7 @@
 #include "formats/rocpd_v3/rocpd_v3_reader.hpp"
 #endif
 #include "reader_impl.hpp"
+#include "trace_trim.hpp"
 #include "trim_schema.hpp"
 
 #include <stdexcept>
@@ -81,6 +82,15 @@ make_rocpd_trim(version_t version)
     return nullptr;
 }
 
+ph_result_t
+trim_rocpd(const std::vector<trim_source_t>& inputs,
+           const std::string&                output_path,
+           version_t                         version,
+           ph_future*                        future)
+{
+    return trim_trace_files(inputs, output_path, trace_schema_t::rocpd, version, future);
+}
+
 const format_entry_t*
 find_format(trace_schema_t schema, version_t version)
 {
@@ -102,7 +112,8 @@ format_entries()
                                              rocpd_probe,
                                              open_rocpd_source,
                                              make_rocpd_reader,
-                                             make_rocpd_trim } };
+                                             make_rocpd_trim,
+                                             trim_rocpd } };
     return entries;
 }
 
@@ -110,6 +121,18 @@ bool
 is_supported_format(const trace_format_t& format)
 {
     return find_format(format.schema, format.version) != nullptr;
+}
+
+ph_result_t
+trim_in_format(trace_schema_t                    schema,
+               version_t                         version,
+               const std::vector<trim_source_t>& inputs,
+               const std::string&                output_path,
+               ph_future*                        future)
+{
+    const format_entry_t* entry = find_format(schema, version);
+    if(entry == nullptr || entry->trim == nullptr) return PH_RESULT_UNSUPPORTED_FILE;
+    return entry->trim(inputs, output_path, version, future);
 }
 
 std::unique_ptr<format_source>
