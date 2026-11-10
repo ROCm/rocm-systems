@@ -47,8 +47,8 @@ NESTED = {
     "style": "panel",
     "parent": "mall",
 }
-# A block in the row above xGMI, which is in row -1 above the Data Fabric
-ABOVE = {"id": "outer", "title": "Outer", "column": 3, "row": -2, "style": "panel"}
+# A second block above the grid, next to xGMI
+ABOVE = {"id": "outer", "title": "Outer", "column": 4, "row": -1, "style": "panel"}
 
 
 def panel_metric_ids(arch):
@@ -215,10 +215,10 @@ def test_block_list_order_does_not_matter(tmp_path):
         (with_block_change("xgmi", row=None), "needs a row"),
         (with_block_change("xgmi", row=True), "row of 'xgmi'"),
         (with_blocks({**NESTED, "row": 0}), "order and no row"),
-        (with_blocks({**ABOVE, "content": []}), "outside row 0"),
-        (with_blocks({**ABOVE, "row": -1}), "both in row -1 of column 3"),
-        (with_blocks({**ABOVE, "row": -3}), "needs a block in row -2"),
-        (with_blocks({**ABOVE, "column": 7, "row": -1}), "has blocks in row 0"),
+        (with_blocks({**ABOVE, "content": []}), "above or below the grid"),
+        (with_blocks(ABOVE), "all in row -1"),
+        (with_block_change("xgmi", row=-2), "row of 'xgmi' is -2"),
+        (with_block_change("xgmi", column=7), "has blocks in row 0"),
         (with_blocks({**NESTED, "parent": "nowhere"}), "unknown block 'nowhere'"),
         (with_blocks({**NESTED, "parent": "xgmi", "column": 3}), "a block of row 0"),
         (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
@@ -239,7 +239,7 @@ def test_block_list_order_does_not_matter(tmp_path):
         ),
         (
             changed(arrows=[{**READ_ARROW, "from": "l2", "to": "xgmi"}]),
-            "next to it on the side toward row 0",
+            "must start at 'data_fabric'",
         ),
         (with_blocks(NESTED), "nested in 'mall'"),
         (with_metric_change("3.1.35", style="stacked"), "must be inline"),
@@ -259,12 +259,12 @@ def test_block_list_order_does_not_matter(tmp_path):
         "block-without-row",
         "row-not-a-number",
         "nested-block-with-row",
-        "off-grid-block-with-content",
-        "two-blocks-in-one-row-and-column",
-        "row-gap",
-        "off-grid-block-beyond-the-columns",
+        "block-above-the-grid-with-content",
+        "two-blocks-above-the-grid",
+        "row-beyond-1",
+        "block-above-the-grid-beyond-the-columns",
         "unknown-parent",
-        "parent-off-grid",
+        "parent-above-the-grid",
         "nested-block-in-another-column",
         "parent-cycle",
         "parent-has-metrics",
@@ -277,10 +277,10 @@ def test_block_list_order_does_not_matter(tmp_path):
         "arrow-direction",
         "arrow-unknown-block",
         "arrow-skips-a-column",
-        "arrow-from-off-grid-to-row-0",
-        "arrow-to-off-grid-from-another-column",
+        "arrow-from-above-the-grid-to-row-0",
+        "arrow-above-the-grid-from-another-block",
         "arrow-to-a-parent-block",
-        "stacked-arrow-to-an-off-grid-block",
+        "stacked-arrow-above-the-grid",
     ],
 )
 def test_malformed_layout_is_rejected(tmp_path, data, message):

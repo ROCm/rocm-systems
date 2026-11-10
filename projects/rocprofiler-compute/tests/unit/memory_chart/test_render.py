@@ -235,29 +235,20 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 # ---------------------------------------------------------------------------
 
 
-def test_gfx950_shows_io_bandwidth_on_attached_blocks():
+def test_gfx950_shows_io_bandwidth_above_and_below_the_grid():
     output = render("gfx950", {"3.1.35": 2e9, "3.1.40": 3e9})  # xGMI Read, PCIe Atomic
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)
     assert re.search(r"\|\|  Atomic BW\s+3\.000 GB/s", output)
     assert output.index("xGMI") < output.index("Compute Units") < output.index("PCIe")
 
 
-def test_blocks_outside_row_0_sit_in_their_row_and_column(tmp_path):
-    data = common.memory_chart_layout_data("gfx950")
-    xgmi_read = next(a for a in data["arrows"] if a["to"] == "xgmi")
-    off_grid = {"row": -1, "style": "panel"}
-    data["blocks"] += [
-        {**off_grid, "id": "mall_io", "title": "MALL I/O", "column": 4},
-        {**off_grid, "id": "far", "title": "Far", "column": 3, "row": -2},
-    ]
-    data["arrows"].append({**xgmi_read, "from": "xgmi", "to": "far", "title": "Far BW"})
-    lines = render_layout(tmp_path, "gfx950", data).splitlines()
-    far_row, far_x = text_box_edge(lines, "Far")
-    xgmi_row, xgmi_x = text_box_edge(lines, "xGMI (to Peer GPU)")
-    assert text_box_edge(lines, "MALL I/O") == (xgmi_row, box_rows(lines, "MALL")[2])
-    assert xgmi_x == far_x == box_rows(lines, "Data Fabric")[2]
-    assert far_row < next(i for i, line in enumerate(lines) if "Far BW" in line)
-    assert far_row < xgmi_row
+def test_blocks_above_and_below_the_grid_line_up_with_their_column():
+    lines = render("gfx950").splitlines()
+    fabric_left = box_rows(lines, "Data Fabric")[2]
+    assert text_box_edge(lines, "xGMI (to Peer GPU)")[1] == fabric_left
+    assert text_box_edge(lines, "PCIe (to CPU or Non-xGMI connected GPU)")[1] == (
+        fabric_left
+    )
 
 
 @pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx942"])

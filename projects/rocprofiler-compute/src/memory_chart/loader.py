@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, NoReturn, Optional, Tuple
 
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
@@ -40,6 +40,8 @@ class Keys:
 
 # Version of the layout format; README.md says when to bump it
 LAYOUT_VERSION = "1.0.0"
+
+# Each Keys lists every key in file order, then the keys a file may leave out
 LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
 SCOPE_KEYS = Keys(("labels", "split"))
 BLOCK_KEYS = Keys(
@@ -62,13 +64,14 @@ ARROW_KEYS = Keys(
     ("group",),
 )
 
+_ROWS = (-1, 0, 1)  # above the grid, the grid, below the grid
 _BLOCK_STYLES = ("panel", "list")
 _ITEM_CATEGORIES = ("util", "hit", "stall", "neutral", "bw", "read", "write", "atomic")
 _ARROW_CATEGORIES = ("read", "write", "atomic", "neutral")
 _DIRECTIONS = ("forward", "backward", "both")
 _ARROW_STYLES = ("inline", "stacked")
 
-# (parent block id, or None for the top-level blocks of row 0; column) of a stack
+# A stack of blocks: (parent block id, column). The parent is None for top-level blocks.
 StackKey = Tuple[Optional[str], int]
 
 
@@ -89,7 +92,7 @@ class LayoutBlock:
     id: str
     title: str
     column: int
-    row: int  # 0 for the grid, negative above it, positive below it
+    row: int  # -1 above the grid, 0 in it, 1 below it
     style: str  # "panel", or "list" for a compact list
     parent: Optional[str]  # enclosing block of a nested block
     stall_level: Optional[str]  # membw level whose active stalls are listed here
@@ -121,7 +124,8 @@ class Layout:
     scope_labels: tuple[str, str]
     scope_split: str
     columns: Tuple[Tuple[LayoutBlock, ...], ...]  # top-level blocks of row 0
-    off_grid: Tuple[LayoutBlock, ...]  # blocks outside row 0, by row, then column
+    above: Optional[LayoutBlock]  # the block in row -1
+    below: Optional[LayoutBlock]  # the block in row 1
     arrows: tuple[LayoutArrow, ...]
 
     def top_level_blocks(self) -> Iterator[LayoutBlock]:
@@ -130,27 +134,14 @@ class Layout:
             yield from column
 
     def blocks(self) -> Iterator[LayoutBlock]:
-        """All blocks, column by column: row 0, each parent before its nested
-        blocks, then the column's blocks in other rows."""
+        """All blocks, column by column: each parent before its nested blocks, then
+        the column's blocks above and below the grid."""
         for column, stack in enumerate(self.columns):
             for block in stack:
                 yield from _with_descendants(block)
-            yield from (block for block in self.off_grid if block.column == column)
-
-    def rows(self) -> List[Tuple[int, List[LayoutBlock]]]:
-        """The rows outside the grid, top to bottom, each with its blocks."""
-        rows: Dict[int, List[LayoutBlock]] = defaultdict(list)
-        for block in self.off_grid:
-            rows[block.row].append(block)
-        return sorted(rows.items())
-
-    def inner_neighbor(self, block: LayoutBlock) -> LayoutBlock:
-        """The block next to an off-grid block on the side toward row 0."""
-        if abs(block.row) == 1:
-            stack = self.columns[block.column]
-            return stack[0] if block.row < 0 else stack[-1]
-        cell = (_inner_row(block.row), block.column)
-        return next(b for b in self.off_grid if (b.row, b.column) == cell)
+            for block in (self.above, self.below):
+                if block is not None and block.column == column:
+                    yield block
 
     def metrics(self) -> set[str]:
         """Ids of all metrics the layout shows."""
@@ -236,7 +227,8 @@ def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
         scope_labels=(left, right),
         scope_split=data["scope"]["split"],
         columns=columns,
-        off_grid=_off_grid(path, raw_blocks, column_count),
+        above=_outside_grid(path, raw_blocks, column_count, -1),
+        below=_outside_grid(path, raw_blocks, column_count, 1),
         arrows=tuple(_arrow(path, raw) for raw in data["arrows"]),
     )
     _check_references(layout, raw_blocks)
@@ -278,11 +270,6 @@ def _with_descendants(block: LayoutBlock) -> Iterator[LayoutBlock]:
         yield from _with_descendants(child)
 
 
-def _inner_row(row: int) -> int:
-    """The row next to *row* on the side toward row 0."""
-    return row - 1 if row > 0 else row + 1
-
-
 def _check_keys(path: Path, raw: dict[str, Any], keys: Keys, where: str) -> None:
     missing = set(keys.required) - set(raw)
     unknown = set(raw) - set(keys.order)
@@ -306,8 +293,9 @@ def _check_index(path: Path, value: object, what: str) -> None:
 
 
 def _check_row(path: Path, value: object, what: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        _fail(path, f"{what} must be a whole number, not {value!r}")
+    # bool is an int in Python, but not a row
+    if isinstance(value, bool) or value not in _ROWS:
+        _fail(path, f"{what} is {value!r}, not one of {list(_ROWS)}")
 
 
 def _raw_blocks(path: Path, entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -334,7 +322,8 @@ def _raw_blocks(path: Path, entries: list[dict[str, Any]]) -> dict[str, dict[str
 
 
 def _check_placement(path: Path, raw: Dict[str, Any], where: str) -> None:
-    """Check the row and order of a block, and what a block outside row 0 may have."""
+    """Check the row and order of a block, and what a block above or below the grid
+    may have."""
     if "parent" in raw:
         if "row" in raw or "order" not in raw:
             _fail(path, f"{where} is nested, so it has an order and no row")
@@ -349,7 +338,7 @@ def _check_placement(path: Path, raw: Dict[str, Any], where: str) -> None:
     if {"order", "content", "stall_level"} & set(raw) or raw["style"] != "panel":
         _fail(
             path,
-            f"{where} is outside row 0: it needs the panel style, "
+            f"{where} is above or below the grid: it needs the panel style, "
             "and no order, content, or stall_level",
         )
 
@@ -391,29 +380,19 @@ def _stacks(
     return stacks, len(columns)
 
 
-def _off_grid(
-    path: Path, raw_blocks: Dict[str, Dict[str, Any]], column_count: int
-) -> Tuple[LayoutBlock, ...]:
-    """The blocks outside row 0, one per row and column, sorted by row, then column."""
-    cells: Dict[Tuple[int, int], Dict[str, Any]] = {}
-    for raw in raw_blocks.values():
-        row, column = _row(raw), raw["column"]
-        if row == 0:
-            continue
-        if (row, column) in cells:
-            ids = [cells[(row, column)]["id"], raw["id"]]
-            _fail(path, f"blocks {ids} are both in row {row} of column {column}")
-        if column >= column_count:
-            _fail(path, f"{raw['id']!r} must be in a column that has blocks in row 0")
-        cells[(row, column)] = raw
-    for (row, column), raw in cells.items():
-        inner_row = _inner_row(row)
-        if inner_row and (inner_row, column) not in cells:
-            _fail(
-                path,
-                f"{raw['id']!r} needs a block in row {inner_row} of its column",
-            )
-    return tuple(_block(path, cells[cell], {}) for cell in sorted(cells))
+def _outside_grid(
+    path: Path, raw_blocks: Dict[str, Dict[str, Any]], column_count: int, row: int
+) -> Optional[LayoutBlock]:
+    """The one block in *row*, -1 above the grid or 1 below it, or None."""
+    found = [raw for raw in raw_blocks.values() if _row(raw) == row]
+    if not found:
+        return None
+    if len(found) > 1:
+        ids = [raw["id"] for raw in found]
+        _fail(path, f"blocks {ids} are all in row {row}, which holds one block")
+    if found[0]["column"] >= column_count:
+        _fail(path, f"{found[0]['id']!r} must be in a column that has blocks in row 0")
+    return _block(path, found[0], {})
 
 
 def _stacked(
@@ -515,11 +494,9 @@ def _check_arrow(
         if source.row != 0 or target.column != source.column + 1:
             _fail(path, f"{where} must go from row 0 to a block in the next column")
         return
-    if layout.inner_neighbor(target) is not source:
-        _fail(
-            path,
-            f"{where} to {target.id!r} must start at the block next to it "
-            "on the side toward row 0",
-        )
+    stack = layout.columns[target.column]
+    next_to_target = stack[0] if target.row < 0 else stack[-1]
+    if source is not next_to_target:
+        _fail(path, f"{where} to {target.id!r} must start at {next_to_target.id!r}")
     if arrow.style != "inline":
-        _fail(path, f"{where} to a block outside row 0 must be inline")
+        _fail(path, f"{where} to a block above or below the grid must be inline")

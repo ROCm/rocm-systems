@@ -6,7 +6,7 @@
 
 The loader checks each file first. The file is then written with keys in the
 loader's order, blocks column by column (each block followed by its nested
-blocks, and each column's row 0 followed by its other rows), one block, metric, or
+blocks, then the column's blocks above and below the grid), one block, metric, or
 arrow per line, and a blank line between columns and between arrows of different
 block pairs.
 
