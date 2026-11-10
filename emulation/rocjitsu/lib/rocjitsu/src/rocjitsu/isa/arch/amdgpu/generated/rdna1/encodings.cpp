@@ -1475,9 +1475,9 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
 }
 
 void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
+  nsa_vaddr_operand_ = vaddr;
   if (!inst_.nsa)
     return;
-  nsa_vaddr_operand_ = vaddr;
   size_ = sizeof(OpEncoding) + inst_.nsa * sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();

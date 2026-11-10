@@ -17,20 +17,23 @@ namespace cdna1 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }
@@ -64,7 +67,7 @@ void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -121,7 +124,7 @@ void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageLoadMipMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -925,7 +928,7 @@ void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -1013,7 +1016,7 @@ void ImageSampleDMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleDMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -1101,7 +1104,7 @@ void ImageSampleLMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleLMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -1216,7 +1219,7 @@ void ImageSampleLzMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleLzMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = amdgpu::image_result_components(inst_.dmask, false);
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};

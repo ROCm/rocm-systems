@@ -899,6 +899,22 @@ public:
       out += " dmask:0x";
       out += "0123456789abcdef"[inst->dmask];
     }
+    if (inst->unorm)
+      out += " unorm";
+    if (inst->glc)
+      out += " glc";
+    if (inst->slc)
+      out += " slc";
+    if (inst->scc)
+      out += " scc";
+    if (inst->a16)
+      out += " a16";
+    if (inst->lwe)
+      out += " lwe";
+    if (inst->da)
+      out += " da";
+    if (inst->d16)
+      out += " d16";
   }
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;

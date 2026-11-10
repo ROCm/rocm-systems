@@ -5,11 +5,12 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/mimg.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sample.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_transfer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -23,54 +24,102 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    false)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_access(
+            wf, *d, inst_.srsrc * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false})
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_access(
-          wf, *d, inst_.srsrc * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false})
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          ~0u, amdgpu::ImageSampleMode::Implicit)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    false)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_access(
+            wf, *d, inst_.srsrc * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = true,
+             .gather = false})
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_access(
-          wf, *d, inst_.srsrc * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = true,
-           .gather = false})
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          ~0u, amdgpu::ImageSampleMode::Implicit, nullptr, amdgpu::ImageTransferMode::Mip)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
@@ -95,54 +144,102 @@ void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    false)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = false;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+    if (amdgpu::prepare_image_access(
+            wf, *d, inst_.srsrc * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false})
+            .failed()) {
+      return;
+    }
+    amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  if (amdgpu::prepare_image_access(
-          wf, *d, inst_.srsrc * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false})
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          ~0u, amdgpu::ImageSampleMode::Implicit)
+          .failed())
     return;
-  }
-  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    false)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = false;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
+    if (amdgpu::prepare_image_access(
+            wf, *d, inst_.srsrc * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = true,
+             .gather = false})
+            .failed()) {
+      return;
+    }
+    amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  if (amdgpu::prepare_image_access(
-          wf, *d, inst_.srsrc * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = true,
-           .gather = false})
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          ~0u, amdgpu::ImageSampleMode::Implicit, nullptr, amdgpu::ImageTransferMode::Mip)
+          .failed())
     return;
-  }
-  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
@@ -243,83 +340,158 @@ void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this) &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(
+            wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false},
+            amdgpu::ImageSampleMode::Implicit)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_sample(
-          wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false},
-          amdgpu::ImageSampleMode::Implicit)
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Implicit)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
 void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this) &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(
+            wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false},
+            amdgpu::ImageSampleMode::Derivatives)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_sample(
-          wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false},
-          amdgpu::ImageSampleMode::Derivatives)
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Derivatives)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
 void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this) &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(
+            wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false},
+            amdgpu::ImageSampleMode::Explicit)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_sample(
-          wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false},
-          amdgpu::ImageSampleMode::Explicit)
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Explicit)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
@@ -329,29 +501,54 @@ void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this) &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(
+            wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = false},
+            amdgpu::ImageSampleMode::Zero)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_sample(
-          wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
-           .unorm = bool(inst_.unorm),
-           .mip = false,
-           .gather = false},
-          amdgpu::ImageSampleMode::Zero)
-          .failed()) {
+           .unorm = bool(inst_.unorm)},
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Zero)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 
@@ -446,29 +643,55 @@ void ImageGather4BMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
+      amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this) &&
+      amdgpu::use_linear_image_path(wf, inst_.srsrc * 4, inst_.ssamp * 4, inst_.dim, inst_.unorm,
+                                    true)) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->is_load = true;
+    amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
+    d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
+    d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+    if (amdgpu::prepare_image_sample(
+            wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+            amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+            {.dmask = inst_.dmask,
+             .dim = inst_.dim,
+             .a16 = bool(inst_.a16),
+             .d16 = bool(inst_.d16),
+             .r128 = bool(inst_.r128),
+             .tfe = bool(inst_.tfe),
+             .lwe = bool(inst_.lwe),
+             .da = true,
+             .unorm = bool(inst_.unorm),
+             .mip = false,
+             .gather = true},
+            amdgpu::ImageSampleMode::Zero)
+            .failed()) {
+      return;
+    }
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
-  d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
+  amdgpu::apply_gfx11_cache_policy(*d, inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
-  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_sample(
-          wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+  if (amdgpu::prepare_image_transfer(
+          wf, *d, inst_.srsrc * 4, inst_.vdata,
           amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
-          {.dmask = inst_.dmask,
-           .dim = inst_.dim,
+          {.dmask = uint32_t(inst_.dmask),
+           .dim = uint32_t(inst_.dim),
            .a16 = bool(inst_.a16),
            .d16 = bool(inst_.d16),
            .r128 = bool(inst_.r128),
            .tfe = bool(inst_.tfe),
            .lwe = bool(inst_.lwe),
-           .da = true,
            .unorm = bool(inst_.unorm),
-           .mip = false,
            .gather = true},
-          amdgpu::ImageSampleMode::Zero)
-          .failed()) {
+          inst_.ssamp * 4, amdgpu::ImageSampleMode::Zero)
+          .failed())
     return;
-  }
   set_data(std::move(d));
 }
 

@@ -132,6 +132,8 @@ struct ClassifiedEvent {
   bool check_memory_order = false;
   bool check_program_end = false;
   bool check_counter_parity_order = false;
+  // May use ordinary VMEM writeback while keeping the sample's counter order.
+  bool point_sample_accel = false;
 };
 
 // ISA classification and wait-field decoding have no pending-state or CFG

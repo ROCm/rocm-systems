@@ -87,6 +87,36 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
+// RDNA3 ISA section 5.6, Data Dependency Resolution: VMcnt decrements in issue
+// order even when the VGPR writes return out of order. GFX10 uses the same
+// counter model. LLVM SIInsertWaitcnts also merges the read event kinds here.
+[[nodiscard]] constexpr bool has_ordered_vmem_reads(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
+enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, PointSample };
+
+[[nodiscard]] constexpr bool ordered_vmem_writebacks(VmemWriteback first, VmemWriteback second) {
+  return first == second && first != VmemWriteback::PointSample;
+}
+
+[[nodiscard]] constexpr VmemWriteback vmem_read_type(rj_code_arch_t arch,
+                                                     std::string_view mnemonic) {
+  // On gfx1150 these opcodes can use either the sampler or the ordinary VMEM
+  // writeback path. LLVM's PointSampleAccel rule requires a wait even for a
+  // second eligible sample because the two requests can use different paths.
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3_5 &&
+      (mnemonic == "image_sample" || mnemonic == "image_sample_l" || mnemonic == "image_sample_lz"))
+    return VmemWriteback::PointSample;
+  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
+      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather"))
+    return VmemWriteback::Sample;
+  if (mnemonic.starts_with("image_bvh"))
+    return VmemWriteback::Bvh;
+  return VmemWriteback::Ordinary;
+}
+
 // VMEM loads of the same type write their VGPR results in issue order. CDNA1-4
 // section 4.4. RDNA1/2 section 4.4 and RDNA3/3.5 section 5.6 say VGPR data can
 // be written out of order, but we follow LLVM's vmem-write-vgpr-in-order
@@ -170,7 +200,7 @@ struct LegacyWaitcnt {
 /// - LegacyNoVscnt: VMCNT, LGKMCNT, EXPCNT.
 /// - LegacyVscnt: those tags plus VSCNT and the GFX11 internal LOADCNT,
 ///   STORECNT, DSCNT, KMCNT subsets.
-/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, SAMPLECNT, and CDNA5's
+/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, SAMPLECNT, BVHCNT, and CDNA5's
 ///   ASYNCCNT/TENSORCNT. Aggregate VMCNT/VSCNT/LGKMCNT tags are not supported.
 /// Mapping a supported tag back with memory_wait_counter_type produces a wait
 /// that covers the original event, including subsets of aggregate counters.
@@ -190,6 +220,8 @@ struct LegacyWaitcnt {
     return smem_wait_counter(model);
   case WaitCounterType::EXPCNT:
     return WaitCounterKind::Exp;
+  case WaitCounterType::BVHCNT:
+    return WaitCounterKind::Bvh;
   case WaitCounterType::SAMPLECNT:
     return WaitCounterKind::Sample;
   case WaitCounterType::ASYNCCNT:
@@ -223,6 +255,10 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   case WaitCounterKind::Async:
     if (model == WaitcntModel::SplitGfx12)
       return WaitCounterType::ASYNCCNT;
+    return std::nullopt;
+  case WaitCounterKind::Bvh:
+    if (model == WaitcntModel::SplitGfx12)
+      return WaitCounterType::BVHCNT;
     return std::nullopt;
   case WaitCounterKind::Sample:
     if (model == WaitcntModel::SplitGfx12)

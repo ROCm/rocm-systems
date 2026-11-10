@@ -3,6 +3,7 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <array>
 #include <cassert>
@@ -11,6 +12,11 @@
 #include <span>
 
 namespace rocjitsu::plugins::race_detector {
+
+struct ConditionalVgprWrite {
+  uint32_t reg = 0;
+  uint64_t lanes = 0;
+};
 
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
@@ -50,6 +56,17 @@ enum class MemoryEventType {
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// VMEM result writes can use distinct hardware FIFOs while sharing a counter.
+class VgprWriteOrder {
+public:
+  constexpr VgprWriteOrder(MemoryOrderClass completion,
+                           amdgpu::VmemWriteback type = amdgpu::VmemWriteback::Ordinary)
+      : completion(completion), type(type) {}
+  bool operator==(const VgprWriteOrder &) const = default;
+  MemoryOrderClass completion;
+  amdgpu::VmemWriteback type;
+};
 
 struct LdsAccess {
   bool read_modify_write = false;
