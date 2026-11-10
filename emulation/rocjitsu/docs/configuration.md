@@ -352,7 +352,7 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 This policy currently applies to RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and
 RDNA3/RDNA4 fused floating-point arithmetic, basic floating-point arithmetic and
-selection, division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, graphics operations and register/lane routing. Other instructions retain their
+selection, division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics operations and register/lane routing. Other instructions retain their
 existing implementations while integration proceeds by instruction family.
 
 The optional top-level `arithmetic` object selects one semantics mode for
@@ -408,7 +408,6 @@ invalid and inexact cases; mode 3 accepts those instructions.
 Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.
-VOPD pairs still use legacy execution and do not yet enforce strict rj-arith policies.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.

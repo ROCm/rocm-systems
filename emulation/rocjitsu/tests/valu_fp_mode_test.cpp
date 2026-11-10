@@ -1330,7 +1330,7 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
                          mode,
                          FE_TONEAREST,
                          kControlMask,
-                         daz});
+                         uses_default_host_controls(arch) ? (0x1f80u & kControlMask) : daz});
       };
       add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
       add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
@@ -5478,8 +5478,7 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
 class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
-  // VOPD still uses the legacy handlers and their host-environment contract.
-  const bool uses_arith = GetParam().name.find("Vopd") == std::string::npos;
+  const bool uses_arith = true;
   expect_arithmetic_case(GetParam(), {}, uses_arith);
 }
 
@@ -5511,7 +5510,7 @@ TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar, /*uses_arith=*/true), true);
   }
 }
 #endif
@@ -5726,7 +5725,8 @@ TEST_P(ValuVopdSubtractionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true), true);
   }
 }
 

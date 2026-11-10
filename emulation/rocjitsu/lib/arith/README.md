@@ -1,7 +1,7 @@
 # Rocjitsu Arithmetic Library
 
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
-calling CPU thread. This branch includes WMMA, floating-point arithmetic, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, graphics arithmetic and register/lane routing, with portable code and x86 SIMD paths.
+calling CPU thread. This branch includes WMMA, floating-point arithmetic, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics arithmetic and register/lane routing, with portable code and x86 SIMD paths.
 
 [rocjitsu/docs/arith-design.md](../../docs/arith-design.md) describes the API,
 numerical semantics, implementation principles, and testing policy.
