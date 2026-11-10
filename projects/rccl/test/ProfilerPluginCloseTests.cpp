@@ -67,8 +67,8 @@ std::string stubPluginPath() {
   if (ec) return "";
   const std::filesystem::path dir = exe.parent_path();
   const std::filesystem::path candidates[] = {
-    dir / RCCL_TEST_PROFILER_STUB_NAME,                        // build tree
-    dir.parent_path() / "lib" / RCCL_TEST_PROFILER_STUB_NAME,  // install tree
+    dir / RCCL_TEST_PROFILER_STUB_NAME,                                           // build tree
+    dir.parent_path() / RCCL_TEST_INSTALL_LIBDIR / RCCL_TEST_PROFILER_STUB_NAME,  // install tree
   };
   for (const std::filesystem::path& candidate : candidates) {
     std::error_code exists_ec;
@@ -98,7 +98,7 @@ TEST(ProfilerPluginClose, UnusablePluginIsUnloaded) {
 
     const std::string stubPath = stubPluginPath();
     ASSERT_FALSE(stubPath.empty())
-        << "stub profiler plugin not found beside the test binary or in ../lib "
+        << "stub profiler plugin not found beside the test binary or in ../" RCCL_TEST_INSTALL_LIBDIR " "
            "(or /proc/self/exe could not be resolved)";
     ASSERT_EQ(access(stubPath.c_str(), R_OK), 0)
         << "stub profiler plugin not readable: " << stubPath;

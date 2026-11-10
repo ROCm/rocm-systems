@@ -52,8 +52,8 @@ std::string FakeProviderPath(const char* name) {
   if (ec) return "";
   const std::filesystem::path dir = exe.parent_path();
   const std::filesystem::path candidates[] = {
-    dir / name,                                          // build tree
-    dir.parent_path() / "lib" / "rccl" / "test" / name,  // install tree
+    dir / name,                                                             // build tree
+    dir.parent_path() / RCCL_TEST_INSTALL_LIBDIR / "rccl" / "test" / name,  // install tree
   };
   for (const std::filesystem::path& candidate : candidates) {
     std::error_code exists_ec;
@@ -82,7 +82,7 @@ void ExpectProviderStaysMapped(const char* path, ncclResult_t expected, Build bu
 
 TEST(DvSymbolsTestIsolated, IonicProviderStaysMappedWhenDvSymbolMissing) {
   const std::string path = FakeProviderPath(DV_PROVIDER_FAKE_IONIC_NAME);
-  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_IONIC_NAME << " not found beside the test binary or in ../lib/rccl/test";
+  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_IONIC_NAME << " not found beside the test binary or in ../" RCCL_TEST_INSTALL_LIBDIR "/rccl/test";
   RUN_ISOLATED_TEST("DvSymbols_IonicProviderStaysMappedWhenDvSymbolMissing", [path]() {
     struct ncclIonicdvSymbols symbols;
     memset(&symbols, 0xff, sizeof(symbols));
@@ -95,7 +95,7 @@ TEST(DvSymbolsTestIsolated, IonicProviderStaysMappedWhenDvSymbolMissing) {
 
 TEST(DvSymbolsTestIsolated, IonicWithoutQpSetGdaStillBuilds) {
   const std::string path = FakeProviderPath(DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME);
-  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME << " not found beside the test binary or in ../lib/rccl/test";
+  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME << " not found beside the test binary or in ../" RCCL_TEST_INSTALL_LIBDIR "/rccl/test";
   RUN_ISOLATED_TEST("DvSymbols_IonicWithoutQpSetGdaStillBuilds", [path]() {
     struct ncclIonicdvSymbols symbols;
     memset(&symbols, 0xff, sizeof(symbols));
@@ -108,7 +108,7 @@ TEST(DvSymbolsTestIsolated, IonicWithoutQpSetGdaStillBuilds) {
 
 TEST(DvSymbolsTestIsolated, Mlx5ProviderStaysMappedWhenDvSymbolMissing) {
   const std::string path = FakeProviderPath(DV_PROVIDER_FAKE_MLX5_NAME);
-  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_MLX5_NAME << " not found beside the test binary or in ../lib/rccl/test";
+  if (path.empty()) GTEST_SKIP() << DV_PROVIDER_FAKE_MLX5_NAME << " not found beside the test binary or in ../" RCCL_TEST_INSTALL_LIBDIR "/rccl/test";
   RUN_ISOLATED_TEST("DvSymbols_Mlx5ProviderStaysMappedWhenDvSymbolMissing", [path]() {
     struct ncclMlx5dvSymbols symbols;
     memset(&symbols, 0xff, sizeof(symbols));
