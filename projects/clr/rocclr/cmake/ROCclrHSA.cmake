@@ -55,8 +55,6 @@ else()
         ${ROCM_PATH}
         ${ROCM_INSTALL_PATH}
         ${CMAKE_CURRENT_BINARY_DIR}
-        ${CMAKE_INSTALL_PREFIX}
-        ${CMAKE_INSTALL_PREFIX}/..
       PATH_SUFFIXES
         rocr/lib/cmake/hsa-runtime64
         rocr/runtime/hsa-runtime

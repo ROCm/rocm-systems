@@ -10,11 +10,6 @@ find_package(amd_comgr 3.2 REQUIRED CONFIG
     cmake/amd_comgr
     lib/cmake/amd_comgr)
 
-get_target_property(_amd_comgr_lib_type amd_comgr TYPE)
-target_compile_definitions(rocclr PUBLIC)
-if(_amd_comgr_lib_type STREQUAL "SHARED_LIBRARY")
-  target_compile_definitions(rocclr PUBLIC COMGR_DYN_DLL)
-endif()
 target_link_libraries(rocclr PUBLIC amd_comgr)
 
 # Comgr DLL name for Windows dynamic loading
