@@ -101,9 +101,22 @@ else()
 endif()
 find_package(OpenGL REQUIRED)
 
+# ABCE (Accelerated Blit Copy Engine) is header-only and lives in the monorepo's
+# runtimes/api-headers; detached CLR checkouts can point this at a matching tree.
+set(ROCCLR_ABCE_INCLUDE_DIR
+    "${ROCCLR_SRC_DIR}/../../../runtimes/api-headers/include/abce"
+    CACHE PATH "Directory holding the ABCE headers (runtimes/api-headers/include/abce)")
+if(NOT EXISTS "${ROCCLR_ABCE_INCLUDE_DIR}/abce_cxx.h")
+  message(FATAL_ERROR "ABCE headers not found at ${ROCCLR_ABCE_INCLUDE_DIR}; "
+                      "set ROCCLR_ABCE_INCLUDE_DIR to runtimes/api-headers/include/abce")
+endif()
+target_include_directories(rocclr PRIVATE ${ROCCLR_ABCE_INCLUDE_DIR})
+
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/rocm/rocappprofile.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocrctx.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocabce.cpp
+  ${ROCCLR_SRC_DIR}/device/rocm/rocabceblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblit.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/rocblitcl.cpp
   ${ROCCLR_SRC_DIR}/device/rocm/roccounters.cpp
