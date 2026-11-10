@@ -209,7 +209,8 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
-       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier) ||
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
+       manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
       manifest.options != mvp_options_digest())
     return reject(error, ContractErrorCode::InvalidFacts,
                   "empty image or unsupported target, ABI, scope or options");

@@ -86,6 +86,13 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
+        if case.startswith('loop_'):
+            pairs = 2 * {
+                'loop_no_b0': 3,
+                'loop_no_b1': 2,
+                'loop_no_b0_full_journal': 4,
+                'loop_no_b0_sync_loss': 4,
+            }.get(case, 0)
         status = 1 if pairs or collisions else 0
         # The dynamic loader's own trace records the analyzer's actual modules
         # without linking a runtime or adding a live-registry input to the tool.
@@ -114,7 +121,17 @@ class AnalysisDriver(Driver):
             execution['ordered_pairs'] for execution in result['executions']
         )
         assert result['collision_groups'] == collisions
-        assert result['coverage_complete'] == (case not in ('exhausted',))
+        assert result['coverage_complete'] == (
+            case
+            not in (
+                'exhausted',
+                'loop_access_loss',
+                'loop_sync_loss',
+                'loop_late',
+                'loop_no_b0_full_journal',
+                'loop_no_b0_sync_loss',
+            )
+        )
         assert result['verdict'] == ('findings' if status else 'no_observed_findings')
         raw = json.loads((self.directory / 'inspect.stdout').read_text())
         assert result['execution_conditions'] == raw['execution_conditions'] == 15
@@ -128,9 +145,23 @@ class AnalysisDriver(Driver):
             assert analyzed['lost_occurrences'] == (
                 {
                     'exhausted': 1,
+                    'loop_access_loss': 4,
+                    'loop_sync_loss': 32,
+                    'loop_no_b0_full_journal': 24,
+                    'loop_no_b0_sync_loss': 32,
                 }.get(case, 0)
             )
-            assert analyzed['ordering_uncertain'] == (case in ('exhausted',))
+            assert analyzed['ordering_uncertain'] == (
+                case
+                in (
+                    'exhausted',
+                    'loop_access_loss',
+                    'loop_sync_loss',
+                    'loop_late',
+                    'loop_no_b0_full_journal',
+                    'loop_no_b0_sync_loss',
+                )
+            )
             assert analyzed['cross_wave_pairs'] == (
                 self.args.workgroups
                 if case == 'grouped_race'
@@ -145,7 +176,12 @@ class AnalysisDriver(Driver):
                         'mixed_b16',
                         'barrier_missing_second',
                     )
-                    else 0
+                    else {
+                        'loop_no_b0': 3,
+                        'loop_no_b1': 2,
+                        'loop_no_b0_full_journal': 4,
+                        'loop_no_b0_sync_loss': 4,
+                    }.get(case, 0)
                 )
             )
             assert analyzed['collision_groups'] == collisions
@@ -219,6 +255,32 @@ class AnalysisDriver(Driver):
                     assert (
                         result['scope'] == 'native_lds_single_range_no_sync_bounded_1d'
                     )
+            if case.startswith('loop_'):
+                assert analyzed['integrity_events'] == 0
+                if case.startswith('loop_no_b0_'):
+                    # The same first four endpoints remain confirmed on either
+                    # side of the journal limit, despite later access/sync loss.
+                    examples = analyzed['cross_wave_examples']
+                    assert len(examples) == 4
+                    assert {finding['first']['phase'] for finding in examples} == set(
+                        range(4)
+                    )
+                    for finding in examples:
+                        assert finding['ordering'] == 'unordered'
+                        assert finding['first']['phase'] == finding['second']['phase']
+                        assert (
+                            finding['first']['sequence']
+                            == finding['second']['sequence']
+                            == finding['first']['phase'] + 1
+                        )
+                assert analyzed['ordering_unresolved_pairs'] == (
+                    1 if case == 'loop_late' else 0
+                )
+                assert analyzed['synchronization_loss'] == {
+                    'loop_sync_loss': 48,
+                    'loop_no_b0_sync_loss': 8,
+                    'loop_late': 8,
+                }.get(case, 0)
             if case == 'mixed_barrier':
                 assert analyzed['ordered_pairs'] == 1
                 assert (

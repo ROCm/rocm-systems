@@ -73,6 +73,8 @@ int main(int argc, char **argv) {
                 << ",\"final_sequence\":"
                 << *wire::read_u32(execution.report, row + wire::kRowFinalSequence)
                 << ",\"sync_loss\":" << *wire::read_u32(execution.report, row + wire::kRowSyncLoss)
+                << ",\"counter_exhausted\":"
+                << *wire::read_u32(execution.report, row + wire::kRowCounterExhausted)
                 << ",\"final_phase\":"
                 << *wire::read_u32(execution.report, row + wire::kRowFinalPhase)
                 << ",\"completions\":[";
