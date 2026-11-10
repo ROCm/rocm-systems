@@ -800,6 +800,7 @@ public:
     if (inst->gds)
       out += " gds";
   }
+  void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
 };
@@ -835,6 +836,8 @@ public:
       out += " slc";
     if (inst->lds)
       out += " lds";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -856,6 +859,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -883,6 +888,42 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (!mnemonic_.starts_with("image_bvh")) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask & 0xfu];
+    }
+    if (!mnemonic_.starts_with("image_bvh")) {
+      static constexpr std::string_view dims[] = {
+          "1D", "2D", "3D", "CUBE", "1D_ARRAY", "2D_ARRAY", "2D_MSAA", "2D_MSAA_ARRAY"};
+      out += " dim:SQ_RSRC_IMG_";
+      out += dims[inst->dim & 7u];
+    }
+    if (!mnemonic_.starts_with("image_bvh")) {
+      if (inst->unorm)
+        out += " unorm";
+      if (inst->glc)
+        out += " glc";
+      if (inst->slc)
+        out += " slc";
+      if (inst->dlc)
+        out += " dlc";
+      if (inst->r128)
+        out += " r128";
+    }
+    if (inst->a16)
+      out += " a16";
+    if (!mnemonic_.starts_with("image_bvh")) {
+      if (inst->tfe)
+        out += " tfe";
+      if (inst->lwe)
+        out += " lwe";
+      if (inst->d16)
+        out += " d16";
+    }
+  }
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();

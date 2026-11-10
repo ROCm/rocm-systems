@@ -134,7 +134,16 @@ enum InstFlags : uint64_t {
   /// decoded displacement. Query writes_pc() for the combined classification.
   WRITES_PC = (1ULL << 37),
   /// @brief Software trap instruction (s_trap).
-  SOFTWARE_TRAP = (1ULL << 38)
+  SOFTWARE_TRAP = (1ULL << 38),
+  /// @brief The trailing DWORD of the VGPR result can preserve the shader's incoming value,
+  /// even at full EXEC. Memory feedback writes only lanes with a fault or warning.
+  CONDITIONAL_LAST_VGPR_DEF = (1ULL << 44),
+  /// The result requires an extra allocated VGPR beyond its data registers.
+  RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
+  COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
+  /// Global load-transpose instructions acquire no register operands when EXEC is zero.
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43)
 };
 
 class BasicBlock;
@@ -371,6 +380,10 @@ public:
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
   /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
   bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
+  /// An empty transpose suppresses register and memory accesses but can occupy LOADCNT.
+  bool is_empty_global_transpose(uint64_t exec) const {
+    return (flags_ & GLOBAL_TRANSPOSE_LOAD) && !exec;
+  }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
   /// @brief Whether the instruction includes a memory completion wait field.
@@ -384,6 +397,13 @@ public:
   }
 
   uint64_t flags() const { return flags_; }
+
+  /// Size an explicit destination according to the issuing wave's width.
+  RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
+    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT))
+      ref.width /= 2;
+    return wave_sized_register(op, ref, wave_size);
+  }
 
   bool is_waitcnt() const { return flags_ & WAITCNT; }
 

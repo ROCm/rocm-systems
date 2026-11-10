@@ -4070,7 +4070,11 @@ TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
   EXPECT_EQ(se1_wfs, 0u);
 }
 
-std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second) {
+std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second,
+                                                 uint32_t lds_size_kib = 0) {
+  const std::string lds =
+      lds_size_kib ? R"({"key":"lds_size_kb","value":")" + std::to_string(lds_size_kib) + R"("},)"
+                   : "";
   return R"({"max_ticks":10000,"num_threads":1,"exec_mode":"functional",
     "vm":{"arch":"cdna3"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
@@ -4080,11 +4084,11 @@ std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second
         {"name":"cp","type":"command_processor"},
         {"name":"se0","type":"shader_engine","children":[
           {"name":"cu0","type":"compute_unit","config":[
-            {"key":"functional_quantum","value":")" +
-         std::to_string(first) + R"("}]},
+            )" +
+         lds + R"({"key":"functional_quantum","value":")" + std::to_string(first) + R"("}]},
           {"name":"cu1","type":"compute_unit","config":[
-            {"key":"functional_quantum","value":")" +
-         std::to_string(second) + R"("}]}
+            )" +
+         lds + R"({"key":"functional_quantum","value":")" + std::to_string(second) + R"("}]}
         ]}
       ]}
     ]}}})";
@@ -4874,6 +4878,148 @@ TEST(CheckpointTest, RestoresCuOwnedLdsWindowsForDecodedReads) {
   }
 }
 
+TEST(CheckpointTest, RestoresAnExhaustedLegacyLdsCursorUntilTheWavesRetire) {
+  for (const auto &[arch, kib] : {std::pair{"cdna4", 64u}, std::pair{"cdna5", 63u}}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 2, kib);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    const uint32_t capacity = kib * 1024, window_size = capacity / 2;
+    const uint32_t granule = amdgpu::lds_allocation_granule(cu->arch());
+    ASSERT_EQ(cu->allocate_lds(capacity / granule * granule), 0u);
+    for (uint32_t slot = 0; slot < 2; ++slot) {
+      auto *wave = cu->dispatch_wf(slot, 0x1000, 16, 4);
+      ASSERT_NE(wave, nullptr);
+      wave->set_lds_base(slot * window_size);
+      wave->set_lds_size(window_size);
+      wave->lds().write32(wave->lds_base() + 64, 0xcafe1000 + slot);
+    }
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-exhausted-cursor-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config, 1, {})
+                    .succeeded());
+    auto bytes = read_binary_file(file.path());
+    const auto *units = fb::GetSimulationCheckpoint(bytes.data())->compute_units();
+    ASSERT_NE(units, nullptr);
+    auto *unit = reinterpret_cast<flatbuffers::Table *>(units->GetMutableObject(0));
+    auto write_cursor = [&](uint32_t cursor) {
+      ASSERT_TRUE(unit->SetField<uint32_t>(fb::ComputeUnitState::VT_LDS_CURSOR, cursor));
+      ASSERT_TRUE(
+          file.write(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+    };
+    for (uint32_t malformed : {capacity + 256, capacity - 1}) {
+      ASSERT_NO_FATAL_FAILURE(write_cursor(malformed));
+      EXPECT_TRUE(config::restore_checkpoint(file.path(), {}).failed());
+    }
+    // A 256-byte placement writer can fit two equal windows exactly into this CU.
+    ASSERT_NO_FATAL_FAILURE(write_cursor(capacity));
+    for (unsigned round = 0; round < 2; ++round) {
+      SCOPED_TRACE(round);
+      config::LoadedConfig restored;
+      ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+      auto *out = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+      EXPECT_EQ(out->reserved_lds_bytes(), capacity);
+      EXPECT_TRUE(out->can_accept_workgroup(1, 0));
+      EXPECT_FALSE(out->can_accept_workgroup(1, 256));
+      for (uint32_t slot = 0; slot < 2; ++slot) {
+        auto *wave = out->wf(slot);
+        ASSERT_NE(wave, nullptr);
+        EXPECT_EQ(wave->lds_base(), slot * window_size);
+        EXPECT_EQ(wave->lds_size(), window_size);
+        EXPECT_EQ(wave->lds().read32(wave->lds_base() + 64), 0xcafe1000 + slot);
+      }
+      if (round == 0) {
+        ASSERT_TRUE(
+            config::save_checkpoint(file.path(), *restored.soc(), 0, restored.engine_config, 1, {})
+                .succeeded());
+      } else {
+        out->wf(0)->halt();
+        out->wf(1)->halt();
+        EXPECT_TRUE(out->can_accept_workgroup(1, 256));
+        EXPECT_EQ(out->allocate_lds(256), 0u);
+      }
+    }
+  }
+}
+
+TEST(CheckpointTest, PreservesLdsBackingPastTheLastNativeAllocation) {
+  struct Case {
+    const char *arch;
+    uint32_t capacity_kib;
+    uint32_t group_size;
+    uint32_t endpgm;
+  };
+  for (const auto &[arch, capacity_kib, group_size, endpgm] :
+       {Case{"cdna4", 64, 64000, 0xbf810000}, Case{"cdna5", 63, 63488, 0xbfb00000}}) {
+    SCOPED_TRACE(arch);
+    auto json = functional_quantum_checkpoint_config(1, 2, capacity_kib);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    rj_vm_t *raw = nullptr;
+    ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+              ROCJITSU_STATUS_SUCCESS);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+    auto *soc = vm->soc;
+    auto *xcd = soc->xcd(0);
+    auto *cu = xcd->shader_engine(0)->compute_unit(0);
+    amdhsa::kernel_descriptor_t kd{};
+    kd.kernel_code_entry_byte_offset = sizeof(kd);
+    kd.group_segment_fixed_size = group_size;
+    constexpr uint64_t kernel = 0x1000;
+    const uint32_t code[] = {0xbf800000, 0xbf800000, endpgm};
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), kernel);
+    soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code),
+                              kernel + sizeof(kd));
+    test::AqlQueue queue(soc->memory(), xcd->command_processor());
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.workgroup_size_x = packet.grid_size_x = 32;
+    packet.workgroup_size_y = packet.grid_size_y = 1;
+    packet.workgroup_size_z = packet.grid_size_z = 1;
+    packet.kernel_object = kernel;
+    packet.group_segment_size = group_size;
+    queue.submit(packet);
+    int active = 0;
+    for (unsigned step = 0; !cu->has_active_wfs() && step < 100; ++step)
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_TRUE(cu->has_active_wfs());
+    ASSERT_EQ(cu->reserved_lds_bytes(), group_size);
+    for (unsigned step = 0; cu->has_active_wfs() && step < 100; ++step)
+      ASSERT_EQ(rj_vm_step(vm.get(), &active), ROCJITSU_STATUS_SUCCESS);
+    ASSERT_FALSE(cu->has_active_wfs());
+    ASSERT_EQ(cu->reserved_lds_bytes(), 0u);
+    const uint32_t capacity = capacity_kib * 1024u;
+    ASSERT_EQ(cu->lds().materialized_size_bytes(), capacity);
+    cu->lds().write32(capacity - 4, 0xcafebabe);
+    cu->lds().write32(group_size - 4, 0x1234abcd);
+    for (const bool resident : {false, true}) {
+      SCOPED_TRACE(resident);
+      if (resident) {
+        ASSERT_EQ(cu->allocate_lds(group_size), 0u);
+        auto *wave = cu->dispatch_wf(0, kernel, 16, 4);
+        ASSERT_NE(wave, nullptr);
+        wave->set_lds_size(group_size);
+      }
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-lds-backing-"));
+      ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0), ROCJITSU_STATUS_SUCCESS);
+      rj_vm_t *loaded = nullptr;
+      ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &loaded), ROCJITSU_STATUS_SUCCESS);
+      std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> restored(loaded, &rj_vm_destroy);
+      auto *other = restored->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      EXPECT_EQ(other->reserved_lds_bytes(), resident ? group_size : 0u);
+      EXPECT_EQ(other->lds().read32(capacity - 4), 0xcafebabeu);
+      EXPECT_EQ(other->lds().read32(group_size - 4), 0x1234abcdu);
+      if (resident) {
+        ASSERT_NE(other->wf(0), nullptr);
+        EXPECT_EQ(other->wf(0)->lds_size(), group_size);
+      }
+    }
+  }
+}
+
 TEST(CheckpointTest, RestoresScalarFloatingPointExceptionsReadByTheShader) {
   for (const std::string_view profile : {"rdna3_5", "rdna4"}) {
     SCOPED_TRACE(profile);
@@ -5007,6 +5153,64 @@ TEST(CheckpointTest, RejectsUnrestorableGfx10SchedulerStateBeforeReplacingCheckp
   }
 }
 
+TEST(CheckpointTest, AlignsNewGfx10ReservationsAfterRestoringAnOlderLdsCursor) {
+  for (const std::string_view profile : {"rdna1", "rdna2"}) {
+    SCOPED_TRACE(profile);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *wave = cu->dispatch_wf(0, 0x1000, 16, 4);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(cu->allocate_lds(256), 0u);
+    wave->set_lds_base(0);
+    wave->set_lds_size(256);
+    wave->lds().write32(252, 0x1234abcd);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-gfx10-lds-cursor-"));
+    ASSERT_TRUE(config::save_checkpoint(file.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+
+    // Older GFX10 writers advanced the allocator by 256 bytes for this live window.
+    auto bytes = read_binary_file(file.path());
+    const auto *units = fb::GetSimulationCheckpoint(bytes.data())->compute_units();
+    ASSERT_NE(units, nullptr);
+    ASSERT_GT(units->size(), 0u);
+    auto *unit = reinterpret_cast<flatbuffers::Table *>(units->GetMutableObject(0));
+    auto *resources =
+        unit->GetPointer<flatbuffers::Table *>(fb::ComputeUnitState::VT_GFX10_RESOURCES);
+    ASSERT_NE(resources, nullptr);
+    ASSERT_TRUE(resources->SetField<uint32_t>(fb::Gfx10CuResources::VT_NEXT_LDS_ALLOC, 256));
+    ASSERT_TRUE(
+        file.write(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size())));
+
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(file.path(), restored));
+    auto *out = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto *resident = out->wf(0);
+    ASSERT_NE(resident, nullptr);
+    EXPECT_EQ(resident->lds_base(), 0u);
+    EXPECT_EQ(resident->lds_size(), 256u);
+    EXPECT_EQ(resident->lds().read32(252), 0x1234abcdu);
+    const auto fresh_base = cu->allocate_lds(256);
+    ASSERT_EQ(fresh_base, profile == "rdna1" ? 512u : 1024u);
+    EXPECT_EQ(out->reserved_lds_bytes(), fresh_base);
+    auto *next = out->dispatch_wf(1, 0x2000, 16, 4);
+    ASSERT_NE(next, nullptr);
+    next->set_lds_base(out->allocate_lds(256));
+    next->set_lds_size(fresh_base);
+    EXPECT_EQ(next->lds_base(), fresh_base);
+    const auto decoder = Decoder::create(out->arch());
+    auto read = decoder->decode_window(
+        rdna2::build_sopk(rdna2::kSGetregB32, {.simm16 = 0xf806, .sdst = 3}));
+    ASSERT_TRUE(read.succeeded());
+    ASSERT_TRUE(out->execute_instruction(read.value().get(), *next).succeeded());
+    EXPECT_EQ(out->read_sgpr(next->sgpr_alloc().base + 3), profile == "rdna1" ? 0x2002u : 0x4004u);
+  }
+}
+
 TEST(CheckpointTest, Gfx10RestoresLaneReadAllocationAndOwnedLds) {
   struct Case {
     const char *profile;
@@ -5129,8 +5333,80 @@ TEST(CheckpointTest, PreservesRequestedVgprsAcrossWaveArchitectures) {
   }
 }
 
+TEST(CheckpointTest, PreservesReturningDsAtomicBehaviorAtTheVgprBoundary) {
+  for (const std::string_view arch : {"cdna3", "cdna5", "rdna4"}) {
+    SCOPED_TRACE(arch);
+    for (const uint32_t destination : {1u, 32u}) {
+      SCOPED_TRACE(destination);
+      auto json = functional_quantum_checkpoint_config(1, 1);
+      ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+      rj_vm_t *raw = nullptr;
+      ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+                ROCJITSU_STATUS_SUCCESS);
+      using Vm = std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)>;
+      Vm original(raw, &rj_vm_destroy);
+      const auto cu = [](const Vm &vm) {
+        return vm->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+      };
+      // Keep the wave resident after DS_ADD_RTN_U32 so its returned register can be read at
+      // completion.
+      std::array<uint32_t, 16> code;
+      code.fill(0xbf800000); // s_nop 0
+      code[0] = arch == "cdna3" ? 0xd8400000u : 0xd8800000u;
+      code[1] = destination << 24 | 0x302u;
+      code.back() = arch == "cdna3" ? 0xbf810000u : 0xbfb00000u;
+      original->soc->memory()->load_image(reinterpret_cast<const uint8_t *>(code.data()),
+                                          sizeof(code), 0x1000);
+      auto *wave = cu(original)->dispatch_wf(0, 0x1000, 16, 4, arch == "cdna3" ? 64 : 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_m0(UINT32_MAX);
+      wave->set_lds_base(cu(original)->allocate_lds(256));
+      wave->set_lds_size(256);
+      wave->lds().write32(8, 41);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + 2, 0, 8);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + 3, 0, 1);
+      cu(original)->write_vgpr(wave->vgpr_alloc().base + destination, 0, 0xfeed);
+      test::ScopedTempFile file;
+      ASSERT_TRUE(file.initialize("rocjitsu-checkpoint-ds-atomic-boundary-"));
+      ASSERT_EQ(rj_vm_save_checkpoint(original.get(), file.path().c_str(), 0),
+                ROCJITSU_STATUS_SUCCESS);
+      rj_vm_t *other = nullptr;
+      ASSERT_EQ(rj_vm_restore_checkpoint(file.path().c_str(), &other), ROCJITSU_STATUS_SUCCESS);
+      Vm restored(other, &rj_vm_destroy);
+      std::array<uint32_t, 2> results{};
+      unsigned machine_index = 0;
+      for (const auto *machine : {&original, &restored}) {
+        auto *resident = cu(*machine)->wf(0);
+        ASSERT_NE(resident, nullptr);
+        EXPECT_EQ(resident->num_vgprs(), 4u);
+        const uint32_t physical_result = resident->vgpr_alloc().base + destination;
+        for (unsigned i = 0;
+             i < 32 && (resident->pc == 0x1000 || !resident->wait_counters().empty()); ++i)
+          ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+        ASSERT_FALSE(resident->is_halted());
+        ASSERT_NE(resident->pc, 0x1000u);
+        ASSERT_TRUE(resident->wait_counters().empty());
+        results[machine_index++] = cu(*machine)->read_vgpr(physical_result, 0);
+        for (unsigned i = 0; i < 32 && !resident->is_halted(); ++i)
+          ASSERT_EQ(rj_vm_step(machine->get(), nullptr), ROCJITSU_STATUS_SUCCESS);
+        ASSERT_TRUE(resident->is_halted());
+      }
+      EXPECT_EQ(results[0], results[1]);
+      if (destination == 1) {
+        EXPECT_EQ(results[0], 41u);
+      }
+      const uint32_t original_word = cu(original)->lds().read32(8);
+      EXPECT_EQ(cu(restored)->lds().read32(8), original_word);
+      if (destination == 1 || arch == "rdna4") {
+        EXPECT_EQ(original_word, destination == 1 ? 42u : 41u);
+      }
+    }
+  }
+}
+
 TEST(CheckpointTest, RestoresLogicalVgprBoundsUsedByDecodedInstructions) {
-  for (const char *profile : {"cdna1", "cdna2"}) {
+  for (const char *profile : {"cdna1", "cdna2", "rdna3", "rdna3_5"}) {
     SCOPED_TRACE(profile);
     auto json = functional_quantum_checkpoint_config(1, 1);
     ASSERT_TRUE(replace_exactly_once(json, "cdna3", profile));

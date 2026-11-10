@@ -1453,6 +1453,11 @@ Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
   opcode_ = inst_.op;
 }
 
+void Ds::implicit_uses(RegisterSet &uses) const {
+  if (inst_.gds)
+    uses.expand(RegisterRef{RegClass::M0, 0, 1});
+}
+
 Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
   flags_ |= VMEM;

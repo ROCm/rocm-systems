@@ -44,7 +44,8 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
   if (!wf.exec())
     return;
   const uint32_t type = (wf.m0() >> 16) & 7, address = wf.m0() & 0xffff;
-  if (!valid_lds_direct_operand(wf.m0()) || dst >= wf.num_vgprs()) {
+  if (!valid_lds_direct_operand(wf.m0()) ||
+      (dst >= wf.num_vgprs() && wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3_5)) {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
