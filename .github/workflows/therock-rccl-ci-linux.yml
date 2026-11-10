@@ -296,10 +296,8 @@ jobs:
       # One workload failing says nothing about the others.
       fail-fast: false
       max-parallel: 1
-      # job_timeout_minutes is the whole-job budget; the script gets 60 less,
-      # which has to cover the SLURM time_limit plus queueing, because the
-      # allocation is taken inside it. 390 is a 4 h time_limit plus 90 minutes
-      # of queue slack.
+      # job_timeout_minutes = 60 reserved + SLURM time_limit + 90 queue slack:
+      # 390 = 60 + 240 + 90.
       matrix:
         include:
           - workload: gpt-oss-120b-training
@@ -308,11 +306,8 @@ jobs:
           - workload: llama-3.1-70b-pp4-training
             nodes: '2'
             job_timeout_minutes: '390'
-          # 4 nodes: the config's parallelism and per_device_batch_size were
-          # validated there in ROCm/MAD#228, and the memory headroom does not
-          # survive a smaller allocation. 450 is its 5 h time_limit plus the
-          # same 90 minutes; at 390, a 4-node request that waited more than
-          # half an hour would be killed while still queued.
+          # 4 nodes: validated at that scale in ROCm/MAD#228; fewer run out of
+          # memory. 450 = 60 + 300 (5 h time_limit) + 90.
           - workload: llama-3.1-405b-maxtext
             nodes: '4'
             job_timeout_minutes: '450'
