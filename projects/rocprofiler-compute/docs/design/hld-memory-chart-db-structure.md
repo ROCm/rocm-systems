@@ -77,7 +77,7 @@ layout.
 | Named `memory_chart_layout_extdata` | Says what it holds, and follows the `*_extdata` convention. | `memory_chart_extdata`, the name Optiq's development branch reads in its older format, which an older Optiq build would misread. |
 | Null when a GPU family has no layout | The column also covers a layout file that was skipped as broken. Readers then use their own fallback. | Failing the database output. |
 | A `version` field in the layout | The layout file is a contract with readers outside rocprof-compute, and the version tells a reader whether it understands the file. | The database schema version alone, which changes with every database change and is not part of the layout. |
-| Schema version 2.4.0 | The change only adds a column. | — |
+| Schema version 2.4.0 | Adding the column. Changes to the JSON in it are tracked by the layout's `version`; a layout without one has the earlier format, which readers skip. | — |
 
 ### Out of scope
 

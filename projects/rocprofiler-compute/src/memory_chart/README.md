@@ -214,7 +214,9 @@ always follows them:
 `version` changes only when a change to the format could make an existing reader draw
 a layout wrongly, for example a renamed or removed field or a field whose meaning
 changes. A reader should skip a layout with a version it doesn't know, the way
-`analyze` does.
+`analyze` does. A layout with no `version` has the earlier format, with `metric`,
+`position`, and `host` fields, which analysis databases from earlier rocprof-compute
+builds store; skip it too.
 
 ## Metric values
 
