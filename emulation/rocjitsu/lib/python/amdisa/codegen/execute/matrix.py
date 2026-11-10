@@ -603,6 +603,32 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         )
         return '\n'.join(L)
 
+    if (
+        arch == 'cdna4'
+        and input_type in ('F8_F6_F4', 'F8F6F4')
+        and (M, N, K) in ((16, 16, 128), (32, 32, 64))
+    ):
+        L.append(
+            '  auto registers_for = [](uint32_t format) -> uint32_t { return format < 2 ? 8 : format < 4 ? 6 : 4; };'
+        )
+        L.append(
+            '  if (inst_.cbsz > 4 || inst_.blgp > 4) { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }'
+        )
+        L.append(
+            '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << RJ_ARITH_MATRIX_FORMAT_B_SHIFT);'
+        )
+        L.append(f'  amdgpu::arith::exec_dense_fp_matrix<8, {M*M//64}, 64>(')
+        L.append(
+            f'      wf, rj_arith_{name.lower()}_w64, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
+        )
+        L.append(
+            '      const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+        )
+        L.append(
+            '      ~uint64_t{0}, ~uint64_t{0}, registers_for(inst_.cbsz), registers_for(inst_.blgp));'
+        )
+        return '\n'.join(L)
+
     is_split_half = (M, N, K) == (16, 16, 32) and (result_type, input_type) in {
         ('F32', 'F16'),
         ('F32', 'BF16'),
@@ -777,36 +803,42 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         if uses_fixed_wave32_split_k_dense_layout and input_type in (
             'F8_F6_F4',
             'F8F6F4',
+            'F4',
         ):
-            L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
+            if input_type == 'F4':
+                L.append('  uint32_t matrix_a_fmt = 4, matrix_b_fmt = 4;')
+                L.append('  uint64_t controls = 0;')
+            else:
+                L.append('  uint32_t matrix_a_fmt = inst_.opsel;')
+                L.append(
+                    f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | inst_.opsel_hi;'
+                )
+                L.append(
+                    '  if (matrix_a_fmt > 4 || matrix_b_fmt > 4) { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }'
+                )
+                L.append(
+                    '  uint64_t controls = matrix_a_fmt | (uint64_t(matrix_b_fmt) << 3);'
+                )
+            L.append('  if (inst_.neg & 4) controls |= RJ_ARITH_WMMA_MIXED_NEG_C;')
+            L.append('  if (inst_.neg_hi & 4) controls |= RJ_ARITH_WMMA_MIXED_ABS_C;')
             L.append(
-                f'  uint32_t matrix_b_fmt = ({op_sel_hi_2_expr} << 2) | '
-                f'inst_.opsel_hi;'
+                '  auto registers_for = [](uint32_t fmt) { return fmt < 2 ? 16u : fmt < 4 ? 12u : 8u; };'
+            )
+            api = (
+                f'rj_arith_v_wmma_f32_{M}x{N}x{K}_'
+                + ('f4' if input_type == 'F4' else 'f8f6f4')
+                + '_w32'
+            )
+            L.append(f'  amdgpu::arith::exec_dense_fp_matrix<16, {M*N//32}, 32>(')
+            L.append(
+                f'      wf, {api}, cu.arithmetic_flags(), controls, dst, {src0_base_expr}, {src1_base_expr}, s2,'
             )
             L.append(
-                f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
-                f'matrix_a_fmt, matrix_b_fmt,'
+                '      const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,'
             )
             L.append(
-                f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'
+                f'      0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt) * {M//16}, registers_for(matrix_b_fmt));'
             )
-            L.append(
-                f'        amdgpu::exec_wmma_f32_mixed<{M}, {N}, {K}>(cu, a_bits, b_bits, dst,'
-            )
-            L.append(f'            {src0_base_expr},')
-            L.append(f'            {src1_base_expr},')
-            L.append(
-                f'            s2, extract_a, extract_b, const_acc,'
-                f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
-            )
-            L.append(f'      }});')
-            L.append('  if (!dispatched) {')
-            L.append('    wf.report_instruction_execution_error(')
-            L.append(
-                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);'
-            )
-            L.append('    return;')
-            L.append('  }')
             return '\n'.join(L)
 
         if uses_rdna_swmmac_arithmetic:
