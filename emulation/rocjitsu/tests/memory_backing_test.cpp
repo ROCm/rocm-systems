@@ -468,7 +468,6 @@ int small_send_buffer_socket(int domain, int type, int protocol) noexcept {
 
 unsigned queued_files = 0;
 unsigned queue_full_count = 0;
-rlimit metadata_send_limit{};
 
 // Model the kernel limiting outstanding SCM_RIGHTS messages until a flush.
 // This makes descriptor pressure independent of how fast the keeper runs.
@@ -483,18 +482,7 @@ ssize_t limit_queued_files(int socket, const msghdr *message, int flags) {
   } else {
     queued_files = 0;
   }
-  // In-flight SCM_RIGHTS descriptors count per user, including other tests.
-  // Keep the low open-file budget outside sends; model queue pressure above.
-  rlimit limited{};
-  if (getrlimit(RLIMIT_NOFILE, &limited) != 0 ||
-      setrlimit(RLIMIT_NOFILE, &metadata_send_limit) != 0)
-    return -1;
-  const ssize_t result = ::sendmsg(socket, message, flags);
-  const int error = errno;
-  if (setrlimit(RLIMIT_NOFILE, &limited) != 0)
-    return -1;
-  errno = error;
-  return result;
+  return ::sendmsg(socket, message, flags);
 }
 
 void check_metadata_batch(bool finite_limit) {
@@ -512,7 +500,6 @@ void check_metadata_batch(bool finite_limit) {
   rlimit limited = original;
   limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, 16);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
-  metadata_send_limit = original;
   std::vector<rocjitsu::BackingFile> files;
   const size_t inlined = rocjitsu::kmd::kKeeperInlineFileSize;
   const size_t sizes[] = {0,       1,       64,      65,          inlined,
