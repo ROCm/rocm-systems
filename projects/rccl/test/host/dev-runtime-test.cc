@@ -7462,6 +7462,23 @@ TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) 
   EXPECT_EQ(seen, (std::vector<uint32_t>{static_cast<uint32_t>(NCCL_VERSION_CODE), kJitFieldVersion}));
 }
 
+// The enqueue-rearch job builds the devComm for the version it was queued
+// with, not the version recorded in its (compile-time) requirements.
+TEST_F(DevrCommCreateInternalJitTest, CreateJob_BuildsForQueuedDeviceCodeVersion) {
+  auto* job = new ncclDevrCommCreateAsyncJob();
+  job->comm = comm;
+  job->outDevComm = &outDevComm;
+  job->deviceCodeVersion = NCCL_VERSION_CODE;
+  ASSERT_EQ(deepCopyDevCommRequirements(&reqs, &job->reqs), ncclSuccess);
+
+  EXPECT_EQ(ncclDevrCommCreateJob(&job->base), ncclSuccess);
+
+  EXPECT_TRUE(NewToOldCalls().empty());
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
+  EXPECT_EQ(job->reqs, nullptr);  // the job releases its copy once it has run
+  ncclDevrCommCreateAsyncJobFree(job);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
