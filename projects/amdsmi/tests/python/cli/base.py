@@ -234,6 +234,7 @@ class TestCliBase(unittest.TestCase):
                 gpus.append(entry["bdf"])
                 gpus.append(entry["uuid"])
         baseline["gpus"] = gpus
+        baseline["nics"] = cls._nic_sweep_values()
 
         # When parsing, expand each arg with its value(s).
         # CPU/Core/NIC are given default values because their sub-arguments require a value.
@@ -243,7 +244,7 @@ class TestCliBase(unittest.TestCase):
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
-            "NIC": ["all", "0"],
+            "NIC": baseline["nics"],
             "CPU": ["all", "0"],
             "CORE": ["all", "0"],
             "FILE": [
@@ -258,6 +259,22 @@ class TestCliBase(unittest.TestCase):
         }
         baseline["clk_freq"] = cls._read_clk_freq()
         return baseline
+
+    @classmethod
+    def _nic_sweep_values(cls) -> list:
+        """Values for the --nic selector: none on a host without a NIC.
+
+        A host without a NIC answers ``--nic 0`` with DEVICE_NOT_FOUND and
+        ``--nic all`` with no output, so sweeping them could never pass.
+        """
+        (rc, data, _) = cls.util.RunCmdSync("amd-smi list --nic all --json")
+        if rc or not data:
+            return []
+        try:
+            nics = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+        return ["all", "0"] if nics else []
 
     @classmethod
     def _read_clk_freq(cls):
