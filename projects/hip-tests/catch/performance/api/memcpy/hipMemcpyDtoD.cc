@@ -22,6 +22,9 @@ class MemcpyDtoDBenchmark : public Benchmark<MemcpyDtoDBenchmark> {
 static void RunBenchmark(size_t size, bool enable_peer_access = false) {
   MemcpyDtoDBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
+  // A device-to-device copy reads `size` bytes and writes `size` bytes, so the
+  // device memory traffic is twice the logical copy size.
+  benchmark.RegisterBandwidth(2 * size);
 
   int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
   int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
@@ -40,9 +43,9 @@ static void RunBenchmark(size_t size, bool enable_peer_access = false) {
  * ------------------------
  *  - Executes `hipMemcpyDtoD` from Device to Device with peer access enabled:
  *    -# Allocation size
- *      - Small: 4 KB
- *      - Medium: 4 MB
- *      - Large: 16 MB
+ *      - Small: 4 KB, 8 KB, 16 KB
+ *      - Medium: 1 MB, 4 MB, 16 MB
+ *      - Large: 256 MB
  *    -# Allocation type
  *      - Source: device malloc
  *      - Destination: device malloc
@@ -59,7 +62,7 @@ HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
   if (HipTest::getDeviceCount() < 2) {
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
-  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto allocation_size = GENERATE(4_KB, 8_KB, 16_KB, 1_MB, 4_MB, 16_MB, 256_MB);
   RunBenchmark(allocation_size, true);
 }
 
@@ -68,9 +71,9 @@ HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
  * ------------------------
  *  - Executes `hipMemcpyDtoD` from Device to Device with peer access disabled:
  *    -# Allocation size
- *      - Small: 4 KB
- *      - Medium: 4 MB
- *      - Large: 16 MB
+ *      - Small: 4 KB, 8 KB, 16 KB
+ *      - Medium: 1 MB, 4 MB, 16 MB
+ *      - Large: 256 MB
  *    -# Allocation type
  *      - Source: device malloc
  *      - Destination: device malloc
@@ -82,7 +85,7 @@ HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessEnabled) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Performance_hipMemcpyDtoD_PeerAccessDisabled) {
-  const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto allocation_size = GENERATE(4_KB, 8_KB, 16_KB, 1_MB, 4_MB, 16_MB, 256_MB);
   RunBenchmark(allocation_size);
 }
 
