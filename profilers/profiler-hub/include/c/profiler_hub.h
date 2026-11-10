@@ -65,7 +65,8 @@ extern "C"
     ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future);
 
     /**
-     * @brief One SQLite file and the GUID of the tables read from it.
+     * @brief One trace file and the GUID of the tables read from it. guid is
+     *        empty for a format that has none.
      * @note path and guid point into the context that produced them. They
      *       stay valid until that context is freed.
      */
@@ -77,8 +78,8 @@ extern "C"
 
     /**
      * @brief Opens every trace file and creates one context for all of them.
-     * @param paths SQLite trace files. A file with several rocpd metadata
-     *        tables becomes one source per GUID. Must not be null.
+     * @param paths Trace files of any supported format. A rocpd file with
+     *        several metadata tables becomes one source per GUID. Must not be null.
      * @param path_count Number of entries in @p paths. Must be greater than zero.
      * @param future Same contract as ph_ctx_create().
      * @return Same status values as ph_ctx_create().

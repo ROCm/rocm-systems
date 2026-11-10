@@ -79,7 +79,8 @@ The reader is built in five layers. Each layer only calls the one below it.
 A context opens one or more trace files. Each file, or each GUID inside a
 schema-3 file, becomes one **source**, opened by its format's registry entry.
 Every source has its own catalog and its own `cached_track_reader`. A rocpd
-source also has its own connection pool.
+source also has its own connection pool. A Kineto source has no pool: it
+parses its file once into memory and serves the tracks from there.
 
 The visualizer expands a YAML project file into a path list
 (`HubYamlFiles` in Optiq). Profiler-hub only ever sees the list.
@@ -109,18 +110,34 @@ tables (`source/formats/rocpd/rocpd_probe.cpp`):
 - Otherwise an unsuffixed `rocpd_metadata` table with major version 2 means
   schema 2, the legacy `.rpd` layout.
 
+The pytorch entry recognises a Kineto trace without SQLite
+(`source/formats/pytorch/kineto_probe.cpp`). It reads the first two bytes. For
+the gzip magic it inflates up to 64 KiB, otherwise it reads up to 64 KiB of text.
+After an optional UTF-8 BOM the text must start with `{` and name `traceEvents`
+and one of `schemaVersion`, `deviceProperties`, `distributedInfo`,
+`baseTimeNanoseconds` or `cpu_op`. Any read or inflate error means the file is
+not its own. Its probe reads nothing more and reports success with version 0.0.0
+and no GUIDs, so a file that starts like a Kineto trace but holds bad JSON fails
+later, at load. A SQLite file starts with `S`, so no file matches both entries.
+
 The probed schema and version form a `trace_format_t`. The entry for that
 schema says which versions this build reads and maps the version to two
 factories: one builds the `reader_t::impl` subclass (`rocpd_v2_reader` or
 `rocpd_v3_reader`), and one builds the trim rules. The entry also trims: its
 `trim` copies a context's files into one database, and is null for a format that
-cannot trim. A file is accepted only when its entry reads the probed version.
+cannot trim. The pytorch entry has no reader factory and no trim-rule factory,
+and its `trim` is null. A file is accepted only when its entry reads the probed
+version.
 
 The compile options `PROFILER_HUB_ENABLE_ROCPD_V2` and
 `PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove that version's reader
 and trim sources and make the rocpd entry stop reading it. The entry itself is
 always built. A file of a removed version probes as
 `PH_RESULT_UNSUPPORTED_FILE`.
+
+The compile option `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (on by default) builds
+the pytorch entry and its sources and looks up zlib. With it off, the entry does
+not exist and a Kineto file probes as `PH_RESULT_UNSUPPORTED_FILE`.
 
 ### 2.3 Synchronous and asynchronous calls
 
@@ -210,13 +227,20 @@ second with a path list and no cache.
    context's thread pool when a future is passed:
    1. `open_sources` opens each source through its registry entry. A rocpd
       source builds a catalog and a connection pool of eight `reader_t`
-      connections. The context adds a `cached_track_reader` per source.
+      connections. A Kineto source builds an empty catalog and reads no file.
+      The context adds a `cached_track_reader` per source and hands it to the
+      source with `attach_reader`.
    2. Each source's `load_catalog` fills its catalog. For rocpd,
       `populate_reader_catalog` creates the topology indexes, reads strings,
       nodes, processes, threads, and agents in order, then reads tracks,
       code objects and kernel symbols, streams, queues, and PMC info in
       parallel. If a catalog cache file matches, the grouped scans that build
-      tracks and aggregates are skipped.
+      tracks and aggregates are skipped. A Kineto source parses its file here,
+      serially, and polls the load's cancel check on each 1 MiB refill of the
+      input. It then fills the catalog and numbers the events: tracks run 0 to
+      N-1, host threads by (pid, tid) and then GPU streams by (device, stream),
+      and event ids are dense per event type from 1 in track order. A Kineto file
+      is parsed on every open, also when a catalog cache folder is given.
    3. On a cache miss, `save_catalog_aggregates` (schema 2) or
       `save_derived_tracks` (schema 3) writes the catalog file.
    4. `initialize_track_list` publishes tracks and assigns global ids.
@@ -230,7 +254,9 @@ second with a path list and no cache.
       - No cache folder: each track is read into the in-memory cache.
 
       Then `finish_load` tells each source that every track is loaded. The
-      rocpd source does nothing.
+      rocpd source does nothing. A Kineto source frees its rows and keeps a table
+      of which event ids belong to which track, so `track_of` and the histogram
+      still answer; a row read after that throws.
    7. `attach_track_store` connects the timeline cache to each source's
       `cached_track_reader`, and the node, agent, process, thread, stream,
       queue, and PMC lists are built for the C structs.

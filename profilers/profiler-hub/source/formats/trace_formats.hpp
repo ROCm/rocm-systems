@@ -41,11 +41,14 @@ struct trim_source_t
  * file is accepted, its entry opens the file's source and the rocpd source's
  * connections build their reader from the entry. Trimming goes through the
  * entry's trim, which is null for a format that cannot trim; the rocpd trim
- * takes its row filter from make_trim. A new format adds an entry in
+ * takes its row filter from make_trim. make_reader and make_trim are null for
+ * a format with no reader_t backend. A new format adds an entry in
  * trace_formats.cpp, and a PROFILER_HUB_ENABLE_<FORMAT> CMake option when its
  * sources can be left out. The rocpd entry is always built: with both rocpd
  * version options off it supports no version, and the probe reports a rocpd
- * file as unsupported.
+ * file as unsupported. The pytorch entry is built only with
+ * PROFILER_HUB_ENABLE_PYTORCH_KINETO; with it off, a Kineto file probes as an
+ * unsupported format.
  */
 struct format_entry_t
 {

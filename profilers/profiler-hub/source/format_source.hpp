@@ -12,6 +12,7 @@
 #include "reader_catalog.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -27,6 +28,7 @@ namespace common
 {
 class thread_pool;
 }
+class cached_track_reader;
 
 /** @brief What a registry entry needs to open one trace file. */
 struct source_request_t
@@ -45,6 +47,8 @@ struct catalog_cache_t
     std::vector<std::string> paths;
     uint32_t                 index{ 0 };
     catalog_progress_fn      progress;
+    /// Empty, or true once the load should stop; a long load may poll it.
+    std::function<bool()> stop_requested;
 };
 
 /**
@@ -82,6 +86,11 @@ public:
     /** @brief Called once every track is loaded. A format that parsed its file into
      *         memory can free the rows here. */
     virtual void finish_load() {}
+
+    /** @brief Called once, right after the track reader for this source is built. A
+     *         format that frees its rows in finish_load can keep the pointer: the
+     *         reader outlives every call made to the source. */
+    virtual void attach_reader(cached_track_reader& /*reader*/) {}
 
     /** @brief Whole-track reads, through the interface the track cache already takes. */
     [[nodiscard]] virtual connection_source& track_reads() = 0;

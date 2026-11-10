@@ -454,21 +454,25 @@ TEST(ph_ctx_schema2_test, load_exposes_node_lists_details_histogram_queries_and_
         profiler_hub::resolved_event_query query;
         query.source_index = 0;
         ph_table_event rows[8]{};
-        EXPECT_GE(ctx.read_table_events(
-                      query, PH_EVENT_TYPE_KERNEL_DISPATCH, 0, UINT64_MAX, rows, 8),
-                  1U);
+        bool           declined = false;
+        EXPECT_GE(
+            ctx.read_table_events(
+                query, PH_EVENT_TYPE_KERNEL_DISPATCH, 0, UINT64_MAX, rows, 8, declined),
+            1U);
         query.search_strings    = { "vector_add" };
         query.has_string_filter = true;
         query.match_substring   = true;
-        EXPECT_GE(ctx.read_table_events(
-                      query, PH_EVENT_TYPE_KERNEL_DISPATCH, 0, UINT64_MAX, rows, 8),
-                  1U);
+        EXPECT_GE(
+            ctx.read_table_events(
+                query, PH_EVENT_TYPE_KERNEL_DISPATCH, 0, UINT64_MAX, rows, 8, declined),
+            1U);
 
         profiler_hub::resolved_event_query missing_track;
         missing_track.tracks = { 999999 };
-        EXPECT_EQ(ctx.read_table_events(
-                      missing_track, PH_EVENT_TYPE_REGION, 0, UINT64_MAX, rows, 8),
-                  0U);
+        EXPECT_EQ(
+            ctx.read_table_events(
+                missing_track, PH_EVENT_TYPE_REGION, 0, UINT64_MAX, rows, 8, declined),
+            0U);
 
         profiler_hub::resolved_event_query summary_query;
         summary_query.source_index = 0;
@@ -479,7 +483,8 @@ TEST(ph_ctx_schema2_test, load_exposes_node_lists_details_histogram_queries_and_
 
         uint64_t first = 0;
         uint64_t last  = 0;
-        EXPECT_TRUE(ctx.table_event_id_span(query, PH_EVENT_TYPE_REGION, first, last));
+        EXPECT_TRUE(
+            ctx.table_event_id_span(query, PH_EVENT_TYPE_REGION, first, last, declined));
         EXPECT_LE(first, last);
 
         ctx.release_track_events(&regions);

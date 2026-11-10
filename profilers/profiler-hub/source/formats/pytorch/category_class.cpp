@@ -11,7 +11,7 @@ namespace
 {
 using reader_types::event_type_t;
 
-constexpr category_class_t k_host_in_tree{ false, false, event_type_t::region };
+constexpr category_class_t k_host{ false, false, event_type_t::region };
 constexpr category_class_t k_launch_site{ false, true, event_type_t::region };
 constexpr category_class_t k_kernel{ true, false, event_type_t::kernel_dispatch };
 constexpr category_class_t k_copy{ true, false, event_type_t::memory_copy };
@@ -24,8 +24,8 @@ struct row_t
 };
 
 constexpr std::array<row_t, 12> k_rows{ {
-    { "cpu_op", k_host_in_tree },
-    { "python_function", k_host_in_tree },
+    { "cpu_op", k_host },
+    { "python_function", k_host },
     { "cuda_runtime", k_launch_site },
     { "cuda_driver", k_launch_site },
     { "kernel", k_kernel },

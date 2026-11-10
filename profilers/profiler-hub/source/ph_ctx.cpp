@@ -414,6 +414,7 @@ ph_ctx::open_sources()
         source->catalog = source->source->catalog();
         source->reader  = std::make_unique<profiler_hub::cached_track_reader>(
             source->source->track_reads(), m_thread_pool, m_read_options);
+        source->source->attach_reader(*source->reader);
         m_sources.push_back(std::move(source));
     }
 }
@@ -728,7 +729,7 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
         m_sources[index]->source->load_catalog(
             m_thread_pool,
             profiler_hub::catalog_cache_t{
-                m_cache_directory, cache_paths, index, catalog_report });
+                m_cache_directory, cache_paths, index, catalog_report, stop_requested });
         if(stop_requested()) return false;
     }
 
@@ -779,7 +780,9 @@ ph_ctx::trim_trace(uint64_t    start_ts,
         return ready;
     if(m_sources.empty()) return PH_RESULT_INVALID_FILE;
 
-    // One output database cannot hold files of different formats.
+    // One output database cannot hold files of different formats. The registry has one
+    // entry per schema, so equal schemas mean one entry; if two entries ever share a
+    // schema this has to ask the registry which entry reads each file.
     for(const accepted_source_t& accepted : m_accepted)
     {
         if(accepted.schema != m_accepted.front().schema)
@@ -1234,8 +1237,10 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
                           uint64_t                                  after_id,
                           uint64_t                                  last_id,
                           ph_table_event*                           rows,
-                          uint32_t                                  capacity)
+                          uint32_t                                  capacity,
+                          bool&                                     declined)
 {
+    declined              = false;
     uint32_t source_index = 0;
     if(query.source_index.has_value())
     {
@@ -1280,6 +1285,7 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
 
     if(!origin.source->supports_table_events())
     {
+        declined = true;
         return 0;
     }
     return origin.source->read_table_events(
@@ -1332,8 +1338,10 @@ bool
 ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
                             uint32_t                                  event_type,
                             uint64_t&                                 first_id,
-                            uint64_t&                                 last_id)
+                            uint64_t&                                 last_id,
+                            bool&                                     declined)
 {
+    declined = false;
     if(!query.source_index.has_value() && m_sources.size() != 1)
     {
         return false;
@@ -1346,6 +1354,7 @@ ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
     profiler_hub::format_source& origin = *source_at(source_index).source;
     if(!origin.supports_table_events())
     {
+        declined = true;
         return false;
     }
     return origin.table_event_id_span(event_type, first_id, last_id);
