@@ -32,15 +32,15 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
 EventId RaceDetector::allocateEventId(
     WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
     std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations, VgprWriteOrder writeOrder,
+    uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
   bool hasLds = !ldsIntervals.empty();
   EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), counterObligations, memoryOrder,
+                            std::move(ldsIntervals), counterObligations, writeOrder,
                             lastRegisterByteMask, ldsAccess);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
-    const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
+    const WaveId orderedWave = writeOrder.completion == MemoryOrderClass::LDS ? waveId : WaveId{-1};
     if (events_.writesLds(eid)) {
       ldsWriteEvents.push_back(eid);
       adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
