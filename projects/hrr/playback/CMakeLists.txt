@@ -63,12 +63,6 @@ if(HRR_BUILD_PLAYBACK)
     "HRR_BUILD_TYPE=\"$<IF:$<BOOL:$<CONFIG>>,$<CONFIG>,unknown>\""
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
-  # The playback tool replays captured traces verbatim, which legitimately calls
-  # deprecated HIP entry points (hipTexRefGetArray, hipMallocHost, ...). Disable
-  # -Wdeprecated-declarations entirely as it is not relevant.
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(hrr-playback PRIVATE -Wno-deprecated-declarations)
-  endif()
   target_link_libraries(hrr-playback PRIVATE hrr::reader hrr::warnings hip::host Threads::Threads)
   # hrr_runtime_symbol: dlsym on POSIX, module enumeration on Windows.
   target_link_libraries(hrr-playback PRIVATE ${CMAKE_DL_LIBS} $<$<BOOL:${WIN32}>:psapi>)
