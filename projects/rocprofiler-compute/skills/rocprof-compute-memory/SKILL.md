@@ -19,9 +19,10 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --m
 
 On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
-The Memory Chart shows the whole hierarchy at once: requests issued, what each
-cache level served, and what reached HBM. Read it before opening any single
-cache level, because it tells you which level to open.
+The Memory Chart shows the hierarchy at once: requests issued and what each
+instrumented cache level served. On CDNA GPUs it also reports HBM traffic where
+the required metrics are available. Read it before opening any single cache
+level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
@@ -34,10 +35,42 @@ rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- 
 The cache aliases differ by architecture; for example, some GPUs name their
 caches `gl0` and `gl2`.
 
+### Navi48 (gfx1201)
+
+Navi48 GPU metrics and the Memory Chart are available on Linux starting with
+ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
+gfx1201 support. Apply the `STABLE_STD` prerequisite in the
+[Navi48 guide](../../docs/conceptual/rdna/navi48.rst) before profiling and compare
+baselines in the same performance state.
+
+Collect `memchart` first. Add `gl0`, `gl1`, `gl2`, or `wgp` only when the chart
+points at that level; LDS metrics belong to `wgp` on Navi48. Discover aliases with
+`rocprof-compute --list-metrics-gfx-id gfx1201`.
+
+GL1 is a write-combining stage. Read its utilization and stalls; do not invent a
+hit rate when the report prints `N/A`. EA to DRAM reports
+`DRAM Read Bandwidth` and `DRAM Write Bandwidth`, including
+traffic served or absorbed by Infinity Cache. Those values do not measure bytes
+reaching physical GDDR6 and must not be compared against a GDDR6 peak.
+`Infinity Cache Hit Rate`, `GDDR6 Read Bandwidth`, and `GDDR6 Write Bandwidth`
+remain `N/A`; treat unavailable values as unknown, not zero.
+
+The `GL2 Cache Bandwidth` table reports size-weighted requests at GL2 output
+FIFOs. Reads cover uncompressed categories and writes include recompressed
+requests. Keep these rates distinct from GL2/EA interface traffic and physical
+GDDR6 bandwidth. LDS byte-access rate uses load, store, and atomic dword counters;
+its hardware normalization remains provisional.
+
+Treat the WGP occupancy field as provisional. Navi48 living-wave counter units,
+instance reduction, and WGP normalization still require validation, so it does
+not establish an exact occupancy limit. The WGP Instruction Issue Stalls table
+is omitted from the CLI while its values are unavailable. See the Navi48 guide
+for the metrics whose restoration is tracked under AIPROFCOMP-907.
+
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
@@ -54,6 +87,10 @@ also runs the roofline benchmarks.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
+
+In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
+`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
+in ROCm 10.3.
 
 ## 2. Open the level the chart points at
 
@@ -94,7 +131,9 @@ they mean:
 
 Client APUs use a different hierarchy; see the
 [RDNA performance model](../../docs/conceptual/rdna/rdna-performance-model.rst)
-for GL0, GL1, and GL2.
+for GL0, GL1, and GL2. For Navi48's RDNA4 hierarchy and traffic boundaries, use
+the [Navi48 guide](../../docs/conceptual/rdna/navi48.rst) and the
+[RDNA4 performance model](../../docs/conceptual/rdna4/rdna4-performance-model.rst).
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
 columns the report prints. Do not apply a remembered cutoff such as "L2 hit

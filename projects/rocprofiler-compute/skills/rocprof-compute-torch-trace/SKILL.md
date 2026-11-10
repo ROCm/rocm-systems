@@ -70,7 +70,7 @@ Profile preserves each pass's raw marker and counter CSVs with the
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
 - List what this GPU can collect with `rocprof-compute --list-metrics`, and a
   block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
@@ -87,6 +87,10 @@ also runs the roofline benchmarks.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
+
+In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
+`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
+in ROCm 10.3.
 
 ## 3. List the captured operators
 
