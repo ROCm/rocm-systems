@@ -864,4 +864,202 @@ TEST_F(RegisterCleanupMicrotest, EveryRecord_IsTornDown) {
   EXPECT_EQ(seen, (std::vector<void*>{Ptr(0x10000), Ptr(0x20000), Ptr(0x30000)}));
 }
 
+// ---------------------------------------------------------------------------
+// rcclRegAutoLocal / rcclRegAutoRelease: records RCCL makes for unregistered ring buffers
+// ---------------------------------------------------------------------------
+
+class RegisterAutoLocalMicrotest : public RegisterMicrotestBase {
+ protected:
+  // What hipPointerGetAttribute reports for every address.
+  hipMemoryType memType_ = hipMemoryTypeDevice;
+  unsigned long long bufferId_ = 7;
+  hipError_t bufferIdResult_ = hipSuccess;
+  std::vector<ncclIpcRegInfo*> deregistered_;
+
+  void SetUp() override {
+    RegisterMicrotestBase::SetUp();
+    g_hipPointerGetAttribute = [this](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+      if (attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = memType_;
+      if (attr == HIP_POINTER_ATTRIBUTE_BUFFER_ID) {
+        if (bufferIdResult_ != hipSuccess) return bufferIdResult_;
+        *static_cast<unsigned long long*>(data) = bufferId_;
+      }
+      return hipSuccess;
+    };
+    g_ncclIpcDeregBuffer = [this](ncclComm*, ncclIpcRegInfo* info) {
+      deregistered_.push_back(info);
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    ncclRegCache* cache = &comm_->regCache;
+    while (cache->rcclRetired) {
+      ncclReg* reg = cache->rcclRetired;
+      cache->rcclRetired = reg->rcclAuto.retiredNext;
+      free(reg);
+    }
+    RegisterMicrotestBase::TearDown();
+  }
+
+  ncclReg* Auto(uintptr_t addr, size_t size) {
+    ncclReg* reg = reinterpret_cast<ncclReg*>(0x1);
+    EXPECT_EQ(rcclRegAutoLocal(comm_.get(), Ptr(addr), size, &reg), ncclSuccess);
+    return reg;
+  }
+
+  std::vector<ncclReg*> Retired() const {
+    std::vector<ncclReg*> out;
+    for (ncclReg* r = comm_->regCache.rcclRetired; r; r = r->rcclAuto.retiredNext) out.push_back(r);
+    return out;
+  }
+
+  // Gives reg one peer import, as a completed IPC registration leaves it.
+  ncclIpcRegInfo* AddPeerImport(ncclReg* reg) {
+    reg->ipcInfosSize = 1;
+    reg->ipcInfos = static_cast<ncclIpcRegInfo**>(calloc(1, sizeof(ncclIpcRegInfo*)));
+    reg->ipcInfos[0] = static_cast<ncclIpcRegInfo*>(calloc(1, sizeof(ncclIpcRegInfo)));
+    return reg->ipcInfos[0];
+  }
+};
+
+TEST_F(RegisterAutoLocalMicrotest, UnregisteredDeviceBuffer_CreatesOwnedRecord) {
+  ncclReg* reg = Auto(0x10010, 0x2000);
+  ASSERT_NE(reg, nullptr);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(reg->begAddr, 0x10000u);
+  EXPECT_EQ(reg->endAddr, 0x13000u);
+  EXPECT_EQ(reg->localRefs, 1);
+  EXPECT_TRUE(reg->rcclAuto.owned);
+  EXPECT_EQ(reg->rcclAuto.bufferId, 7u);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x3000u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, SameAllocation_ReusesRecordWithoutNewRef) {
+  ncclReg* first = Auto(0x10000, 0x2000);
+  ncclReg* again = Auto(0x11000, kPage);
+  EXPECT_EQ(again, first);
+  EXPECT_EQ(Population(), 1);
+  EXPECT_EQ(first->localRefs, 1);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x2000u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, UserRegisteredBuffer_ReturnsUserRecordUntouched) {
+  ncclReg* user = Seed(0x10000, 0x20000);
+  EXPECT_EQ(Auto(0x11000, kPage), user);
+  EXPECT_EQ(user->localRefs, 1);
+  EXPECT_FALSE(user->rcclAuto.owned);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_RetiresStaleRecordWithoutTouchingPeers) {
+  ncclReg* stale = Auto(0x10000, 0x2000);
+  AddPeerImport(stale);
+  bufferId_ = 8;  // freed and reallocated at the same address
+
+  ncclReg* fresh = Auto(0x10000, 0x2000);
+  ASSERT_NE(fresh, nullptr);
+  EXPECT_NE(fresh, stale);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), fresh);
+  EXPECT_EQ(fresh->rcclAuto.bufferId, 8u);
+  EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
+  // Unmapping a peer import here would wait on the peer's kernel; it waits for ncclRegCleanup.
+  EXPECT_TRUE(deregistered_.empty());
+  // The retired record's pages stay mapped on the peers, so they still count toward the cap.
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x4000u);
+  free(stale->ipcInfos[0]);
+  free(stale->ipcInfos);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRcclRef) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
+  ASSERT_EQ(handle, reg);
+  bufferId_ = 8;
+
+  EXPECT_EQ(Auto(0x10000, 0x2000), reg);
+  EXPECT_EQ(reg->localRefs, 1);
+  EXPECT_FALSE(reg->rcclAuto.owned);
+  EXPECT_TRUE(Retired().empty());
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, HostMemory_LeavesUnregistered) {
+  memType_ = hipMemoryTypeHost;
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, BufferIdQueryFails_LeavesUnregistered) {
+  bufferIdResult_ = hipErrorInvalidValue;
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, NoBufferId_LeavesUnregistered) {
+  bufferId_ = 0;
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, NullOrEmptyBuffer_LeavesUnregistered) {
+  EXPECT_EQ(Auto(0, kPage), nullptr);
+  EXPECT_EQ(Auto(0x10000, 0), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, ByteCapReached_LeavesFurtherBuffersUnregistered) {
+  g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_MAX_BYTES", 0x3000}});
+  ASSERT_NE(Auto(0x10000, 0x2000), nullptr);
+  EXPECT_EQ(Auto(0x20000, 0x2000), nullptr);
+  EXPECT_EQ(Population(), 1);
+  EXPECT_NE(Auto(0x30000, kPage), nullptr);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x3000u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, RegisterFails_LeavesUnregistered) {
+  ScopedHook check(g_commCheck, [](ncclComm*, const char*, const char*) { return ncclInvalidArgument; });
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, Release_TearsDownOwnedAndRetiredRecordsOnly) {
+  ncclReg* user = Seed(0x40000, 0x41000);
+  ncclReg* stale = Auto(0x10000, 0x2000);
+  ncclIpcRegInfo* staleImport = AddPeerImport(stale);
+  bufferId_ = 8;
+  ncclReg* fresh = Auto(0x10000, 0x2000);
+  ncclIpcRegInfo* freshImport = AddPeerImport(fresh);
+
+  EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
+  EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{freshImport, staleImport}));
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), user);
+  EXPECT_TRUE(Retired().empty());
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, Release_KeepsOwnedRecordTheUserAlsoRegistered) {
+  ncclReg* reg = Auto(0x10000, kPage);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
+  EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, Cleanup_TearsDownRetiredRecords) {
+  ncclReg* stale = Auto(0x10000, kPage);
+  ncclIpcRegInfo* staleImport = AddPeerImport(stale);
+  bufferId_ = 8;
+  ASSERT_NE(Auto(0x10000, kPage), nullptr);
+
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{staleImport}));
+  EXPECT_TRUE(Retired().empty());
+}
+
 }  // namespace

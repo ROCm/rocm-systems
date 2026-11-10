@@ -159,6 +159,7 @@ ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; 
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t rcclRegAutoRelease(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
 ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
