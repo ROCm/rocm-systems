@@ -6412,6 +6412,16 @@ TEST_F(CommQueryPropertiesTest, Caller231_ReportsRuntimeDevCommSize) {
   EXPECT_EQ(props.devCommRuntimeVersionSize, sizeof(ncclDevComm_t));
 }
 
+// Branch: a pre-2.31 caller's struct ends before devCommRuntimeVersionSize, so
+// writing it would scribble past the caller's object.
+TEST_F(CommQueryPropertiesTest, Pre231Caller_LeavesDevCommRuntimeVersionSizeAlone) {
+  props.version = NCCL_VERSION(2, 30, 7);
+  props.devCommRuntimeVersionSize = 0xC0FFEE;  // stands in for the caller's neighbouring memory
+
+  ASSERT_EQ(ncclCommQueryProperties(comm, &props), ncclSuccess);
+  EXPECT_EQ(props.devCommRuntimeVersionSize, 0xC0FFEEu);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevrGetLsaTeamPtrMC resolves an offset to its multicast address for a
