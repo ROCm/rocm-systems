@@ -21,7 +21,6 @@ struct FabricGpuBarrierState {
   int nRanks;
   dda::common::FabricGpuBarrier::FlagType** peerFlags;
   dda::common::DdaKernelParams params;
-  bool aborted;
   bool useEpoch;
 };
 static_assert(sizeof(FabricGpuBarrierState) == sizeof(dda::common::FabricGpuBarrier),

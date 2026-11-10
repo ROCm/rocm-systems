@@ -104,8 +104,10 @@ public:
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
     int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
 
+  // `aborted` is the kernel's own sticky flag, not a member: a store to this by-value
+  // argument spills the mailbox pointers to scratch and the flag CAS becomes a flat atomic.
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx() {
+  __device__ __forceinline__ void syncOnSameBlockIdx(int& aborted) {
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -122,7 +124,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS && !aborted_) {
+    if (threadIdx.x < NRANKS && aborted == 0) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -139,7 +141,7 @@ public:
           arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, params_);
         }
       }
-      aborted_ = __any(!arrived);
+      if (__any(!arrived)) aborted = 1;
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -151,11 +153,6 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
-  // Sticky for the rest of the kernel and uniform across the signaling lanes,
-  // which all sit in wave 0: once any of them gives up a barrier on abort, the
-  // block signals no later barrier, so a late peer cannot pair its earlier flag
-  // with this block's next one and read data this rank never finished producing.
-  bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
                          DdaKernelParams params);

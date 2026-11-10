@@ -33,8 +33,9 @@ __launch_bounds__(512)
   __global__ void ddaReduceScatterFabric(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                          const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                          FabricGpuBarrier barrier, const T* __restrict__ acc) {
+  int ddaAbort = 0;
   // Release-acquire barrier ensures the stream-ordered scratch write is visible to peers.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -45,7 +46,7 @@ __launch_bounds__(512)
 
   reduceScatter<T, NRANKS_CT, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 0);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
 }
 
 } // namespace dda::common

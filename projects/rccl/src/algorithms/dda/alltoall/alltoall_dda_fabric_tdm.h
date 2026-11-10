@@ -33,6 +33,7 @@ __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
                           const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
                           FabricGpuBarrier barrier) {
+  int ddaAbort = 0;
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
   static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
@@ -50,7 +51,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
   const size_t selfSlot = static_cast<size_t>(selfRank) * bytesPerRank;
 
   // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   for (size_t base = first; base < nItems; base += stride) {
 #pragma unroll
@@ -81,7 +82,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 
   // tdmWait is per wave. Drain the whole block's stores before any peer is told to read its scratch.
   barrier.orderDestWrites();
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
 
   const uint8_t* selfScratch = peerScratch[selfRank];
   for (size_t base = first; base < nItems; base += stride) {
@@ -111,7 +112,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
     tdm::tdmWait();
   }
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.
   (void)peerScratch;
@@ -169,6 +170,7 @@ __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
                               const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
                               int blocksPerPeer, unsigned pieces, unsigned drain, FabricGpuBarrier barrier) {
+  int ddaAbort = 0;
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
   static_assert(UnrollPeers < 10, "tdm unroll must be less than 10");
@@ -208,7 +210,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
             pieceBegin(jFirst, p + 1), stride, nTiles, bytesPerRank);
       }
     }
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
     barrier.epochEnd(epoch, pieces);
     return;
   }
@@ -245,7 +247,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
     if (p < nPieces) barrier.postPeer(peer, epoch, static_cast<unsigned>(p));
   }
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
   barrier.epochEnd(epoch, pieces);
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.

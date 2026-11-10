@@ -20,6 +20,7 @@ __launch_bounds__(512)
 #endif
   __global__ void ddaReduceScatterIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                       const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+  int ddaAbort = 0;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
   const auto gtIdx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -36,15 +37,15 @@ __launch_bounds__(512)
       const size_t off = static_cast<size_t>(s) * count;
       copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
     }
-    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
   } else {
     // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
-    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>(ddaAbort);
   }
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>(ddaAbort);
 }
 
 } // namespace dda::common
