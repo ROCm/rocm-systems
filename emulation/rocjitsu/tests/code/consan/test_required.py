@@ -20,7 +20,7 @@ def paired_registrations():
     for name in sorted(physical_names()):
         # The validator owns agreement, not the CMake scenario's geometry or
         # fixture mapping. Use arbitrary shared values instead of repeating it.
-        _, gpu, _, _, _ = name.split('.')
+        gpu = name.split('.')[1]
         command = [
             'python3',
             'driver.py',
@@ -193,6 +193,27 @@ class RequiredCoverage(unittest.TestCase):
         extra['name'] = extra['name'].rsplit('.', 1)[0] + '.additional-case'
         tests.append(extra)
         with self.assertRaisesRegex(ValueError, 'required simulator twin missing'):
+            validate_physical_registrations(tests)
+
+    def test_geometry_suffixes_keep_their_target_and_application_contract(self):
+        tests = paired_registrations()
+        physical = dict(tests[0])
+        twin = dict(tests[1])
+        for test in (physical, twin):
+            test['name'] += '.groups4'
+            test['command'] = [*test['command'], '--workgroups', '4']
+        tests.extend((physical, twin))
+        validate_physical_registrations(tests)
+        twin['command'][-1] = '16'
+        with self.assertRaisesRegex(
+            ValueError, 'command differs from required simulator twin'
+        ):
+            validate_physical_registrations(tests)
+        twin['command'][-1] = '4'
+        set_property(physical, 'RESOURCE_LOCK', ['consan-wrong-target'])
+        with self.assertRaisesRegex(
+            ValueError, 'invalid physical execution properties'
+        ):
             validate_physical_registrations(tests)
 
     def test_missing_or_empty_selection_fails(self):

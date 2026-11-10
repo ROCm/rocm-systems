@@ -52,6 +52,8 @@ int main(int argc, char **argv) {
     std::cout << "{\"serial\":" << execution.serial << ",\"slot\":" << execution.storage_slot
               << ",\"generation\":" << execution.storage_generation << ",\"report_address\":"
               << *wire::read_u64(execution.context, wire::kContextReportPointer)
+              << ",\"grid_x\":" << execution.dimensions.grid[0]
+              << ",\"workgroup_size_x\":" << execution.dimensions.workgroup[0]
               << ",\"argument_u32\":";
     if (const std::optional<uint32_t> argument = wire::read_u32(execution.arguments, 0))
       std::cout << *argument;
@@ -63,11 +65,14 @@ int main(int argc, char **argv) {
         std::cout << ',';
       const size_t row = kReportHeaderBytes + wave * layout.value().row_stride;
       std::cout << "{\"wave\":" << *wire::read_u32(execution.report, row + wire::kRowWave)
+                << ",\"workgroup_x\":"
+                << *wire::read_u32(execution.report, row + wire::kRowWorkgroupX)
                 << ",\"serial\":" << *wire::read_u64(execution.report, row + wire::kRowSerial)
                 << ",\"status\":" << *wire::read_u32(execution.report, row + wire::kRowStatus)
                 << ",\"loss\":" << *wire::read_u32(execution.report, row + wire::kRowLoss)
                 << ",\"final_sequence\":"
                 << *wire::read_u32(execution.report, row + wire::kRowFinalSequence)
+                << ",\"sync_loss\":" << *wire::read_u32(execution.report, row + wire::kRowSyncLoss)
                 << ",\"final_phase\":"
                 << *wire::read_u32(execution.report, row + wire::kRowFinalPhase)
                 << ",\"completions\":[";

@@ -23,6 +23,7 @@ struct LdsRaceParticipant {
   uint64_t original_offset = 0;
   AccessKind access = AccessKind::Read;
   uint32_t phase = 0;
+  uint32_t workgroup = 0;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
@@ -41,11 +42,14 @@ struct LdsRaceIntegrityIssue {
   uint32_t wave = UINT32_MAX;
   uint32_t site = UINT32_MAX;
   std::string reason;
+  uint32_t workgroup = UINT32_MAX;
   bool operator==(const LdsRaceIntegrityIssue &) const = default;
 };
 
 struct LdsRaceExecutionResult {
   uint64_t serial = 0;
+  uint32_t workgroup_count = 1;
+  uint32_t waves_per_workgroup = 0;
   uint64_t valid_observations = 0;
   uint64_t rejected_records = 0;
   // Loss counts exhausted instruction occurrences, not missing lane records.

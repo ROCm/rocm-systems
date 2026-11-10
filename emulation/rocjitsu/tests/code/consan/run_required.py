@@ -106,6 +106,26 @@ def required_names():
         'ConSanHsaPlugin.RejectedNonDispatchPacketDoesNotModifyATrackedSignal',
         'ConSanHsaPlugin.IndividualBarriersStillPassThroughWithoutDispatchAdmission',
     }
+    for groups in (1, 4, 16):
+        for case in ('grouped_disjoint', 'grouped_barrier', 'grouped_empty'):
+            names.add(
+                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
+            )
+    for groups in (4, 16):
+        for case in ('grouped_race', 'grouped_read_read', 'grouped_isolation'):
+            names.add(
+                f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}.groups{groups}'
+            )
+    for case, groups in (
+        ('grouped_repeat', 4),
+        ('grouped_oversized', 17),
+        ('grouped_edge', 4),
+        ('grouped_missing_id', 4),
+    ):
+        names.add(f'ConSanSimE2E.gfx1250.wave32.assembly.{case}.groups{groups}')
+    names.add(
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.single_missing_id.groups1'
+    )
     for gpu, wave_size in MODES:
         suffix = f'{gpu}Wave{wave_size}'
         width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
@@ -222,7 +242,7 @@ def validate_physical_registrations(tests):
         test = available[name]
         if not name.startswith('ConSanPhysical'):
             raise ValueError(f'{name}: physical test has no simulator twin')
-        _, gpu, _, _, _ = name.split('.')
+        gpu = name.split('.')[1]
         properties = {
             item['name']: item['value'] for item in test.get('properties', [])
         }

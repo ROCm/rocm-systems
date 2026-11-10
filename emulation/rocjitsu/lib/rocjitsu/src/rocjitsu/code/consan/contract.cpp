@@ -4,6 +4,7 @@
 #include "rocjitsu/code/consan/contract.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "util/bit.h"
 #include "util/sha256.h"
@@ -22,9 +23,9 @@ constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C
 constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
 constexpr size_t kSiteWireBytes = 68;
 constexpr size_t kBarrierWireBytes = 56;
-// Manifest prefix (144), entry fields including the name length (76), and site
+// Manifest prefix (144), entry fields including the name length (80), and site
 // count (4). Name bytes and per-site records are accounted for separately.
-constexpr size_t kFixedPayloadBytes = 144 + 76 + 4;
+constexpr size_t kFixedPayloadBytes = 144 + 80 + 4;
 
 Result reject(ContractError *error, ContractErrorCode code, std::string_view message) {
   if (error != nullptr)
@@ -127,6 +128,7 @@ void encode_entry(Encoder &encoder, const EntryFacts &entry) {
   encoder.u32(entry.prepared_sgprs);
   encoder.u32(entry.prepared_vgprs);
   encoder.u32(entry.maximum_workgroup_size);
+  encoder.u32(entry.workgroup_id_scalar);
 }
 
 bool decode_entry(Decoder &decoder, EntryFacts &entry, uint32_t string_limit) {
@@ -138,7 +140,7 @@ bool decode_entry(Decoder &decoder, EntryFacts &entry, uint32_t string_limit) {
          decoder.u32(entry.original_group_bytes) && decoder.u32(entry.prepared_group_bytes) &&
          decoder.u32(entry.original_private_bytes) && decoder.u32(entry.prepared_private_bytes) &&
          decoder.u32(entry.prepared_sgprs) && decoder.u32(entry.prepared_vgprs) &&
-         decoder.u32(entry.maximum_workgroup_size);
+         decoder.u32(entry.maximum_workgroup_size) && decoder.u32(entry.workgroup_id_scalar);
 }
 
 void encode_site(Encoder &encoder, const SiteFacts &site) {
@@ -223,7 +225,12 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
       entry.prepared_group_bytes > 65536 || entry.prepared_sgprs == 0 ||
       entry.prepared_sgprs > 106 || entry.prepared_vgprs == 0 || entry.prepared_vgprs > 256 ||
       (entry.prepared_vgprs % 4) != 0 || entry.maximum_workgroup_size == 0 ||
-      entry.maximum_workgroup_size > 1024)
+      entry.maximum_workgroup_size > 1024 ||
+      (entry.workgroup_id_scalar != UINT32_MAX &&
+       (isa_properties(target->arch).uses_ttmp_workgroup_ids
+            ? entry.workgroup_id_scalar != kWorkgroupIdTtmp9Selector
+            : (entry.workgroup_id_scalar < 2 || entry.workgroup_id_scalar > 16 ||
+               entry.workgroup_id_scalar >= entry.prepared_sgprs))))
     return reject(error, ContractErrorCode::InvalidFacts, "invalid entry ABI or resources");
 
   if (!util::is_range_in_bounds(entry.original_descriptor_offset, 64, manifest.original.bytes) ||
@@ -237,7 +244,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
     return reject(error, ContractErrorCode::InvalidFacts,
                   "entry mapping or text extent is missing");
 
-  if ((manifest.scope == ScopeKind::NativeLdsWorkgroupBarrier) != !manifest.barriers.empty())
+  if ((manifest.scope != ScopeKind::NativeLdsNoSynchronization) != !manifest.barriers.empty())
     return reject(error, ContractErrorCode::InvalidFacts, "barrier scope and facts disagree");
   if (!manifest.barriers.empty() && entry.maximum_workgroup_size <= manifest.wave_size)
     return reject(error, ContractErrorCode::InvalidFacts,
@@ -425,21 +432,36 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
                                     ContractError *error, const ContractLimits &limits) {
   if (validate_manifest(manifest, error, limits).failed())
     return Result::failure();
-  if (dimensions.grid != dimensions.workgroup || dimensions.workgroup[0] == 0 ||
+  if (dimensions.workgroup[0] == 0 || dimensions.grid[0] == 0 ||
       dimensions.workgroup[0] > manifest.entry.maximum_workgroup_size ||
-      dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 || packet_private_bytes != 0)
+      dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 || dimensions.grid[1] != 1 ||
+      dimensions.grid[2] != 1 || packet_private_bytes != 0 ||
+      dimensions.grid[0] % dimensions.workgroup[0] != 0)
     return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "native LDS capture requires one bounded 1D workgroup and no private segment");
-
+                  "capture requires complete bounded 1D workgroups and no private segment");
+  const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
+  if (workgroups > (manifest.target == 1250 ? 16u : 1u) ||
+      (workgroups > 1 && manifest.entry.workgroup_id_scalar == UINT32_MAX))
+    return reject(error, ContractErrorCode::UnsupportedLaunch,
+                  "multi-workgroup profile requires gfx1250, at most 16 groups, and original "
+                  "workgroup-X input");
   const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
-  const uint32_t waves = (dimensions.workgroup[0] + manifest.wave_size - 1) / manifest.wave_size;
-  if (!manifest.barriers.empty() && waves < 2)
+  const uint32_t waves_per_group =
+      (dimensions.workgroup[0] + manifest.wave_size - 1) / manifest.wave_size;
+  if (!manifest.barriers.empty() && waves_per_group < 2)
     return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "barrier profile requires at least two waves");
-  const uint64_t report_bytes = kReportHeaderBytes + waves * row_stride;
+                  "barrier profile requires at least two waves per workgroup");
+  const uint64_t rows = uint64_t{workgroups} * waves_per_group;
+  if (rows > std::numeric_limits<uint32_t>::max() ||
+      row_stride > (std::numeric_limits<uint64_t>::max() - kReportHeaderBytes) / rows)
+    return reject(error, ContractErrorCode::ResourceLimit, "report extent arithmetic overflow");
+  const uint64_t report_bytes = kReportHeaderBytes + rows * row_stride;
   const std::optional<KernargExtensionLayout> kernarg =
       make_kernarg_extension_layout(manifest.entry.original_kernarg_bytes, kContextPointerPayloads);
-  if (row_stride > std::numeric_limits<uint32_t>::max() || report_bytes > limits.report_bytes ||
+  // row_stride is a 32-bit wire field. The report_bytes cap is a separate bound
+  // of this capture profile; the context extent and probe offsets remain 64-bit.
+  if (row_stride > std::numeric_limits<uint32_t>::max() ||
+      report_bytes > std::numeric_limits<uint32_t>::max() || report_bytes > limits.report_bytes ||
       !kernarg)
     return reject(error, ContractErrorCode::ResourceLimit,
                   "report or wrapper extent exceeds budget");
@@ -453,7 +475,9 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
                       .report_bytes = report_bytes,
                       .group_bytes = group_bytes,
                       .private_bytes = 0,
-                      .wave_count = waves};
+                      .wave_count = static_cast<uint32_t>(rows),
+                      .workgroup_count = workgroups,
+                      .waves_per_workgroup = waves_per_group};
 }
 
 FailureOr<TransportImage> initialize_transport(const Manifest &manifest,
@@ -491,7 +515,9 @@ FailureOr<TransportImage> initialize_transport(const Manifest &manifest,
     const size_t row = kReportHeaderBytes + size_t{wave} * layout.value().row_stride;
     wire::write_u64(image.report, row + wire::kRowSerial, serial);
     wire::write_u32(image.report, row + wire::kRowEntry, manifest.entry.id);
-    wire::write_u32(image.report, row + wire::kRowWave, wave);
+    wire::write_u32(image.report, row + wire::kRowWave, wave % layout.value().waves_per_workgroup);
+    wire::write_u32(image.report, row + wire::kRowWorkgroupX,
+                    wave / layout.value().waves_per_workgroup);
   }
   return image;
 }

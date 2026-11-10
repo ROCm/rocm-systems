@@ -41,6 +41,61 @@ class RuntimeIntegration(unittest.TestCase):
                     (driver.directory / 'prepare.stderr').read_text(), 'rejected'
                 )
 
+    def test_grouped_scenarios_keep_their_original_fixtures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            source = build / 'source'
+            source.mkdir()
+            (build / 'CMakeCache.txt').write_text(
+                f'CMAKE_HOME_DIRECTORY:INTERNAL={source}\n'
+            )
+            binaries = {}
+            for name in ('prepare', 'runner', 'inspect', 'plugin'):
+                binaries[name] = build / name
+                binaries[name].write_bytes(b'test driver input')
+            fixtures = build / 'fixtures'
+            target = fixtures / 'targets' / 'gfx1250' / 'wave32'
+            target.mkdir(parents=True)
+            for number in (1, 2, 3):
+                (target / f'group-{number}.hsaco').write_bytes(
+                    b'fixture selection only'
+                )
+            for case, number in (
+                ('grouped_disjoint', 1),
+                ('grouped_barrier', 2),
+                ('grouped_race', 3),
+                ('grouped_repeat', 2),
+            ):
+                with self.subTest(case=case):
+                    args = argparse.Namespace(
+                        **binaries,
+                        source=source,
+                        fixtures=fixtures,
+                        root=build / 'evidence',
+                        case=case,
+                        fixture_kind='assembly',
+                        target='gfx1250',
+                        wave_size=32,
+                        threads=65,
+                        workgroups=4,
+                        launcher=None,
+                        test_statistics=False,
+                    )
+                    driver = Driver(args)
+                    with mock.patch.object(
+                        driver,
+                        'prepare_original',
+                        side_effect=RuntimeError('stop before preparation'),
+                    ) as prepare:
+                        with self.assertRaisesRegex(
+                            RuntimeError, 'stop before preparation'
+                        ):
+                            driver.execute()
+                    prepare.assert_called_once_with(
+                        target / f'group-{number}.hsaco',
+                        driver.directory / 'original.hsaco',
+                    )
+
     def test_missing_statistics_checks_the_requested_agent_first(self):
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
