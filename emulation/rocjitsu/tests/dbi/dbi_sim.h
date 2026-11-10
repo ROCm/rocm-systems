@@ -5,7 +5,7 @@
 /// @brief Minimal single-CU simulator harness shared by the DBI simulator tests.
 ///
 /// Lays out a kernel descriptor plus code in GPU memory (AMDHSA ABI), dispatches
-/// one workgroup, runs to completion, and reads VGPRs back from the halt
+/// one workgroup by default, runs to completion, and reads VGPRs back from the halt
 /// snapshot. A wavefront frees its register file at s_endpgm, so the final
 /// register state has to come from a HaltSnapshotPlugin captured at halt rather
 /// than from the CU. Guest memory can be seeded with write_memory() and read back
@@ -153,6 +153,12 @@ public:
   ///        the patched descriptor's .text-relative entry. Defaults to 0.
   void set_entry_offset(uint64_t offset) { entry_offset_ = offset; }
 
+  /// @brief Dispatch this many workgroups along X, each containing one wave.
+  void set_workgroup_count_x(uint32_t count) {
+    ASSERT_GT(count, 0u);
+    workgroup_count_x_ = count;
+  }
+
   /// @brief Write a kernel_descriptor_t (entry at the set_entry_offset() offset
   ///        into the code) followed by @p code, with @p private_bytes of
   ///        per-lane scratch.
@@ -183,19 +189,20 @@ public:
     return addr;
   }
 
-  /// @brief Dispatch @p code over one wave and return, for each register in
-  ///        @p regs, its per-lane values after the kernel halts.
+  /// @brief Dispatch @p code and return, for each register in @p regs, its
+  ///        per-lane values from @p workgroup_id after the kernel halts.
   ///
   /// @details Reading several registers from one dispatch rather than one each
   /// keeps assertions about them statements about a single execution.
   ///
   /// @return One vector per entry of @p regs, each @p wave_size long; empty when
-  ///   no wave halted (the kernel did not run to completion). Callers must check
-  ///   the size before indexing per lane.
+  ///   the selected workgroup did not halt. Callers must check the size before
+  ///   indexing per lane.
   std::vector<std::vector<uint32_t>> run_and_read_vgprs(const std::vector<uint32_t> &code,
                                                         uint32_t private_bytes,
-                                                        const std::vector<uint32_t> &regs) {
-    const WavefrontSnapshot *wf = run(code, private_bytes);
+                                                        const std::vector<uint32_t> &regs,
+                                                        uint32_t workgroup_id = 0) {
+    const WavefrontSnapshot *wf = run(code, private_bytes, workgroup_id);
     if (wf == nullptr)
       return std::vector<std::vector<uint32_t>>(regs.size());
 
@@ -252,12 +259,13 @@ public:
   }
 
 private:
-  /// @brief Write the kernel and its kernargs, dispatch one wave, and run to
+  /// @brief Write the kernel and its kernargs, dispatch, and run to
   ///        completion.
-  /// @return The halt snapshot, or nullptr when no wave halted (the kernel did
-  ///   not run to completion). The plugin never drops a snapshot, so a DbiSim
-  ///   reused for several dispatches still reports the first one here.
-  const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes) {
+  /// @return The selected workgroup's halt snapshot, or nullptr when it did
+  ///   not halt. The plugin never drops a snapshot, so a DbiSim reused for
+  ///   several dispatches still reports the first matching one here.
+  const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes,
+                               uint32_t workgroup_id = 0) {
     const uint64_t ko = write_kernel(0x1000, code, private_bytes);
     if (!kernarg_bytes_.empty())
       mem_->load_image(kernarg_bytes_.data(), kernarg_bytes_.size(), KERNARG_ADDR);
@@ -271,18 +279,20 @@ private:
     const uint64_t ring = AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
     AqlQueue queue(mem_, cp(), ring, AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000, ring + 0x10008,
                    ring + 0x10010, /*xcd_fanout=*/false, /*queue_id=*/queue_id);
-    queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_,
-                   kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
+    queue.dispatch(ko, /*grid_size_x=*/wave_size_ * workgroup_count_x_,
+                   /*workgroup_size_x=*/wave_size_, kernarg_bytes_.empty() ? 0 : KERNARG_ADDR);
     engine_->run();
 
-    if (snapshot_plugin_->snapshots().empty())
-      return nullptr;
-    return &snapshot_plugin_->snapshots().front();
+    for (const WavefrontSnapshot &snapshot : snapshot_plugin_->snapshots())
+      if (snapshot.wg_id == workgroup_id)
+        return &snapshot;
+    return nullptr;
   }
 
   uint32_t wave_size_ = 64;
   bool wave32_dispatch_ = false;
   uint32_t queue_seq_ = 0;
+  uint32_t workgroup_count_x_ = 1;
   uint64_t entry_offset_ = 0;
   uint32_t kernarg_properties_ = 0;
   uint32_t user_sgpr_count_ = 2;
