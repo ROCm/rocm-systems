@@ -678,6 +678,13 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
     handle->owner = this;
     // hsaKmtHandleImport creates a distinct object per import, so this handle owns it.
     handle->owns_allocation = true;
+
+    if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(gpu_agent.libThunkDev(), res.buf_handle,
+                                           &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+      DestroyMemoryHandle(handle);
+      return HSA_STATUS_ERROR;
+    }
+
     return HSA_STATUS_SUCCESS;
   }
   default:
