@@ -35,15 +35,15 @@
 #include "comm.h"
 #include "group.h"
 
-#include "fakes/comm_fakes.h"    // controllable ncclCommSetAsyncError seam
-#include "fakes/recorder_fakes.h"  // g_recorderResult, shared with the other micro binaries
-#include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
-#include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
-#include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
-#include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
-#include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
-#include "ScopedHook.h"          // RAII install/restore for controllable seams
-#include "WaitUntil.h"           // bounded poll for what the other thread does
+#include "fakes/comm_fakes.h"
+#include "fakes/recorder_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/collective_stubs.h"
+#include "fakes/ce_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/transport_stubs.h"
+#include "ScopedHook.h"
+#include "WaitUntil.h"
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
