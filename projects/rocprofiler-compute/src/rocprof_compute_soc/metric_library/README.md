@@ -6,7 +6,8 @@ peaks), not how a panel shows it. `loader.py` loads them.
 
 Production does not read these files yet: `analyze` and `profile` still use
 [`analysis_configs/`](../analysis_configs/). Until production reads the library, a metric
-change goes into both trees.
+change goes into both trees, and a row added, moved or renamed in a panel also goes into
+the arch's views in [`views/`](../views/).
 
 ## Layout
 

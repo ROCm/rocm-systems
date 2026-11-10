@@ -130,6 +130,12 @@ python tools/config_management/hash_manager.py --compute-all src/rocprof_compute
 
 The first command verifies structural conformance. The second refreshes the hash DB so `hash_checker.py` agrees.
 
+Each panel also has a view per arch under `src/rocprof_compute_soc/views/<arch>/`, which lists the panel's rows by metric library id. When you add, move or rename a row, table or panel, make the same change in the views of every arch that has the panel, then check them:
+```bash
+python3 tools/validate_views.py
+python3 -m pytest tests/unit/rocprof_compute_soc/metric_library/test_analysis_views_sync.py
+```
+
 ### 3. Hash checks (fast local / CI)
 ```bash
 python tools/config_management/master_config_workflow_script.py --hash-only
