@@ -31,6 +31,16 @@ namespace att_wrapper
 int64_t
 MemoryCounter::extract_waitcnt(const std::string& str) const
 {
+    // gfx12 combined waits (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt) print one packed
+    // immediate: dscnt in bits [5:0], loadcnt/storecnt in bits [13:8].
+    if(str.find("cnt_dscnt") != std::string::npos)
+    {
+        auto space = str.find(' ');
+        if(space == std::string::npos) return 0;
+        auto packed = std::strtoll(str.c_str() + space + 1, nullptr, 0);
+        return (name == "dscnt") ? (packed & 0x3F) : ((packed >> 8) & 0x3F);
+    }
+
     // Find the position of the number in the string
     size_t pos  = str.find(name);
     size_t iter = pos + name.size() + 1;

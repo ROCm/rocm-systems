@@ -237,11 +237,20 @@ public:
 
     const auto& get_agents() const { return agents; }
 
+    std::unordered_set<rocprofiler_agent_id_t> configured_agents() const
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        auto                         result = std::unordered_set<rocprofiler_agent_id_t>{};
+        for(const auto& [agent_id, _] : params)
+            result.insert(agent_id);
+        return result;
+    }
+
 private:
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerAgent>> agents{};
     std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
-    std::mutex                        agent_mut;
+    mutable std::mutex                agent_mut;
     std::shared_ptr<std::atomic<int>> worker_flag{nullptr};
 };
 

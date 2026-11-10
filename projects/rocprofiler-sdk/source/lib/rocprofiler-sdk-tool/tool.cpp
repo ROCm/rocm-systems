@@ -1111,8 +1111,9 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
             }
 
-            if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
-               tool::get_config().advanced_thread_trace)
+            if(tool::get_config().advanced_thread_trace &&
+               (obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY ||
+                obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE))
             {
                 const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
                 auto        filename      = fmt::format("{}_code_object_id_{}",
@@ -1122,51 +1123,22 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 std::string output_filename =
                     get_output_filename(tool::get_config(), filename, ".out");
 
-                // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
-                                            obj_data->memory_size);
-                tool_metadata->code_object_load.wlock(
-                    [](auto&                                 data_vec,
-                       std::string                           file_name,
-                       tool::rocprofiler_code_object_info_t* obj_data_v) {
-                        data_vec.push_back({std::move(file_name),
-                                            obj_data_v->code_object_id,
-                                            obj_data_v->load_base,
-                                            obj_data_v->load_size});
-                    },
-                    output_filename,
-                    obj_data);
-            }
-            else if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE &&
-                    tool::get_config().advanced_thread_trace)
-            {
-                const char* gpu_name      = tool_metadata->agents_map.at(obj_data->rocp_agent).name;
-                auto        filename      = fmt::format("{}_code_object_id_{}",
-                                            std::string(gpu_name),
-                                            std::to_string(obj_data->code_object_id));
-                auto        output_stream = get_output_stream(tool::get_config(), filename, ".out");
-                std::string output_filename =
-                    get_output_filename(tool::get_config(), filename, ".out");
-
-                uint8_t*      binary      = nullptr;
-                size_t        buffer_size = 0;
-                std::ifstream code_object_file(obj_data->uri, std::ios::binary | std::ios::ate);
-                if(code_object_file.good())
+                if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
                 {
-                    buffer_size = code_object_file.tellg();
-                    code_object_file.seekg(0, std::ios::beg);
-                    binary = new(std::nothrow) uint8_t[buffer_size];
-                    if(binary &&
-                       !code_object_file.read(reinterpret_cast<char*>(binary), buffer_size))
-                    {
-                        delete[] binary;
-                        binary = nullptr;
-                    }
+                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                    output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
+                                                obj_data->memory_size);
                 }
-                // NOLINTBEGIN(performance-no-int-to-ptr)
-                output_stream.stream->write(reinterpret_cast<char*>(obj_data->memory_base),
-                                            obj_data->memory_size);
-                // NOLINTEND(performance-no-int-to-ptr)
+                else
+                {
+                    // memory_base/memory_size alias storage_file here, and the URI is not a plain
+                    // path, so copy the code object through the loader's file descriptor.
+                    auto code_object_file = std::ifstream{
+                        fmt::format("/proc/self/fd/{}", obj_data->storage_file), std::ios::binary};
+                    ROCP_ERROR_IF(!code_object_file)
+                        << "Failed to read code object " << obj_data->code_object_id;
+                    if(code_object_file) *output_stream.stream << code_object_file.rdbuf();
+                }
                 tool_metadata->code_object_load.wlock(
                     [](auto&                                 data_vec,
                        std::string                           file_name,
@@ -3723,7 +3695,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
     }
 
-    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API))
+    // The ROCTx region stack is only read by set_kernel_rename_and_stream_correlation_id for
+    // kernel dispatch records, and the tracing wraps every ROCTx mark/range call, so only enable
+    // it when one of those records is collected.
+    const auto& rename_cfg         = tool::get_config();
+    const bool  needs_roctx_region = rename_cfg.kernel_rename || rename_cfg.kernel_trace ||
+                                    rename_cfg.counter_collection ||
+                                    rename_cfg.spm_counter_collection || rename_cfg.kernel_replay;
+    if(needs_roctx_region && core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API))
     {
         auto rename_ctx            = rocprofiler_context_id_t{0};
         auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
