@@ -4152,6 +4152,125 @@ INSTANTIATE_TEST_SUITE_P(ImplementedRules, Cdna4ToCdna3SemanticRuleTranslationTe
                            return std::string(info.param.name);
                          });
 
+TEST(BinaryTranslatorE2E, Cdna4DppReverseShiftsRejectValueRoutingOnRdna) {
+  using namespace rocjitsu;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch);
+    for (const auto op :
+         {cdna4::kVLshlrevB16Vop2, cdna4::kVLshrrevB16Vop2, cdna4::kVAshrrevI16Vop2,
+          cdna4::kVLshlrevB32Vop2, cdna4::kVLshrrevB32Vop2, cdna4::kVAshrrevI32Vop2}) {
+      SCOPED_TRACE(::testing::Message() << arch << " op=" << op);
+      const auto guest = cdna4::build_vop2(op, {.src0 = 250, .vsrc1 = 2, .vdst = 193});
+      // row_shr:1, row_mask:0x5, bank_mask:0xA. Direct translation would permute the count.
+      const auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+          {guest[0], 0x5a011101u, 0xBF810000u});
+      AmdGpuCodeObject source(image.data(), image.size());
+      const auto result = translator.translate(source);
+      EXPECT_EQ(result.elf_bytes, image);
+      EXPECT_TRUE(test_support::has_error_containing(result, DiagnosticKind::ExpandFailed,
+                                                     "DPP permutes the shifted value"));
+    }
+  }
+}
+
+TEST(BinaryTranslatorE2E, Cdna4Vop2ReverseShiftsExecuteOnRdna) {
+  using namespace rocjitsu;
+  struct ShiftCase {
+    uint16_t op;
+    const char *mnemonic;
+    bool half;
+    bool left;
+    bool arithmetic;
+  };
+  constexpr std::array shifts{
+      ShiftCase{cdna4::kVLshlrevB16Vop2, "v_lshlrev_b16", true, true, false},
+      ShiftCase{cdna4::kVLshrrevB16Vop2, "v_lshrrev_b16", true, false, false},
+      ShiftCase{cdna4::kVAshrrevI16Vop2, "v_ashrrev_i16", true, false, true},
+      ShiftCase{cdna4::kVLshlrevB32Vop2, "v_lshlrev_b32", false, true, false},
+      ShiftCase{cdna4::kVLshrrevB32Vop2, "v_lshrrev_b32", false, false, false},
+      ShiftCase{cdna4::kVAshrrevI32Vop2, "v_ashrrev_i32", false, false, true},
+  };
+  constexpr uint8_t count_reg = 192, value_reg = 129;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch);
+    amdgpu::GpuMemory memory("reverse_shift_memory");
+    amdgpu::L2Cache cache("reverse_shift_cache");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("reverse_shift", config, &memory, &cache);
+    ASSERT_NE(cu, nullptr);
+    auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+    ASSERT_NE(wave, nullptr);
+    constexpr uint64_t active = 0x5555555555555555ull;
+    wave->set_exec(active);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (const auto &shift : shifts) {
+      struct CountCase {
+        uint16_t selector;
+        uint32_t bits;
+      };
+      // Selector 248 supplies the F32 bits of 1/(2*pi); the literal below supplies its F16 bits.
+      constexpr std::array counts{CountCase{256 + count_reg, 0}, CountCase{248, 0x3e22f983u},
+                                  CountCase{255, 0x3118u}, CountCase{128 + 21, 21u}};
+      for (const auto &[count, bits] : counts) {
+        const bool register_count = count == 256 + count_reg;
+        if (!shift.half && !register_count)
+          continue;
+        const uint8_t dst = register_count ? count_reg : value_reg;
+        SCOPED_TRACE(::testing::Message() << arch << " " << shift.mnemonic << " count=" << count);
+        const auto guest =
+            cdna4::build_vop2(shift.op, {.src0 = count, .vsrc1 = value_reg, .vdst = dst});
+        std::vector<uint32_t> code{guest[0]};
+        if (count == 255)
+          code.push_back(bits);
+        code.push_back(0xBF810000u);
+        const auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(code);
+        AmdGpuCodeObject source(image.data(), image.size());
+        const auto result = translator.translate(source);
+        ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+        AmdGpuCodeObject target(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_FALSE(target.text_sections().empty());
+        const auto decoded = decode_text_instructions(*target.text_sections().front(), arch);
+        ASSERT_GE(decoded.size(), shift.half ? 3u : 2u);
+        EXPECT_TRUE(decoded[0]->mnemonic().starts_with(shift.mnemonic));
+        EXPECT_EQ(decoded[0]->size(), shift.half ? 8u : 4u);
+        if (shift.half) {
+          EXPECT_EQ(decoded[1]->mnemonic(), "v_bfe_u32");
+        }
+        constexpr uint32_t value = 0xadcd8105u;
+        auto lane_count = [](uint32_t lane) { return 0xf00d0003u + lane; };
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          cu->write_vgpr(base + value_reg, lane, value);
+          cu->write_vgpr(base + count_reg, lane, lane_count(lane));
+        }
+        for (const auto &inst : decoded) {
+          if (inst->mnemonic() == "s_endpgm")
+            break;
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+        }
+        for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+          const uint32_t amount =
+              (register_count ? lane_count(lane) : bits) & (shift.half ? 15u : 31u);
+          const uint32_t mask = shift.half ? 0xffffu : UINT32_MAX;
+          const uint32_t src = value & mask;
+          uint32_t expected = src >> amount;
+          if (shift.left)
+            expected = (src << amount) & mask;
+          if (shift.arithmetic)
+            expected =
+                (static_cast<int32_t>(shift.half ? 0xffff0000u | src : src) >> amount) & mask;
+          if (!(active & (uint64_t{1} << lane)))
+            expected = dst == value_reg ? value : lane_count(lane);
+          EXPECT_EQ(cu->read_vgpr(base + dst, lane), expected) << "lane " << lane;
+        }
+      }
+    }
+  }
+}
+
 TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaEmitsShiftAndCarryAdd) {
   // v[4:5] = (v[0:1] << 2) + v[2:3]. vdst does not alias the addend, so the shift
   // goes straight into vdst. Verify a v_lshlrev_b64 (the shift the old lowering
@@ -4178,6 +4297,130 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaEmitsShiftAndCarryAdd) {
   const bool has_add = std::ranges::any_of(
       decoded, [](const auto &inst) { return inst->mnemonic() == "v_add_co_u32"; });
   EXPECT_TRUE(has_add) << "lowering must emit the 64-bit carry add";
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaNormalizesInlineAndRegisterCounts) {
+  struct ShiftCase {
+    uint16_t count_selector;
+    uint8_t dst;
+    uint32_t expected_shift;
+  };
+  constexpr uint16_t kLaneCount = 256 + 4; // v4 varies per lane
+  constexpr std::array cases{
+      ShiftCase{128 + 9, 6, 1},    ShiftCase{128 + 5, 6, 0},
+      ShiftCase{124, 6, 2},        // M0 uses a different selector on RDNA
+      ShiftCase{252, 6, 0},        // EXECZ is zero in every active lane
+      ShiftCase{248, 6, 3},        // inline 1/(2*pi)
+      ShiftCase{kLaneCount, 0, 0}, // destination overlaps the shifted input
+      ShiftCase{2, 2, 4},          // count in s2, destination overlaps the addend
+  };
+  constexpr std::array<uint32_t, 8> lane_shifts{0, 1, 2, 3, 4, 0, 0, 0};
+  constexpr uint64_t value = 0x12345678ffffffffull;
+  constexpr uint64_t addend = 0x3141592600000001ull;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const auto &test : cases) {
+      SCOPED_TRACE(::testing::Message() << arch << ", count selector " << test.count_selector);
+      const auto guest = make_cdna4_v_lshl_add_u64_words(test.dst, 256, test.count_selector, 258);
+      const auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+          {guest[0], guest[1], 0xBF810000u});
+      const rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+      rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch);
+      auto result = translator.translate(source);
+      ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+      rocjitsu::AmdGpuCodeObject target(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_FALSE(target.text_sections().empty());
+      const auto decoded = decode_text_instructions(*target.text_sections().front(), arch);
+
+      rocjitsu::amdgpu::GpuMemory memory("lshl_add_memory");
+      rocjitsu::amdgpu::L2Cache cache("lshl_add_cache");
+      rocjitsu::amdgpu::ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 102;
+      config.vgprs_per_wf = 32;
+      auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("lshl_add_cu", config, &memory, &cache);
+      ASSERT_NE(cu, nullptr);
+      auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(UINT64_MAX);
+      const uint32_t base = wave->vgpr_alloc().base;
+      cu->write_sgpr(wave->sgpr_alloc().base + 2, 12);
+      wave->set_m0(10u);
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+        cu->write_vgpr(base, lane, static_cast<uint32_t>(value));
+        cu->write_vgpr(base + 1, lane, value >> 32);
+        cu->write_vgpr(base + 2, lane, static_cast<uint32_t>(addend));
+        cu->write_vgpr(base + 3, lane, addend >> 32);
+        cu->write_vgpr(base + 4, lane, lane);
+      }
+      for (const auto &inst : decoded) {
+        if (inst->mnemonic() == "s_endpgm")
+          break;
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded()) << inst->mnemonic();
+      }
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
+        const uint32_t shift =
+            test.count_selector == kLaneCount ? lane_shifts[lane % 8] : test.expected_shift;
+        const uint64_t expected = (value << shift) + addend;
+        EXPECT_EQ(cu->read_vgpr(base + test.dst, lane), static_cast<uint32_t>(expected)) << lane;
+        EXPECT_EQ(cu->read_vgpr(base + test.dst + 1, lane), expected >> 32) << lane;
+      }
+    }
+  }
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsGuestOnlyCountSelectors) {
+  for (uint16_t count : {102, 103, 104, 105, 239, 251}) {
+    SCOPED_TRACE(count);
+    const auto words = make_cdna4_v_lshl_add_u64_words(4, 256, count, 258);
+    const auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {words[0], words[1], 0xBF810000u});
+    const rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+    const auto result = translator.translate(source);
+    EXPECT_TRUE(rocjitsu::test_support::has_error_containing(
+        result, rocjitsu::DiagnosticKind::ExpandFailed, "no equivalent RDNA source selector"));
+  }
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaChecksVgprPairAlignment) {
+  using namespace rocjitsu;
+  struct Operands {
+    uint8_t dst;
+    uint8_t value;
+    uint16_t count_selector;
+    uint8_t addend;
+    bool aligned;
+  };
+  constexpr std::array cases{
+      Operands{3, 0, 2, 2, false}, // v[3:4] partially overlaps the addend v[2:3]
+      Operands{4, 1, 2, 2, false}, // the shifted value starts at v1
+      Operands{4, 0, 2, 3, false}, // the addend starts at v3
+      // Every 64-bit operand can alias the highest aligned pair. The 32-bit shift count can use
+      // v255.
+      Operands{254, 254, 256 + 255, 254, true},
+  };
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch);
+    for (const Operands &test_case : cases) {
+      SCOPED_TRACE(::testing::Message() << arch << ", dst v" << static_cast<unsigned>(test_case.dst)
+                                        << ", value v" << static_cast<unsigned>(test_case.value)
+                                        << ", addend v" << static_cast<unsigned>(test_case.addend));
+      const auto guest = make_cdna4_v_lshl_add_u64_words(
+          test_case.dst, 256 + test_case.value, test_case.count_selector, 256 + test_case.addend);
+      const auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+          {guest[0], guest[1], 0xBF810000u});
+      const AmdGpuCodeObject source(image.data(), image.size());
+      const auto result = translator.translate(source);
+      if (test_case.aligned) {
+        EXPECT_TRUE(result.ok());
+      } else {
+        EXPECT_EQ(result.elf_bytes, image);
+        EXPECT_TRUE(
+            test_support::has_error_containing(result, DiagnosticKind::ExpandFailed, "even"));
+      }
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
@@ -4213,6 +4456,74 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaHandlesDestinationAliasingAddend) {
   ASSERT_TRUE(shift_dst.has_value());
   EXPECT_NE(shift_dst->index, 2u)
       << "shift result must not overwrite the aliased addend v[2:3] before the add reads it";
+}
+
+TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaScratchAvoidsOutstandingMemoryResults) {
+  using namespace rocjitsu;
+  constexpr auto sload =
+      cdna4::build_smem(cdna4::kSLoadDwordx2Smem, {.sbase = 4, .sdata = 0, .imm = 1});
+  constexpr auto wait = cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0x70});
+  struct ScratchReuse {
+    bool vgpr;
+    bool sgpr;
+  };
+  constexpr ScratchReuse cases[] = {{false, false}, {true, false}, {false, true}, {true, true}};
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const auto reuse : cases) {
+      SCOPED_TRACE(::testing::Message()
+                   << arch << ", reuse VGPR=" << reuse.vgpr << ", SGPR=" << reuse.sgpr);
+      const uint8_t pending_vgpr = reuse.vgpr ? 254 : 0;
+      const auto vload = cdna4::build_flat(
+          cdna4::kFlatLoadDwordx2Flat, {.seg = 2, .addr = 8, .saddr = 127, .vdst = pending_vgpr});
+      for (const uint8_t dst : {2, 4}) {
+        // Aliasing the shifted input needs count scratch. Aliasing the addend needs a scratch pair.
+        const auto shift = make_cdna4_v_lshl_add_u64_words(dst, 256 + 2, 256 + 6, 256 + 4);
+        std::vector<uint32_t> words;
+        if (reuse.sgpr) {
+          // Name all ordinary SGPR pairs to force the carry into a site-dead pair.
+          for (uint8_t reg = 2; reg < REGISTER_SET_ALLOCATABLE_SGPRS; reg += 2)
+            words.push_back(cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 128, .sdst = reg})[0]);
+        }
+        words.insert(words.end(), {sload[0], sload[1], vload[0], vload[1], shift[0], shift[1],
+                                   wait[0], 0xBF810000u});
+        auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(words);
+        const AmdGpuCodeObject source(image.data(), image.size());
+        BinaryTranslatorOptions options;
+        if (reuse.vgpr)
+          options.debug_min_free_vgpr = pending_vgpr;
+        BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch, 0, options);
+        auto result = translator.translate(source);
+        ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+        AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+        const auto decoded = decode_text_instructions(*translated.text_sections()[0], arch);
+        auto count = std::ranges::find_if(
+            decoded, [](const auto &inst) { return inst->mnemonic() == "v_lshlrev_b32"; });
+        auto carry = std::ranges::find_if(
+            decoded, [](const auto &inst) { return inst->mnemonic() == "v_add_co_u32"; });
+        ASSERT_NE(count, decoded.end());
+        ASSERT_NE(carry, decoded.end());
+        auto count_reg = (*count)->dst_operand(0)->to_register_ref();
+        auto carry_reg = (*carry)->dst_operand(1)->to_register_ref();
+        ASSERT_TRUE(count_reg && carry_reg);
+        if (reuse.vgpr)
+          EXPECT_EQ(count_reg->index, pending_vgpr);
+        else
+          EXPECT_GE(count_reg->index, 2u);
+        if (reuse.sgpr)
+          EXPECT_EQ(carry_reg->index, 0u);
+        else
+          EXPECT_GE(carry_reg->index, 2u);
+        if (reuse.vgpr || reuse.sgpr) {
+          ASSERT_NE(count, decoded.begin());
+          EXPECT_EQ((*std::prev(count))->mnemonic(), "s_wait_idle");
+        } else {
+          EXPECT_FALSE(std::any_of(decoded.begin(), count, [](const auto &inst) {
+            return inst->mnemonic() == "s_wait_idle";
+          }));
+        }
+      }
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsInlineConstantAddend) {
@@ -4258,42 +4569,59 @@ TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaRejectsV255Addend) {
 }
 
 TEST(BinaryTranslatorE2E, LshlAddU64ForRdnaCarryUsesScalarSgprNotVcc) {
-  // v_lshl_add_u64 defines no carry output and VCC is not liveness-tracked, so
-  // the carry chain must target a dead ordinary SGPR pair, never VCC (which could
-  // be live across the instruction). Verify the emitted v_add_co_u32 /
-  // v_add_co_ci_u32 write a scalar SDST that is not VCC.
-  const auto words = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256 + 0,
-                                                     /*src1=*/2, /*src2=*/256 + 2);
-  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {words[0], words[1], 0xBF810000u});
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  using namespace rocjitsu;
+  // The first high add reads its carry pair as a lane mask. Reusing the pair
+  // for the second low/high sequence exercises the GFX11 wave64 hazard.
+  const auto shift = make_cdna4_v_lshl_add_u64_words(/*vdst=*/4, /*src0=*/256, /*src1=*/130,
+                                                     /*src2=*/258);
+  auto image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {shift[0], shift[1], shift[0], shift[1], 0xBF810000u});
+  AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());
 
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
-  auto result = translator.translate(source);
-  ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, arch);
+    auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << result.diagnostics.front().message;
+    AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(translated.is_valid());
+    ASSERT_FALSE(translated.text_sections().empty());
+    const auto decoded = decode_text_instructions(*translated.text_sections()[0], arch);
+    const bool rdna3 = arch == ROCJITSU_CODE_ARCH_RDNA3;
+    const std::string_view wait_name = rdna3 ? "s_waitcnt_depctr" : "s_wait_alu";
+    const uint16_t wait_mask = rdna3 ? 0xf19f : 0xf1ff;
+    std::optional<RegisterRef> first_carry;
+    unsigned carry_chains = 0;
+    for (size_t i = 0; i < decoded.size(); ++i) {
+      if (decoded[i]->mnemonic() != "v_add_co_u32")
+        continue;
+      ASSERT_LT(i + 2, decoded.size());
+      ASSERT_EQ(decoded[i]->num_dst_operands(), 2);
+      const std::optional<RegisterRef> carry = decoded[i]->dst_operand(1)->to_register_ref();
+      ASSERT_TRUE(carry.has_value());
+      EXPECT_EQ(carry->cls, RegClass::SGPR);
+      EXPECT_EQ(carry->width, 2);
+      if (first_carry)
+        EXPECT_EQ(carry, first_carry);
+      else
+        first_carry = carry;
 
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(translated.is_valid());
-  ASSERT_FALSE(translated.text_sections().empty());
-  const auto decoded =
-      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_RDNA4);
+      const auto &wait = decoded[i + 1];
+      ASSERT_EQ(wait->mnemonic(), wait_name);
+      ASSERT_NE(wait->raw_encoding(), nullptr);
+      EXPECT_EQ(*wait->raw_encoding() & 0xffffu, wait_mask);
 
-  // VCC_LO is scalar selector 106. The carry SDST must be an ordinary SGPR.
-  constexpr uint32_t kVccLo = 106;
-  bool saw_add = false;
-  for (const auto &inst : decoded) {
-    const auto mnemonic = inst->mnemonic();
-    if (mnemonic != "v_add_co_u32" && mnemonic != "v_add_co_ci_u32")
-      continue;
-    saw_add = true;
-    ASSERT_GE(inst->num_dst_operands(), 2)
-        << mnemonic << " must expose an explicit scalar carry destination";
-    const auto sdst = inst->dst_operand(1)->to_register_ref();
-    ASSERT_TRUE(sdst.has_value()) << mnemonic << " carry SDST must be a register";
-    EXPECT_NE(sdst->index, kVccLo) << mnemonic << " must not clobber VCC as its carry destination";
+      const auto &high = decoded[i + 2];
+      ASSERT_EQ(high->mnemonic(), "v_add_co_ci_u32");
+      ASSERT_EQ(high->num_src_operands(), 3);
+      ASSERT_EQ(high->num_dst_operands(), 2);
+      EXPECT_EQ(high->src_operand(2)->to_register_ref(), carry);
+      EXPECT_EQ(high->dst_operand(1)->to_register_ref(), carry);
+      ++carry_chains;
+    }
+    EXPECT_EQ(carry_chains, 2u);
   }
-  EXPECT_TRUE(saw_add) << "lowering must emit the carry-add pair";
 }
 
 TEST(BinaryTranslatorE2E, VirtualLdsSidecarLowersDsReadB32ToFlatGlobalLoad) {
@@ -10540,6 +10868,47 @@ TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
                                           ? ""
                                           : second_result.diagnostics.front().message);
   EXPECT_EQ(second_result.elf_bytes, result.elf_bytes);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadSavesM0AboveVopd3CndmaskSelector) {
+  // s0..s3 stay live past the cluster load, and the v_dual_cndmask_b32 after it
+  // reads its lane mask from s4. gfx1250 is wave32-only, so the mask is s4 alone
+  // and the M0 save takes the lowest dead SGPR, s5.
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr std::array<uint32_t, 6> words = {
+      cluster[0], cluster[1], cluster[2],
+      // v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_mov_b32 v4, v5
+      0xCF248102u, 0x04030105u, 0x04000001u};
+  auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(words, 4);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA5);
+  // SOP1 s_mov_b32: SSRC0[7:0], SDST[22:16]. M0 encodes as 125 on gfx1250.
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  std::vector<uint16_t> m0_saves;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+      continue;
+    const uint32_t word = inst->raw_encoding()[0];
+    if ((word & 0xffu) == kGfx1250M0Operand)
+      m0_saves.push_back(static_cast<uint16_t>((word >> 16) & 0x7fu));
+  }
+  EXPECT_EQ(m0_saves, std::vector<uint16_t>{5});
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadsUseVgprCarrierUnderSgprPressure) {
