@@ -18,10 +18,8 @@ NCCL_PARAM(MloPartRdmaEnable, "MLOPART_RDMA_ENABLE", 0);
 
 RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 1);
 
-// gfx1250 Ring Simple copies every hop through the P2P FIFO unless the peer can store straight into the user
-// buffer, and on gfx1250 that copy costs AllReduce ~8% and AllGather ~15% of large-message bandwidth (gfx950 has
-// the CU headroom to hide it). RCCL registers these buffers itself so unregistered calls take the direct path.
-// Graph capture keeps its own registration path.
+// gfx1250 Ring Simple: RCCL registers unregistered AllReduce/AllGather buffers so peers store straight into them
+// instead of copying through the P2P FIFO. Graph capture keeps its own registration path.
 static bool rcclRingAutoRegister(struct ncclComm* comm, struct ncclTaskColl* info) {
   return rcclParamRingAutoRegister() && ncclParamLocalRegister() && !comm->planner.persistent &&
          (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) &&

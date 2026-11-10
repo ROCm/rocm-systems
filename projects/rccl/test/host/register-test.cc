@@ -874,6 +874,9 @@ class RegisterAutoLocalMicrotest : public RegisterMicrotestBase {
   hipMemoryType memType_ = hipMemoryTypeDevice;
   unsigned long long bufferId_ = 7;
   hipError_t bufferIdResult_ = hipSuccess;
+  // hipMemGetAddressRange: every address sits in an allocSize_-aligned allocation of allocSize_ bytes.
+  uintptr_t allocSize_ = 0x10000;
+  hipError_t addressRangeResult_ = hipSuccess;
   std::vector<ncclIpcRegInfo*> deregistered_;
 
   void SetUp() override {
@@ -884,6 +887,12 @@ class RegisterAutoLocalMicrotest : public RegisterMicrotestBase {
         if (bufferIdResult_ != hipSuccess) return bufferIdResult_;
         *static_cast<unsigned long long*>(data) = bufferId_;
       }
+      return hipSuccess;
+    };
+    g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+      if (addressRangeResult_ != hipSuccess) return addressRangeResult_;
+      *base = reinterpret_cast<hipDeviceptr_t>(reinterpret_cast<uintptr_t>(ptr) & ~(allocSize_ - 1));
+      *size = allocSize_;
       return hipSuccess;
     };
     g_ncclIpcDeregBuffer = [this](ncclComm*, ncclIpcRegInfo* info) {
@@ -928,21 +937,33 @@ TEST_F(RegisterAutoLocalMicrotest, UnregisteredDeviceBuffer_CreatesOwnedRecord) 
   ASSERT_NE(reg, nullptr);
   ASSERT_EQ(Population(), 1);
   EXPECT_EQ(Slot(0), reg);
+  // The record spans the whole allocation, not just the call's range.
   EXPECT_EQ(reg->begAddr, 0x10000u);
-  EXPECT_EQ(reg->endAddr, 0x13000u);
+  EXPECT_EQ(reg->endAddr, 0x20000u);
   EXPECT_EQ(reg->localRefs, 1);
   EXPECT_TRUE(reg->rcclAuto.owned);
   EXPECT_EQ(reg->rcclAuto.bufferId, 7u);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x3000u);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x10000u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, SameAllocation_ReusesRecordWithoutNewRef) {
   ncclReg* first = Auto(0x10000, 0x2000);
-  ncclReg* again = Auto(0x11000, kPage);
-  EXPECT_EQ(again, first);
+  EXPECT_EQ(Auto(0x11000, kPage), first);
+  EXPECT_EQ(Auto(0x18000, 0x8000), first);
   EXPECT_EQ(Population(), 1);
   EXPECT_EQ(first->localRefs, 1);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x2000u);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x10000u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, BufferSpansTwoAllocations_LeavesUnregistered) {
+  EXPECT_EQ(Auto(0x1F000, 0x2000), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, AddressRangeQueryFails_LeavesUnregistered) {
+  addressRangeResult_ = hipErrorInvalidValue;
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, UserRegisteredBuffer_ReturnsUserRecordUntouched) {
@@ -968,23 +989,75 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_RetiresStaleRecordWithoutTouchi
   // Unmapping a peer import here would wait on the peer's kernel; it waits for ncclRegCleanup.
   EXPECT_TRUE(deregistered_.empty());
   // The retired record's pages stay mapped on the peers, so they still count toward the cap.
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x4000u);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x20000u);
   free(stale->ipcInfos[0]);
   free(stale->ipcInfos);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRcclRef) {
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRcclRefAndLeavesUnregistered) {
   ncclReg* reg = Auto(0x10000, 0x2000);
   void* handle = nullptr;
   ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
   ASSERT_EQ(handle, reg);
   bufferId_ = 8;
 
-  EXPECT_EQ(Auto(0x10000, 0x2000), reg);
+  // The record still maps the freed allocation on the peers, so the ring must not use it.
+  EXPECT_EQ(Auto(0x10000, 0x2000), nullptr);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
   EXPECT_EQ(reg->localRefs, 1);
   EXPECT_FALSE(reg->rcclAuto.owned);
   EXPECT_TRUE(Retired().empty());
   EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoGraphRegistered_DropsOnlyRcclRefAndLeavesUnregistered) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x10000, /*isGraph=*/true, &handle), ncclSuccess);
+  ASSERT_EQ(handle, reg);
+  bufferId_ = 8;
+
+  EXPECT_EQ(Auto(0x10000, 0x2000), nullptr);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(reg->localRefs, 0);
+  EXPECT_EQ(reg->graphRefs, 1);
+  EXPECT_FALSE(reg->rcclAuto.owned);
+  EXPECT_TRUE(Retired().empty());
+}
+
+TEST_F(RegisterAutoLocalMicrotest, OtherLookupOfReusedAddress_RetiresStaleRecordAndReturnsNothing) {
+  ncclReg* stale = Auto(0x10000, 0x2000);
+  bufferId_ = 8;
+
+  ncclReg* found = reinterpret_cast<ncclReg*>(0x1);
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, nullptr);
+  EXPECT_EQ(Population(), 0);
+  EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
+}
+
+TEST_F(RegisterAutoLocalMicrotest, LookupOfSameAllocation_ReturnsOwnedRecord) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  ncclReg* found = nullptr;
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x14000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, reg);
+  EXPECT_TRUE(Retired().empty());
+}
+
+TEST_F(RegisterAutoLocalMicrotest, UserRegistersReusedAddress_GetsFreshRecord) {
+  ncclReg* stale = Auto(0x10000, 0x2000);
+  bufferId_ = 8;
+
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
+  ASSERT_NE(handle, nullptr);
+  EXPECT_NE(handle, stale);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), handle);
+  EXPECT_FALSE(static_cast<ncclReg*>(handle)->rcclAuto.owned);
+  EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
 }
 
 TEST_F(RegisterAutoLocalMicrotest, HostMemory_LeavesUnregistered) {
@@ -1012,12 +1085,14 @@ TEST_F(RegisterAutoLocalMicrotest, NullOrEmptyBuffer_LeavesUnregistered) {
 }
 
 TEST_F(RegisterAutoLocalMicrotest, ByteCapReached_LeavesFurtherBuffersUnregistered) {
-  g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_MAX_BYTES", 0x3000}});
-  ASSERT_NE(Auto(0x10000, 0x2000), nullptr);
-  EXPECT_EQ(Auto(0x20000, 0x2000), nullptr);
+  g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_MAX_BYTES", 0x18000}});
+  // The cap counts whole allocations, even for a one-page call.
+  ASSERT_NE(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Auto(0x20000, kPage), nullptr);
   EXPECT_EQ(Population(), 1);
+  allocSize_ = 0x8000;
   EXPECT_NE(Auto(0x30000, kPage), nullptr);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x3000u);
+  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x18000u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, RegisterFails_LeavesUnregistered) {
@@ -1042,13 +1117,34 @@ TEST_F(RegisterAutoLocalMicrotest, Release_TearsDownOwnedAndRetiredRecordsOnly) 
   EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, Release_KeepsOwnedRecordTheUserAlsoRegistered) {
+TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordTheUserAlsoRegisteredToTheUser) {
   ncclReg* reg = Auto(0x10000, kPage);
   void* handle = nullptr;
   ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
   EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
   ASSERT_EQ(Population(), 1);
   EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(reg->localRefs, 1);
+  EXPECT_FALSE(reg->rcclAuto.owned);
+  EXPECT_TRUE(deregistered_.empty());
+}
+
+TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordAGraphAlsoRegisteredToTheGraph) {
+  ncclReg* reg = Auto(0x10000, kPage);
+  AddPeerImport(reg);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x10000, /*isGraph=*/true, &handle), ncclSuccess);
+  ASSERT_EQ(handle, reg);
+
+  EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(reg->localRefs, 0);
+  EXPECT_EQ(reg->graphRefs, 1);
+  EXPECT_FALSE(reg->rcclAuto.owned);
+  EXPECT_TRUE(deregistered_.empty());
+  free(reg->ipcInfos[0]);
+  free(reg->ipcInfos);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, Cleanup_TearsDownRetiredRecords) {

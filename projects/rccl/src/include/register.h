@@ -61,9 +61,9 @@ struct ncclReg {
   int ipcInfosSize;                  // Size of ipcInfos array (localRanks or nRanks for cross-clique)
   // RCCL: NET segment cache, written only by rcclNetRegSegmentCount / rcclNetRegCommit (rccl_wrap.cc).
   struct { int nSegments; bool allPeers; } rcclNet;
-  // RCCL: set by rcclRegAutoLocal for a record RCCL created on the user's behalf. bufferId is the HIP buffer
-  // ID the record was made for; a different ID at the same address means the allocation was freed and reused.
-  // retiredNext links the record into ncclRegCache::rcclRetired once it is out of the cache.
+  // RCCL: set by rcclRegAutoLocal for a record RCCL created on the user's behalf. The record spans the whole
+  // allocation and bufferId is its HIP buffer ID; a different ID at the same address means the allocation was freed
+  // and reused. retiredNext links the record into ncclRegCache::rcclRetired once it is out of the cache.
   struct { bool owned; unsigned long long bufferId; struct ncclReg* retiredNext; } rcclAuto;
 };
 
@@ -80,10 +80,14 @@ struct ncclRegCache {
 };
 
 ncclResult_t ncclRegCleanup(struct ncclComm* comm);
-// Returns in *reg the cache record covering [buff, buff + size), creating one owned by RCCL when the user has not
-// registered the buffer. An RCCL-owned record whose allocation was freed and the address reused is retired and
-// recreated. *reg is NULL when the buffer cannot be registered; that is not an error. Does not IPC-map.
+// Returns in *reg the cache record covering [buff, buff + size), creating one owned by RCCL for the buffer's whole
+// allocation when the user has not registered it. *reg is NULL when the buffer cannot be registered; that is not an
+// error. Does not IPC-map.
 ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, struct ncclReg** reg);
+// Called by ncclRegFind and ncclRegister for an RCCL-owned record covering buff. If buff now belongs to a different
+// allocation, sets *stale, drops RCCL's reference and, when nobody else holds the record, moves it out of the cache
+// onto the retired list. The caller must not use a stale record.
+ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct ncclReg* reg, bool* stale);
 // Releases every RCCL-owned record, live or retired, including its peer imports. Call it while the peers'
 // proxies are still running and no collective on comm is in flight.
 ncclResult_t rcclRegAutoRelease(struct ncclComm* comm);

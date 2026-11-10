@@ -9,3 +9,4 @@
 #undef ncclCommGraphDeregister
 #undef ncclCommGraphRegister
 #undef ncclRegLocalIsValid
+#undef rcclRegCheckOwned

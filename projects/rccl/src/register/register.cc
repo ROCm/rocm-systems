@@ -100,6 +100,14 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
       *handle = regSlot;
       goto exit;
     } else if ((cache->slots[slot]->begAddr <= begAddr) && (cache->slots[slot]->endAddr >= endAddr)) {
+      if (cache->slots[slot]->rcclAuto.owned) {
+        bool stale = false;
+        NCCLCHECK(rcclRegCheckOwned(comm, data, cache->slots[slot], &stale));
+        if (stale) {
+          slot = -1;
+          continue;
+        }
+      }
       if (isGraph) cache->slots[slot]->graphRefs++;
       else cache->slots[slot]->localRefs++;
       *handle = cache->slots[slot];
@@ -154,6 +162,19 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
   return ncclSuccess;
 }
 
+// Frees every retired record, carrying on past a failed teardown and returning the first error.
+static ncclResult_t rcclRegFreeRetired(struct ncclComm* comm) {
+  struct ncclRegCache* cache = &comm->regCache;
+  ncclResult_t ret = ncclSuccess;
+  while (cache->rcclRetired) {
+    struct ncclReg* reg = cache->rcclRetired;
+    cache->rcclRetired = reg->rcclAuto.retiredNext;
+    NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
+    free(reg);
+  }
+  return ret;
+}
+
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
   struct ncclRegCache* cache = &comm->regCache;
   for (int i = 0; i < cache->population; i++) {
@@ -164,12 +185,7 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
     free(reg);
   }
   free(cache->slots);
-  while (cache->rcclRetired) {
-    struct ncclReg* reg = cache->rcclRetired;
-    cache->rcclRetired = reg->rcclAuto.retiredNext;
-    NCCLCHECK(regCleanup(comm, reg));
-    free(reg);
-  }
+  NCCLCHECK(rcclRegFreeRetired(comm));
   return ncclSuccess;
 }
 
@@ -235,47 +251,29 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   *reg = NULL;
   if (buff == NULL || size == 0) return ncclSuccess;
 
-  // The user never deregisters a buffer RCCL registered for it, so a record is only reusable while the
-  // address still belongs to the allocation it was made for. Anything that cannot be identified stays
-  // unregistered rather than failing the collective.
+  // ncclRegFind drops a record whose allocation was freed and the address reused, so a hit is safe to use.
+  struct ncclRegCache* cache = &comm->regCache;
+  NCCLCHECK(ncclRegFind(comm, buff, size, reg));
+  if (*reg) return ncclSuccess;
+
+  // The record covers the buffer's whole allocation: peers import the whole allocation anyway, later calls on
+  // other parts of it reuse the record, and the buffer ID identifies exactly what the record maps. Anything that
+  // cannot be identified, or spans more than one allocation, stays unregistered rather than failing the collective.
   CUmemorytype memType;
   unsigned long long bufferId = 0;
+  CUdeviceptr base = 0;
+  size_t baseSize = 0;
   if (cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, (CUdeviceptr)buff) != CUDA_SUCCESS ||
       memType != CU_MEMORYTYPE_DEVICE ||
       cuPointerGetAttribute(&bufferId, CU_POINTER_ATTRIBUTE_BUFFER_ID, (CUdeviceptr)buff) != CUDA_SUCCESS ||
-      bufferId == 0) {
+      bufferId == 0 || cuMemGetAddressRange(&base, &baseSize, (CUdeviceptr)buff) != CUDA_SUCCESS ||
+      (uintptr_t)buff + size > (uintptr_t)base + baseSize) {
     (void)cudaGetLastError();
     return ncclSuccess;
   }
 
-  struct ncclRegCache* cache = &comm->regCache;
-  struct ncclReg* found = NULL;
-  NCCLCHECK(ncclRegFind(comm, buff, size, &found));
-  while (found && found->rcclAuto.owned && found->rcclAuto.bufferId != bufferId) {
-    found->rcclAuto.owned = false;
-    if (found->localRefs > 1 || found->graphRefs > 0) {
-      // The user registered this range too; it is theirs to deregister.
-      --found->localRefs;
-      cache->rcclAutoBytes -= found->endAddr - found->begAddr;
-      break;
-    }
-    INFO(NCCL_REG, "rank %d buffer %p is a new allocation; retiring the RCCL registration [%p, %p)", comm->rank, buff,
-         (void*)found->begAddr, (void*)found->endAddr);
-    int slot = 0;
-    while (cache->slots[slot] != found) slot++;
-    memmove(cache->slots + slot, cache->slots + slot + 1, (cache->population - slot - 1) * sizeof(struct ncclReg*));
-    cache->population -= 1;
-    found->rcclAuto.retiredNext = cache->rcclRetired;
-    cache->rcclRetired = found;
-    NCCLCHECK(ncclRegFind(comm, buff, size, &found));
-  }
-  if (found) {
-    *reg = found;
-    return ncclSuccess;
-  }
-
   uintptr_t pageSize = cache->pageSize;
-  size_t regBytes = (((uintptr_t)buff + size + pageSize - 1) & -pageSize) - ((uintptr_t)buff & -pageSize);
+  size_t regBytes = (((uintptr_t)base + baseSize + pageSize - 1) & -pageSize) - ((uintptr_t)base & -pageSize);
   if (cache->rcclAutoBytes + regBytes > (size_t)rcclParamRingAutoRegisterMaxBytes()) {
     INFO(NCCL_REG, "rank %d not registering buffer %p size %zu: RCCL_RING_AUTO_REGISTER_MAX_BYTES %ld reached",
          comm->rank, buff, size, rcclParamRingAutoRegisterMaxBytes());
@@ -283,13 +281,13 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   }
   int population = cache->population;
   void* handle = NULL;
-  if (ncclRegister(comm, buff, size, /*isGraph=*/false, &handle) != ncclSuccess || handle == NULL) {
+  if (ncclRegister(comm, (void*)base, baseSize, /*isGraph=*/false, &handle) != ncclSuccess || handle == NULL) {
     (void)cudaGetLastError();
     return ncclSuccess;
   }
-  found = (struct ncclReg*)handle;
+  struct ncclReg* found = (struct ncclReg*)handle;
   if (cache->population == population) {
-    // ncclRegister reused a record ncclRegFind did not match; keep its owner's reference count unchanged.
+    // ncclRegister reused a record ncclRegFind did not return; keep its owner's reference count unchanged.
     --found->localRefs;
     return ncclSuccess;
   }
@@ -297,6 +295,32 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   found->rcclAuto.bufferId = bufferId;
   cache->rcclAutoBytes += found->endAddr - found->begAddr;
   *reg = found;
+  return ncclSuccess;
+}
+
+ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct ncclReg* reg, bool* stale) {
+  unsigned long long bufferId = 0;
+  *stale = cuPointerGetAttribute(&bufferId, CU_POINTER_ATTRIBUTE_BUFFER_ID, (CUdeviceptr)buff) != CUDA_SUCCESS ||
+           bufferId != reg->rcclAuto.bufferId;
+  if (!*stale) return ncclSuccess;
+  (void)cudaGetLastError();
+
+  struct ncclRegCache* cache = &comm->regCache;
+  reg->rcclAuto.owned = false;
+  if (reg->localRefs > 1 || reg->graphRefs > 0) {
+    // The user or a graph registered this range too; it is theirs to deregister.
+    --reg->localRefs;
+    cache->rcclAutoBytes -= reg->endAddr - reg->begAddr;
+    return ncclSuccess;
+  }
+  INFO(NCCL_REG, "rank %d buffer %p is a new allocation; retiring the RCCL registration [%p, %p)", comm->rank, buff,
+       (void*)reg->begAddr, (void*)reg->endAddr);
+  int slot = 0;
+  while (cache->slots[slot] != reg) slot++;
+  memmove(cache->slots + slot, cache->slots + slot + 1, (cache->population - slot - 1) * sizeof(struct ncclReg*));
+  cache->population -= 1;
+  reg->rcclAuto.retiredNext = cache->rcclRetired;
+  cache->rcclRetired = reg;
   return ncclSuccess;
 }
 
@@ -309,17 +333,17 @@ ncclResult_t rcclRegAutoRelease(struct ncclComm* comm) {
     if (reg->rcclAuto.owned && reg->localRefs == 1 && reg->graphRefs == 0) {
       NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
       free(reg);
-    } else {
-      cache->slots[kept++] = reg;
+      continue;
     }
+    if (reg->rcclAuto.owned) {
+      // The user or a graph registered this range too; leave the record to them.
+      reg->rcclAuto.owned = false;
+      --reg->localRefs;
+    }
+    cache->slots[kept++] = reg;
   }
   cache->population = kept;
-  while (cache->rcclRetired) {
-    struct ncclReg* reg = cache->rcclRetired;
-    cache->rcclRetired = reg->rcclAuto.retiredNext;
-    NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
-    free(reg);
-  }
+  NCCLCHECKIGNORE(rcclRegFreeRetired(comm), ret);
   cache->rcclAutoBytes = 0;
   return ret;
 }

@@ -1564,3 +1564,25 @@ threshold table introduced for gfx1250.
         | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
+
+    * - | ``RCCL_RING_AUTO_REGISTER``
+        | On gfx1250, registers the user buffer of an unregistered out-of-place
+          Ring Simple ``ncclAllReduce`` or ``ncclAllGather`` on first use, so
+          peers store straight into it instead of staging every hop in the P2P
+          FIFO. RCCL registers the buffer's whole allocation and releases it when
+          the communicator is destroyed. Only buffers that can be IPC-registered
+          benefit (``ncclMemAlloc``, or VMM allocations with a fabric handle).
+          Not applied during graph capture or when ``NCCL_LOCAL_REGISTER=0``. If
+          the allocation is freed and a new one lands at the same address, RCCL
+          stops using the old registration and keeps its peer mappings until the
+          communicator is destroyed.
+      - | ``0``: Disabled. Unregistered buffers use the P2P FIFO path.
+        | ``1``: Enabled (default).
+
+    * - | ``RCCL_RING_AUTO_REGISTER_MAX_BYTES``
+        | Caps the allocation bytes ``RCCL_RING_AUTO_REGISTER`` keeps registered
+          per communicator, counting freed allocations whose peer mappings are
+          kept until the communicator is destroyed. Beyond the cap, buffers stay
+          unregistered.
+      - | ``34359738368`` (32 GiB): Default.
+        | ``N`` (bytes): Use ``N`` as the cap.

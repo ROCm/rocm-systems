@@ -4504,6 +4504,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       }
       free(hostRanks);
     }
+    if (autoRegRet != ncclSuccess) {
+      INFO(NCCL_DESTROY | NCCL_REG, "comm 0x%" PRIx64 " rank %d RCCL registration release error %d", comm->commHash,
+           comm->rank, autoRegRet);
+      if (ret == ncclSuccess) ret = autoRegRet;
+    }
   }
 
   proxyStopResult = ncclProxyStop(comm);
