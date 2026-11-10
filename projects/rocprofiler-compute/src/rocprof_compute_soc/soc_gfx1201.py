@@ -1,8 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Navi48 (gfx1201) topology and profiling setup."""
-
 import argparse
 from typing import List, Optional, Set
 
@@ -15,8 +13,6 @@ _WMMA_COUNTERS = frozenset({"SQ_WMMA_VALU_INSTS", "SQ_WMMA_VALU_INSTS_sum"})
 
 
 class gfx1201_soc(OmniSoC_Base):
-    """SoC handler for Navi48 RDNA 4 GPUs, including Radeon RX 9070."""
-
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx1201")
@@ -29,9 +25,11 @@ class gfx1201_soc(OmniSoC_Base):
 
     @demarcate
     def profiling_setup(self) -> Optional[List[str]]:
-        """Select and group counters through the shared profiling pipeline."""
+        """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
-        return self.perfmon_filter()
+        # Performance counter filtering
+        filter_blocks = self.perfmon_filter()
+        return filter_blocks
 
     def validate_counter_collection(
         self, requested: Set[str], collected: Set[str]
@@ -51,5 +49,5 @@ class gfx1201_soc(OmniSoC_Base):
 
     @demarcate
     def post_profiling(self) -> None:
-        """Run shared post processing."""
+        """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
