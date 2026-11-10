@@ -46,6 +46,22 @@
 
 using namespace RCCLTestHelpers;
 
+namespace
+{
+
+// Prime, so the period does not divide any power-of-two chunk or tile and a
+// misplaced chunk still changes the bytes it lands on.
+constexpr size_t kAgStPatternPeriod = 251;
+
+// Byte a rank writes at an index of its contribution. The rank term is distinct
+// for up to 8 ranks, so a swapped slot changes the value too.
+inline uint8_t agStValue(int rank, size_t idx)
+{
+    return static_cast<uint8_t>((idx + 37 * static_cast<size_t>(rank)) % kAgStPatternPeriod);
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Fixture
 // ---------------------------------------------------------------------------
@@ -149,9 +165,9 @@ protected:
                 ncclResult_t res = ncclAllGather(send, recv, count, ncclUint8, getActiveCommunicator(), getActiveStream());
                 // Drain before the vote so a skip never leaves a kernel writing a window that ~SymBuf deregisters and frees.
                 hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+                const std::string notEligible = std::string(kernel) + " symmetric kernel not eligible on this topology";
                 const std::string ineligible
-                    = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
-                                               std::string(kernel) + " symmetric kernel not eligible on this topology");
+                    = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first, notEligible.c_str());
                 if(!ineligible.empty())
                 {
                     GTEST_SKIP() << ineligible;
@@ -1065,22 +1081,6 @@ TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom1MB)
 // 4-byte tier a 4-byte input skew reaches, the per-byte head and tail a 1-byte
 // skew or odd size reaches, and in-place.
 // ===========================================================================
-
-namespace
-{
-
-// Prime, so the period does not divide any power-of-two chunk or tile and a
-// misplaced chunk still changes the bytes it lands on.
-constexpr size_t kAgStPatternPeriod = 251;
-
-// Byte a rank writes at an index of its contribution. The rank term is distinct
-// for up to 8 ranks, so a swapped slot changes the value too.
-inline uint8_t agStValue(int rank, size_t idx)
-{
-    return static_cast<uint8_t>((idx + 37 * static_cast<size_t>(rank)) % kAgStPatternPeriod);
-}
-
-} // namespace
 
 TEST_F(SymmetricKernelCorruptionTest, AllGatherST_PositionDependentData)
 {
