@@ -8711,6 +8711,69 @@ TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantNoStackSpace_LeavesTheDeviceSt
   EXPECT_EQ(0, setLimit.calls);
 }
 
+// --- Built-target gate (ROCM-33822) ---
+//
+// Compiled with RCCL_BUILT_GPU_TARGETS="gfx906;gfx942:xnack+;gfx950;gfx1100;gfx1250-strict"
+// (see test/host/CMakeLists.txt), the same ';' separated shape src/CMakeLists.txt
+// records from GPU_TARGETS. Without that define archinfo.h's empty fallback makes
+// rcclArchIsBuilt() return true unconditionally and this gate would be untested.
+// Rank_kGcnArchName is gfx942, so every other scene in this file passes the gate.
+
+TEST(ArchIsBuiltMicrotest, MatchesByBaseNameAndRejectsEverythingElse) {
+  // Suffixed device name against a bare target -- the shape every real call has.
+  EXPECT_TRUE(rcclArchIsBuilt("gfx942:sramecc+:xnack-"));
+  EXPECT_TRUE(rcclArchIsBuilt("gfx906"));   // first entry
+  EXPECT_TRUE(rcclArchIsBuilt("gfx1100"));  // interior entry
+  // A target may carry its own suffix (AsanGpuTargets emits gfx942:xnack+), and a
+  // bare device name must still match it.
+  EXPECT_TRUE(rcclArchIsBuilt("gfx942"));
+  // A target name is whatever GPU_TARGETS said; nothing assumes it is gfx[0-9a-z]+.
+  // cmake/AsanGpuTargets.cmake ships gfx1250-strict, and it must match, as the last
+  // entry with no trailing separator.
+  EXPECT_TRUE(rcclArchIsBuilt("gfx1250-strict"));
+
+  EXPECT_FALSE(rcclArchIsBuilt("gfx1103:xnack-")) << "ROCM-33822: absent from the built list";
+  // Whole-value match: neither side may merely be a prefix of the other.
+  EXPECT_FALSE(rcclArchIsBuilt("gfx11001"));
+  EXPECT_FALSE(rcclArchIsBuilt("gfx110"));
+  EXPECT_FALSE(rcclArchIsBuilt("gfx94"));
+  EXPECT_FALSE(rcclArchIsBuilt("gfx1250")) << "gfx1250-strict is a different target";
+}
+
+// Fail open rather than refuse hardware that works. The empty-list and -generic
+// arms cannot be reached through the compiled-in list, so assert them here.
+TEST(ArchIsBuiltMicrotest, UnanswerableQuestionAssumesSupported) {
+  EXPECT_TRUE(rcclArchIsBuilt(""));
+  EXPECT_TRUE(rcclArchIsBuilt(":xnack-"));
+  EXPECT_TRUE(rcclArchIsBuilt(nullptr));
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_ArchNotInBuiltTargets_RejectsBeforeKernelInit) {
+  Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    if (!prop) {
+      return hipErrorInvalidValue;
+    }
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx1103:xnack-");
+    prop->multiProcessorCount = Rank_kCuCount;
+    prop->warpSize = 32;
+    return hipSuccess;
+  });
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { res = s.Run(); });
+
+  EXPECT_EQ(ncclInvalidUsage, res);
+  EXPECT_EQ(0, kernels.calls) << "the gate must run BEFORE the first hipFuncGetAttributes";
+  EXPECT_NE(std::string::npos, log.find("gfx1103")) << "WARN names the running arch; got: " << log;
+  EXPECT_NE(std::string::npos, log.find("gfx942")) << "and the built targets; got: " << log;
+  EXPECT_EQ(ncclInvalidUsage, s.comm()->initState) << "fail: records it, exit: still publishes";
+  EXPECT_NE(nullptr, s.published());
+}
+
 TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColor_ReturnsSuccessWithoutAllocatingTheChild) {
   Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);

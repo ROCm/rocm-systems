@@ -2072,6 +2072,23 @@ foreach(_variant "" "-uncached" "-faultinj")
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
     EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
+  # Production librccl always defines this (src/CMakeLists.txt, from GPU_TARGETS).
+  # Without it archinfo.h's empty fallback makes rcclArchIsBuilt() fail open and
+  # init.cc's built-target gate becomes unreachable here. Same ';' separated shape
+  # production records, including a suffixed entry and a target whose name is not
+  # gfx[0-9a-z]+, so the tests parse what production parses. Must contain
+  # Rank_kGcnArchName's gfx942 so the existing scenes still pass the gate, and must
+  # NOT contain gfx1103 -- that is what the rejection test asserts on.
+  #
+  # Applied here rather than through EXTRA_DEFS, and escaped the way
+  # src/CMakeLists.txt does: ';' is CMake's list separator, so an unescaped value
+  # splits into one -D per target, and EXTRA_DEFS re-expands an escaped one through
+  # cmake_parse_arguments and splits it anyway. Either way the compiler command
+  # ends up with an unterminated quote.
+  string(REPLACE ";" "\\;" _init_built_targets
+    "gfx906;gfx942:xnack+;gfx950;gfx1100;gfx1250-strict")
+  target_compile_definitions(${_init_tgt} PRIVATE
+    "RCCL_BUILT_GPU_TARGETS=\"${_init_built_targets}\"")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   elseif(_variant STREQUAL "-faultinj")
