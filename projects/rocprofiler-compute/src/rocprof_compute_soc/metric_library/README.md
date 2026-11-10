@@ -2,12 +2,11 @@
 
 Each directory here defines one GPU architecture's metrics, once each, keyed by a stable
 id such as `compute.salu_util`. The files hold what a metric is (its formula, unit and
-peaks), not how a panel shows it. `loader.py` loads them. The design is in
-[`lld-phase-a-metric-library.md`](../../../docs/design/analysis-config-redesign/lld-phase-a-metric-library.md).
+peaks), not how a panel shows it. `loader.py` loads them.
 
 Production does not read these files yet: `analyze` and `profile` still use
-[`analysis_configs/`](../analysis_configs/). Until the cutover, a metric change goes into
-both trees.
+[`analysis_configs/`](../analysis_configs/). Until production reads the library, a metric
+change goes into both trees.
 
 ## Layout
 
@@ -109,7 +108,7 @@ parses, that a formula has one id on every arch, the roofline ceilings, and that
 fits in one pass. Its module docstring lists every check. The `check-yaml` hook rejects
 duplicate keys.
 
-Until the cutover,
+While production reads `analysis_configs/`,
 `tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py` checks that
 the library matches `analysis_configs/` and `profile_configs/sets/`: every equation of a
 panel row is a library formula, and the units, peaks, counters, built-in variables and

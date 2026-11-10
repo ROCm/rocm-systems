@@ -246,7 +246,7 @@ For full details, see the [metric config management README](./tools/config_manag
 
 ### Metric Library
 
-The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until the cutover, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks.
 
 ## Memory Chart Layouts
 
