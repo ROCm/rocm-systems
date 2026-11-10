@@ -245,8 +245,12 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete. A workgroup with a single wave has no other wave to
    race with, so its LDS events are retired as soon as they are wave-complete,
-   without a barrier. Long single-wave kernels therefore do not accumulate
-   completed LDS events.
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
