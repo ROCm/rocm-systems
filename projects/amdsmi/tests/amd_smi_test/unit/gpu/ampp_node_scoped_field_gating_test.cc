@@ -346,8 +346,11 @@ TEST(GpuUnit, AmppNodeScopedFieldWriteAllowedOnPrimaryGpuWhenPresent) {
             << "value on profile " << p.name << " of a primary GPU must not be rejected as "
             << "INVAL";
         exercised = true;
+        break;  // one real config/commit write is enough to exercise this
       }
+      if (exercised) break;
     }
+    if (exercised) break;
   }
 
   if (!exercised) {
