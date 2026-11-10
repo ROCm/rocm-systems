@@ -37,6 +37,20 @@ int GetGcnArchName(int deviceId, char* out);
 double GetDeviceWallClockRateInKhz(int deviceId);
 bool IsArchMatch(char const* arch, char const* target);
 
+/* Comma-separated list of GPU targets this librccl was compiled for, set by the
+ * build from the resolved GPU_TARGETS. The empty fallback keeps builds that do
+ * not set it compiling, and disables the check below. */
+#ifndef RCCL_BUILT_GPU_TARGETS
+#define RCCL_BUILT_GPU_TARGETS ""
+#endif
+
+/* Host Code: does this build have device code for `archName` (a gcnArchName such
+ * as "gfx1103:xnack-")? Compares base names, ignoring the feature suffix on
+ * either side. Returns true when the question cannot be answered -- no target
+ * list, a "-generic" target, or no arch name -- because a false reject would
+ * refuse to initialize on hardware that works. */
+bool rcclArchIsBuilt(char const* archName);
+
 /* Host Code: Must match NCCL_LL128_LINESIZE / NCCL_LL128_LINEELEMS in device
  * code for the same arch. */
 inline int rcclLL128LineElemsFromArch(char const* arch) {

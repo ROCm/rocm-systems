@@ -3209,6 +3209,16 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   timers[TIMER_INIT_KERNELS] = clockNano();
+  // Reject an arch this librccl has no device code for, before the first
+  // hipFuncGetAttributes. Those queries fail for every kernel, the loop in
+  // ncclInitKernelsForDevice ignores each failure, and init continues into a comm
+  // that cannot launch anything -- or faults inside HIP first (ROCM-33822).
+  if (!rcclArchIsBuilt(archName)) {
+    WARN("This RCCL library has no device code for %s (built targets: %s). Rebuild with %s in GPU_TARGETS.",
+         archName, RCCL_BUILT_GPU_TARGETS, archName);
+    res = ncclInvalidUsage;
+    goto fail;
+  }
   NCCLCHECKGOTO(ncclInitKernelsForDevice(cudaArch, maxSharedMem, &maxLocalSizeBytes), res, fail);
   // Set the maximum kernel stack size of all kernels to avoid
   // a CUDA memory reconfig on load (c.f. NVSHMEM issue)
