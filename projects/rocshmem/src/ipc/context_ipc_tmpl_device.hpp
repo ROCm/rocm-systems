@@ -390,10 +390,10 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 template <typename T, ROCSHMEM_OP Op>
 __device__ void IPCContext::internal_ring_allreduce_wg(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
-    int n_seg, int seg_size, int chunk_size, size_t pSync_offset) {
+    int n_seg, int seg_size, int chunk_size) {
 
   int PE_size = team_obj->tinfo_wrt_world->size;
-  long *pSync = team_obj->reduce_pSync + pSync_offset;
+  long *pSync = team_obj->reduce_pSync;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
 
@@ -473,8 +473,7 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
     }
   }
 
-  // Team-relative bound: clear only this call's half of the double-buffered
-  // pSync region, not the global PE count.
+  // Team-relative bound, not the global PE count.
   for (int i = wg_id; i < 2 * PE_size - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
@@ -579,10 +578,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
-    // Double-buffer the ring pSync slots across calls to avoid an ABA race
-    // when back-to-back reduces reuse the same team/ctx.
-    if (2 * ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t pSync_offset = (team_obj->reduce_sequence_number % 2) * ring_pSync;
+    if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t ring_pWrk =
           (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       // integer division truncating value
@@ -596,7 +592,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                       seg_size, chunk_size, pSync_offset);
+                                       seg_size, chunk_size);
       }
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
@@ -607,7 +603,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
           barrier_wg(team);
           internal_ring_allreduce_wg<T, Op>(p_dst, p_src,
                                          (p_chunk * PE_size), team_obj, 1,
-                                         (p_chunk * PE_size), p_chunk, pSync_offset);
+                                         (p_chunk * PE_size), p_chunk);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -618,9 +614,6 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
           barrier_wg(team);
           internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj);
         }
-      }
-      if (is_thread_zero_in_block()) {
-        team_obj->reduce_sequence_number++;
       }
     } else {
       LOGD_WARN("Unsupported reduction size for IPC conduit.");
