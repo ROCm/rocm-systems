@@ -2065,6 +2065,7 @@ template <bool EnableAsync>
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
+  const uint64_t instruction_pc = active->pc;
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
   std::string execution_failure_detail;
@@ -2077,7 +2078,8 @@ template <bool EnableAsync>
     }
     if (active->instruction_execution_error_detail())
       execution_failure_detail = active->instruction_execution_error_detail();
-    fail_wave_instruction(*active, instruction_mnemonic, active->pc,
+    active->pc = instruction_pc;
+    fail_wave_instruction(*active, instruction_mnemonic, instruction_pc,
                           active->instruction_execution_error(), execution_failure_detail);
   };
   // Operand resolution outside execute_instruction() participates in the same
