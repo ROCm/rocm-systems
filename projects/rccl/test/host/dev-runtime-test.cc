@@ -6808,6 +6808,16 @@ TEST_F(DevCommCreateJitTest, AotCaller_QueuesCompileTimeVersion) {
   EXPECT_EQ(QueuedDeviceCodeVersion(), kJitFieldVersion);
 }
 
+// Branch: useRuntimeVersion from a caller that has the field selects the
+// runtime version, whatever the caller was compiled against.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_QueuesRuntimeVersion) {
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
