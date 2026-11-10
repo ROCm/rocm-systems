@@ -284,7 +284,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    2ULL*1024*1024,      // [8] AlltoAll        -- LL beats Direct 1.2-4.3x to 2M at 8/16/32 (DPX)
+    128ULL*1024,         // [8] AlltoAll        -- LL128 takes over from 256K (DPX)
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
@@ -299,7 +299,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    16ULL*1024*1024,     // [8] AlltoAll        -- LL128 above the 128K LL ceiling, DDA VMM above 16M (DPX)
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -486,6 +486,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaAgLL128MaxBlocks = 75,
   .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
   .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
+  // AllToAll LL128 block cap from 256 KiB to 16 MiB. Rounded to a multiple of the peer count:
+  // 70 / 60 / 62 / 63 blocks at 8 / 16 / 32 / 64 ranks (DPX).
+  .ddaA2aLL128MaxBlocks = 72,
+  .ddaA2aLL128MaxBlocksMinBytes = 256ULL*1024,
+  .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
