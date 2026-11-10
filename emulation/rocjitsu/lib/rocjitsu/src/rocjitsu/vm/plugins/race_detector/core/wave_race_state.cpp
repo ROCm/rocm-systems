@@ -190,15 +190,12 @@ util::Result WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType t
 }
 
 util::Result WaveRaceState::prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &info) {
-  for (const auto obligation : info.counter_obligations()) {
-    // Counters without a modeled capacity, such as STORECNT before GFX12,
-    // apply no backpressure.
-    const auto counter = capacityCounterFor(obligation.wait_counter_type());
-    if (counterCapacities.split(counter) > 0 || counter == amdgpu::WaitCounterType::VMCNT ||
-        counter == amdgpu::WaitCounterType::LGKMCNT)
-      if (prepareForCounterIncrement(counter, obligation.counter_increment()).failed())
-        return util::Result::failure();
-  }
+  // Counters without a modeled capacity, such as STORECNT before GFX12, apply
+  // no backpressure; prepareForCounterIncrement() returns early for them.
+  for (const auto obligation : info.counter_obligations())
+    if (prepareForCounterIncrement(obligation.wait_counter_type(), obligation.counter_increment())
+            .failed())
+      return util::Result::failure();
   return util::Result::success();
 }
 
