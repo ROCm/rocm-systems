@@ -551,7 +551,10 @@ def _evaluate_collect_ratio_composite(
     nums = composite.weight_meta.get("numerator")
     dens = composite.weight_meta.get("denominator")
     if not isinstance(nums, list) or not isinstance(dens, list):
-        console_warning("COLLECT_RATIO: missing numerator/denominator metadata.")
+        console_warning(
+            "metrics",
+            "COLLECT_RATIO: missing numerator/denominator metadata.",
+        )
         return "N/A"
 
     num_series: List[pd.Series] = []
