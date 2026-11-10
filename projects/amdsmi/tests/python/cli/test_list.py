@@ -45,7 +45,7 @@ class TestList(TestCliBase):
         first = self.list_data[0]
         for selection, expected in (
             (f"-g {first['gpu']} {first['gpu']}", [first]),
-            (f"-g {first['gpu']} -g {first['gpu']}", [first]),
+            (f"-g {first['gpu']} -g {first['gpu']} {first['gpu']}", [first]),
             (f"-g {first['gpu']} --gpu {first['bdf']} --gpu {first['uuid']}", [first]),
             (f"-g {first['gpu']} -g all", self.list_data),
         ):

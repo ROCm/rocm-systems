@@ -116,6 +116,9 @@ def _baremetal_helpers(helpers_type, errors):
         def is_brcm_switch_initialized(self):
             return True
 
+        def get_missing_drivers(self):
+            return []
+
         def get_output_format(self):
             return "human_readable"
 

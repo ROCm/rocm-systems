@@ -305,7 +305,10 @@ def wait_for_ranks(
     processes: Sequence[subprocess.Popen[bytes]], deadline: float, timeout: float
 ) -> None:
     while True:
-        statuses = [process.poll() for process in processes]
+        # A raising signal handler can interrupt Popen after it acquires its
+        # waitpid lock but before it installs the finally that releases it.
+        with block_termination_signals():
+            statuses = [process.poll() for process in processes]
         for rank, status in enumerate(statuses):
             if status is not None and status != 0:
                 raise ScaleOutError(f"rank {rank} exited with status {status}")

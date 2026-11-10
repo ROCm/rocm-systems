@@ -281,6 +281,23 @@ inline uint32_t cvt_f32_f16(float source, rj_code_arch_t arch, bool ieee_mode) {
   return bits;
 }
 
+/// @brief Convert one V_CVT_SR_PK_F16_F32 component with its 16-bit addend.
+inline uint16_t cvt_sr_pk_f16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
+  // Model the full 16-bit addition in the CDNA5 pseudocode (p. 646) and the
+  // truncation in section 7.6. The upper three addend bits can change an exact
+  // F16 value by several ULPs. Their placement still needs a gfx1250 measurement.
+  // At 2^16 and above the F16 result has already overflowed, or the input is Inf/NaN.
+  if ((bits & fp_format::F32::kMagnitude) < std::bit_cast<uint32_t>(0x1p16f))
+    bits += addend;
+  return util::f32_to_f16_sr_mode(std::bit_cast<float>(bits), 0, fp16_ovfl);
+}
+
+/// @brief Convert one V_CVT_SR_PK_BF16_F32 component with its 16-bit addend.
+inline uint16_t cvt_sr_pk_bf16_f32(uint32_t bits, uint16_t addend, bool fp16_ovfl) {
+  // The single-result converter consumes the high half of a 32-bit seed.
+  return util::f32_to_bf16_sr_mode(std::bit_cast<float>(bits), uint32_t{addend} << 16, fp16_ovfl);
+}
+
 /// @brief Return the OMOD value supported by an ordinary floating-point result.
 inline uint32_t effective_omod(rj_code_arch_t arch, uint32_t denorm_mode, bool ieee_mode,
                                uint32_t omod) {
@@ -1157,8 +1174,12 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
+/// returned without entering the host floating-point environment.
 inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
                            bool clamp_nan_to_zero) {
+  if (omod == 0 && !clamp)
+    return value;
   double result;
   {
     detail::ScopedFenv environment(round_mode);
