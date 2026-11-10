@@ -108,10 +108,7 @@ endmacro()
 
 # Internal helper: split HIP_HIPCC_FLAGS elements that contain multiple
 # space-separated flags packed into a single string (e.g. "-O3 -fPIC
-# -std=c++17") into individual flags.  The old hipcc-based FindHIP.cmake
-# tolerated this because flags were passed through a shell invocation that
-# performed word splitting; target_compile_options() does not, so we must
-# split explicitly.
+# -std=c++17") into individual flags.  
 macro(_HIP_SPLIT_FLAGS _out_var)
     set(${_out_var})
     foreach(_hip_flag_element IN LISTS HIP_HIPCC_FLAGS)
