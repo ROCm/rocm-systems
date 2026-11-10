@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 557 · build snapshot" aria-label="Stars: 557">557</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 496 · build snapshot" aria-label="Forks: 496">496</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 557 · build snapshot" aria-label="Stars: 557">557</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 496 · build snapshot" aria-label="Forks: 496">496</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
       </ul>
     </div>
   </a>
@@ -2121,6 +2121,8 @@
 instructions and register layouts; its implementation uses portable C++ and
 CPU-specific SIMD arithmetic.</p>
 <h2 id="scope-and-contract">Scope and contract<a class="headerlink" href="#scope-and-contract" title="Permanent link">&para;</a></h2>
+<p>GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+privilege checks, topology, and execution side effects are outside this arithmetic library.</p>
 <p>The library is a collection of C entry points mapping one-to-one to GPU instructions.
 Each aims to reproduce the instruction's arithmetic, synchronously on the calling
 CPU thread. Operation is stateless: operands and controls arrive as arguments,
@@ -2276,7 +2278,7 @@ setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without <code>RJ_ARITH_SEMANTICS_</code>.
 The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4
 fused floating-point arithmetic, basic floating-point arithmetic and selection,
-division, dot products, conversions, math functions, comparisons, integer arithmetic, graphics operations and register/lane routing. Other handlers retain their existing
+division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, graphics operations and register/lane routing. Other handlers retain their existing
 implementations.</p>
 <h3 id="guest-fp-controls">Guest FP controls<a class="headerlink" href="#guest-fp-controls" title="Permanent link">&para;</a></h3>
 <p>Guest rounding, denormal handling, and NaN policies are emulated explicitly,
