@@ -121,6 +121,20 @@ TEST(ExecutionFuzzTargetTest, RandomMixRunsGeneratedKernelsAcrossTargets) {
   }
 }
 
+TEST(ExecutionFuzzInputTest, TrailingLiteralLeavesEnoughBytesToFetchLastTerminator) {
+  for (const FuzzTarget target : {FuzzTarget::Gfx908, FuzzTarget::Gfx90a, FuzzTarget::Gfx942}) {
+    SCOPED_TRACE(target_name(target));
+    for (const uint8_t memory_mode : {uint8_t{0}, kCacheMemoryBit}) {
+      SCOPED_TRACE(memory_mode);
+      // s_mov_b32 s0, literal. It consumes the first appended terminator as its literal.
+      const std::array<uint8_t, 6> input = {
+          static_cast<uint8_t>(target), memory_mode, 0xff, 0x00, 0x80, 0xbe};
+      const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+      EXPECT_EQ(stats.waves_halted, 1u);
+    }
+  }
+}
+
 TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
