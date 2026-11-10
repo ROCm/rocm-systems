@@ -406,22 +406,23 @@ resolved.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
-counter table in CDNA5 ISA 5.7.1), so each holds 63 tokens, or 31 for KMcnt. These are the capacities the core memory-wait checker uses. Each
-counter constrains only its own events: STOREcnt pressure does not complete a
-pending load, and a scalar load does not complete a pending DS operation.
-Async loads and async stores share ASYNCcnt but complete in order only within
-their own type (CDNA5 ISA 10.8), so a full ASYNCcnt completes the oldest async
-load only when async loads alone fill it, and likewise for stores. Scalar loads
-complete out of order (CDNA5 ISA 5.7.1.1), so a full KMcnt never completes one.
-A memory instruction issued with EXEC zero still applies backpressure, since it
-counts unless every counter it could add to is zero (CDNA5 ISA 3.2.2.1). Tensor
-DMA instructions apply TENSORcnt backpressure when they issue, before their LDS
+counter table in CDNA5 ISA 5.7.1), so each holds 63 tokens, or 31 for KMcnt.
+These are the capacities the core memory-wait checker uses. Each counter
+constrains only its own events: STOREcnt pressure does not complete a pending
+load, and a scalar load does not complete a pending DS operation. Async loads
+and async stores share ASYNCcnt but complete in order only within their own type
+(CDNA5 ISA 10.8), so a full ASYNCcnt completes the oldest async load only when
+async loads alone fill it, and likewise for stores. Scalar loads complete out of
+order (CDNA5 ISA 5.7.1.1), so a full KMcnt never completes one. A memory
+instruction issued with EXEC zero still applies backpressure, since it counts
+unless every counter it could add to is zero (CDNA5 ISA 3.2.2.1). Tensor DMA
+instructions apply TENSORcnt backpressure when they issue, before their LDS
 bytes are checked, so the oldest transfer a full TENSORcnt completes does not
-conflict with the new one. Every generic FLAT applies backpressure to both
-DScnt and LOADcnt or STOREcnt when it issues, whichever memory its addresses
-resolve to, because it increments both (CDNA5 ISA 5.7.1.3). The slot it takes
-in a domain its addresses did not use is recorded as an event with no registers
-or LDS bytes, in order with that domain's other operations, so later capacity
+conflict with the new one. Every generic FLAT applies backpressure to both DScnt
+and LOADcnt or STOREcnt when it issues, whichever memory its addresses resolve
+to, because it increments both (CDNA5 ISA 5.7.1.3). The slot it takes in a
+domain its addresses did not use is recorded as an event with no registers or
+LDS bytes, in order with that domain's other operations, so later capacity
 checks and partial waits count it as hardware does. The FLAT's own result still
 depends only on the domains its addresses used.
 
@@ -609,17 +610,17 @@ this source tree. The original
   async copies follow that rule, so neither the emulator nor the detector
   applies it to them.
 
-- **False positives with LDS barrier synchronization**: a producer can hand
-  LDS data to another wave through an LDS barrier cell instead of a wait and
+- **False positives with LDS barrier synchronization**: a producer can hand LDS
+  data to another wave through an LDS barrier cell instead of a wait and
   `s_barrier`. A tensor load can request an arrival on a barrier cell when it
   completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
   after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
-  consumer wave can then wait for the barrier's phase and read the tile, or
-  copy it out with an async store, without the producer waiting on
-  `s_wait_tensorcnt` or `s_wait_asynccnt` or the workgroup passing `s_barrier`.
-  The detector does not observe this synchronization: it retires a transfer
-  only through wait-counter instructions, counter capacity and `s_barrier`. A consumer that is
-  correctly synchronized through the barrier cell is therefore reported as
+  consumer wave can then wait for the barrier's phase and read the tile, or copy
+  it out with an async store, without the producer waiting on `s_wait_tensorcnt`
+  or `s_wait_asynccnt` or the workgroup passing `s_barrier`. The detector does
+  not observe this synchronization: it retires a transfer only through
+  wait-counter instructions, counter capacity and `s_barrier`. A consumer that
+  is correctly synchronized through the barrier cell is therefore reported as
   racing with the tensor or async load. These reports are false positives, not
   missing coverage.
 
