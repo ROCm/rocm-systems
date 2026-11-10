@@ -8595,7 +8595,7 @@ TEST(GeneratedInstDefUse, D16BufferLoadLdsBitSuppressesDestinationRead) {
       << "LDS set: data goes to LDS, so vdata is not a preserved read";
 }
 
-TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
+TEST(GeneratedInstDefUse, Vop3SdstEncDppClearsSuppressedScalarResult) {
   constexpr uint32_t kVop3SdstWord0 = (53u << 26) | (288u << 16) | (8u << 8) | 6u;
   constexpr uint32_t kVop3SdstWord1 = (10u << 18) | (3u << 9) | 250u;
   auto inst = decode_rdna4({kVop3SdstWord0, kVop3SdstWord1, (0xFu << 28) | (0xFu << 24) | 2u});
@@ -8603,7 +8603,24 @@ TEST(GeneratedInstDefUse, Vop3SdstEncDppInvalidSourceCanReadScalarResult) {
 
   InstDefUse idu(*inst, 64);
   EXPECT_TRUE(idu.defs.contains({RegClass::SGPR, 8, 2}));
-  EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+  EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 8, 2}));
+}
+
+TEST(GeneratedInstDefUse, DppReverseSubtractIgnoresScalarMinuendOnGfx115AndGfx12) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    auto decoder = Decoder::create(arch);
+    auto reads_s5 = [&](std::initializer_list<uint32_t> words) {
+      auto inst = decoder->decode_window(std::span(words.begin(), words.size()));
+      EXPECT_TRUE(inst.succeeded());
+      return inst.succeeded() &&
+             InstDefUse(*inst.value(), 32).uses.contains({RegClass::SGPR, 5, 1});
+    };
+    EXPECT_TRUE(reads_s5({0xd7020c06, 0x02000b04}));              // plain SUBREV_CO reads s5
+    EXPECT_FALSE(reads_s5({0xd7020c06, 0x00000afa, 0xff090104})); // DPP16
+    EXPECT_FALSE(reads_s5({0xd5220c06, 0x01a80aea, 0x1f58d104})); // DPP8
+  }
 }
 
 // explicit_ordinary_sgpr_bound is the cheap whole-scope scan shared by DBT's
