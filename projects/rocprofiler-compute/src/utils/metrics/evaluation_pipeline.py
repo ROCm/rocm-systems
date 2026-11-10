@@ -277,7 +277,6 @@ def _copy_metric_tables(
         if dfs_type.get(table_id) != "metric_table":
             continue
         copied = df.copy(deep=True)
-        copied.attrs = dict(df.attrs)
         copies[table_id] = copied
         types[table_id] = "metric_table"
     return copies, types
