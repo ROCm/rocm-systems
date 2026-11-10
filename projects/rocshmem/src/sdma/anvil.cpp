@@ -25,6 +25,7 @@
 #include "anvil.hpp"
 #include "log.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <cstring>
 #include <cstdio>
@@ -180,7 +181,7 @@ static const std::string getBusId(int deviceId) {
 
 SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
                      uint32_t engineId, const EngineSelection& selection)
-    : remoteDeviceId_(remoteDeviceId) {
+    : engineId_(engineId), remoteDeviceId_(remoteDeviceId) {
   int originalDeviceId;
 
   ANVIL_CHECK_HIP_ERROR(hipGetDevice(&originalDeviceId));  // Save the current device
@@ -520,6 +521,7 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
                                            engineId, selection);
   lastQueueStatus_ = queue->createStatus();
   if (!queue->valid()) return nullptr;
+  queuesPerEngine_[engineId] += 1;
   vec.emplace_back(std::move(queue));
   queuesUsedTotal_ += 1;
   if (channelIdx != nullptr) {
@@ -577,7 +579,13 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
   for (int c = 0; c < numChannels; ++c) {
-    SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
+    // Re-rank per channel so a peer's channels spread too. NO_MEMORY means that engine's slots are
+    // full, so try the next one; any other failure is not about capacity and ends the connect.
+    SdmaQueue* queue = nullptr;
+    for (uint32_t engine : candidateEngines(selection)) {
+      queue = createSdmaQueue(srcDeviceId, dstDeviceId, engine, selection);
+      if (queue != nullptr || lastQueueStatus_ != HSAKMT_STATUS_NO_MEMORY) break;
+    }
     if (queue == nullptr) {
       if (lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
         reportBudget(queuesUsedTotal_);
@@ -594,6 +602,8 @@ void AnvilLib::releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_
   // credited back.
   while (vec.size() > keep) {
     if (queuesUsedTotal_ > 0) queuesUsedTotal_ -= 1;
+    auto it = queuesPerEngine_.find(vec.back()->engineId());
+    if (it != queuesPerEngine_.end() && it->second > 0) it->second -= 1;
     vec.pop_back();
   }
 }
@@ -602,6 +612,7 @@ void AnvilLib::disconnect() {
   // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
   sdma_channels_.clear();
   queuesUsedTotal_ = 0;
+  queuesPerEngine_.clear();
   LOG_TRACE("SDMA: Disconnected all queues");
 }
 
@@ -738,6 +749,30 @@ EngineSelection AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
 
   selection_.engineId = getSdmaEngineIdFromOamMap(srcDeviceId, dstDeviceId);
   return selection_;
+}
+
+std::vector<uint32_t> AnvilLib::candidateEngines(const EngineSelection& selection) const {
+  std::vector<uint32_t> engines;
+  // HSA's preferred mask lists every engine it considers equivalent for the pair. Taking only the
+  // lowest one put every peer on engine 0, whose few queue slots ran out while engines 2 and 4 sat
+  // idle. The OAM-map path picks one engine for xGMI locality and keeps it.
+  if (selection.usedPreferred) {
+    for (uint32_t e = 0; e < 32; ++e) {
+      const bool inMask = (selection.preferredMask >> e) & 1u;
+      const bool inRange = numSdmaEnginesTotal_ == 0 || e < numSdmaEnginesTotal_;
+      if (inMask && inRange && isUsableSdmaEngine(static_cast<int>(e))) engines.push_back(e);
+    }
+  }
+  // An odd-only mask maps to the even engine below it, which is not in the mask itself.
+  if (engines.empty()) engines.push_back(static_cast<uint32_t>(selection.engineId));
+
+  auto load = [this](uint32_t e) {
+    auto it = queuesPerEngine_.find(e);
+    return it == queuesPerEngine_.end() ? 0u : it->second;
+  };
+  std::stable_sort(engines.begin(), engines.end(),
+                   [&](uint32_t a, uint32_t b) { return load(a) < load(b); });
+  return engines;
 }
 
 AnvilLib& anvil = anvil.getInstance();

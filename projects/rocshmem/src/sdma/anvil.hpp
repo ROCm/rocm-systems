@@ -81,9 +81,11 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
+  uint32_t engineId() const { return engineId_; }
 
  private:
   bool valid_{false};
+  uint32_t engineId_{0};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
   uint64_t* cachedWptr_{nullptr};
@@ -160,6 +162,9 @@ class AnvilLib {
   // numSdmaQueuesPerEngine_; an engine-pinned rejection fails instead of retrying on an
   // unconstrained engine.
   uint32_t queuesUsedTotal_{0};
+  // Queues this process holds on each engine. KFD caps queues per engine, not per GPU, so the
+  // engine choice in connect() has to see where the earlier peers already landed.
+  std::unordered_map<uint32_t, uint32_t> queuesPerEngine_;
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
   // Selection in progress, so getOamId can report why the map was consulted without the caller
   // threading the same values back down.
@@ -175,6 +180,8 @@ class AnvilLib {
   // Chooses an engine for the pair and records why, so the caller can hand the same record to
   // every queue it then creates.
   EngineSelection getSdmaEngineId(int srcDeviceId, int dstDeviceId);
+  // Usable engines connect() may place a queue for this pair on, least loaded first.
+  std::vector<uint32_t> candidateEngines(const EngineSelection& selection) const;
 
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
