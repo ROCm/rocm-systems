@@ -440,35 +440,34 @@ __device__ int GDAContext::reduce_wave(rocshmem_team_t team, T *dest,
     internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
+      // See reduce_wg: ring chunks have to be whole cache lines, the remainder goes through the direct allreduce.
+      constexpr int kLineBytes = 128;
+      const int line_elems = (kLineBytes > sizeof(T)) ? (kLineBytes / sizeof(T)) : 1;
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
-      int chunk_size = ring_pWrk / PE_size;
-      int seg_size = chunk_size * PE_size;
-
-      int n_seg = nreduce / seg_size;
-      int n_seg_up = (nreduce - 1) / seg_size + 1;
-
-      if (n_seg > 0) {
-        internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
-          n_seg, seg_size, chunk_size, wf_info);
-      }
-      if (n_seg_up > n_seg) {
-        T *p_dst = (dest + (n_seg * seg_size));
-        const T *p_src = (source + (n_seg * seg_size));
-        int p_count = nreduce - (n_seg * seg_size);
-        int p_chunk = p_count / PE_size;
-
+      int chunk_size = (ring_pWrk / PE_size) / line_elems * line_elems;
+      int done = 0;
+      if (chunk_size > 0) {
+        int seg_size = chunk_size * PE_size;
+        int n_seg = nreduce / seg_size;
+        if (n_seg > 0) {
+          internal_ring_allreduce_wave<T, Op>(dest, source, nreduce, team_obj,
+            n_seg, seg_size, chunk_size, wf_info);
+          done = n_seg * seg_size;
+        }
+        int p_chunk = ((nreduce - done) / PE_size) / line_elems * line_elems;
         if (p_chunk > 0) {
-          internal_ring_allreduce_wave<T, Op>(p_dst, p_src,
-            (p_chunk * PE_size), team_obj, 1,
-            (p_chunk * PE_size), p_chunk, wf_info);
+          if (done > 0) barrier_wave(team);  // pSync is reused by the second ring
+          internal_ring_allreduce_wave<T, Op>(dest + done, source + done, p_chunk * PE_size,
+            team_obj, 1, p_chunk * PE_size, p_chunk, wf_info);
+          done += p_chunk * PE_size;
         }
-
-        if ((p_chunk * PE_size) < p_count) {
-          p_count -= (p_chunk * PE_size);
-          p_dst += (p_chunk * PE_size);
-          const T *p_src2 = p_src + (p_chunk * PE_size);
-          internal_direct_allreduce_wave<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
-        }
+      }
+      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / PE_size));
+      while (done < nreduce) {
+        int count = min(piece, nreduce - done);
+        if (done > 0) barrier_wave(team);  // pSync is reused: all PEs must have left the previous step
+        internal_direct_allreduce_wave<T, Op>(dest + done, source + done, count, team_obj, wf_info);
+        done += count;
       }
     } else {
       LOGD_WARN("Unsupported reduction size for GDA wave conduit.");
@@ -557,6 +556,7 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
   for (int i = wg_id; i < nelems; i += wg_size) {
     dst[i] = src[i];
   }
+  threadfence_system();
   __syncthreads();
 
   for (int seg = 0; seg < n_seg; seg++) {
@@ -585,6 +585,10 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
       __syncthreads();
       gda_compute_reduce<T, Op>(&pWrk[off_recv], &dst[off_seg + off_recv],
                                 chunk_size, wg_id, wg_size);
+      // The next iteration sends this chunk: the NIC reads it from memory, so the GPU writes
+      // have to be made visible at system scope first.
+      threadfence_system();
+      __syncthreads();
     }
 
     // Loop 2 in the example above
@@ -594,7 +598,11 @@ __device__ void GDAContext::internal_ring_allreduce_wg(T *dst, const T *src,
         reinterpret_cast<void *>(&dst[off_send + off_seg]),
         chunk_size * sizeof(T), send_pe, send_pe, wf_info);
       fence();
+      __syncthreads();
       if (is_thread_zero_in_block()) {
+        // The data put is non-blocking: it has to be complete before the flag put, otherwise the
+        // flag can overtake the data on a multipath fabric and the next PE forwards stale data.
+        qps[send_pe].quiet(wf_info);
         wait_val = seg + 10;
         internal_putmem(&pSync[iter], &wait_val, sizeof(*pSync), send_pe,
           send_pe, wf_info);
@@ -661,6 +669,7 @@ __device__ void GDAContext::internal_ring_allreduce_wave(T *dst, const T *src,
       for (int j = wf_tid; j < chunk_size; j += WF_SIZE) {
         OpWrap<Op>::Calc(&pWrk[off_recv], &dst[off_seg + off_recv], j);
       }
+      __threadfence_system();  // the NIC reads this chunk in the next iteration
     }
 
     // Loop 2: all-gather
@@ -710,39 +719,37 @@ __device__ int GDAContext::reduce_wg(rocshmem_team_t team, T *dest,
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, wf_info);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
+      // The ring puts into dst on the other PEs while this PE also writes dst through its cache. A put that
+      // shares a cache line with local writes gets clobbered when the dirty line is written back, so the
+      // ring chunks have to be whole cache lines (the remainder goes through the direct allreduce).
+      constexpr int kLineBytes = 128;
+      const int line_elems = (kLineBytes > sizeof(T)) ? (kLineBytes / sizeof(T)) : 1;
       size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
-      // integer division truncating value
-      int chunk_size = ring_pWrk / PE_size;
-      int seg_size = chunk_size * PE_size;
-
-      // integer division truncating value
-      int n_seg = nreduce / seg_size;
-      // integer division rounding up
-      int n_seg_up = (nreduce - 1) / seg_size + 1;
-
-      if (n_seg > 0) {
-        internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
-          seg_size, chunk_size, wf_info);
-      }
-      if (n_seg_up > n_seg) {
-        T *p_dst = (dest + (n_seg * seg_size));
-        const T *p_src = (source + (n_seg * seg_size));
-        int p_count = nreduce - (n_seg * seg_size);
-        int p_chunk = p_count / PE_size;
-
+      int chunk_size = (ring_pWrk / PE_size) / line_elems * line_elems;
+      int done = 0;
+      if (chunk_size > 0) {
+        int seg_size = chunk_size * PE_size;
+        int n_seg = nreduce / seg_size;
+        if (n_seg > 0) {
+          internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
+            seg_size, chunk_size, wf_info);
+          done = n_seg * seg_size;
+        }
+        int p_chunk = ((nreduce - done) / PE_size) / line_elems * line_elems;
         if (p_chunk > 0) {
-          internal_ring_allreduce_wg<T, Op>(p_dst, p_src, (p_chunk * PE_size),
-            team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
+          if (done > 0) barrier_wg(team);  // pSync is reused by the second ring
+          internal_ring_allreduce_wg<T, Op>(dest + done, source + done, p_chunk * PE_size,
+            team_obj, 1, p_chunk * PE_size, p_chunk, wf_info);
+          done += p_chunk * PE_size;
         }
-
-        if ((p_chunk * PE_size) < p_count) {
-          // Final elements need to use direct_allreduce
-          p_count -= (p_chunk * PE_size);
-          p_dst += (p_chunk * PE_size);
-          const T *p_src2 = p_src + (p_chunk * PE_size);
-
-          internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj, wf_info);
-        }
+      }
+      // Remaining elements: direct allreduce in pieces that fit into pWrk.
+      int piece = max(1, (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE / PE_size));
+      while (done < nreduce) {
+        int count = min(piece, nreduce - done);
+        if (done > 0) barrier_wg(team);  // pSync is reused: all PEs must have left the previous step
+        internal_direct_allreduce_wg<T, Op>(dest + done, source + done, count, team_obj, wf_info);
+        done += count;
       }
     } else {
       LOGD_WARN("Unsupported reduction size for GDA conduit.");
