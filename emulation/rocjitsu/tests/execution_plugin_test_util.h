@@ -316,6 +316,9 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::optional<amdgpu::LdsAllocationRange> lds_allocation;
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -404,6 +407,9 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_allocation = access.lds_allocation;
+    captured.ds_suppressed_lanes = access.ds_suppressed_lanes;
+    captured.ds2_suppressed_lanes = access.ds2_suppressed_lanes;
     accesses.push_back(std::move(captured));
   }
 

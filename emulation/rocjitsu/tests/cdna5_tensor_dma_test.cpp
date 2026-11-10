@@ -3469,7 +3469,7 @@ TEST(Gfx1250ExecutionTest, ReleaseWaitCounterWakesWaitcntWhenTargetIsSatisfied) 
   ASSERT_NE(wf, nullptr);
 
   wf->wait_counters().increment(amdgpu::WaitCounterType::TENSORCNT);
-  wf->set_wait_target_tensorcnt(0);
+  wf->wait_for({.tensorcnt = 0});
   ASSERT_EQ(wf->state(), amdgpu::WfState::WAITCNT);
 
   wf->release_wait_counter(amdgpu::WaitCounterType::TENSORCNT);

@@ -95,7 +95,7 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
 }
 
-enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, PointSample };
+enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, GenericFlat, PointSample };
 
 [[nodiscard]] constexpr bool ordered_vmem_writebacks(VmemWriteback first, VmemWriteback second) {
   return first == second && first != VmemWriteback::PointSample;
@@ -126,6 +126,17 @@ enum class VmemWriteback : uint8_t { Ordinary, Sample, Bvh, PointSample };
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
          arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
+// GFX10 ISA section 4.4 orders VGPR returns within GDS, separately from LDS.
+// EXPCNT tracks outgoing data and has no bearing on that writeback order.
+[[nodiscard]] constexpr bool has_ordered_gds_writeback(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
+// GFX10 GDS keeps EXEC and its outgoing VGPR sources live until EXPCNT retires.
+[[nodiscard]] constexpr bool checks_gds_source_lifetime(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
 }
 
 // FLAT's LDS route stays in order with indexed LDS: RDNA3/3.5 FLAT ordering
@@ -316,9 +327,14 @@ struct WaitCounterPolicy {
 
   // Absent fields leave their counters unchanged. An engaged result with no
   // active fields represents an explicit no-wait sentinel.
-  // SOPK forms currently use only SIMM16; SGPR addends are not modeled.
+  // Static analysis can prove a split wait with a NULL addend. Runtime
+  // checking uses executed_wait_fields() for a register-dependent limit.
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
+  executed_wait_fields(const Instruction &inst, rj_code_arch_t arch,
+                       const WaitFields &executed_limits);
+  [[nodiscard]] static bool is_gfx10_sopk_wait(const Instruction &inst, rj_code_arch_t arch);
 
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 };

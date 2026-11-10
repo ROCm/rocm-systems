@@ -142,6 +142,7 @@ uint64_t Wavefront::memory_exec(const Instruction &inst) const {
 }
 
 void Wavefront::observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const {
+  record_lds_source_read(address, bytes);
   cu_.plugin_group().onAmdgpuLdsDirectRead(*this, address, bytes, lane);
 }
 

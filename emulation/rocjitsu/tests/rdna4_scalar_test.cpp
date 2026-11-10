@@ -238,5 +238,32 @@ TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
   ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {1, 1}));
 }
 
+TEST_F(Rdna4Scalar, SplitWaitsReplacePreviousTargetAndMaskReservedBits) {
+  auto &counts = wave->wait_counters();
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc00000)); // s_wait_loadcnt 0
+  counts.increment(amdgpu::WaitCounterType::LOADCNT);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc30000)); // s_wait_bvhcnt 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc00040)); // LOADCNT threshold [5:0] = 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+  counts.decrement(amdgpu::WaitCounterType::LOADCNT);
+  EXPECT_TRUE(wave->wait_satisfied());
+
+  wave->set_state(amdgpu::WfState::RUNNING);
+  counts.increment(amdgpu::WaitCounterType::BVHCNT);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc30008)); // BVHCNT threshold [2:0] = 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+  counts.decrement(amdgpu::WaitCounterType::BVHCNT);
+  EXPECT_TRUE(wave->wait_satisfied());
+
+  wave->set_state(amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc8c1c2)); // s_wait_loadcnt_dscnt 0xc1c2
+  EXPECT_EQ(wave->wait_target().vmcnt, 1u);
+  EXPECT_EQ(wave->wait_target().dscnt, 2u);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc9c3c4)); // s_wait_storecnt_dscnt 0xc3c4
+  EXPECT_EQ(wave->wait_target().vscnt, 3u);
+  EXPECT_EQ(wave->wait_target().dscnt, 4u);
+  EXPECT_EQ(wave->wait_target().vmcnt, amdgpu::WaitCounters::VMCNT_MAX);
+}
 } // namespace
 } // namespace rocjitsu

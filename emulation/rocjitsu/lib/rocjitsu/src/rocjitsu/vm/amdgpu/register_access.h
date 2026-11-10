@@ -1145,6 +1145,56 @@ public:
                                     (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
   }
 
+  /// VGPRs read by a GDS request. GWS reads its argument
+  /// from the first active lane. A suppressed result disables the request.
+  [[nodiscard]] uint64_t gds_source_lanes(const Instruction &inst) const {
+    if (!vgpr_results_fit_allocation(inst))
+      return 0;
+    const uint64_t lanes = wavefront().exec();
+    return inst.mnemonic().starts_with("ds_gws_") ? lanes & -lanes : lanes;
+  }
+
+  /// Section 3.6.1 specifies an undefined data value for out-of-range
+  /// sources of reads and returning atomics. No-return DS/GDS and GWS
+  /// use the issuing wave's VGPR0 for each out-of-range source word.
+  [[nodiscard]] static bool ds_sources_use_vgpr0(const Instruction &inst) {
+    for (int i = 0; i < inst.num_dst_operands(); ++i)
+      if (inst.dst_operand(i)->decoded_vgpr())
+        return false;
+    return true;
+  }
+
+  /// Resolve each data-share source DWORD in the issuing wave. Preserve a
+  /// contiguous in-range tuple; a crossing tuple can refer to multiple VGPRs.
+  template <typename F>
+  void for_each_ds_source_range(const Operand &operand, bool use_vgpr0, F &&visit) const {
+    const auto reg = operand.decoded_vgpr();
+    if (!reg || !operand.reads_value())
+      return;
+    const auto &wf = wavefront();
+    const auto base = wf.vgpr_alloc().base;
+    const auto physical = base + reg->index;
+    if (use_vgpr0 ? wf.vgpr_alloc().contains(physical, reg->width)
+                  : cu_->owns_vgpr_range(wf, physical, reg->width)) {
+      visit(*reg);
+      return;
+    }
+    if (!use_vgpr0)
+      return;
+    for (uint32_t word = 0; word < reg->width; ++word) {
+      const auto physical_word = wf.ds_source_vgpr(physical + word);
+      visit(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical_word - base), 1});
+    }
+  }
+
+  template <typename F> void for_each_gds_source(const Instruction &inst, F &&visit) const {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
+      for_each_ds_source_range(*inst.src_operand(i), ds_sources_use_vgpr0(inst), visit);
+    }
+  }
+
   /// @brief Resolve a source using the execution bank and scalar selector.
   /// @param wordwise Preserve the backed prefix for emitters that validate each dword.
   [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
