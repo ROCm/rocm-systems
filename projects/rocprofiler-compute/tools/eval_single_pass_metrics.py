@@ -26,6 +26,10 @@ from counter_grouping_inspector import (  # noqa: E402
     get_default_config_dir,
 )
 
+from rocprof_compute_soc.counter_file import (  # noqa: E402
+    PerfmonConfig,
+    perfmon_config_for_arch,
+)
 from rocprof_compute_soc.counter_grouping_single_pass import (  # noqa: E402
     _count_single_pass_metric_sets_without_pass,
     collect_unique_multi_pass_metric_sets,
@@ -36,9 +40,11 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 
 
-def _build_soc(arch: str, tmp: Path) -> Tuple[OmniSoC_Base, Set[str], Dict[str, int]]:
+def _build_soc(arch: str, tmp: Path) -> Tuple[OmniSoC_Base, Set[str], PerfmonConfig]:
     config_dir = get_default_config_dir()
-    perfmon_config = mi_gpu_specs.get_perfmon_config(arch)
+    perfmon_config = perfmon_config_for_arch(
+        arch, mi_gpu_specs.get_perfmon_config(arch)
+    )
     soc = _build_inspector_soc(arch, config_dir, None, perfmon_config, tmp)
     counters, _ = soc.detect_counters()
     counters -= {"SQ_ACCUM_PREV_HIRES"}
