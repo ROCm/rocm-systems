@@ -352,7 +352,7 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 This policy currently applies to RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and
 RDNA3/RDNA4 fused floating-point arithmetic, basic floating-point arithmetic and
-selection, division, dot products, conversions, math functions, comparisons, integer arithmetic, graphics operations and register/lane routing. Other instructions retain their
+selection, division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, graphics operations and register/lane routing. Other instructions retain their
 existing implementations while integration proceeds by instruction family.
 
 The optional top-level `arithmetic` object selects one semantics mode for
@@ -420,6 +420,13 @@ does not retain legacy host-environment isolation; nondefault host controls are
 outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
+
+Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
+handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
+multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
+produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
+`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+
 
 ### Memory wait diagnostics
 

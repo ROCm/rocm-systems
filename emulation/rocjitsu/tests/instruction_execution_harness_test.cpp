@@ -7562,7 +7562,7 @@ TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
   }
 }
 
-TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
+TEST(Rdna4ScalarF16Test, AddAndFmacConsumeFp16OvflMode) {
   amdgpu::GpuMemory gpu_mem("rdna4_scalar_f16_add_mode_mem");
   amdgpu::L2Cache l2("rdna4_scalar_f16_add_mode_l2");
 
@@ -7583,17 +7583,21 @@ TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
   ASSERT_NE(wf, nullptr);
 
   const uint32_t sb = wf->sgpr_alloc().base;
-  cu->write_sgpr(sb + 0, util::f32_to_f16(65504.0f));
-  cu->write_sgpr(sb + 1, util::f32_to_f16(65504.0f));
-
-  const auto words = encode_sop2(rdna4::kSAddF16Sop2, 2, 0, 1);
-  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-  ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_add_f16");
-
-  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7C00u);
+  for (bool fmac : {false, true}) {
+    SCOPED_TRACE(fmac);
+    cu->write_sgpr(sb, 0x7bffu);
+    cu->write_sgpr(sb + 1, fmac ? 0x4000u : 0x7bffu);
+    const auto words = encode_sop2(fmac ? rdna4::kSFmacF16Sop2 : rdna4::kSAddF16Sop2, 2, 0, 1);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    for (bool saturate : {false, true}) {
+      // FMAC reads old D. Reset it so the previous overflow cannot mask the next result.
+      cu->write_sgpr(sb + 2, 0);
+      wf->set_mode_raw(saturate ? amdgpu::Wavefront::FP16_OVFL_BIT : 0);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xffffu, saturate ? 0x7bffu : 0x7c00u);
+    }
+  }
 
   if (!wf->is_halted())
     wf->halt();
