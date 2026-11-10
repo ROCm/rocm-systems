@@ -260,6 +260,10 @@ producer_loop(
 
     // Consumers rely on every trace segment ending with an END chunk. Early exits that did not
     // drain send an empty one on the way out (see `finish`).
+    // TODO: multi-SE triple buffering (users/gbaraldi/multiplese) rewrites this loop with one
+    // buffering packet and chunk sequence per SE. When it lands, segment_ended must become per SE
+    // and `finish` must send an empty END (plus GPU_BUFFER_FULL after an overflow) to every SE
+    // that did not drain. The copy-failure check in send_to_consumer must also be kept.
     bool segment_ended = false;
     int  exit_flags    = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
 
