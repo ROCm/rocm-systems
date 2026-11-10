@@ -3,6 +3,10 @@
 
 """Unit tests for single-pass metric packing helpers."""
 
+import importlib.util
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
 
 from rocprof_compute_soc.counter_file import (
@@ -382,3 +386,27 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs():
         assert bucket_holding(files, latency) is not None
     read_home = bucket_holding(files, read_level | read)
     assert read_home is not row_home
+
+
+def test_eval_tool_wraps_gfx1250_exclusive_families(tmp_path) -> None:
+    """The offline pass report must use the same gfx1250 family split as profiling."""
+    tool_path = (
+        Path(__file__).resolve().parents[3] / "tools" / "eval_single_pass_metrics.py"
+    )
+    spec = importlib.util.spec_from_file_location("eval_single_pass_metrics", tool_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    seen: dict[str, object] = {}
+
+    def fake_soc(arch, config_dir, supported, perfmon_config, tmp):
+        seen["config"] = perfmon_config
+        soc = MagicMock()
+        soc.detect_counters.return_value = (set(), None)
+        return soc
+
+    module._build_inspector_soc = fake_soc
+    module.mi_gpu_specs.get_perfmon_config = lambda arch: {"SQ": 8}
+    module._build_soc("gfx1250", tmp_path)
+    assert seen["config"].exclusive_families == (("SP_VALU_", "SQ_VMEM_"),)
