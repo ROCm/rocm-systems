@@ -22,10 +22,18 @@
 #   libdw::libdw
 #
 
-find_package(PkgConfig)
+# ROCm bundles libdw in <prefix>/lib/rocm_sysdeps and rocprofiler-sdk is built against it
+get_filename_component(_libdw_rocm_sysdeps
+                       "${CMAKE_CURRENT_LIST_DIR}/../../../rocm_sysdeps" REALPATH)
 
-if(PkgConfig_FOUND)
-    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
+# Function scope keeps the CMAKE_PREFIX_PATH change local; results are returned via cache
+# variables.
+function(_rocprofiler_sdk_libdw_pkg_config _rocm_sysdeps)
+    if(IS_DIRECTORY "${_rocm_sysdeps}")
+        list(PREPEND CMAKE_PREFIX_PATH "${_rocm_sysdeps}")
+    endif()
+    set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH ON)
+
     pkg_check_modules(DW libdw)
 
     if(DW_FOUND
@@ -49,13 +57,26 @@ if(PkgConfig_FOUND)
                 CACHE FILEPATH "libdw version")
         endif()
     endif()
+endfunction()
+
+find_package(PkgConfig)
+
+# An explicit libdw_ROOT (variable or environment) is authoritative: pkg-config could
+# return headers from another install while find_library picks the library from
+# libdw_ROOT.
+if(PkgConfig_FOUND
+   AND NOT libdw_ROOT
+   AND NOT DEFINED ENV{libdw_ROOT})
+    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
+    _rocprofiler_sdk_libdw_pkg_config("${_libdw_rocm_sysdeps}")
 endif()
 
 if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
+    # HINTS are searched before system paths
     find_path(
         libdw_ROOT_DIR
         NAMES include/elfutils/libdw.h
-        HINTS ${libdw_ROOT}
+        HINTS ${libdw_ROOT} ${_libdw_rocm_sysdeps}
         PATHS ${libdw_ROOT})
 
     mark_as_advanced(libdw_ROOT_DIR)
@@ -63,17 +84,19 @@ if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
     find_path(
         libdw_INCLUDE_DIR
         NAMES elfutils/libdw.h
-        HINTS ${libdw_ROOT}
+        HINTS ${libdw_ROOT} ${_libdw_rocm_sysdeps}
         PATHS ${libdw_ROOT}
         PATH_SUFFIXES include)
 
     find_library(
         libdw_LIBRARY
         NAMES dw
-        HINTS ${libdw_ROOT}
+        HINTS ${libdw_ROOT} ${_libdw_rocm_sysdeps}
         PATHS ${libdw_ROOT}
         PATH_SUFFIXES lib lib64)
 endif()
+
+unset(_libdw_rocm_sysdeps)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(libdw DEFAULT_MSG libdw_LIBRARY libdw_INCLUDE_DIR)
