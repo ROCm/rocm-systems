@@ -69,7 +69,6 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   const bool hints_;      //!< The CP firmware of the device decodes handle hints
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
-  uint32_t queue_index_ = 0;  //!< Queue index this signal's dispatch runs on
   std::recursive_mutex lock_;  //!< Signal lock for update
 
   //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
@@ -103,9 +102,8 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
       //! The current use's timing was read out or it has none to read. Says nothing about
       //! whether the GPU finished the use; use_completion_ tracks that.
       uint32_t timing_processed_ : 1;
-      uint32_t isPacketDispatch_ : 1;  //!< True if the packet is a dispatch
       uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
-      uint32_t reserved_ : 29;
+      uint32_t reserved_ : 30;
     };
     uint32_t data_;
   } Flags;
@@ -194,7 +192,7 @@ class Sampler : public device::Sampler {
   );
 
  private:
-  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                             const amd::Sampler& sampler) const;
   Sampler& operator=(const Sampler&);
 

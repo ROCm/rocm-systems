@@ -177,6 +177,12 @@ foreach(
     rj_arith_add_test(${target} math/${family}_test.cpp)
 endforeach()
 
+# VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
+foreach(family IN ITEMS alu fused dot)
+    set(target "rj_arith_dual_${family}_test")
+    rj_arith_add_test(${target} dual/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
@@ -246,4 +252,30 @@ foreach(
 )
     set(target "rj_arith_integer_${family}_test")
     rj_arith_add_test(${target} integer/${family}_test.cpp)
+endforeach()
+
+# Scalar families keep required SCC/EXEC results distinct from FP status.
+foreach(
+    family
+    IN
+    ITEMS
+        boolean
+        shift
+        move
+        field
+        count
+        pack
+        arithmetic
+        compare_integer
+        compare_float
+        exec
+        fp
+        round
+        conversion
+        state
+        relative
+        pseudo
+)
+    set(target "rj_arith_scalar_${family}_test")
+    rj_arith_add_test(${target} scalar/${family}_test.cpp)
 endforeach()

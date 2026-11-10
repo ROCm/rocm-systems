@@ -2360,7 +2360,6 @@ class Device : public RuntimeObject {
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
     int hw_event_index;
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
-    uint32_t queue_index;  // queue index the dispatch runs on
   };
 
   //! Create a barrier packet that waits on num_deps signals. num_deps == 1

@@ -3224,9 +3224,7 @@ bool VirtualGPU::create() {
                                        dedicated_queue_));
   if (!gpu_queue_) return false;
 
-  if (dev().settings().ext_dispatch_packet_ld_) {
-    metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
-  }
+  metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
 
   if (!managed_kernarg_buffer_.Create(Device::MemorySegment::kKernArg)) {
     LogError("Couldn't allocate arguments/signals for the queue");
@@ -5505,7 +5503,7 @@ void VirtualGPU::HiddenHeapInit() {
 // ================================================================================================
 hsa_amd_packet_type8_t VirtualGPU::SelectExtDispatchAmdFormat(
     bool ext_dispatch_packet, const amd::NDRangeKernelCommand* vcmd) const {
-  if (ext_dispatch_packet && dev().settings().ext_dispatch_packet_ld_ && vcmd != nullptr &&
+  if (ext_dispatch_packet && vcmd != nullptr &&
       vcmd->dynDataPrefetchConfig().isEnabled()) {
     return HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD;
   }
