@@ -106,6 +106,22 @@ macro(_HIP_PARSE_ARGS _out_src _out_cmake_opts _out_cxx_opts)
     unset(_hip_arg)
 endmacro()
 
+# Internal helper: split HIP_HIPCC_FLAGS elements that contain multiple
+# space-separated flags packed into a single string (e.g. "-O3 -fPIC
+# -std=c++17") into individual flags.  The old hipcc-based FindHIP.cmake
+# tolerated this because flags were passed through a shell invocation that
+# performed word splitting; target_compile_options() does not, so we must
+# split explicitly.
+macro(_HIP_SPLIT_FLAGS _out_var)
+    set(${_out_var})
+    foreach(_hip_flag_element IN LISTS HIP_HIPCC_FLAGS)
+        separate_arguments(_hip_flag_split UNIX_COMMAND "${_hip_flag_element}")
+        list(APPEND ${_out_var} ${_hip_flag_split})
+    endforeach()
+    unset(_hip_flag_element)
+    unset(_hip_flag_split)
+endmacro()
+
 macro(HIP_ADD_LIBRARY hip_target)
     _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
     # Tag sources as HIP so CMake compiles them with CMAKE_HIP_COMPILER
@@ -120,7 +136,9 @@ macro(HIP_ADD_LIBRARY hip_target)
     # Forward legacy HIP_HIPCC_FLAGS if the caller populated them (e.g.
     # rocALUTION appends --offload-arch, -O3, etc. to this list variable).
     if(HIP_HIPCC_FLAGS)
-        target_compile_options(${hip_target} PRIVATE ${HIP_HIPCC_FLAGS})
+        _HIP_SPLIT_FLAGS(_hip_split_flags)
+        target_compile_options(${hip_target} PRIVATE ${_hip_split_flags})
+        unset(_hip_split_flags)
     endif()
     if(hip_FOUND AND TARGET hip::device)
         # PUBLIC so consumers of this library inherit hip::device usage
@@ -144,7 +162,9 @@ macro(HIP_ADD_EXECUTABLE hip_target)
         target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
     endif()
     if(HIP_HIPCC_FLAGS)
-        target_compile_options(${hip_target} PRIVATE ${HIP_HIPCC_FLAGS})
+        _HIP_SPLIT_FLAGS(_hip_split_flags)
+        target_compile_options(${hip_target} PRIVATE ${_hip_split_flags})
+        unset(_hip_split_flags)
     endif()
     if(hip_FOUND AND TARGET hip::device)
         # PRIVATE for executables — nothing consumes an executable's link
