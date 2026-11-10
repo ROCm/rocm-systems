@@ -147,7 +147,7 @@ All fields are required.
 
 `LAYOUT_VERSION` in [`loader.py`](loader.py) is the version of this format. `analyze`
 stores it with each layout in the analysis database. It follows semantic versioning.
-Anyone who changes the format, person or AI agent, bumps it in the same change:
+Bump it in the same change that changes the format:
 
 - MAJOR: a field is renamed or removed, or its meaning changes.
 - MINOR: an optional field is added.
