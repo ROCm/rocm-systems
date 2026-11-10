@@ -1719,6 +1719,27 @@
         }
       ]
     },
+    "net_ll128_post_send_fence": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "LL128 Ring AllReduce with every ring hop on NET/IB with GPU Direct RDMA. NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached per process, so they are set before launch.",
+      "env_variables": {
+        "NCCL_P2P_DISABLE": "1",
+        "NCCL_SHM_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "NetLl128_RingAllReduceEveryHopOnNet",
+          "description": "Regression test for the LL128 post-send fence: without the full fence the NIC could send stale 128-byte lines and the receiver hung",
+          "test_filter": "NetLl128MPITest.RingAllReduceCompletesWithEveryHopOnNet"
+        }
+      ]
+    },
     "comm_mpi_tests": {
       "extends": "default",
       "is_gtest": true,
