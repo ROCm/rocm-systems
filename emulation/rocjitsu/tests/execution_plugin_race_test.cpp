@@ -1780,6 +1780,100 @@ TEST_F(Gfx1250CounterCapacityRaceTest, DsWriteBelowCapacityIsNotReleasedByABarri
   EXPECT_TRUE(ds_read(1, kOldestAddress));
 }
 
+/// Counter capacity on gfx950 (CDNA4), whose combined VMCNT holds 63 tokens and
+/// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
+/// of behavior that differs on gfx1250.
+class Gfx950CounterCapacityRaceTest : public ::testing::Test {
+protected:
+  static constexpr int kVmcntCapacity = 63;
+  static constexpr int kLgkmcntCapacity = 15;
+
+  PluginFixture fixture;
+  StringSink *sink = nullptr;
+  Wavefront *wave = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, "cdna4"));
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x100, /*sgprs=*/104, /*vgprs=*/256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104,
+                                                       waves);
+    decoder = Decoder::create(fixture.cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+  }
+
+  /// Issue a one-lane, one-dword load into `vgpr` from LDS or global memory,
+  /// with the wave's EXEC set to `exec`.
+  void load(bool lds, uint32_t vgpr, uint64_t exec = 1) {
+    wave->pc += 16;
+    auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wave->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = wave->vgpr_alloc().base + vgpr;
+    TestMemoryInstruction inst(std::move(state));
+    const uint64_t wave_exec = wave->exec();
+    wave->set_exec(exec);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, inst, *wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wave);
+    wave->set_exec(wave_exec);
+  }
+
+  /// Read one lane of a VGPR and report whether it raced.
+  bool vgpr_read(uint32_t vgpr) {
+    wave->pc += 16;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + vgpr,
+                                                 /*lane_mask=*/1);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+};
+
+// Messages share LGKMCNT with DS operations before GFX12, so a message issued
+// at a full LGKMCNT completes the oldest DS read.
+TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
+  load(/*lds=*/true, /*vgpr=*/0);
+  for (int index = 0; index < kLgkmcntCapacity - 1; ++index)
+    load(/*lds=*/true, /*vgpr=*/1);
+  wave->pc += 16;
+  const uint32_t word = 0xBF900000u; // s_sendmsg 0.
+  std::unique_ptr<Instruction> message(decode_valid(*decoder, &word));
+  ASSERT_NE(message, nullptr);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *message, *wave);
+  EXPECT_FALSE(vgpr_read(0));
+}
+
+// Before GFX12, an EXEC-zero vector memory instruction applies no backpressure.
+TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesNoBackpressure) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+// A load issued at a full VMCNT with active lanes completes the oldest load.
+TEST_F(Gfx950CounterCapacityRaceTest, LoadAdvancesVmcnt) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  for (int index = 0; index < kVmcntCapacity - 1; ++index)
+    load(/*lds=*/false, /*vgpr=*/1);
+  load(/*lds=*/false, /*vgpr=*/2);
+  EXPECT_FALSE(vgpr_read(0));
+}
+
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
 class ExitedWaveRaceTest : public TensorDmaRaceTest {
