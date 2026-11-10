@@ -158,6 +158,59 @@ def _build_fake_amdsmi():
     interface.amdsmi_get_gpu_kfd_info = lambda _h: {"current_partition_id": 0}
     interface.amdsmi_get_gpu_cper_entries = lambda _h, _m, _s, cursor: ({}, cursor, [], 0)
     interface.amdsmi_get_afids_from_cper = lambda _raw: ([], 0)
+    interface.amdsmi_get_cper_json = lambda _raw: json.dumps(
+        {
+            "schema_version": "3.4.0",
+            "tool_version": "test",
+            "source": {
+                "type": "cper",
+                "filename": "test.cper",
+                "timestamp": "2026-11-09T21:06:30+00:00",
+                "platform_id": "0x1002:0x75A0",
+                "partition_id": None,
+                "record_id": 1,
+                "creator_id": "amdgpu",
+            },
+            "events": [
+                {
+                    "metadata": {"section": 0, "context_type": "Runtime MCA", "class": "mca"},
+                    "platform": {
+                        "fru_id": "OAM6",
+                        "fru": "OAM6",
+                        "platform": "AMD Instinct MI300X",
+                    },
+                    "event_report": {
+                        "bank": "gc",
+                        "error_type": "CPF",
+                        "severity": "Corrected",
+                        "description": "Graphics Compute Engine Correctable error",
+                        "instance": "MP5",
+                        "socket": 6,
+                        "die": "AID0",
+                        "cpu": None,
+                        "hbm": None,
+                        "syndrome": "Block=CPF, MemoryId=2",
+                        "address": None,
+                        "uc": False,
+                        "pcc": False,
+                        "tcc": False,
+                        "deferred": False,
+                        "addr_valid": True,
+                        "cecc": True,
+                        "uecc": False,
+                        "poison": False,
+                        "transparent": False,
+                        "scrub": False,
+                    },
+                    "analysis": {"afid": [29]},
+                    "data_array": None,
+                    "validation": {},
+                    "ppr": None,
+                    "firmware": None,
+                }
+            ],
+        }
+    )
 
     def _bdf_unavailable(_handle):
         # Non-primary path falls back to "no primary id" when the BDF lookup fails.
@@ -187,6 +240,7 @@ def _build_ras_args(handles, **overrides):
         gpu=list(handles),
         cper=True,
         afid=False,
+        decode=False,
         severity=["fatal"],
         folder=None,
         file_limit=None,
@@ -538,3 +592,155 @@ class TestCliRasCperJson(unittest.TestCase):
                     commands.ras(_build_ras_args(self._handles, follow=True))
         finally:
             self.ras_module.time.sleep = original_sleep
+
+
+class TestCliRasDecodeCommand(unittest.TestCase):
+    """Unit tests for ``ras --decode --cper-file``."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not _RAS_SRC or not os.path.isfile(_RAS_SRC):
+            raise unittest.SkipTest(
+                f"amd-smi CLI ras.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = dict.fromkeys(_CLI_MODULES)
+        modules.update(_build_fake_amdsmi())
+        stub_modules(cls, modules)
+        if _CLI_DIR not in sys.path:
+            sys.path.insert(0, _CLI_DIR)
+            add_class_cleanup(cls, sys.path.remove, _CLI_DIR)
+
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+        import amdsmi_helpers
+        import amdsmi_logger
+
+        cls.helpers_cls = amdsmi_helpers.AMDSMIHelpers
+        cls.logger_cls = amdsmi_logger.AMDSMILogger
+        cls.ras_module = _load_ras_module()
+
+    def _make_commands(self, fmt="human_readable"):
+        commands = object.__new__(self.ras_module.RasCommands)
+        commands.logger = self.logger_cls(format=fmt, destination="stdout")
+        commands.helpers = self.helpers_cls()
+        commands.group_check_printed = True
+        return commands
+
+    def _decode_args(self, cper_file, **overrides):
+        defaults = dict(
+            gpu=[],
+            cper=False,
+            afid=False,
+            decode=True,
+            severity=["all"],
+            folder=None,
+            file_limit=None,
+            cper_file=cper_file,
+            follow=False,
+        )
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def _run(self, commands, args):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            commands.ras(args)
+        return buf.getvalue()
+
+    # ── human-readable ───────────────────────────────────────────────────────
+
+    def test_human_output_has_header_fields(self):
+        with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+            f.write(b"\x00" * 16)
+            path = f.name
+        try:
+            captured = self._run(self._make_commands("human_readable"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+
+        self.assertIn("File:", captured)
+        self.assertIn("Schema Version:", captured)
+        self.assertIn("Creator ID:", captured)
+
+    def test_human_output_event_table_contains_afid_and_fru(self):
+        with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+            f.write(b"\x00" * 16)
+            path = f.name
+        try:
+            captured = self._run(self._make_commands("human_readable"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+
+        self.assertIn("29", captured, "AFID 29 must appear in the event table")
+        self.assertIn("OAM6", captured, "FRU must appear in the event table")
+
+    def test_human_output_event_detail_block(self):
+        with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+            f.write(b"\x00" * 16)
+            path = f.name
+        try:
+            captured = self._run(self._make_commands("human_readable"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+
+        self.assertIn("gc", captured, "bank 'gc' must appear in event detail")
+        self.assertIn("CPF", captured, "error_type must appear")
+        self.assertIn("—", captured, "null values must render as em-dash")
+
+    # ── JSON ─────────────────────────────────────────────────────────────────
+
+    def test_json_output_is_valid_addc_schema(self):
+        with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+            f.write(b"\x00" * 16)
+            path = f.name
+        try:
+            captured = self._run(self._make_commands("json"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+
+        doc = json.loads(captured)
+        self.assertIn("schema_version", doc)
+        self.assertIn("events", doc)
+        self.assertIsInstance(doc["events"], list)
+        self.assertEqual(doc["events"][0]["analysis"]["afid"], [29])
+
+    # ── CSV ──────────────────────────────────────────────────────────────────
+
+    def test_csv_output_one_row_per_event(self):
+        with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+            f.write(b"\x00" * 16)
+            path = f.name
+        try:
+            captured = self._run(self._make_commands("csv"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+
+        lines = [l for l in captured.strip().splitlines() if l]
+        self.assertGreaterEqual(len(lines), 2, "expect at least header + 1 data row")
+        self.assertIn("file_name", lines[0])
+        self.assertIn("afid", lines[0])
+        self.assertIn("29", lines[1])
+
+    # ── error handling ───────────────────────────────────────────────────────
+
+    def test_missing_cper_file_arg_raises(self):
+        from amdsmi_cli_exceptions import AmdSmiInvalidCommandException
+
+        commands = self._make_commands("human_readable")
+        with self.assertRaises(AmdSmiInvalidCommandException):
+            commands.ras(self._decode_args(cper_file=None))
+
+    def test_library_exception_propagates(self):
+        def _fail(_raw):
+            raise _FakeLibraryException(code=28, message="UNEXPECTED_DATA")
+
+        orig = self.interface.amdsmi_get_cper_json
+        self.interface.amdsmi_get_cper_json = _fail
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".cper", delete=False) as f:
+                f.write(b"\x00" * 16)
+                path = f.name
+            with self.assertRaises(Exception):
+                self._run(self._make_commands("human_readable"), self._decode_args(path))
+        finally:
+            os.unlink(path)
+            self.interface.amdsmi_get_cper_json = orig
