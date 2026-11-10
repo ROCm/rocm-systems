@@ -446,6 +446,8 @@ typedef struct rj_code_dbt_options_t {
 } rj_code_dbt_options_t;
 
 /// @brief Translate a code object from guest_arch to host_arch.
+/// @note Allocation failures during translation or output-handle creation terminate
+/// the calling process before returning a status.
 /// @param[in]  source     Source code object to translate.
 /// @param[in]  options    Translation options.
 /// @param[out] translated Newly created translated code object (refcount = 0; caller owns it).
