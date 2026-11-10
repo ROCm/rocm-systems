@@ -229,7 +229,7 @@ pthread_create_gotcha::wrapper::operator()() const
                 causal::sampling::block_signals(_signals);
                 causal::sampling::shutdown();
             }
-            else if(m_config.enable_sampling)
+            else if(m_config.enable_timemory_sampling)
             {
                 sampling::block_signals(_signals);
                 sampling::shutdown();
@@ -315,7 +315,7 @@ pthread_create_gotcha::wrapper::operator()() const
             _signals = causal::sampling::setup();
             causal::sampling::unblock_signals();
         }
-        else if(m_config.enable_sampling)
+        else if(m_config.enable_timemory_sampling)
         {
             _is_sampling = true;
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -740,19 +740,21 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         return (*m_wrappee)(thread, attr, func, arg);
     }
 
-    auto const thread_state_guard = state::thread::scoped(state::thread::Internal);
-    auto const coverage           = (mode == state::process::Mode::coverage);
-    auto const use_sampling       = config::get_use_timemory_sampling();
-    auto const use_causal         = config::get_use_causal();
-    auto const offset             = (!enabled || !active || info->is_offset);
-    auto const use_bundle         = (active && !coverage && !offset && !is_paused());
-    auto const enable_sampling =
-        (use_sampling && sample_child && active && !coverage && !offset);
-    auto const enable_causal =
-        (use_causal && sample_child && active && !coverage && !offset);
-    // Threads rocprof-sys itself starts, or starts with child sampling disabled, must
-    // be in the internal thread list before the sampler can see them.
-    auto const exclude = (offset || (use_sampling && !enable_sampling));
+    auto const thread_state_guard    = state::thread::scoped(state::thread::Internal);
+    auto const coverage              = (mode == state::process::Mode::coverage);
+    auto const use_timemory_sampling = config::get_use_timemory_sampling();
+    auto const use_causal            = config::get_use_causal();
+    auto const offset                = (!enabled || !active || info->is_offset);
+    auto const use_bundle            = (active && !coverage && !offset && !is_paused());
+    // The new thread may be sampled: child sampling on, profiling active, not coverage
+    // mode, not one of rocprof-sys's own threads.
+    auto const sample_this_child = (sample_child && active && !coverage && !offset);
+    auto const enable_timemory_sampling = (use_timemory_sampling && sample_this_child);
+    auto const enable_causal            = (use_causal && sample_this_child);
+    // No sampler may take rocprof-sys's own threads, or, while either sampler is on, a
+    // thread created with child sampling off. They must be in the internal thread list
+    // before a sampler can see them.
+    auto const exclude = (offset || (config::get_use_sampling() && !sample_this_child));
 
     static const bool k_debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
@@ -762,12 +764,14 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         LOG_TRACE(
             "Creating new thread :: global_state={}, thread_state={}, mode={}, "
             "active={}, "
-            "coverage={}, use_causal={}, use_sampling={}, sample_children={}, tid={}, "
-            "use_bundle={}, enable_causal={}, enable_sampling={}, thread_info={}...",
+            "coverage={}, use_causal={}, use_timemory_sampling={}, sample_children={}, "
+            "tid={}, "
+            "use_bundle={}, enable_causal={}, enable_timemory_sampling={}, "
+            "thread_info={}...",
             glob_state, thr_state, mode, std::to_string(active), std::to_string(coverage),
-            std::to_string(use_causal), std::to_string(use_sampling),
+            std::to_string(use_causal), std::to_string(use_timemory_sampling),
             std::to_string(sample_child), std::to_string(tid), std::to_string(use_bundle),
-            std::to_string(enable_causal), std::to_string(enable_sampling),
+            std::to_string(enable_causal), std::to_string(enable_timemory_sampling),
             info->as_string());
 
         std::stringstream backtrace_ss;
@@ -804,19 +808,20 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         origin = std::string{ offset ? "started by rocprof-sys" : "child sampling off" } +
                  ", " + describe_start_routine(reinterpret_cast<void*>(func));
     }
-    auto const config = wrapper_config{ .enable_causal   = enable_causal,
-                                        .enable_sampling = enable_sampling,
-                                        .offset          = offset,
-                                        .exclude         = exclude,
-                                        .parent_tid      = tid,
-                                        .promise         = promise,
-                                        .registered      = registered,
-                                        .origin          = std::move(origin) };
-    auto*      wrap   = new wrapper{ func, arg, config };
+    auto const config =
+        wrapper_config{ .enable_causal            = enable_causal,
+                        .enable_timemory_sampling = enable_timemory_sampling,
+                        .offset                   = offset,
+                        .exclude                  = exclude,
+                        .parent_tid               = tid,
+                        .promise                  = promise,
+                        .registered               = registered,
+                        .origin                   = std::move(origin) };
+    auto* wrap = new wrapper{ func, arg, config };
     state::thread::set(state::thread::Internal);
 
     // block the signals in entire process
-    if(enable_sampling && !blocked.empty())
+    if(enable_timemory_sampling && !blocked.empty())
     {
         LOG_DEBUG("Blocking signals...");
         tim::signals::block_signals(blocked, tim::signals::sigmask_scope::process);
@@ -861,7 +866,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     }
 
     // unblock the signals in the entire process
-    if(enable_sampling && !blocked.empty())
+    if(enable_timemory_sampling && !blocked.empty())
     {
         LOG_DEBUG("Unblocking signals...");
         tim::signals::unblock_signals(blocked, tim::signals::sigmask_scope::process);

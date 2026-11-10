@@ -30,11 +30,11 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 
     struct wrapper_config
     {
-        bool         enable_causal   = false;
-        bool         enable_sampling = false;
-        bool         offset          = false;
-        bool         exclude         = false;  // never sampled: register in thread list
-        std::int64_t parent_tid      = 0;
+        bool         enable_causal            = false;
+        bool         enable_timemory_sampling = false;
+        bool         offset                   = false;
+        bool         exclude                  = false;  // never sampled: in thread list
+        std::int64_t parent_tid               = 0;
         promise_t    promise;
         promise_t    registered;  // set once the child is in the thread list
         std::string  origin;      // why excluded and where its start routine lives
