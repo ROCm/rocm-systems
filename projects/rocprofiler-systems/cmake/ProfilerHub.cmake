@@ -14,13 +14,10 @@ set(ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY
 )
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_TAG
-    ""
+    "develop"
     CACHE STRING
-    "Git ref for profiler-hub fallback sparse checkout; empty = auto (HEAD of this source checkout, else the pinned fallback commit)"
+    "Git ref (branch, tag or commit) for profiler-hub fallback sparse checkout; the default 'develop' is re-fetched on every configure"
 )
-
-# Pinned to merged #9968: C++20; includes #10459 NIC agent and RocPD schema 3.0.1
-set(_PROFILER_HUB_FALLBACK_GIT_TAG "37d64c8ace8a3637c6ff4a1df60bc9bdb419eb1a")
 
 set(ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR
     "profilers/profiler-hub"
@@ -34,17 +31,23 @@ option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 # ------------------------------------------------------------------------------
 # Resolution order:
 #   1. find_package(profiler-hub) - use installed package if present
-#   2. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
+#   2. in-tree: ../../profilers/profiler-hub of this source checkout, if present
+#   3. fallback: sparse checkout of ROCPROFSYS_PROFILER_HUB_GIT_SUBDIR from
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
 set(ROCPROFSYS_PROFILER_HUB_MIN_VERSION
     "0.3.0"
     CACHE STRING
-    "Minimum profiler-hub package version; older installs fall back to the git pin"
+    "Minimum profiler-hub package version; older installs fall back to in-tree or git sources"
 )
 
 set(_PROFILER_HUB_IS_EXTERNAL FALSE)
 set(_PROFILER_HUB_SOURCE_DIR "")
+get_filename_component(
+    _PROFILER_HUB_IN_TREE_DIR
+    "${PROJECT_SOURCE_DIR}/../../profilers/profiler-hub"
+    ABSOLUTE
+)
 
 # Pass the min version into find_package so an old install is skipped, not loaded.
 # Not REQUIRED: we fall back to git. ~/.cmake/packages can still pick another tree.
@@ -57,6 +60,9 @@ if(profiler-hub_FOUND)
         "${profiler-hub_DIR}"
     )
     set(_PROFILER_HUB_IS_EXTERNAL TRUE)
+elseif(EXISTS "${_PROFILER_HUB_IN_TREE_DIR}/CMakeLists.txt")
+    message(STATUS "[profiler-hub] Using in-tree sources at ${_PROFILER_HUB_IN_TREE_DIR}")
+    set(_PROFILER_HUB_SOURCE_DIR "${_PROFILER_HUB_IN_TREE_DIR}")
 else()
     message(
         STATUS
@@ -74,26 +80,9 @@ else()
     set(_PROFILER_HUB_STAMP "${_PROFILER_HUB_ROOT}/.checkout.stamp")
 
     set(_PROFILER_HUB_TAG "${ROCPROFSYS_PROFILER_HUB_GIT_TAG}")
-    set(_PROFILER_HUB_TAG_IS_AUTO FALSE)
-    if(_PROFILER_HUB_TAG STREQUAL "")
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            RESULT_VARIABLE _git_result
-            OUTPUT_VARIABLE _git_head
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-        if(_git_result EQUAL 0 AND NOT _git_head STREQUAL "")
-            set(_PROFILER_HUB_TAG "${_git_head}")
-            set(_PROFILER_HUB_TAG_IS_AUTO TRUE)
-        else()
-            set(_PROFILER_HUB_TAG "${_PROFILER_HUB_FALLBACK_GIT_TAG}")
-        endif()
-    endif()
 
     set(_PROFILER_HUB_NEEDS_CHECKOUT TRUE)
-    if(EXISTS "${_PROFILER_HUB_STAMP}")
+    if(NOT _PROFILER_HUB_TAG STREQUAL "develop" AND EXISTS "${_PROFILER_HUB_STAMP}")
         file(READ "${_PROFILER_HUB_STAMP}" _stamp_contents)
         if(
             _stamp_contents
@@ -149,26 +138,6 @@ else()
             OUTPUT_VARIABLE _git_output
             ERROR_VARIABLE _git_error
         )
-        if(
-            NOT _git_result EQUAL 0
-            AND _PROFILER_HUB_TAG_IS_AUTO
-            AND NOT _PROFILER_HUB_TAG STREQUAL _PROFILER_HUB_FALLBACK_GIT_TAG
-        )
-            message(
-                WARNING
-                "[profiler-hub] fetch of ${_PROFILER_HUB_TAG} failed; retrying with "
-                "fallback pin ${_PROFILER_HUB_FALLBACK_GIT_TAG}"
-            )
-            execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} fetch --filter=blob:none --depth 1 origin
-                    ${_PROFILER_HUB_FALLBACK_GIT_TAG}
-                WORKING_DIRECTORY ${_PROFILER_HUB_CHECKOUT}
-                RESULT_VARIABLE _git_result
-                OUTPUT_VARIABLE _git_output
-                ERROR_VARIABLE _git_error
-            )
-        endif()
         if(NOT _git_result EQUAL 0)
             message(
                 FATAL_ERROR
