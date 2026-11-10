@@ -146,7 +146,6 @@ if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
-option(GIN_ANVIL_UNIT_TESTS                    "Build GIN Anvil device-template unit tests (ENABLE_ROCSHMEM_GIN on Fixtures; no full librocshmem in librccl)" OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
 option(ENABLE_RCCL_EP_IN_LIBRCCL               "Compile rccl_ep into librccl.so instead of the standalone librccl_ep.so; gfx9 only" OFF)
@@ -802,9 +801,14 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+if (NOT Python3_FOUND)
+  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
+endif()
+
 ## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
 ## the files being staged on every node. Disk locations remain as overrides.
-set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/tuner/embed_tuner_configs.py)
 set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
 # Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
 # when an input is newer than the output, so deleting a CSV would leave it
@@ -812,11 +816,12 @@ set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded
 # running every build does not churn rebuilds.
 add_custom_target(rccl_embedded_tuner_configs
   ALL
-  COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
-                           -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
-                           -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  COMMAND ${Python3_EXECUTABLE} ${RCCL_EMBEDDED_TUNER_SCRIPT}
+          ${CMAKE_CURRENT_SOURCE_DIR}/tuner
+          ${RCCL_EMBEDDED_TUNER_HEADER}
+  DEPENDS ${RCCL_EMBEDDED_TUNER_SCRIPT}
   BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
-  COMMENT "Generating embedded RCCL tuner configs"
+  COMMENT "Embedding RCCL tuner configurations"
   VERBATIM)
 
 # Example plugins are C sources

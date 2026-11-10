@@ -59,10 +59,7 @@
 #include "graph/xml.h"   // struct ncclXml, ncclTopoGetXmlFromFile()
 
 #include "common/ProcessIsolatedTestRunner.hpp"
-
-#ifndef RCCL_TEST_SOURCE_DIR
-#define RCCL_TEST_SOURCE_DIR "."
-#endif
+#include "common/TopoFixtures.hpp"
 
 namespace RcclUnitTesting
 {
@@ -72,8 +69,7 @@ namespace
 
 // 8 GPUs / 6 leaf / multi-NIC model. GPU rank 0 lives on NUMA 0 and reaches
 // 3 NICs (mlx5_0/1/2), shared with the other 3 GPUs on that NUMA node.
-const char* kTopoXmlPath =
-    RCCL_TEST_SOURCE_DIR "/../tools/topo_expl/models/topo_8p6l_5nic.xml";
+const char* kTopoXml = "topo_8p6l_5nic.xml";
 
 // 8 GPUs / 2 NICs sparse model. The interior GPUs (e.g. rank 1) have no
 // directly-attached NIC, so their closest NIC set is the 2 NICs (mlx5_0,
@@ -81,10 +77,9 @@ const char* kTopoXmlPath =
 // first NIC. This isolates AUTO's divide-NICs-across-GPUs behavior with
 // localNetCount(2) > localGpuCount(1): ceil(2 / 1) = 2, a non-degenerate value
 // (unlike the 5nic model where AUTO collapses to ceil(3 / 4) = 1).
-const char* kTopoNicsGtGpusXmlPath =
-    RCCL_TEST_SOURCE_DIR "/../tools/topo_expl/models/topo_8p_ts1.xml";
+const char* kTopoNicsGtGpusXml = "topo_8p_ts1.xml";
 
-// Rank inside kTopoNicsGtGpusXmlPath whose local NIC pool exceeds the GPUs
+// Rank inside kTopoNicsGtGpusXml whose local NIC pool exceeds the GPUs
 // sharing it (see scan: ranks 1..6 all yield nets=2, gpus=1).
 constexpr int kAutoRank = 1;
 
@@ -174,10 +169,12 @@ struct MockComm
 // Load the given fixture (defaults to the 8p6l/5nic model), compute paths, run
 // body(system), then free.
 void withTopoSystem(const std::function<void(struct ncclTopoSystem*)>& body,
-                    const char* topoPath = kTopoXmlPath)
+                    const char* topoXml = kTopoXml)
 {
+    const std::string topoPath = topoFixturePath(topoXml);
+    ASSERT_TRUE(topoFixtureReadable(topoPath));
     struct ncclTopoSystem* system = nullptr;
-    ASSERT_EQ(loadTopoSystem(topoPath, &system), ncclSuccess)
+    ASSERT_EQ(loadTopoSystem(topoPath.c_str(), &system), ncclSuccess)
         << "failed to load topo fixture: " << topoPath;
     ASSERT_NE(system, nullptr);
 
@@ -252,9 +249,11 @@ void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut, int cpuVendor = -1)
     *p2pOut     = -1;
     *cudaP2pOut = -1;
 
+    const std::string topoPath = topoFixturePath(kTopoXml);
+    ASSERT_TRUE(topoFixtureReadable(topoPath));
     struct ncclTopoSystem* system = nullptr;
-    ASSERT_EQ(loadTopoSystem(kTopoXmlPath, &system), ncclSuccess)
-        << "failed to load topo fixture: " << kTopoXmlPath;
+    ASSERT_EQ(loadTopoSystem(topoPath.c_str(), &system), ncclSuccess)
+        << "failed to load topo fixture: " << topoPath;
     ASSERT_NE(system, nullptr);
     if(cpuVendor >= 0)
     {
@@ -466,7 +465,7 @@ TEST(NetDevsPolicyTests, Auto_NicsExceedGpus_SelectsTwo)
                               divUp(nets, gpus));
                     EXPECT_EQ(distinctNetsAcrossChannels(system, nets, kAutoRank), 2);
                 },
-                kTopoNicsGtGpusXmlPath);
+                kTopoNicsGtGpusXml);
         },
         {{"NCCL_NETDEVS_POLICY", "AUTO"}});
 }

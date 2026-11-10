@@ -76,8 +76,6 @@ extern void log (log_level_t level, const char *format, ...)
     }                                                                         \
   while (0)
 
-void set_log_level (log_level_t level);
-
 } /* namespace amd::debug_agent */
 
 #endif /* _ROCM_DEBUG_AGENT_LOGGING_H */

@@ -19,6 +19,15 @@
 
 #define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
+// Keep lane id, flag-lane test and peer 0's FIFO pointer and flag in registers instead of reloading them
+// from the Primitives object, which lives in scratch.
+#if defined(__gfx1250_strict__) || defined(__gfx1250__) || defined(__gfx950__) \
+    || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx908__)
+#define RCCL_LL128_HW_LANE_ENABLE 1
+#else
+#define RCCL_LL128_HW_LANE_ENABLE 0
+#endif
+
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
 #define RCCL_USE_WBINVL1_VOL 1
@@ -89,11 +98,31 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   RedOp redOp;
   const int tid;
   const int nthreads;
+#if RCCL_LL128_HW_LANE_ENABLE
+  // Primitives groups start on a warp boundary, so tid % WARP_SIZE is the hardware lane; every LL128 Primitives
+  // construction must keep that true, or the lanes are wrong and data is silently corrupted. wid and flagThread take
+  // Valid only if every LL128 group starts on a warp boundary (lane == tid % WARP_SIZE).
+  // Use int(wid) where a plain int is needed (auto, varargs, templates).
+  struct HwLane {
+    __device__ __forceinline__ operator int() const { return (int)__lane_id(); }
+  };
+  struct HwFlagLane {
+    __device__ __forceinline__ operator bool() const {
+      return __lane_id() % (NCCL_LL128_LINEELEMS / 2) == NCCL_LL128_LINEELEMS / 2 - 1;
+    }
+  };
+  [[no_unique_address]] HwLane wid;
+#else
   const int wid;
+#endif
   const int stepSize;
   const int warp;
   const int warpInBlock; // warp index in thread block
+#if RCCL_LL128_HW_LANE_ENABLE
+  [[no_unique_address]] HwFlagLane flagThread;
+#else
   const bool flagThread;
+#endif
   const int group;
   const int threadsPerBlock;
   Fan fan;
@@ -181,7 +210,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        sendConnFifo[sendStep[wid] % NCCL_STEPS].size = nbytes;
+        // == sendStep[wid]; indexing by wid would keep Primitives in scratch.
+        sendConnFifo[sendConnHead % NCCL_STEPS].size = nbytes;
       }
       sendConnHead += 1;
     }
@@ -364,16 +394,25 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
 #define WARP_MASK 0xffffffff
 
+  // recvPtr0/recvFlag0/sendPtr0/sendFlag0 are peer 0's FIFO and flag for this step, computed once per op when
+  // RCCL_LL128_HW_LANE_ENABLE is 1 (unused otherwise).
   template <int ELEMS_PER_THREAD, int RECV, int SEND, int SrcBuf, int DstBuf>
-  __device__ __forceinline__ void recvReduceSendCopy(uint64_t (&v)[ELEMS_PER_THREAD], int ll128Offset, bool postOp) {
+  __device__ __forceinline__ void recvReduceSendCopy(uint64_t (&v)[ELEMS_PER_THREAD], int ll128Offset, bool postOp,
+                                                     uint64_t* recvPtr0, uint64_t recvFlag0, uint64_t* sendPtr0,
+                                                     uint64_t sendFlag0) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
     uint64_t vr[ELEMS_PER_THREAD];
 
     __syncwarp();
     /************************ Wait first recv ********************/
     if (RECV) {
+#if RCCL_LL128_HW_LANE_ENABLE
+      uint64_t* ptr = recvPtr0 + ll128Offset;
+      uint64_t flag = recvFlag0;
+#else
       uint64_t* ptr = recvPtr(0) + ll128Offset;
       uint64_t flag = recvFlag(0);
+#endif
       bool needReload;
       int spins = 0;
       do {
@@ -465,8 +504,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
           store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
         }
       }
+#if RCCL_LL128_HW_LANE_ENABLE
+      uint64_t flag = sendFlag0;
+      uint64_t* ptr = sendPtr0 + ll128Offset;
+#else
       uint64_t flag = sendFlag(0);
       uint64_t* ptr = sendPtr(0) + ll128Offset;
+#endif
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
         store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
@@ -498,11 +542,23 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
     if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+#if RCCL_LL128_HW_LANE_ENABLE
+    uint64_t* const recvPtr0 = RECV ? recvPtr(0) : nullptr;
+    const uint64_t recvFlag0 = RECV ? recvFlag(0) : 0;
+    uint64_t* const sendPtr0 = SEND ? sendPtr(0) : nullptr;
+    const uint64_t sendFlag0 = SEND ? sendFlag(0) : 0;
+#else
+    uint64_t* const recvPtr0 = nullptr;
+    const uint64_t recvFlag0 = 0;
+    uint64_t* const sendPtr0 = nullptr;
+    const uint64_t sendFlag0 = 0;
+#endif
     while (nelem > 0) {
       const int eltInSlice = min(nelem, DataEltPerSlice);
       uint64_t regs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
       if (SRC) loadRegsBegin(regs, srcPtr, eltInSlice);
-      recvReduceSendCopy<NCCL_LL128_SHMEM_ELEMS_PER_THREAD, RECV, SEND, SrcBuf, DstBuf>(regs, wireOffset, postOp);
+      recvReduceSendCopy<NCCL_LL128_SHMEM_ELEMS_PER_THREAD, RECV, SEND, SrcBuf, DstBuf>(
+        regs, wireOffset, postOp, recvPtr0, recvFlag0, sendPtr0, sendFlag0);
       if (DST) {
         if (accPtr != nullptr) {
           uint64_t accRegs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
@@ -575,12 +631,29 @@ public:
                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group = 0,
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
-    : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE), /*compiler warnings*/
+    : redOp(redOpArg), tid(tid), nthreads(nthreads), /*compiler warnings*/
+#if !RCCL_LL128_HW_LANE_ENABLE
+      wid(tid % WARP_SIZE),
+#endif
       stepSize(stepSize_ > 0 ? stepSize_ : ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)),
       warp(tid / WARP_SIZE),
       warpInBlock(threadIdx.x / WARP_SIZE),
-      flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)), group(group),
+#if !RCCL_LL128_HW_LANE_ENABLE
+      flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)),
+#endif
+      group(group),
       threadsPerBlock(blockDim.x) {
+#if RCCL_LL128_HW_LANE_ENABLE
+    // wid and flagThread must take no storage: the int after each must follow the int before it. Primitives is
+    // complete here. The pragma covers instantiations whose RedOp or Fan is not standard-layout.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+    static_assert(offsetof(Primitives, stepSize) == offsetof(Primitives, nthreads) + sizeof(int),
+                  "wid must take no storage");
+    static_assert(offsetof(Primitives, group) == offsetof(Primitives, warpInBlock) + sizeof(int),
+                  "flagThread must take no storage");
+#pragma clang diagnostic pop
+#endif
 #ifdef ENABLE_WARP_SPEED
     auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[warpInBlock] : &ncclShmem.channel;
 #else
@@ -608,11 +681,11 @@ public:
 #if TDM_LL128_ON
     tdmEnable = ncclShmem.comm.tdmLl128Enable;
 #endif
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && RCCL_LL_FIFO_SYS_SCOPE
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    // Cheap fence waits only for this wave's stores. Plain FIFO stores need the full fence before the tail
+    // update, or the NIC can read stale lines.
     skip_fence = false;
 #endif
   }

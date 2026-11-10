@@ -226,6 +226,7 @@ public:
   BufferStoreFormatD16XyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.packed_store_data = &vdata;
     amdgpu::buffer_register_modifiers<false>(*this, modifiers);
   }
   Operand vdata;

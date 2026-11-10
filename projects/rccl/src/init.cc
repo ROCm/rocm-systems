@@ -175,6 +175,16 @@ static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) 
   return comm->nNodes <= 1;
 }
 
+// GIN connection type once ncclGinSetDefaultBackend has run. That can drop every active backend
+// (Anvil SDMA alone on a multi-host communicator), and FULL or RAIL with none left would make
+// query and connect report a backend that is gone.
+static ncclGinConnectionType_t ginConnectionType(const struct ncclComm* comm, bool globalCrossNicSupport) {
+  if (!comm->sharedRes->ginState.supported) return NCCL_GIN_CONNECTION_NONE;
+  if (globalCrossNicSupport) return NCCL_GIN_CONNECTION_FULL;
+  if (comm->contiguousRanksPerHost != INT_MAX) return NCCL_GIN_CONNECTION_RAIL;
+  return NCCL_GIN_CONNECTION_NONE;
+}
+
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
   int maxPolicy = 0;
@@ -242,6 +252,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 
 // RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
+//   Applies to Simple. LL128 honors it only on gfx1250 and otherwise always uses the full fence.
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 #if ENABLE_TDM_SIMPLE
@@ -364,9 +375,15 @@ static ncclResult_t ncclInit() {
   NCCLCHECK(ncclOsTopoGetStrFromSys("/proc", "version", strValue, sizeof(strValue)));
   char *verStr, *state;
   verStr = strtok_r(strValue, " ", &state);
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 2 && verStr != NULL; i++) {
     verStr = strtok_r(NULL, " ", &state);
-    if (verStr == NULL) break;
+  }
+  // A failed read is reported as "" and ncclSuccess. Fewer than three tokens also leaves
+  // verStr NULL, and strstr(NULL) would SIGSEGV. This runs before call_once, so the failure
+  // is not latched.
+  if (verStr == NULL) {
+    WARN("Could not read kernel version from /proc/version");
+    return ncclSystemError;
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
@@ -437,7 +454,7 @@ ncclResult_t ncclGetUniqueId_impl(ncclUniqueId* out) {
   memset(out, 0, sizeof(*out));
   // copy to avoid alignment mismatch
   memcpy(out, &handle, sizeof(handle));
-  Recorder::instance().record(rrGetUniqueId, -1, -1, out);
+  (void)Recorder::instance().record(rrGetUniqueId, -1, -1, out);
   TRACE_CALL("ncclGetUniqueId(0x%llx)", (unsigned long long)getHash(out->internal, NCCL_UNIQUE_ID_BYTES));
   return ncclSuccess;
 }
@@ -1254,7 +1271,7 @@ fail:
 #endif
 static void showVersion() {
   // Retrieve Hostname info
-  char hostBuf[HOST_NAME_MAX];
+  char hostBuf[HOST_NAME_MAX + 1] = {};
   std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf) - 1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
@@ -1708,6 +1725,14 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
         comm->nvlDomainInfo.minRanksPerNvlDomain, comm->nvlDomainInfo.maxRanksPerNvlDomain);
 
   return ncclSuccess;
+}
+
+// [RCCL] True when one UALink LSA team holds every rank on more than one host (tray) and the arch table has an
+// AllGather TDM window. Across trays AllGather symk then runs only through that window.
+static bool commSpansTrays(const struct ncclComm* comm, bool isOneLsaTeam) {
+  const rcclArchThresholds* table = comm->archThresholds;
+  return comm->MNNVL && isOneLsaTeam && comm->topo->nHosts > 1 && table != nullptr &&
+         table->symTdmMinR2[ncclFuncAllGather] != 0;
 }
 
 // True when every host has the same number of ranks and those partitions sum to nranks.
@@ -2351,7 +2376,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 #else
                                                                  false);
 #endif
-  INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "Cheap post-send fence is %s (Simple%s)", comm->cheapPostSendFenceOff ? "OFF" : "ON",
+       comm->cudaArch == 1250 ? " and LL128" : "; LL128 always uses the full fence");
 #if ENABLE_TDM_SIMPLE
   // gfx1250 only; the mover entry points are deleted elsewhere.
   comm->tdmSimpleEnable =
@@ -2759,7 +2785,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   NCCLCHECKGOTO(ncclCalloc(&comm->gproxyConn, comm->nRanks), ret, fail);
 
   if (ncclParamRasDiagnostics() && comm->rank == 0) ncclRunRasDiagnostics(comm);
-  if (ncclParamDiagnostics()) ncclRunDiagnostics(comm);
+  if (ncclParamDiagnostics()) NCCLCHECKGOTO(ncclRunDiagnostics(comm), ret, fail);
 
   timers[TIMER_INIT_CONNECT] = clockNano();
   // Build p2p schedule
@@ -2932,14 +2958,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
-    if (globalCrossNicSupport) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-    } else if (comm->contiguousRanksPerHost != INT_MAX) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
-    }
+    comm->globalGinSupport = ginConnectionType(comm, globalCrossNicSupport);
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
+  comm->spansTrays = commSpansTrays(comm, isOneLsaTeams); // [RCCL]
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
   // hostRmaSupport must not require symmetricSupport: multi-node GIN proxy RMA
@@ -3293,10 +3316,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   // Check if using host uncached mem correctly
-  NCCLCHECK(checkHostUncacheMemSetting(comm));
+  NCCLCHECKGOTO(checkHostUncacheMemSetting(comm), res, fail);
 
   // RCCL: determine and set unroll factor for comm
-  NCCLCHECK(commSetUnrollFactor(comm));
+  NCCLCHECKGOTO(commSetUnrollFactor(comm), res, fail);
 
 #ifdef ENABLE_ROCSHMEM
   if (!job->parent && rcclParamRocshmemEnabled()) {
@@ -3309,7 +3332,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ret = rocshmem::rocshmem_get_uniqueid(&rocshmemUniqueId);
       if (ret != rocshmem::ROCSHMEM_SUCCESS) {
         ERROR("Error in rocshmem_get_uniqueid, Rocshmem cannot be initialized.");
-        return ncclSystemError;
+        res = ncclSystemError;
+        goto fail;
       }
     }
 
@@ -3319,13 +3343,15 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_set_attr_uniqueid_args, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     ret = rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
@@ -3360,13 +3386,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
                                           &(comm->team_reduce_world_dup));
 
     ncclCommToRshmemTeam[comm] = comm->team_reduce_world_dup;
-    CUDACHECK(hipDeviceSynchronize());
+    CUDACHECKGOTO(hipDeviceSynchronize(), res, fail);
   }
 #endif
 
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName, "gfx950")) {
-    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager));
+    NCCLCHECKGOTO(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager), res, fail);
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
@@ -3420,8 +3446,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   // Trace this call for replay tool
   if (job->parent) {
-    /* unlink child abort flag. */
-    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
     if (job->isGrow) {
       TRACE_CALL("ncclCommGrow(%p, %d, %p)", job->parent, comm->nRanks, comm);
     } else {
@@ -3450,6 +3474,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
        timers[TIMER_INIT_TOPO] / 1e9, timers[TIMER_INIT_GRAPHS] / 1e9, timers[TIMER_INIT_CONNECT] / 1e9,
        timers[TIMER_INIT_TOTAL] / 1e9 - sum_timers);
 exit:
+  if (job->parent) {
+    /* unlink child abort flag. */
+    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
+  }
   if (job->newcomm) {
     /* assign it to user pointer. */
     __atomic_store_n(job->newcomm, comm, __ATOMIC_RELEASE);
@@ -3461,11 +3489,11 @@ fail:
   // If failure occurs after that assignment, commFree() will free comm->archName,
   // so freeing archName here as well would be a double free. Null it out so that
   // commFree handles cleanup exclusively.
-  if (archName == comm->archName) {
+  if (comm && archName == comm->archName) {
     archName = NULL;
   }
   free(archName);
-  COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
+  if (comm) COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
   goto exit;
 }
 
@@ -3685,8 +3713,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName) {
-    if (strcasecmp(envNetName, "ROCM-IB") == 0) tmpNetName = "IB-CAST";
-    else tmpNetName = envNetName;
+    tmpNetName = rcclCanonicalNetName(envNetName);
   }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR) {
@@ -4415,12 +4442,27 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
            comm->rank, ret);
     }
 
-    NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, true), ret, fail);
-    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, false), ret, fail);
-    // And keep polling until all graphs referencing us die.
-    while (comm->localPersistentRefs != 0) {
-      NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+    int aborting = COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
+    if (aborting) {
+      NCCLCHECKGOTO(ncclCommOrphanPersistentPlans(comm), ret, fail);
     }
+    ncclResult_t pollRet = ncclCommPollEventCallbacks(comm, true);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    pollRet = ncclCommPollCallbacks(comm, false);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    // And keep polling until all graphs referencing us die.
+    if (!aborting) {
+      while (comm->localPersistentRefs != 0) {
+        NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+      }
+    }
+    if (comm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(comm);
     while (!ncclIntruQueueEmpty(&comm->legacyRegCleanupQueue)) {
       struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->legacyRegCleanupQueue);
       if (cb->fn(comm, cb) != ncclSuccess) {
@@ -4428,6 +4470,12 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
+    // Close imported DDA IPC mappings while commDestroySync is still running
+    // concurrently for every local rank. The existing intranode barrier below
+    // then guarantees all mappings are closed before serial commFree releases
+    // any rank's exported allocations. Revoked comms close in commReclaim.
+    ncclResult_t ddaCloseRet = ncclSuccess;
+    NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), ddaCloseRet);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
@@ -4561,6 +4609,27 @@ fail:
   goto exit;
 }
 
+static void persistentPlanReaper(ncclComm_t comm) {
+  cudaError_t devErr = cudaSetDevice(comm->cudaDev);
+  if (devErr != cudaSuccess) {
+    WARN("persistentPlanReaper: comm %p rank %d cudaSetDevice(%d) failed", comm, comm->rank, comm->cudaDev);
+  }
+  while (comm->localPersistentRefs != 0) {
+    ncclResult_t ret = ncclCommPollCallbacks(comm, /*waitSome=*/true);
+    if (ret != ncclSuccess) {
+      WARN("persistentPlanReaper: comm %p rank %d poll error %d", comm, comm->rank, ret);
+    }
+  }
+  uint64_t commHash = comm->commHash;
+  int rank = comm->rank;
+  ncclCommDropPersistentPlanRefs(comm);
+  ncclResult_t ret = ncclSuccess;
+  NOWARN(ret = commCleanup(comm), NCCL_DESTROY);
+  if (ret != ncclSuccess) {
+    ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, rank, ret);
+  }
+}
+
 static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -4611,12 +4680,15 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
             lbd(curIntraComm, curRank);
           }
         } else if (curIntraComm->revokedFlag) {
-          /* commRevokeAsync already synced streams and stopped proxy;
-           * drain any remaining persistent graph refs and legacy IPC cleanup
-           * callbacks before commCleanup runs (mirrors commDestroySync). */
-          while (curIntraComm->localPersistentRefs != 0) {
-            if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
+          if ((ret = ncclCommOrphanPersistentPlans(curIntraComm)) != ncclSuccess) {
+            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
           }
+          if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/false)) != ncclSuccess) {
+            WARN("commReclaim: polling graph callbacks failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
+          }
+          if (curIntraComm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(curIntraComm);
           while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
             struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
             if (cb->fn(curIntraComm, cb) != ncclSuccess) {
@@ -4624,6 +4696,11 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
                    cb);
             }
           }
+          // Revoke skips commDestroySync, so close this rank's DDA IPC imports
+          // here, before the serial commCleanup loop below frees any local rank's
+          // exported allocations.
+          ncclResult_t ddaCloseRet = ncclSuccess;
+          NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(curIntraComm), ddaCloseRet);
         }
       }
       for (int i = 0; i < nIntraThreads; i++) {
@@ -4639,9 +4716,23 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
         uint64_t commHash = curIntraComm->commHash;
         nextIntraComm = nextIntraComm->intraNext;
 
-        NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
-        if (ret != ncclSuccess) {
-          ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+        int deferCleanup = curIntraComm->localPersistentRefs != 0;
+        if (deferCleanup) {
+          std::thread reaperThread;
+          try {
+            reaperThread = std::thread(persistentPlanReaper, curIntraComm);
+          } catch (const std::exception& e) {
+            WARN("Thread creation failed: %s", e.what());
+            ret = ncclSystemError;
+            continue;
+          }
+          reaperThread.detach();
+        } else {
+          ncclCommDropPersistentPlanRefs(curIntraComm);
+          NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
+          if (ret != ncclSuccess) {
+            ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+          }
         }
       }
     }
@@ -4712,13 +4803,19 @@ fail:
   goto exit;
 }
 
+// A child init can unlink childAbortFlag concurrently, so it is loaded once and only that snapshot is written.
+static void setChildAbortFlags(ncclComm_t comm, uint32_t uval) {
+  uint32_t* childAbortFlag = COMPILER_ATOMIC_LOAD(&comm->childAbortFlag, std::memory_order_acquire);
+  if (childAbortFlag != nullptr) {
+    COMPILER_ATOMIC_STORE(childAbortFlag, uval, std::memory_order_release);
+    COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
+  }
+}
+
 static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   // Set abort flags
   uint32_t uval = static_cast<uint32_t>(value);
-  if (comm->childAbortFlag != nullptr) {
-    COMPILER_ATOMIC_STORE(comm->childAbortFlag, uval, std::memory_order_release);
-    COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
-  }
+  setChildAbortFlags(comm, uval);
   COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
   COMPILER_ATOMIC_STORE(comm->abortFlagDev, uval, std::memory_order_release);
   return ncclSuccess;
@@ -4755,7 +4852,12 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
     }
   }
 
-  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+  if (comm->localPersistentRefs == 0) {
+    NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+  } else {
+    setChildAbortFlags(comm, 0u);
+    COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
+  }
 
 exit:
   (void)ncclCommSetAsyncError(comm, res);
@@ -4794,7 +4896,7 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
   // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
   // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
   (void)setCommAbortFlags(comm, 1);
-  comm->revokedFlag = 1;
+  COMPILER_ATOMIC_STORE(&comm->revokedFlag, 1u, std::memory_order_release);
   (void)ncclCommEnsureReady(comm);
   comm->finalizeCalled = true;
 
@@ -4885,9 +4987,11 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   ncclResult_t res = ncclSuccess;
 
   int oldDev;
+  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
+  if (newcomm) *newcomm = NCCL_COMM_NULL;
   CUDACHECK(cudaGetDevice(&oldDev));
-  NCCLCHECKGOTO(CommCheck(comm, caller, "comm"), res, exit);
   NCCLCHECKGOTO(PtrCheck(newcomm, caller, "newcomm"), res, exit);
+  NCCLCHECKGOTO(CommCheck(comm, caller, "comm"), res, exit);
   if (isShrink) {
     NCCLCHECKGOTO(PtrCheck(excludeRanksList, caller, "excludeRanksList"), res, exit);
     NCCLCHECKGOTO(excludeRanksCount > 0 ? ncclSuccess : ncclInvalidArgument, res, exit);
@@ -4901,9 +5005,20 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   }
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
-
-  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
-  *newcomm = NCCL_COMM_NULL;
+  if (isShrink) {
+    if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
+      WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    for (int i = 1; i < excludeRanksCount; i++) {
+      if (excludeRanksList[i] == excludeRanksList[i - 1]) {
+        WARN("%s: excludeRanksList contains rank %d more than once", caller, excludeRanksList[i]);
+        res = ncclInvalidArgument;
+        goto exit;
+      }
+    }
+  }
   if (!isShrink && color == NCCL_SPLIT_NOCOLOR) {
     INFO(NCCL_INIT, "Rank %d has color with NCCL_SPLIT_NOCOLOR, not creating a new communicator", comm->rank);
   } else {
@@ -4931,8 +5046,8 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
       NCCLCHECKGOTO(ncclCudaHostCalloc(&childComm->abortFlagDev, 1), res, fail);
       NCCLCHECKGOTO(ncclCalloc(&childComm->abortFlagRefCount, 1), res, fail);
       /* temporarily used to abort everything during child comm init. */
-      comm->childAbortFlag = childComm->abortFlag;
       comm->childAbortFlagDev = childComm->abortFlagDev;
+      COMPILER_ATOMIC_STORE(&comm->childAbortFlag, childComm->abortFlag, std::memory_order_release);
       *childComm->abortFlagRefCount = 1;
     }
     if (config == NULL) {
@@ -4976,12 +5091,14 @@ exit:
   // for loggin only, not ready for replaying
   // TODO: further integrate overloaded record header
   // !recording at sink
-  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config, *newcomm);
+  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config,
+                              newcomm ? *newcomm : NCCL_COMM_NULL);
   (void)cudaSetDevice(oldDev);
   return res;
 fail:
   if (childComm) {
     if (!comm->shareResources) {
+      COMPILER_ATOMIC_STORE(&comm->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
       if (childComm->abortFlag) free(childComm->abortFlag);
       if (childComm->abortFlagDev) ncclCudaHostFree(childComm->abortFlagDev);
       if (childComm->abortFlagRefCount) free(childComm->abortFlagRefCount);
@@ -5006,7 +5123,12 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
     comm->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
-    NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+    if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {
+      setChildAbortFlags(comm, 0u);
+      COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
+    } else {
+      NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+    }
   }
   NCCLCHECKGOTO(ncclCommInitChildComm(comm, newcomm, /*isShrink=*/true, shrinkFlags, /*color=*/0, /*key=*/comm->rank,
                                       excludeRanksList, excludeRanksCount, config, __func__),

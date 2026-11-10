@@ -468,6 +468,15 @@ graph:
   Unit_hipGraphExecMemcpyNodeSetParams1D_CaptureTransitions:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer, never run standalone."
+    tags: [exec]
   Unit_hipGraphGetEdges_Positive_Functional:
     <<: *level_default
     tags: [query]
@@ -1234,6 +1243,15 @@ graph:
   Unit_hipGraphLaunch_Functional_MultipleLaunch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer, never run standalone."
+    tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_default
     tags: [node]
@@ -1987,3 +2005,15 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphAddExternalSemaphoresSignalNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAddExternalSemaphoresWaitNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExternalSemaphoresNodeParams_Negative_NullNode:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
