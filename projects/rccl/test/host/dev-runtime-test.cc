@@ -6887,6 +6887,27 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_Return
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
 }
 
+// The enqueue-rearch path carries the version in its job, not the task queue.
+TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_RecordsRuntimeVersion) {
+  ScopedHook rearch(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "ENQUEUE_REARCH_ENABLE" ? 1 : deftVal;
+  });
+  uint32_t jobVersion = 0;
+  ScopedHook enqueue(g_devrMgmtTaskEnqueue,
+                     [&](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm_t) {
+                       jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
+                       destructor(job);
+                       return ncclSuccess;
+                     });
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(enqueue.calls, 1);
+  EXPECT_EQ(jobVersion, static_cast<uint32_t>(NCCL_VERSION_CODE));
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
