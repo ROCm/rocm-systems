@@ -14,7 +14,7 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
-from memory_chart.loader import Layouts
+from memory_chart.loader import LAYOUT_VERSION, Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -307,14 +307,17 @@ class SourceFrameCollector:
 
 
 def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
-    """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
+    """The memory chart layout file of *gpu_arch* with the format version added;
+    None if it has none.
 
     src/memory_chart/README.md documents the format.
     """
     layout = Layouts.for_arch(gpu_arch)
     if layout is None:
         return None
-    return json.loads(layout.path.read_text(encoding="utf-8"))
+    layout_json = json.loads(layout.path.read_text(encoding="utf-8"))
+    layout_json["version"] = LAYOUT_VERSION
+    return layout_json
 
 
 class db_analysis(OmniAnalyze_Base):

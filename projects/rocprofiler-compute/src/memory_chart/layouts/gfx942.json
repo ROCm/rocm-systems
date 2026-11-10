@@ -1,5 +1,4 @@
 {
-  "version": 1,
   "archs": ["gfx942"],
   "description": "MI300: CU, L1s, L2, Data Fabric, MALL, UMC, HBM; xGMI above the fabric. HBM bandwidth is estimated.",
   "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
