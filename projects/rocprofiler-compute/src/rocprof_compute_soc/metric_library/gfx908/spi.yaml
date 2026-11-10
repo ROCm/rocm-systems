@@ -11,9 +11,7 @@ spi.dispatched_wavefronts:
   unit: Wavefronts
   description: >-
     The total number of wavefronts, summed over all workgroups, forming this kernel
-    launch. On AMD Instinct CDNA accelerators and GCN GPUs, the wavefront size is
-    always 64 work-items, so the total number of wavefronts should equal the grid
-    size divided by 64, rounded up.
+    launch.
 spi.dispatched_workgroups:
   name: Dispatched Workgroups
   formula: AVG(SPI_CSN_NUM_THREADGROUPS)

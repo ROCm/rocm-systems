@@ -59,9 +59,8 @@ lds.insts:
   formula: SUM(SQ_INSTS_LDS) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of LDS (also known as shared memory) instructions (including,
-    but not limited to, read/write/atomics and HIP's __shfl instructions) executed
-    per normalization unit.
+    The total number of LDS instructions (including, but not limited to,
+    read/write/atomics and HIP's __shfl instructions) executed per normalization unit.
 lds.lat:
   name: LDS Latency
   formula: SUM(SQ_INST_LEVEL_LDS_ACCUM) / SUM(SQ_INSTS_LDS)
@@ -82,10 +81,9 @@ lds.theoretical_bw:
   formula: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Indicates the maximum amount of bytes that could have been loaded from, stored
-    to, or atomically updated in the LDS per unit time (see LDS Bandwidth example
-    for more detail). Does not take into account the execution mask of the wavefront
-    when the instruction was executed.
+    Indicates the maximum amount of bytes that could have been loaded from, stored to,
+    or atomically updated in the LDS divided by total duration. Does not take into
+    account the execution mask of the wavefront when the instruction was executed.
   peak: $max_sclk * $cu_per_gpu * 0.128
 lds.theoretical_bw_util:
   name: Theoretical LDS Bandwidth Utilization

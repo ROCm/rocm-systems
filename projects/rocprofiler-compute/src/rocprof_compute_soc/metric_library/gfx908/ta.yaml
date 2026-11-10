@@ -30,9 +30,9 @@ ta.global_atomic_insts:
   formula: SUM(TA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of global & generic (flat) memory atomic (with and without return)
+    The total number of global & generic memory atomic (with and without return)
     instructions executed on all compute units on the accelerator, per normalization
-    unit. The address processing unit counts each instruction once per wavefront.
+    unit.
 ta.global_insts:
   name: TA Global/Generic Instructions
   formula: SUM(TA_FLAT_WAVEFRONTS_sum) / SUM($denom)
@@ -45,26 +45,23 @@ ta.global_rd_insts:
   formula: SUM(TA_FLAT_READ_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of global & generic (flat) memory read instructions executed
-    on all compute units on the accelerator, per normalization unit. The address processing
-    unit counts each instruction once per wavefront.
+    The total number of global & generic memory read instructions executed on all
+    compute units on the accelerator, per normalization unit.
 ta.global_wr_insts:
   name: TA Global/Generic Write Instructions
   formula: SUM(TA_FLAT_WRITE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of global & generic (flat) memory write instructions executed
-    on all compute units on the accelerator, per normalization unit. The address processing
-    unit counts each instruction once per wavefront.
+    The total number of global & generic memory write instructions executed on all
+    compute units on the accelerator, per normalization unit.
 ta.spill_atomic_insts:
   name: TA Spill/Stack Atomic Instructions
   formula: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
     The total number of spill/stack memory atomic (with and without return) instructions
-    executed on all compute units on the accelerator, per normalization unit. These
-    are buffer instructions, which the address processing unit counts once per wavefront.
-    Typically unused as these memory operations are typically used to implement thread-local
+    executed on all compute units on the accelerator, per normalization unit. Typically
+    unused as these memory operations are typically used to implement thread-local
     storage.
 ta.spill_insts:
   name: TA Spill/Stack Instructions
@@ -79,8 +76,7 @@ ta.spill_rd_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of spill/stack memory read instructions executed on all compute
-    units on the accelerator, per normalization unit. These are buffer instructions,
-    which the address processing unit counts once per wavefront.
+    units on the accelerator, per normalization unit.
 ta.spill_stack_coalesced_rd:
   name: TA Spill/Stack Coalesced Read
   formula: SUM(TA_BUFFER_COALESCED_READ_CYCLES_sum) / SUM($denom)
@@ -108,8 +104,7 @@ ta.spill_wr_insts:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of spill/stack memory write instructions executed on all compute
-    units on the accelerator, per normalization unit. These are buffer instructions,
-    which the address processing unit counts once per wavefront.
+    units on the accelerator, per normalization unit.
 ta.total_insts:
   name: TA Total Instructions
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)
