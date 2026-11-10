@@ -556,6 +556,18 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
   }
 }
 
+// RDNA4 has split counters, but its capacity is not modeled: it has no combined
+// counters and no split capacities.
+TEST(RaceDetector, CounterCapacity_Rdna4ModelsNoCapacity) {
+  constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(capacities.vmcnt, 0);
+  EXPECT_EQ(capacities.lgkmcnt, 0);
+  for (const auto counter : {amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
+                             amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
+                             amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT})
+    EXPECT_EQ(capacities.split(counter), 0) << static_cast<int>(counter);
+}
+
 // A full counter of two-token events is detected even though the wave holds
 // fewer events than the capacity: 15 two-token events plus a two-token issue
 // overflow the 31-token KMcnt. Synthetic ordered events make it observable.
