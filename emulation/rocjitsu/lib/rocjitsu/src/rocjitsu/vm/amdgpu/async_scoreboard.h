@@ -58,7 +58,12 @@ public:
   using Access = async_execution::Access;
   using Pool = matrix_coexecution::SharedPool;
   explicit AsyncInstructionQueue(Pool &pool) : pool_(pool) {}
-  ~AsyncInstructionQueue() { assert(empty()); }
+  ~AsyncInstructionQueue() {
+    // Issuer unwinding can bypass the normal drain. Join accepted jobs before
+    // destroying their instructions, without reporting errors during teardown.
+    for (size_t index = 0; index != count_; ++index)
+      (void)pool_.finish(entries_[index].ticket);
+  }
   bool empty() const { return count_ == 0; }
   size_t size() const { return count_; }
   /// @brief The first helper failure and its originating guest instruction.

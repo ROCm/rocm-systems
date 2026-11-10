@@ -7045,11 +7045,18 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
                      /*max_ticks=*/2'000'000));
     f.cu()->set_gws_wait_limit(32);
     std::atomic<uint64_t> exception_status = 0;
-    f.cu()->set_queue_exception_handler(
-        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
-          exception_status.store(status);
-          return true;
-        });
+    std::atomic<uint64_t> failure_pc = 0;
+    f.cu()->set_queue_exception_handler([&](uint32_t, uint32_t, uint64_t status, bool,
+                                            amdgpu::QueueExceptionDeliveryPolicy) {
+      exception_status.store(status);
+      for (uint32_t slot = 0; slot != 2; ++slot) {
+        const amdgpu::Wavefront *wave = f.cu()->wf(slot);
+        if (wave &&
+            wave->instruction_execution_error() == amdgpu::InstructionExecutionError::GwsFailure)
+          failure_pc.store(wave->pc);
+      }
+      return true;
+    });
     if (dispatch_threads > 1)
       f.cp()->set_dispatch_threads(dispatch_threads);
 
@@ -7070,6 +7077,7 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
 
     ASSERT_NO_THROW(f.engine->run());
     EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(failure_pc.load(), 0x1040u);
     EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 1);
     EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
     EXPECT_NE(f.engine->last_exit().code, 0);
