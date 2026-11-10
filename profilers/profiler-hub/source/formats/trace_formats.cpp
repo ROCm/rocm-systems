@@ -44,11 +44,15 @@ make_rocpd_reader(version_t                                version,
 {
 #if PROFILER_HUB_ENABLE_ROCPD_V3
     if(version.major == 3)
+    {
         return make_rocpd_v3_reader(std::move(storage), std::move(catalog));
+    }
 #endif
 #if PROFILER_HUB_ENABLE_ROCPD_V2
     if(version.major == 2)
+    {
         return make_rocpd_v2_reader(std::move(storage), std::move(catalog));
+    }
 #endif
     (void) version;
     (void) storage;
