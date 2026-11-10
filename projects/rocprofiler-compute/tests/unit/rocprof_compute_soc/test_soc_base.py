@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 import config
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import (
     AnalysisConfigMetric,
     CounterFile,
@@ -871,6 +872,24 @@ def test_live_attach_set_fits_one_pass_on_each_architecture(gpu_arch: str) -> No
     assert len(counter_files) == 1, f"{gpu_arch}: live attachment needs one pass"
     assert set(flat_counters_in_perfmon_file(counter_files[0])) == requested_counters
     assert accumulator_count == 0, f"{gpu_arch}: live attachment set uses accumulators"
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_set_selects_its_library_metric_ids(gpu_arch: str) -> None:
+    """--set selects, and profile saves, the metric ids of the library set."""
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), gpu_arch)
+    for set_option, set_data in library.sets.items():
+        soc = offline_soc(gpu_arch, [], False, set_option)
+        counters, selected_blocks = soc.detect_counters()
+        assert selected_blocks == list(set_data["metrics"]), set_option
+        assert counters, set_option
+
+
+def test_set_missing_from_the_library_is_an_error() -> None:
+    """gfx908 has no compute_thruput_flops set: MI100 lacks its counters."""
+    soc = offline_soc("gfx908", [], False, "compute_thruput_flops")
+    with pytest.raises(SystemExit):
+        soc.detect_counters()
 
 
 def _metrics_to_select(gpu_arch: str) -> List[str]:

@@ -49,7 +49,6 @@ from utils.utils_common import (
     create_temp_rocprofiler_metrics_path,
     is_only_pc_sampling,
     is_tcc_channel_counter,
-    parse_sets_yaml,
     selects_roofline,
     validate_roofline_csv,
 )
@@ -493,16 +492,15 @@ class OmniSoC_Base:
             warn_numeric_metric_ids(filter_blocks, self.__arch)
             filter_blocks = row_ids_as_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
-            sets_info = parse_sets_yaml(self.__arch)
-            if args.set_selected not in sets_info:
+            sets = loader.MetricLibrary.load(
+                loader.default_metric_library_dir(), self.__arch
+            ).sets
+            if args.set_selected not in sets:
                 console_error(
                     f'argument --set: invalid choice: "{args.set_selected}" '
-                    f"(choose from {', '.join(sets_info)})"
+                    f"(choose from {', '.join(sets)})"
                 )
-            filter_blocks = [
-                next(iter(metric.keys()))
-                for metric in sets_info[args.set_selected]["metric"]
-            ]
+            filter_blocks = list(sets[args.set_selected]["metrics"])
 
         expressions: List[str] = []
         if not filter_blocks:

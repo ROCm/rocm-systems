@@ -16,6 +16,7 @@ from pc_sampling.pc_sampling_analysis import (
     detect_pc_sampling_method,
     load_aggregated_pc_sampling,
 )
+from rocprof_compute_soc.metric_library import loader
 from utils import schema
 from utils.analysis_views import (
     convert_filter_blocks_to_panel_ids,
@@ -84,6 +85,13 @@ def build_dfs(
 
     if filter_metrics and arch:
         warn_numeric_metric_ids(filter_metrics, arch)
+    saved_blocks = [str(t) for t in profiling_config.get("filter_blocks", [])]
+    if not filter_metrics and any(
+        loader.METRIC_LIBRARY_ID_RE.match(t) for t in saved_blocks
+    ):
+        # Saved metric ids (--set, or -b with metric ids) filter rows, as -b does.
+        filter_metrics = saved_blocks
+    if filter_metrics and arch:
         filter_metrics = expand_metric_ids(filter_metrics, arch)
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
