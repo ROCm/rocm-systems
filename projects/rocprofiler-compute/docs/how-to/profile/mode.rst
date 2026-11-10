@@ -1116,6 +1116,51 @@ pass :ref:`--trace-ml-api <ml-api-trace>` with no values.
 To analyze the captured Triton kernels, use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
 
+.. _jax-trace:
+
+JAX trace
+=========
+
+ROCm Compute Profiler can map performance counters to the ``jax.jit`` /
+``jax.pmap`` compiled call or eager primitive that launched them.
+Enable it with the ``--trace-ml-api jax`` option. It writes the same
+``ml_api_trace`` output as Torch and Triton trace and is analyzed the same way.
+
+The tracer wraps compiled ``jax.jit`` and ``jax.pmap`` calls and
+``jax.extend.core.Primitive`` dispatch. Marker names are ``jax.jit.<fn>``,
+``jax.pmap.<fn>``, and ``jax.{primitive}`` (for example ``jax.dot_general``).
+It does not wrap ``jnp.*`` helpers. A nested or inner call does not open a
+second range; its kernels stay under the outer marker.
+
+The range encloses host-side launch enqueue, not GPU completion
+(`asynchronous dispatch <https://docs.jax.dev/en/latest/async_dispatch.html>`__).
+Kernels launched from the call inherit that marker and join on
+``Correlation_ID`` and ``GUID``.
+
+The deprecated ``pjit`` alias compiles to the same ``PjitFunction`` as
+``jax.jit``, so those calls show as ``jax.jit.<fn>``. ``shard_map`` is unmarked
+unless it sits under an outer ``jit`` / ``pmap``.
+
+.. warning::
+
+   JAX trace is currently an experimental feature. You must pass
+   ``--experimental`` to both **profile** and **analyze** commands when using the
+   JAX trace related options (``--trace-ml-api jax`` for profile;
+   ``--list-operators jax`` and ``--operator 'jax:PATTERN'`` for analyze).
+
+Usage
+-----
+
+To enable JAX mapping, use ``--experimental`` with the
+``--trace-ml-api jax`` option:
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --experimental --trace-ml-api jax --name jax_workload -- python jax_workload.py
+
+To analyze the captured JAX operators, use ``--list-operators jax`` and
+``--operator 'jax:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
+
 .. _ml-api-trace:
 
 ML API trace
@@ -1134,7 +1179,7 @@ Every ``--trace-ml-api`` run also records user ROCTx regions.
    $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
 The output is the same as naming every framework, as in
-``--trace-ml-api torch triton``. Each kernel is attributed to the framework
+``--trace-ml-api torch triton jax``. Each kernel is attributed to the framework
 that launched it. Analyze the results with ``--list-operators`` and
 ``--operator`` (see :doc:`../analyze/cli`). To select a user ROCTx region and
 the GPU work inside it, use ``--list-operators user`` or

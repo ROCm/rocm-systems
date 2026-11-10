@@ -11,7 +11,7 @@ to interpreting it, so an agent loads only what the question needs.
 | [rocprof-compute-memory](rocprof-compute-memory/SKILL.md) | Memory chart, caches, LDS, fabric traffic, gfx950 bandwidth analysis |
 | [rocprof-compute-roofline](rocprof-compute-roofline/SKILL.md) | Compute-bound versus memory-bound, arithmetic intensity |
 | [rocprof-compute-pc-sampling](rocprof-compute-pc-sampling/SKILL.md) | Which instruction is hot and why it stalls |
-| [rocprof-compute-torch-trace](rocprof-compute-torch-trace/SKILL.md) | Attribute GPU kernels to PyTorch and Triton operators |
+| [rocprof-compute-torch-trace](rocprof-compute-torch-trace/SKILL.md) | Attribute GPU kernels to PyTorch, Triton, and JAX operators |
 
 These are user-facing skills. The contributor workflows under `.ai/skills/`
 (code review, rebase) are a separate thing and are not published here.

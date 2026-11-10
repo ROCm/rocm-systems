@@ -45,6 +45,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_jax
       - test_inject_roctx_torch_trace_collector
       - test_conftest
       - test_memory_chart_loader
@@ -134,6 +135,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_jax
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
@@ -161,6 +163,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -241,6 +244,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_jax
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
@@ -268,6 +272,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -348,6 +353,7 @@ test_categories:
       - test_csv_compression
       - test_inject_roctx_package
       - test_inject_roctx_torch
+      - test_inject_roctx_jax
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
@@ -375,6 +381,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach

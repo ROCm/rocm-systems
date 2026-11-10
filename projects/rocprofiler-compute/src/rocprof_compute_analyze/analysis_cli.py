@@ -30,7 +30,12 @@ from utils.utils_analysis import (
 from utils.utils_common import validate_roofline_csv
 
 # Display names for the backends in operator headings and messages.
-_OPERATOR_LABELS = {"torch": "PyTorch", "triton": "Triton", "user": "User"}
+_OPERATOR_LABELS = {
+    "torch": "PyTorch",
+    "triton": "Triton",
+    "jax": "JAX",
+    "user": "User",
+}
 
 
 def _labels_for_backends(backends: List[str]) -> str:
