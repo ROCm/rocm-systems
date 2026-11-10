@@ -111,7 +111,9 @@ class BlitSdmaBase : public core::Blit {
   /// @brief Single-doorbell WaitSignal copy for gfx125+ single copies.
   /// Emits GCR invalidate + dep polls + N WaitSignal copy packets +
   /// GCR writeback + mailbox/trap — all in one ring reservation.
-  /// Only the first packet waits and only the final packet signals.
+  /// When a dependency is present every copy packet waits on it. On the
+  /// unprofiled path every packet signals, so out_signal is
+  /// pre-incremented by num_copy_command - 1.
   /// When profiling is enabled, start/end SDMA timestamp commands are emitted
   /// around the copy packets (after dep polls and after copies respectively),
   /// the packets carry no inline SIGNAL, and out_signal completes via an
