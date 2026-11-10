@@ -4740,21 +4740,13 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
 
-static int g_planCallbackEntered;
-
-ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
-  g_planCallbackEntered++;
-  return ncclSuccess;
-}
-ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclSuccess; }
-const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
-
 TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
-  g_planCallbackEntered = 0;
+  auto ok = [](struct ncclKernelPlan*) { return ncclSuccess; };
+  ScopedHook startGroup(g_profilerStartGroupEvent, ok);
+  ScopedHook stopGroup(g_profilerStopGroupEvent, ok);
+  ScopedHook startTasks(g_profilerStartTaskEvents, ok);
+  ScopedHook stopTasks(g_profilerStopTaskEvents, ok);
+  ScopedHook postWork(g_profilerPostPlanWork, [](struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; });
   ncclComm comm{};
   uint32_t abortFlag = 0;
   comm.abortFlag = &abortFlag;
@@ -4764,23 +4756,23 @@ TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStil
 
   abortFlag = 1;
   hostStreamPlanCallback(&plan);
-  EXPECT_EQ(0, g_planCallbackEntered);
+  EXPECT_EQ(0, startGroup.calls);
 
   abortFlag = 0;
   comm.revokedFlag = 1;
   hostStreamPlanCallback(&plan);
-  EXPECT_EQ(0, g_planCallbackEntered);
+  EXPECT_EQ(0, startGroup.calls);
 
   comm.revokedFlag = 0;
   comm.destroyFlag = 1;
   hostStreamPlanCallback(&plan);
-  EXPECT_EQ(1, g_planCallbackEntered);
+  EXPECT_EQ(1, startGroup.calls);
 
   ncclKernelPlan eager{};
   eager.comm = &comm;
   abortFlag = 1;
   hostStreamPlanCallback(&eager);
-  EXPECT_EQ(2, g_planCallbackEntered);
+  EXPECT_EQ(2, startGroup.calls);
 }
 
 TEST_F(EnqueueMicrotest, PersistentDestructor_LiveRef_ReclaimsAndOrphanDoesNotEnqueueAgain) {
