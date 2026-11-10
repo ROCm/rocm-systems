@@ -105,18 +105,18 @@ int main(int argc, char **argv) {
           if (!first_record)
             std::cout << ',';
           first_record = false;
-          std::cout << "{\"commit\":" << commit
-                    << ",\"site\":" << *wire::read_u32(execution.report, record + wire::kRecordSite)
-                    << ",\"sequence\":"
-                    << *wire::read_u32(execution.report, record + wire::kRecordSequence)
-                    << ",\"offset\":"
-                    << *wire::read_u32(execution.report, record + wire::kRecordLdsOffset)
-                    << ",\"width\":"
-                    << *wire::read_u32(execution.report, record + wire::kRecordWidth)
-                    << ",\"mask\":"
-                    << *wire::read_u64(execution.report, record + wire::kRecordGuestMask)
-                    << ",\"flags\":"
-                    << *wire::read_u32(execution.report, record + wire::kRecordFlags) << '}';
+          std::cout
+              << "{\"commit\":" << commit
+              << ",\"site\":" << *wire::read_u32(execution.report, record + wire::kRecordSite)
+              << ",\"sequence\":"
+              << *wire::read_u32(execution.report, record + wire::kRecordSequence)
+              << ",\"phase\":" << *wire::read_u32(execution.report, record + wire::kRecordPhase)
+              << ",\"offset\":"
+              << *wire::read_u32(execution.report, record + wire::kRecordLdsOffset)
+              << ",\"width\":" << *wire::read_u32(execution.report, record + wire::kRecordWidth)
+              << ",\"mask\":" << *wire::read_u64(execution.report, record + wire::kRecordGuestMask)
+              << ",\"flags\":" << *wire::read_u32(execution.report, record + wire::kRecordFlags)
+              << '}';
         }
       }
       std::cout << "]}";

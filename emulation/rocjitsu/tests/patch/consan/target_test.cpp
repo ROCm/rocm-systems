@@ -147,6 +147,42 @@ TEST(ConSanBarrierStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
   }
 }
 
+TEST(ConSanBarrierStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  for (const uint32_t maximum : {31u, 32u, 33u}) {
+    SCOPED_TRACE(maximum);
+    const std::string fixture = "native-barrier-max" + std::to_string(maximum);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
+    if (maximum <= 32) {
+      EXPECT_TRUE(input.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry) << error.message;
+      EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry) << error.message;
+    } else {
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      EXPECT_EQ(input.value().maximum_workgroup_size, maximum);
+      const FailureOr<PreparedArtifact> artifact =
+          prepare(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(artifact.succeeded()) << error.message;
+      EXPECT_EQ(artifact.value().manifest.entry.maximum_workgroup_size, maximum);
+      EXPECT_TRUE(
+          plan_launch(artifact.value().manifest, {{33, 1, 1}, {33, 1, 1}}, 128, 0).succeeded());
+    }
+  }
+  // The minimum only belongs to barrier scope: one-wave no-sync kernels remain valid.
+  const std::vector<uint8_t> no_barrier =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-no-barrier-max32"));
+  ASSERT_FALSE(no_barrier.empty());
+  InputError error;
+  EXPECT_TRUE(prepare(no_barrier, target, "lds_producer_consumer", error).succeeded())
+      << error.message;
+}
+
 TEST(ConSanBarrierStatic, RejectUnmatchedSignalAndWaitOperations) {
   const std::vector<uint8_t> original =
       test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-15"));
@@ -160,15 +196,16 @@ TEST(ConSanBarrierStatic, RejectUnmatchedSignalAndWaitOperations) {
   const BarrierFacts &barrier = baseline.value().barriers.front();
   const uint64_t text = baseline.value().text_file_offset;
   const uint32_t wait = *wire::read_u32(original, text + barrier.original_wait);
-  const uint32_t nop = build_s_nop(0, target.arch);
+  const FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  ASSERT_TRUE(nop.succeeded());
   struct Mutation {
     const char *name;
     uint64_t offset;
     uint32_t word;
   };
   const std::array<Mutation, 3> mutations = {{
-      {.name = "signal without wait", .offset = barrier.original_wait, .word = nop},
-      {.name = "wait without signal", .offset = barrier.original_signal, .word = nop},
+      {.name = "signal without wait", .offset = barrier.original_wait, .word = nop.value()},
+      {.name = "wait without signal", .offset = barrier.original_signal, .word = nop.value()},
       // Replace the scalar EXEC restore immediately after the valid pair;
       // every other instruction and its original offset remain unchanged.
       {.name = "extra wait after pair", .offset = barrier.original_wait + 4, .word = wait},

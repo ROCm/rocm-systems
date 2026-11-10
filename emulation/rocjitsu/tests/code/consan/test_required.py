@@ -74,14 +74,16 @@ def set_property(test, name, value):
 
 
 class RequiredCoverage(unittest.TestCase):
-    def test_multiple_barrier_pipeline_cannot_be_omitted(self):
-        name = 'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_multiple'
+    def test_multiple_barrier_controls_cannot_be_omitted(self):
         required = required_names()
-        self.assertIn(name, required)
-        with self.assertRaisesRegex(
-            ValueError, 'Required ConSan registrations missing'
-        ):
-            validate_selected([{'name': item} for item in required - {name}])
+        for case in ('barrier_multiple', 'barrier_missing_second'):
+            with self.subTest(case=case):
+                name = f'ConSanSimProductionE2E.gfx1250.wave32.assembly.{case}'
+                self.assertIn(name, required)
+                with self.assertRaisesRegex(
+                    ValueError, 'Required ConSan registrations missing'
+                ):
+                    validate_selected([{'name': item} for item in required - {name}])
 
     def test_compiled_probe_validation_is_required_for_every_mode(self):
         for name in required_names():

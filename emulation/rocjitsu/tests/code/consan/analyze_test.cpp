@@ -245,7 +245,7 @@ TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrel
     EXPECT_EQ(execution.coverage_complete, !unrelated_gap);
     ASSERT_EQ(execution.ordered_examples.size(), 1u);
     EXPECT_EQ(execution.ordered_examples[0].ordering, LdsRaceOrdering::Ordered);
-    EXPECT_TRUE(execution.ordered_examples[0].first.mask == 1);
+    EXPECT_EQ(execution.ordered_examples[0].first.mask, 1u);
   }
 }
 
@@ -279,7 +279,7 @@ TEST_F(ConSanAnalysis,
     EXPECT_FALSE(execution.coverage_complete);
     ASSERT_EQ(execution.unresolved_examples.size(), 1u);
     EXPECT_TRUE(execution.cross_wave_examples.empty());
-    EXPECT_EQ(execution.unresolved_examples[0].ordering, LdsRaceOrdering::Incomplete);
+    EXPECT_EQ(execution.unresolved_examples[0].ordering, LdsRaceOrdering::Unresolved);
     EXPECT_NE(render_lds_race_analysis(result.value()).find("\"ordering\":\"ordering_unresolved\""),
               std::string::npos);
   }
@@ -411,7 +411,7 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
     EXPECT_EQ(execution.collision_groups, 0u);
     EXPECT_EQ(execution.ordering_unresolved_pairs, 1u);
     ASSERT_EQ(execution.unresolved_examples.size(), 1u);
-    EXPECT_EQ(execution.unresolved_examples[0].ordering, LdsRaceOrdering::Incomplete);
+    EXPECT_EQ(execution.unresolved_examples[0].ordering, LdsRaceOrdering::Unresolved);
     EXPECT_FALSE(has_findings(result.value()));
     if (unexpected_tail) {
       EXPECT_TRUE(std::ranges::any_of(execution.issues, [](const LdsRaceIntegrityIssue &issue) {
@@ -1106,7 +1106,7 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
               const bool second_valid =
                   (second_site + 1 <= boundaries[second_wave]) == (second_site < split);
               LdsRaceOrdering order =
-                  missing || !first_valid || !second_valid        ? LdsRaceOrdering::Incomplete
+                  missing || !first_valid || !second_valid        ? LdsRaceOrdering::Unresolved
                   : (first_site < split) != (second_site < split) ? LdsRaceOrdering::Ordered
                                                                   : LdsRaceOrdering::Unordered;
               const auto participant = [&](uint32_t wave, uint32_t site) {
@@ -1128,7 +1128,7 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
                 ++ordered_count;
                 if (ordered.size() < examples)
                   ordered.push_back(finding);
-              } else if (order == LdsRaceOrdering::Incomplete) {
+              } else if (order == LdsRaceOrdering::Unresolved) {
                 ++unresolved_count;
                 if (unresolved.size() < examples)
                   unresolved.push_back(finding);

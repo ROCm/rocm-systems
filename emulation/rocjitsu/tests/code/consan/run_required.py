@@ -60,6 +60,7 @@ def required_names():
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_high',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_separated',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_multiple',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_missing_second',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',

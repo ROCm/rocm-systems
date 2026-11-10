@@ -46,6 +46,11 @@ foreach(
                 24
                 25
                 26
+                27
+                barrier-max31
+                barrier-max32
+                barrier-max33
+                no-barrier-max32
             )
         endif()
         foreach(
@@ -94,6 +99,12 @@ foreach(
             elseif(_case STREQUAL "dense-sites")
                 set(_case_number 2)
                 set(_layout_options -DCONSAN_LDS_ACCESS_PAIRS=256)
+            elseif(_case MATCHES "^barrier-max(31|32|33)$")
+                set(_case_number 15)
+                set(_layout_options -DCONSAN_MAX_WORKGROUP=${CMAKE_MATCH_1})
+            elseif(_case STREQUAL "no-barrier-max32")
+                set(_case_number 1)
+                set(_layout_options -DCONSAN_MAX_WORKGROUP=32)
             endif()
             set(_object ${_directory}/${_fixture_name}.o)
             set(_image ${_directory}/${_fixture_name}.hsaco)

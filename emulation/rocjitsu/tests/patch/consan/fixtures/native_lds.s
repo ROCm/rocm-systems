@@ -208,7 +208,7 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
-#if CONSAN_CASE >= 15 && CONSAN_CASE <= 24
+#if (CONSAN_CASE >= 15 && CONSAN_CASE <= 24) || CONSAN_CASE == 27
 #if CONSAN_CASE == 19
   s_cmp_eq_u32 s4, 7
   s_cbranch_scc1 .Lskip_barrier
@@ -236,20 +236,33 @@ CONSAN_KERNEL:
 #else
   s_barrier_wait -1
 #endif
-#if CONSAN_CASE == 24
+#if CONSAN_CASE == 24 || CONSAN_CASE == 27
+  // B0 publishes the first store. B1 protects the consumer's load before
+  // wave 0 reuses the word; case 27 omits only that second barrier group.
   v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_LOAD v3, v1
   MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE == 24
   s_wait_dscnt 0
   s_barrier_signal -1
   s_barrier_wait -1
+#endif
 #endif
 .Lskip_barrier:
   MASK_MOVE MASK_EXEC, MASK_SAVE
 #elif CONSAN_CASE == 7
   s_barrier
 #endif
+#if CONSAN_CASE == 24 || CONSAN_CASE == 27
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  // Publish the earlier consumer load without adding another LDS access.
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+#else
 #if CONSAN_CASE == 14 || CONSAN_CASE == 20
   v_cmp_eq_u32 MASK_VCC, (2*CONSAN_WAVE_SIZE-1), v0
 #else
@@ -257,6 +270,7 @@ CONSAN_KERNEL:
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_LOAD v3, v1
+#endif
   consan_wait_all
   GLOBAL_STORE v5, v3, s[6:7]
 #endif

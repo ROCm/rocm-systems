@@ -313,6 +313,94 @@ TEST_F(ConSanContract, RejectsOverlappingPreparedBarrierMappings) {
   }
 }
 
+TEST_F(ConSanContract, RejectsBarrierCallbacksOverlappingAccessEnvelopes) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.sites.back().original_offset = 64;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = 16,
+                        .prepared_signal = 400,
+                        .prepared_wait = 404,
+                        .completion_probe = 408,
+                        .probe_size = 64}};
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+
+  struct Mapping {
+    const char *name;
+    uint64_t wait;
+    uint32_t probe_size;
+    bool overlaps;
+  };
+  constexpr std::array<Mapping, 5> kMappings = {{
+      {.name = "identical access callback", .wait = 60, .probe_size = 64, .overlaps = true},
+      {.name = "partial overlap at start", .wait = 44, .probe_size = 64, .overlaps = true},
+      {.name = "partial overlap at end", .wait = 92, .probe_size = 64, .overlaps = true},
+      {.name = "contained callback", .wait = 76, .probe_size = 16, .overlaps = true},
+      {.name = "adjacent wait and callback", .wait = 128, .probe_size = 64, .overlaps = false},
+  }};
+  for (const Mapping &mapping : kMappings) {
+    SCOPED_TRACE(mapping.name);
+    Manifest changed = manifest;
+    changed.barriers.front().prepared_wait = mapping.wait;
+    changed.barriers.front().completion_probe = mapping.wait + 4;
+    changed.barriers.front().probe_size = mapping.probe_size;
+    EXPECT_EQ(validate_manifest(changed, &error_).failed(), mapping.overlaps);
+    EXPECT_EQ(encode_manifest(changed, &error_).failed(), mapping.overlaps);
+
+    // Independently exercise decoding with valid framing and checksum.
+    bytes_ = encoded.value();
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const size_t barrier = bytes_.size() - kBarrierBytes;
+    ASSERT_TRUE(wire::write_u64(bytes_, barrier + 32, mapping.wait));
+    ASSERT_TRUE(wire::write_u64(bytes_, barrier + 40, mapping.wait + 4));
+    put32(barrier + 48, mapping.probe_size);
+    rehash();
+    EXPECT_EQ(decode_manifest(bytes_, &error_).failed(), mapping.overlaps);
+    if (mapping.overlaps) {
+      EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    }
+  }
+}
+
+TEST_F(ConSanContract, BarrierMaximumWorkgroupMustPermitTwoWaves) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.sites.back().original_offset = 64;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = 16,
+                        .prepared_signal = 400,
+                        .prepared_wait = 404,
+                        .completion_probe = 408,
+                        .probe_size = 64}};
+  manifest.entry.maximum_workgroup_size = 33;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+  ASSERT_TRUE(decode_manifest(encoded.value(), &error_).succeeded()) << error_.message;
+  EXPECT_TRUE(plan_launch(manifest, {{33, 1, 1}, {33, 1, 1}}, 8, 0, &error_).succeeded());
+
+  for (const uint32_t maximum : {1u, 31u, 32u}) {
+    SCOPED_TRACE(maximum);
+    manifest.entry.maximum_workgroup_size = maximum;
+    EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    EXPECT_TRUE(encode_manifest(manifest, &error_).failed());
+    bytes_ = encoded.value();
+    // maximum_workgroup_size is the final u32 before the site count.
+    put32(count_offset() - sizeof(uint32_t), maximum);
+    rehash();
+    EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+  }
+  Manifest no_barrier = example();
+  no_barrier.entry.maximum_workgroup_size = 32;
+  EXPECT_TRUE(validate_manifest(no_barrier, &error_).succeeded()) << error_.message;
+}
+
 TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts) {
   Manifest manifest = example();
   manifest.target = 1250;
@@ -418,6 +506,12 @@ TEST_F(ConSanContract, OutOfBoundsAndWrappingPhysicalMappingsFail) {
 TEST_F(ConSanContract, GuestMappingsAndReservationsMustBeUnambiguous) {
   Manifest manifest = example();
   manifest.sites[1].prepared_guest_offset = manifest.sites[0].prepared_guest_offset;
+  EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+  manifest = example();
+  manifest.sites[1].probe_offset = manifest.sites[0].probe_offset;
+  EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
+  manifest = example();
+  manifest.sites[0].probe_offset = manifest.sites[0].prepared_guest_offset + 4;
   EXPECT_TRUE(validate_manifest(manifest, &error_).failed());
   manifest = example();
   manifest.sites[1].first_slot = 0;
