@@ -154,7 +154,7 @@ class MemChart:
         """Text width a block wants, before columns are evened out."""
         widths = [len(block.title) + 2, _MIN_TEXT_WIDTH]
         widths += [
-            len(item.title) + 1 + _VALUE_RESERVE[self._unit(item.metric_name).kind]
+            len(item.title) + 1 + _VALUE_RESERVE[self._unit(item.metric_id).kind]
             for item in block.items
         ]
         widths += [
@@ -216,7 +216,7 @@ class MemChart:
         for item in block.items:
             if lines and not compact:
                 lines.append("")
-            shown = self._shown(item.metric_name)
+            shown = self._shown(item.metric_id)
             color = COLORS["util"] if compact else COLORS[item.category]
             if len(item.title) + 1 + len(shown) > width:
                 lines += [item.title, _colored(shown, color)]
@@ -224,7 +224,7 @@ class MemChart:
                 lines.append(f"{item.title} {_colored(shown, color)}")
             if item.bar:
                 lines.append(
-                    f"[dim]{progress_bar(self.values.get(item.metric_name))}[/dim]"
+                    f"[dim]{progress_bar(self.values.get(item.metric_id))}[/dim]"
                 )
         for row in self.stalls[block.id]:
             if lines:
@@ -276,7 +276,7 @@ class MemChart:
             if arrow.style == "inline":
                 widths.append(label_width + 3 + _VALUE_RESERVE["count"])
             else:
-                widths += [len(arrow.title), len(self._shown(arrow.metric_name))]
+                widths += [len(arrow.title), len(self._shown(arrow.metric_id))]
             if arrow.group:
                 widths.append(len(arrow.group))
         return max(widths) + 1
@@ -295,7 +295,7 @@ class MemChart:
                 lines.append("")
             group = arrow.group
             if arrow.style == "inline":
-                shown = self._shown(arrow.metric_name)
+                shown = self._shown(arrow.metric_id)
                 value_width = _VALUE_RESERVE["count"]
                 lines.append(
                     _colored(
@@ -304,7 +304,7 @@ class MemChart:
                 )
             else:
                 lines.append(_colored(arrow.title, color))
-                lines.append(_colored(self._shown(arrow.metric_name), color))
+                lines.append(_colored(self._shown(arrow.metric_id), color))
             lines.append(_colored(_arrow_line(arrow.direction, width - 1), color))
         return lines
 
@@ -455,7 +455,7 @@ class MemChart:
         label_width = max((len(a.title) for a in arrows), default=0)
         lines = [
             _colored(
-                f"||  {a.title:<{label_width}}  {self._shown(a.metric_name)}",
+                f"||  {a.title:<{label_width}}  {self._shown(a.metric_id)}",
                 COLORS[a.category],
             )
             for a in arrows

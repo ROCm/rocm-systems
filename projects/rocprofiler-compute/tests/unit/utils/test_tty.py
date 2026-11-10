@@ -490,10 +490,11 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         view=None,
     )
     metric_dataframe = pd.DataFrame({
+        "Metric_ID": ["3.1.0"],
         "Metric": ["DRAM Read Bandwidth"],
         "Value": [512e9],
         "Unit": ["Bytes/s"],
-    })
+    }).set_index("Metric_ID")
     table_config = {
         "id": 301,
         "title": "Instruction Cache",
@@ -543,10 +544,10 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     # Values are unscaled Bytes/s; units are the config's, not the display's
     assert calls == [
         (
-            {"DRAM Read Bandwidth": 512e9},
+            {"3.1.0": 512e9},
             "3. Memory Chart (Normalization: per_wave)",
             "gfx1250",
-            {"DRAM Read Bandwidth": "Bytes/s"},
+            {"3.1.0": "Bytes/s"},
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
@@ -935,7 +936,8 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     """A mem-chart-only panel emits the merged chart, or tables under --view table
     or on an architecture without a chart layout."""
     mem_chart_marker = "rendered memory chart"
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    df = pd.DataFrame({"Metric_ID": ["3.1.0"], "Metric": ["Metric A"], "Value": [1]})
+    df = df.set_index("Metric_ID")
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
     monkeypatch.setattr(
         "utils.tty.plot_mem_chart",

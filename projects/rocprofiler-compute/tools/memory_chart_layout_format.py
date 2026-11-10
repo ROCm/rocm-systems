@@ -2,10 +2,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Fill in the metric ids of memory chart layouts and write them in the canonical style.
+"""Check memory chart layouts and rewrite them in the canonical style.
 
-Each metric_id is set from the memory chart panel config of the layout's archs, and
-the loader checks the result. The file is then written with keys in the
+The loader checks each file first. The file is then written with keys in the
 loader's order, blocks column by column (each block followed by its nested
 blocks, and each column's row 0 followed by its other rows), one block, metric, or
 arrow per line, and a blank line between columns and between arrows of different
@@ -21,7 +20,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -35,31 +34,8 @@ from memory_chart.loader import (
     LayoutError,
     layout_files,
     layout_from_json,
-    metric_entries,
-    panel_metric_ids,
-    read_layout_json,
+    load_layout,
 )
-
-
-def with_metric_ids(path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Layout *data* with each metric_id set from the panel config of its archs."""
-    archs = data.get("archs") or []
-    numberings = [panel_metric_ids(arch) for arch in archs]
-    if not numberings or any(ids != numberings[0] for ids in numberings):
-        raise LayoutError(
-            f"{path.name}: archs {archs} must share one memory chart panel numbering"
-        )
-    for entry in metric_entries(data):
-        # The loader check that follows reports an entry without a name
-        if "metric_name" not in entry:
-            continue
-        name = entry["metric_name"]
-        if name not in numberings[0]:
-            raise LayoutError(
-                f"{path.name}: metric {name!r} is not in the memory chart panel"
-            )
-        entry["metric_id"] = numberings[0][name]
-    return data
 
 
 def _inline(obj: dict[str, Any], keys: Keys) -> str:
@@ -137,13 +113,12 @@ def main() -> int:
     stale = []
     for path in layout_files():
         try:
-            data = with_metric_ids(path, read_layout_json(path))
-            layout_from_json(path, data)
+            load_layout(path)
         except LayoutError as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
         text = path.read_text(encoding="utf-8")
-        canonical = format_layout(data)
+        canonical = format_layout(json.loads(text))
         if text != canonical:
             stale.append(path.name)
             if not args.check:

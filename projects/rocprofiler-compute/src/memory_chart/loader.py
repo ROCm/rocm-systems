@@ -12,16 +12,12 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, NoReturn, Optional, Tuple, Union
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.logger import console_warning
-from utils.utils_common import (
-    canonical_config_arch,
-    load_panel_configs,
-    metric_ids_by_name,
-)
+from utils.utils_common import canonical_config_arch, load_panel_configs
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -60,19 +56,9 @@ BLOCK_KEYS = Keys(
     ),
     ("row", "order", "parent", "stall_level", "content"),
 )
-ITEM_KEYS = Keys(("metric_name", "metric_id", "title", "category", "bar"))
+ITEM_KEYS = Keys(("metric_id", "title", "category", "bar"))
 ARROW_KEYS = Keys(
-    (
-        "from",
-        "to",
-        "direction",
-        "metric_name",
-        "metric_id",
-        "title",
-        "category",
-        "style",
-        "group",
-    ),
+    ("from", "to", "direction", "metric_id", "title", "category", "style", "group"),
     ("group",),
 )
 
@@ -90,7 +76,6 @@ StackKey = Tuple[Optional[str], int]
 class LayoutItem:
     """A metric shown in a block."""
 
-    metric_name: str
     metric_id: str
     title: str
     category: str
@@ -119,7 +104,6 @@ class LayoutArrow:
     source: str
     target: str
     direction: str
-    metric_name: str
     metric_id: str
     title: str
     category: str
@@ -168,13 +152,10 @@ class Layout:
         cell = (_inner_row(block.row), block.column)
         return next(b for b in self.off_grid if (b.row, b.column) == cell)
 
-    def metric_entries(self) -> List[Union[LayoutItem, LayoutArrow]]:
-        """Every metric shown in a block, then every arrow."""
-        return [*(item for b in self.blocks() for item in b.items), *self.arrows]
-
     def metrics(self) -> set[str]:
-        """Names of all metrics the layout shows."""
-        return {entry.metric_name for entry in self.metric_entries()}
+        """Ids of all metrics the layout shows."""
+        ids = {item.metric_id for b in self.blocks() for item in b.items}
+        return ids | {arrow.metric_id for arrow in self.arrows}
 
 
 class Layouts:
@@ -210,24 +191,6 @@ class PanelConfigs:
         return cls._by_arch[arch]
 
 
-def panel_metric_ids(arch: str) -> Dict[str, str]:
-    """Id of every metric in the memory chart panel of *arch*, by metric name."""
-    panel = PanelConfigs.for_arch(arch) or {}
-    return {
-        name: metric_id
-        for source in panel.get("data source") or []
-        for table in source.values()
-        for name, metric_id in metric_ids_by_name(table).items()
-    }
-
-
-def metric_entries(layout_json: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Every metric entry of a parsed layout file: block contents, then arrows."""
-    blocks = layout_json["blocks"]
-    items = [item for block in blocks for item in block.get("content", [])]
-    return [*items, *layout_json["arrows"]]
-
-
 def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
     """True when every table of a panel config is drawn as the memory chart."""
     sources = panel.get("data source") or []
@@ -245,18 +208,13 @@ def layout_files() -> list[Path]:
 
 def load_layout(path: Path) -> Layout:
     """Read and check a layout file; raise LayoutError if missing or malformed."""
-    return layout_from_json(path, read_layout_json(path))
-
-
-def read_layout_json(path: Path) -> Dict[str, Any]:
-    """The parsed layout file, unchecked; raise LayoutError if it is not JSON."""
     try:
         layout_json = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # ValueError covers invalid JSON
         _fail(path, f"cannot read the layout: {error}")
     if not isinstance(layout_json, dict):
         _fail(path, "the layout must be a JSON object")
-    return layout_json
+    return layout_from_json(path, layout_json)
 
 
 def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
@@ -490,29 +448,25 @@ def _block(
     )
 
 
-def _check_metric_ref(path: Path, raw: Dict[str, Any], where: str) -> None:
-    for key in ("metric_name", "metric_id"):
-        value = raw[key]
-        if not isinstance(value, str) or not value:
-            _fail(path, f"{key} of {where} must be a non-empty string, not {value!r}")
+def _check_metric_id(path: Path, raw: Dict[str, Any], where: str) -> None:
+    if not isinstance(raw["metric_id"], str) or not raw["metric_id"]:
+        _fail(path, f"metric_id of {where} must be a non-empty string")
 
 
 def _item(path: Path, raw: dict[str, Any]) -> LayoutItem:
-    where = repr(raw.get("metric_name"))
+    where = repr(raw.get("metric_id"))
     _check_keys(path, raw, ITEM_KEYS, where)
-    _check_metric_ref(path, raw, where)
+    _check_metric_id(path, raw, where)
     _check_choice(path, raw["category"], _ITEM_CATEGORIES, f"category of {where}")
     if not isinstance(raw["bar"], bool):
         _fail(path, f"bar of {where} must be true or false, not {raw['bar']!r}")
-    return LayoutItem(
-        raw["metric_name"], raw["metric_id"], raw["title"], raw["category"], raw["bar"]
-    )
+    return LayoutItem(raw["metric_id"], raw["title"], raw["category"], raw["bar"])
 
 
 def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
-    where = f"arrow {raw.get('metric_name')!r}"
+    where = f"arrow {raw.get('metric_id')!r}"
     _check_keys(path, raw, ARROW_KEYS, where)
-    _check_metric_ref(path, raw, where)
+    _check_metric_id(path, raw, where)
     _check_choice(path, raw["direction"], _DIRECTIONS, f"direction of {where}")
     _check_choice(path, raw["category"], _ARROW_CATEGORIES, f"category of {where}")
     _check_choice(path, raw["style"], _ARROW_STYLES, f"style of {where}")
@@ -520,7 +474,6 @@ def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
         source=raw["from"],
         target=raw["to"],
         direction=raw["direction"],
-        metric_name=raw["metric_name"],
         metric_id=raw["metric_id"],
         title=raw["title"],
         category=raw["category"],
@@ -554,7 +507,7 @@ def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> 
 def _check_arrow(
     layout: Layout, arrow: LayoutArrow, by_id: Dict[str, LayoutBlock]
 ) -> None:
-    path, where = layout.path, f"arrow {arrow.metric_name!r}"
+    path, where = layout.path, f"arrow {arrow.metric_id!r}"
     for end in (arrow.source, arrow.target):
         if end not in by_id:
             _fail(path, f"{where} refers to unknown block {end!r}")

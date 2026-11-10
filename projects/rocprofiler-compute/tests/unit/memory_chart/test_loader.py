@@ -7,7 +7,6 @@ import copy
 import json
 import random
 import re
-from collections import Counter
 
 import common
 import pytest
@@ -19,9 +18,9 @@ from memory_chart.loader import (
     PanelConfigs,
     layout_files,
     load_layout,
-    panel_metric_ids,
 )
 from memory_chart.units import display_unit, panel_units
+from utils.utils_common import metric_ids_by_name
 
 MEMORY_CHART_ARCHS = common.memory_chart_archs()
 
@@ -35,7 +34,6 @@ READ_ARROW = {
     "from": "cu",
     "to": "vl1d",
     "direction": "backward",
-    "metric_name": "Flat Read",
     "metric_id": "3.1.6",
     "title": "Read",
     "category": "read",
@@ -53,14 +51,14 @@ NESTED = {
 ABOVE = {"id": "outer", "title": "Outer", "column": 3, "row": -2, "style": "panel"}
 
 
-def panel_metric_names(arch):
-    """Memory chart metric names of an arch, in config order, duplicates kept."""
-    return [
-        name
+def panel_metric_ids(arch):
+    """Memory chart metric ids of an arch."""
+    return {
+        metric_id
         for source in PanelConfigs.for_arch(arch)["data source"]
         for table in source.values()
-        for name in table.get("metric") or {}
-    ]
+        for metric_id in metric_ids_by_name(table).values()
+    }
 
 
 def gfx950_data():
@@ -115,27 +113,11 @@ def test_every_config_arch_has_one_layout(arch):
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     shown = load_layout(path).metrics()
-    panel = set(panel_metric_names(arch))
+    panel = panel_metric_ids(arch)
     assert not shown - panel, (
         f"not in the {arch} memory chart panel: {sorted(shown - panel)}"
     )
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
-
-
-@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
-def test_metric_ids_match_the_panel_config(path, arch):
-    layout = load_layout(path)
-    ids = panel_metric_ids(arch)
-    shown = {(entry.metric_name, entry.metric_id) for entry in layout.metric_entries()}
-    wrong = shown - set(ids.items())
-    assert not wrong, "run tools/memory_chart_layout_format.py to renumber them"
-
-
-@pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
-def test_panel_metric_names_are_unique(arch):
-    # Charts and the analysis database find metrics by name
-    duplicates = [n for n, c in Counter(panel_metric_names(arch)).items() if c > 1]
-    assert not duplicates
 
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
@@ -153,11 +135,11 @@ def test_arrow_style_fits_the_metric_unit(path, arch):
     layout = load_layout(path)
     grid = {b.id for b in layout.blocks() if b.row == 0}
     wrong = [
-        arrow.metric_name
+        arrow.metric_id
         for arrow in layout.arrows
         if arrow.target in grid
         and (arrow.style == "inline")
-        != (display_unit(units[arrow.metric_name]).kind == "count")
+        != (display_unit(units[arrow.metric_id]).kind == "count")
     ]
     assert not wrong
 
@@ -166,10 +148,10 @@ def test_arrow_style_fits_the_metric_unit(path, arch):
 def test_bars_are_only_on_percent_metrics(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))
     wrong = [
-        item.metric_name
+        item.metric_id
         for block in load_layout(path).blocks()
         for item in block.items
-        if item.bar and display_unit(units[item.metric_name]).kind != "percent"
+        if item.bar and display_unit(units[item.metric_id]).kind != "percent"
     ]
     assert not wrong
 
@@ -243,13 +225,13 @@ def test_block_list_order_does_not_matter(tmp_path):
         (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
         (with_blocks({**NESTED, "parent": "inner"}), "nest inside each other"),
         (with_blocks({**NESTED, "parent": "vl1d", "column": 1}), "nested blocks"),
-        (with_metric_change("VGPR", bar=True), "compact list"),
-        (with_metric_change("L2 Hit", category="x"), "category"),
-        (with_metric_change("L2 Hit", bar=1), "bar of 'L2 Hit'"),
-        (with_metric_change("L2 Hit", metric_id=None), "metric_id of 'L2 Hit'"),
-        (changed(arrows=[{**READ_ARROW, "metric_name": ""}]), "metric_name of arrow"),
-        (with_metric_change("Flat Read", category="hit"), "category"),
-        (with_metric_change("Flat Read", direction="up"), "direction"),
+        (with_metric_change("3.1.1", bar=True), "compact list"),
+        (with_metric_change("3.1.28", category="x"), "category"),
+        (with_metric_change("3.1.28", bar=1), "bar of '3.1.28'"),
+        (with_metric_change("3.1.28", metric_id=None), "metric_id of None"),
+        (changed(arrows=[{**READ_ARROW, "metric_id": ""}]), "metric_id of arrow ''"),
+        (with_metric_change("3.1.6", category="hit"), "category"),
+        (with_metric_change("3.1.6", direction="up"), "direction"),
         (changed(arrows=[{**READ_ARROW, "to": "nowhere"}]), "unknown block"),
         (changed(arrows=[{**READ_ARROW, "to": "l2"}]), "next column"),
         (
@@ -261,7 +243,7 @@ def test_block_list_order_does_not_matter(tmp_path):
             "next to it on the side toward row 0",
         ),
         (with_blocks(NESTED), "nested in 'mall'"),
-        (with_metric_change("xGMI Read BW", style="stacked"), "must be inline"),
+        (with_metric_change("3.1.35", style="stacked"), "must be inline"),
     ],
     ids=[
         "unknown-top-level-key",
@@ -292,7 +274,7 @@ def test_block_list_order_does_not_matter(tmp_path):
         "metric-category",
         "bar-not-a-bool",
         "metric-id-not-a-string",
-        "arrow-metric-name-empty",
+        "arrow-metric-id-empty",
         "arrow-category",
         "arrow-direction",
         "arrow-unknown-block",
