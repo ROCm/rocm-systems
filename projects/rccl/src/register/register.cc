@@ -22,7 +22,8 @@ NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
 #else
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
 #endif
-RCCL_PARAM(RingAutoRegisterMaxBytes, "RING_AUTO_REGISTER_MAX_BYTES", 32LL << 30);
+RCCL_PARAM(RingAutoRegisterWarnBytes, "RING_AUTO_REGISTER_WARN_BYTES", 32LL << 30);
+int64_t ncclParamLegacyCudaRegister();
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid) {
   if (reg && isValid) {
@@ -172,6 +173,7 @@ static ncclResult_t rcclRegFreeRetired(struct ncclComm* comm) {
     NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
     free(reg);
   }
+  cache->rcclRetiredBytes = 0;
   return ret;
 }
 
@@ -271,14 +273,20 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
     (void)cudaGetLastError();
     return ncclSuccess;
   }
-
-  uintptr_t pageSize = cache->pageSize;
-  size_t regBytes = (((uintptr_t)base + baseSize + pageSize - 1) & -pageSize) - ((uintptr_t)base & -pageSize);
-  if (cache->rcclAutoBytes + regBytes > (size_t)rcclParamRingAutoRegisterMaxBytes()) {
-    INFO(NCCL_REG, "rank %d not registering buffer %p size %zu: RCCL_RING_AUTO_REGISTER_MAX_BYTES %ld reached",
-         comm->rank, buff, size, rcclParamRingAutoRegisterMaxBytes());
-    return ncclSuccess;
+#if HIP_VERSION >= 71260540
+  // On one node peers import only cuMem allocations unless legacy IPC is on (see ipcRegisterBuffer), so a legacy
+  // allocation would only hold a record that no peer ever maps. Across nodes NET registration still uses it.
+  if (comm->nNodes == 1 && (comm->directMode || !ncclParamLegacyCudaRegister())) {
+    int legacyIpcCap = 0;
+    if (cuPointerGetAttribute(&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)buff) !=
+          CUDA_SUCCESS ||
+        legacyIpcCap) {
+      (void)cudaGetLastError();
+      return ncclSuccess;
+    }
   }
+#endif
+
   int population = cache->population;
   void* handle = NULL;
   if (ncclRegister(comm, (void*)base, baseSize, /*isGraph=*/false, &handle) != ncclSuccess || handle == NULL) {
@@ -293,7 +301,6 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   }
   found->rcclAuto.owned = true;
   found->rcclAuto.bufferId = bufferId;
-  cache->rcclAutoBytes += found->endAddr - found->begAddr;
   *reg = found;
   return ncclSuccess;
 }
@@ -310,7 +317,6 @@ ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct n
   if (reg->localRefs > 1 || reg->graphRefs > 0) {
     // The user or a graph registered this range too; it is theirs to deregister.
     --reg->localRefs;
-    cache->rcclAutoBytes -= reg->endAddr - reg->begAddr;
     return ncclSuccess;
   }
   INFO(NCCL_REG, "rank %d buffer %p is a new allocation; retiring the RCCL registration [%p, %p)", comm->rank, buff,
@@ -321,6 +327,15 @@ ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct n
   cache->population -= 1;
   reg->rcclAuto.retiredNext = cache->rcclRetired;
   cache->rcclRetired = reg;
+  cache->rcclRetiredBytes += reg->endAddr - reg->begAddr;
+  if (!cache->rcclRetiredWarned && cache->rcclRetiredBytes > (size_t)rcclParamRingAutoRegisterWarnBytes()) {
+    cache->rcclRetiredWarned = true;
+    WARN("rank %d: RCCL_RING_AUTO_REGISTER is holding %zu bytes of freed AllReduce/AllGather buffers until the "
+         "communicator is destroyed, because the job keeps freeing and reallocating them; GPU memory use will keep "
+         "growing. Set RCCL_RING_AUTO_REGISTER=0 to stop this; large unregistered AllReduce/AllGather may then run "
+         "slower.",
+         comm->rank, cache->rcclRetiredBytes);
+  }
   return ncclSuccess;
 }
 
@@ -344,7 +359,6 @@ ncclResult_t rcclRegAutoRelease(struct ncclComm* comm) {
   }
   cache->population = kept;
   NCCLCHECKIGNORE(rcclRegFreeRetired(comm), ret);
-  cache->rcclAutoBytes = 0;
   return ret;
 }
 

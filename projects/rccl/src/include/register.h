@@ -73,10 +73,11 @@ struct ncclRegCache {
   uintptr_t pageSize;
   // RCCL: stale RCCL-owned records. Their peer imports stay mapped until ncclRegCleanup, because unmapping one
   // while collectives are in flight deadlocks (hipMemUnmap in the peer's proxy waits for a kernel that waits
-  // on this rank). rcclAutoBytes counts the live and retired RCCL-owned bytes against
-  // RCCL_RING_AUTO_REGISTER_MAX_BYTES.
+  // on this rank). rcclRetiredBytes is what they keep resident; passing RCCL_RING_AUTO_REGISTER_WARN_BYTES warns once.
+  // There is deliberately no cap: a rank that stopped registering while its ring neighbours still did would hang.
   struct ncclReg* rcclRetired;
-  size_t rcclAutoBytes;
+  size_t rcclRetiredBytes;
+  bool rcclRetiredWarned;
 };
 
 ncclResult_t ncclRegCleanup(struct ncclComm* comm);

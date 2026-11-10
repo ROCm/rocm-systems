@@ -1575,14 +1575,20 @@ threshold table introduced for gfx1250.
           Not applied during graph capture or when ``NCCL_LOCAL_REGISTER=0``. If
           the allocation is freed and a new one lands at the same address, RCCL
           stops using the old registration and keeps its peer mappings until the
-          communicator is destroyed.
+          communicator is destroyed. As with ``ncclCommRegister``, every rank
+          must pass the same kind of allocation to a collective: ring neighbours
+          that disagree on whether a buffer is registered hang.
       - | ``0``: Disabled. Unregistered buffers use the P2P FIFO path.
         | ``1``: Enabled (default).
 
-    * - | ``RCCL_RING_AUTO_REGISTER_MAX_BYTES``
-        | Caps the allocation bytes ``RCCL_RING_AUTO_REGISTER`` keeps registered
-          per communicator, counting freed allocations whose peer mappings are
-          kept until the communicator is destroyed. Beyond the cap, buffers stay
-          unregistered.
+    * - | ``RCCL_RING_AUTO_REGISTER_WARN_BYTES``
+        | ``RCCL_RING_AUTO_REGISTER`` keeps freed buffers' peer mappings, and
+          therefore their GPU memory, until the communicator is destroyed. RCCL
+          warns once per communicator when that memory passes this many bytes,
+          because the job keeps freeing and reallocating AllReduce/AllGather
+          buffers. It is a warning, not a cap: a rank that stopped registering
+          while its ring neighbours did not would hang. Set
+          ``RCCL_RING_AUTO_REGISTER=0`` if the memory growth is a problem; large
+          unregistered AllReduce/AllGather may then run slower.
       - | ``34359738368`` (32 GiB): Default.
-        | ``N`` (bytes): Use ``N`` as the cap.
+        | ``N`` (bytes): Warn once freed buffers hold more than ``N`` bytes.

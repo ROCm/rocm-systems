@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/argcheck_fakes.h"
 #include "fakes/hip_fakes.h"
@@ -36,6 +37,9 @@
 #include "fakes/register_seam_undef.h"
 
 namespace {
+
+using RcclUnitTesting::CaptureLog;
+using RcclUnitTesting::LogHas;
 
 void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
 
@@ -877,6 +881,8 @@ class RegisterAutoLocalMicrotest : public RegisterMicrotestBase {
   // hipMemGetAddressRange: every address sits in an allocSize_-aligned allocation of allocSize_ bytes.
   uintptr_t allocSize_ = 0x10000;
   hipError_t addressRangeResult_ = hipSuccess;
+  // 1 for a hipMalloc allocation, 0 for a cuMem one.
+  int legacyIpcCap_ = 0;
   std::vector<ncclIpcRegInfo*> deregistered_;
 
   void SetUp() override {
@@ -887,6 +893,7 @@ class RegisterAutoLocalMicrotest : public RegisterMicrotestBase {
         if (bufferIdResult_ != hipSuccess) return bufferIdResult_;
         *static_cast<unsigned long long*>(data) = bufferId_;
       }
+      if (attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) *static_cast<int*>(data) = legacyIpcCap_;
       return hipSuccess;
     };
     g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
@@ -943,7 +950,6 @@ TEST_F(RegisterAutoLocalMicrotest, UnregisteredDeviceBuffer_CreatesOwnedRecord) 
   EXPECT_EQ(reg->localRefs, 1);
   EXPECT_TRUE(reg->rcclAuto.owned);
   EXPECT_EQ(reg->rcclAuto.bufferId, 7u);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x10000u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, SameAllocation_ReusesRecordWithoutNewRef) {
@@ -952,7 +958,6 @@ TEST_F(RegisterAutoLocalMicrotest, SameAllocation_ReusesRecordWithoutNewRef) {
   EXPECT_EQ(Auto(0x18000, 0x8000), first);
   EXPECT_EQ(Population(), 1);
   EXPECT_EQ(first->localRefs, 1);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x10000u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, BufferSpansTwoAllocations_LeavesUnregistered) {
@@ -966,12 +971,33 @@ TEST_F(RegisterAutoLocalMicrotest, AddressRangeQueryFails_LeavesUnregistered) {
   EXPECT_EQ(Population(), 0);
 }
 
+TEST_F(RegisterAutoLocalMicrotest, SingleNodeLegacyAllocation_LeavesUnregistered) {
+  comm_->nNodes = 1;
+  legacyIpcCap_ = 1;
+  EXPECT_EQ(Auto(0x10000, kPage), nullptr);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, SingleNodeCuMemAllocation_CreatesOwnedRecord) {
+  comm_->nNodes = 1;
+  ncclReg* reg = Auto(0x10000, kPage);
+  ASSERT_NE(reg, nullptr);
+  EXPECT_TRUE(reg->rcclAuto.owned);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, MultiNodeLegacyAllocation_CreatesOwnedRecordForNetRegistration) {
+  comm_->nNodes = 2;
+  legacyIpcCap_ = 1;
+  ncclReg* reg = Auto(0x10000, kPage);
+  ASSERT_NE(reg, nullptr);
+  EXPECT_TRUE(reg->rcclAuto.owned);
+}
+
 TEST_F(RegisterAutoLocalMicrotest, UserRegisteredBuffer_ReturnsUserRecordUntouched) {
   ncclReg* user = Seed(0x10000, 0x20000);
   EXPECT_EQ(Auto(0x11000, kPage), user);
   EXPECT_EQ(user->localRefs, 1);
   EXPECT_FALSE(user->rcclAuto.owned);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_RetiresStaleRecordWithoutTouchingPeers) {
@@ -988,8 +1014,8 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_RetiresStaleRecordWithoutTouchi
   EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
   // Unmapping a peer import here would wait on the peer's kernel; it waits for ncclRegCleanup.
   EXPECT_TRUE(deregistered_.empty());
-  // The retired record's pages stay mapped on the peers, so they still count toward the cap.
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x20000u);
+  // The retired record's pages stay mapped on the peers until the communicator is destroyed.
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0x10000u);
   free(stale->ipcInfos[0]);
   free(stale->ipcInfos);
 }
@@ -1008,7 +1034,6 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoUserRegistered_DropsOnlyRccl
   EXPECT_EQ(reg->localRefs, 1);
   EXPECT_FALSE(reg->rcclAuto.owned);
   EXPECT_TRUE(Retired().empty());
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoGraphRegistered_DropsOnlyRcclRefAndLeavesUnregistered) {
@@ -1084,15 +1109,32 @@ TEST_F(RegisterAutoLocalMicrotest, NullOrEmptyBuffer_LeavesUnregistered) {
   EXPECT_EQ(Population(), 0);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, ByteCapReached_LeavesFurtherBuffersUnregistered) {
-  g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_MAX_BYTES", 0x18000}});
-  // The cap counts whole allocations, even for a one-page call.
-  ASSERT_NE(Auto(0x10000, kPage), nullptr);
-  EXPECT_EQ(Auto(0x20000, kPage), nullptr);
-  EXPECT_EQ(Population(), 1);
-  allocSize_ = 0x8000;
-  EXPECT_NE(Auto(0x30000, kPage), nullptr);
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0x18000u);
+TEST_F(RegisterAutoLocalMicrotest, RetiredBytesPassWarnThreshold_WarnsOnceAndKeepsRegistering) {
+  g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_WARN_BYTES", 0x18000}});
+  std::string log = CaptureLog([&]() {
+    // Each round frees the allocation and gets a new one at the same address, retiring a whole 0x10000 record.
+    for (unsigned long long id = 7; id < 10; ++id) {
+      bufferId_ = id;
+      ncclReg* reg = Auto(0x10000, kPage);
+      ASSERT_NE(reg, nullptr);
+      EXPECT_TRUE(reg->rcclAuto.owned);
+    }
+  });
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0x20000u);
+  EXPECT_EQ(Retired().size(), 2u);
+  EXPECT_TRUE(LogHas(log, "keeps freeing and reallocating them"));
+  EXPECT_TRUE(LogHas(log, "Set RCCL_RING_AUTO_REGISTER=0"));
+  EXPECT_EQ(log.find("RCCL_RING_AUTO_REGISTER is holding"), log.rfind("RCCL_RING_AUTO_REGISTER is holding"));
+}
+
+TEST_F(RegisterAutoLocalMicrotest, RetiredBytesBelowWarnThreshold_DoesNotWarn) {
+  std::string log = CaptureLog([&]() {
+    Auto(0x10000, kPage);
+    bufferId_ = 8;
+    Auto(0x10000, kPage);
+  });
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0x10000u);
+  EXPECT_FALSE(LogHas(log, "RCCL_RING_AUTO_REGISTER is holding"));
 }
 
 TEST_F(RegisterAutoLocalMicrotest, RegisterFails_LeavesUnregistered) {
@@ -1114,7 +1156,7 @@ TEST_F(RegisterAutoLocalMicrotest, Release_TearsDownOwnedAndRetiredRecordsOnly) 
   ASSERT_EQ(Population(), 1);
   EXPECT_EQ(Slot(0), user);
   EXPECT_TRUE(Retired().empty());
-  EXPECT_EQ(comm_->regCache.rcclAutoBytes, 0u);
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordTheUserAlsoRegisteredToTheUser) {
