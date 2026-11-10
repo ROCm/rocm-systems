@@ -518,7 +518,8 @@ class IPCContext : public Context {
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_wg(T *dst, const T *src,
                                           int nelems, IPCTeam *team_obj,
-					  int n_seg, int seg_size, int chunk_size);
+					  int n_seg, int seg_size, int chunk_size,
+					  size_t pSync_offset);
 
   template <typename T, ROCSHMEM_OP Op>
   __device__ void internal_ring_allreduce_wave(T *dst, const T *src,
