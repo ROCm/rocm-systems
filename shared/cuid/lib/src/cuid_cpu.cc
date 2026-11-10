@@ -4,10 +4,15 @@
 #include "src/cuid_cpu.h"
 
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -269,44 +274,167 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info,
 
 namespace {
 
-/**
- * @brief Try to read PPIN (Protected Processor Inventory Number) from MSR
- *
- * PPIN is available on AMD CPUs (CPUID Fn8000_0008.EBX[23]) via MSR 0xC001_083B
- * Requires root privileges to read MSR.
- */
-bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
-#ifdef __x86_64__
-  // Check if PPIN is supported via CPUID
-  uint32_t eax, ebx, ecx, edx;
-  if (__get_cpuid(0x80000008, &eax, &ebx, &ecx, &edx)) {
-    if (!(ebx & (1 << 23))) {
-      return false;  // PPIN not supported
+// MSR_AMD_PPIN and MSR_PPIN in the kernel's msr-index.h.
+constexpr uint32_t kAmdPpinCtlMsr = 0xC00102F0;
+constexpr uint32_t kAmdPpinMsr = 0xC00102F1;
+constexpr uint32_t kIntelPpinMsr = 0x4F;
+
+amdcuid_status_t io_error_status(int error) {
+  return (error == EACCES || error == EPERM) ? AMDCUID_STATUS_PERMISSION_DENIED
+                                             : AMDCUID_STATUS_FILE_ERROR;
+}
+
+bool parse_hex(const char* text, uint64_t& value) {
+  if (!std::isxdigit(static_cast<unsigned char>(*text))) return false;
+  char* end = nullptr;
+  errno = 0;
+  const unsigned long long parsed = std::strtoull(text, &end, 16);
+  if (errno == ERANGE) return false;
+  while (std::isspace(static_cast<unsigned char>(*end))) ++end;
+  if (*end != '\0') return false;
+  value = parsed;
+  return true;
+}
+
+// The kernel's topology/ppin: 0400, "0x%llx\n", absent when the CPU has no
+// usable PPIN. `exists` is false only when the file is not there.
+amdcuid_status_t read_topology_ppin(const std::string& path, bool& exists, uint64_t& ppin) {
+  exists = true;
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    if (errno == ENOENT) {
+      exists = false;
+      return AMDCUID_STATUS_SUCCESS;
     }
+    return io_error_status(errno);
+  }
+  char text[64];
+  const ssize_t length = read(fd, text, sizeof(text) - 1);
+  const int error = errno;
+  close(fd);
+  if (length < 0) return io_error_status(error);
+  text[length] = '\0';
+  return parse_hex(text, ppin) ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_INVALID_FORMAT;
+}
+
+// Whether the kernel lists `flag` for logical CPU `cpu` in /proc/cpuinfo.
+amdcuid_status_t cpuinfo_has_flag(const std::string& cpuinfo_path, int cpu, const char* flag,
+                                  bool& has_flag) {
+  has_flag = false;
+  std::ifstream cpuinfo(cpuinfo_path);
+  if (!cpuinfo) return AMDCUID_STATUS_CPUINFO_ERROR;
+  std::string line;
+  bool found = false;
+  while (std::getline(cpuinfo, line)) {
+    if (line.empty()) {
+      if (found) break;
+      continue;
+    }
+    const size_t colon = line.find(':');
+    if (colon == std::string::npos) continue;
+    std::string key = line.substr(0, colon);
+    while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+    if (key == "processor") {
+      std::string value = line.substr(colon + 1);
+      while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(0, 1);
+      found = parse_int(value) == cpu;
+    } else if (found && key == "flags") {
+      std::istringstream flags(line.substr(colon + 1));
+      std::string word;
+      while (flags >> word) {
+        if (word == flag) has_flag = true;
+      }
+    }
+  }
+  return found ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_CPUINFO_ERROR;
+}
+
+// The kernel sets amd_ppin only since 5.7; before that a missing flag says
+// nothing. An unparsable release is treated as old.
+bool kernel_at_least(const std::string& release, int major, int minor) {
+  const size_t dot = release.find('.');
+  if (dot == std::string::npos) return false;
+  const size_t end = std::min(release.find_first_not_of("0123456789", dot + 1), release.size());
+  const int found_major = parse_int(release.substr(0, dot));
+  const int found_minor = end > dot + 1 ? parse_int(release.substr(dot + 1, end - dot - 1)) : -1;
+  if (found_major < 0 || found_minor < 0) return false;
+  return found_major > major || (found_major == major && found_minor >= minor);
+}
+
+amdcuid_status_t read_ppin_msr(const std::string& msr_base_path, int cpu, uint32_t msr,
+                               uint64_t& ppin) {
+  const std::string path = msr_base_path + "/" + std::to_string(cpu) + "/msr";
+  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return io_error_status(errno);
+  const ssize_t length = pread(fd, &ppin, sizeof(ppin), static_cast<off_t>(msr));
+  const int error = errno;
+  close(fd);
+  if (length < 0) return io_error_status(error);
+  return length == sizeof(ppin) ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_FILE_ERROR;
+}
+
+}  // namespace
+
+amdcuid_status_t read_cpu_ppin(const std::string& cpu_base_path, const std::string& cpuinfo_path,
+                               const std::string& msr_base_path, const std::string& kernel_release,
+                               bool amd_ppin_cpuid, uint16_t vendor_id, int cpu, uint64_t& ppin) {
+  ppin = 0;
+#ifndef __x86_64__
+  return AMDCUID_STATUS_SUCCESS;
+#else
+  const std::string topology_path = cpu_base_path + "/cpu" + std::to_string(cpu) + "/topology/ppin";
+  bool exists = false;
+  amdcuid_status_t status = read_topology_ppin(topology_path, exists, ppin);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    ppin = 0;
+    return status;
+  }
+  if (exists) return AMDCUID_STATUS_SUCCESS;
+
+  // Before Linux 5.18 only the msr driver exposes PPIN. The kernel sets
+  // amd_ppin (since 5.7) or intel_ppin only when PPIN is there to read, so on a
+  // kernel that sets the flag its absence is the absence of PPIN, and its
+  // presence makes a failed MSR read an error rather than a reason to hash the
+  // SMBIOS UUID.
+  const char* flag = nullptr;
+  uint32_t msr = 0;
+  if (vendor_id == 0x1022) {
+    flag = "amd_ppin";
+    msr = kAmdPpinMsr;
+  } else if (vendor_id == 0x8086) {
+    flag = "intel_ppin";
+    msr = kIntelPpinMsr;
   } else {
-    return false;
+    return AMDCUID_STATUS_SUCCESS;
   }
-
-  // Try to read PPIN from MSR 0xC001083B (AMD) or 0x4F (Intel)
-  // Requires root privileges
-  std::string msr_path = "/dev/cpu/" + std::to_string(core_id) + "/msr";
-  std::ifstream msr(msr_path, std::ios::binary);
-  if (!msr) {
-    return false;  // No MSR access (need root or msr module)
+  bool has_flag = false;
+  status = cpuinfo_has_flag(cpuinfo_path, cpu, flag, has_flag);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  if (!has_flag) {
+    // A kernel older than 5.7 has no amd_ppin, so decide as its ppin_init()
+    // does: the CPUID bit, then PPIN_CTL, which says whether firmware locked
+    // PPIN out.
+    if (vendor_id != 0x1022 || kernel_at_least(kernel_release, 5, 7) || !amd_ppin_cpuid)
+      return AMDCUID_STATUS_SUCCESS;
+    uint64_t control = 0;
+    status = read_ppin_msr(msr_base_path, cpu, kAmdPpinCtlMsr, control);
+    if (status != AMDCUID_STATUS_SUCCESS) return status;
+    constexpr uint64_t kLockout = 1, kEnable = 2;
+    if ((control & kLockout) && !(control & kEnable)) return AMDCUID_STATUS_SUCCESS;
   }
+  status = read_ppin_msr(msr_base_path, cpu, msr, ppin);
+  if (status != AMDCUID_STATUS_SUCCESS) ppin = 0;
+  return status;
+#endif
+}
 
-  // AMD PPIN MSR first, fallback to Intel if not found
-  const uint64_t AMD_PPIN_MSR = 0xC001083B;
-  msr.seekg(AMD_PPIN_MSR);
-  if (!msr.read(reinterpret_cast<char*>(&ppin), sizeof(ppin))) {
-    const uint64_t INTEL_PPIN_MSR = 0x4F;
-    msr.seekg(INTEL_PPIN_MSR);
-    if (!msr.read(reinterpret_cast<char*>(&ppin), sizeof(ppin))) {
-      return false;
-    }
-  }
+namespace {
 
-  return ppin != 0;
+// CPUID Fn8000_0008 EBX[23]: the CPU implements PPIN.
+bool amd_ppin_cpuid_bit() {
+#ifdef __x86_64__
+  uint32_t eax, ebx, ecx, edx;
+  return __get_cpuid(0x80000008, &eax, &ebx, &ecx, &edx) && (ebx & (1u << 23));
 #else
   return false;
 #endif
@@ -318,17 +446,26 @@ bool try_read_ppin(uint64_t& ppin, uint32_t core_id) {
  * @brief Get hardware fingerprint for CPU at socket granularity.
  *
  * Priority:
- * 1. PPIN (per-socket eFuse serial, requires root + firmware enablement)
- * 2. SMBIOS system uuid + physical_id (platform-level, requires root)
+ * 1. PPIN (per-socket eFuse serial), read from the kernel's topology/ppin or,
+ *    on older kernels, the vendor's PPIN MSR; reading it needs root.
+ * 2. Only when the CPU has no PPIN: SMBIOS system uuid + physical_id
+ *    (platform-level, requires root)
  *
  * Both tiers produce a per-socket fingerprint consistent with the spec's
  * intent that CPU identity is tied to the physical package, not logical cores.
+ * A PPIN the caller cannot read is an error, never a reason to take tier 2:
+ * the same socket would otherwise get a different CUID depending on whether
+ * the msr module is loaded.
  */
 amdcuid_status_t CuidCpu::get_hardware_fingerprint(uint64_t& fingerprint) const {
-  // PPIN is an eFuse-burned per-socket serial number — the spec's primary
-  // identifier. The core argument only selects which MSR fd to open.
   uint64_t ppin = 0;
-  if (try_read_ppin(ppin, m_info.header.fields.cpu.core)) {
+  struct utsname name = {};
+  uname(&name);
+  const amdcuid_status_t ppin_status = read_cpu_ppin(
+      "/sys/devices/system/cpu", "/proc/cpuinfo", "/dev/cpu", name.release, amd_ppin_cpuid_bit(),
+      m_info.header.fields.cpu.vendor_id, m_info.header.fields.cpu.core, ppin);
+  if (ppin_status != AMDCUID_STATUS_SUCCESS) return ppin_status;
+  if (ppin != 0) {
     fingerprint = ppin;
     return AMDCUID_STATUS_SUCCESS;
   }
