@@ -879,8 +879,8 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
     // applied after routing: before its operands are read, neither memory
     // domain is guaranteed to be used. On gfx1250 every FLAT counts on both domains, so
     // it is admitted here like any other memory instruction.
-    const bool flat = inst.mnemonic().starts_with("flat_");
-    if (inst.is_memory_op() && (!flat || flat_counts_on_both_domains(wf.cu().arch()))) {
+    if (inst.is_memory_op() &&
+        (!inst.mnemonic().starts_with("flat_") || flat_counts_on_both_domains(wf.cu().arch()))) {
       const auto *info = inst.amdgpu_memory_issue_info();
       assert(info && "memory instruction reached the race detector without issue metadata");
       if (info &&
