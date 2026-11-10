@@ -7180,10 +7180,10 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchRunsDeferredDdaIpcSetup) {
   });
 }
 
-// A user group may order comms differently per rank, and a revoked comm is about to be rejected:
-// neither runs the collective setup.
-TEST(WrapMicrotestIsolated, SelectAllGather_GroupedOrRevokedCallLeavesDdaIpcDeferred) {
-  RUN_ISOLATED_TEST("Wrap_SelectAllGather_GroupedOrRevokedCallLeavesDdaIpcDeferred", []() {
+// A user group may order comms differently per rank, and a revoked or suspended comm is about to be
+// rejected: none of them runs the collective setup.
+TEST(WrapMicrotestIsolated, SelectAllGather_GroupedRevokedOrSuspendedCallLeavesDdaIpcDeferred) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_GroupedRevokedOrSuspendedCallLeavesDdaIpcDeferred", []() {
     DeferredCeScratchScene scene;
     rcclCollDecision decision{};
     ncclGroupDepth = 1;
@@ -7196,6 +7196,15 @@ TEST(WrapMicrotestIsolated, SelectAllGather_GroupedOrRevokedCallLeavesDdaIpcDefe
     EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
                                                /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
                                                &decision));
+    EXPECT_TRUE(scene.ensureCapturing.empty());
+    EXPECT_NE(0u, scene.comm->ddaIpcLazyScratchBytes);
+    scene.comm->revokedFlag = 0;
+    {
+      ScopedHook suspended(g_commIsSuspended, [](ncclComm*) { return true; });
+      EXPECT_EQ(ncclSuccess, rcclSelectAllGather(scene.comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                 /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                 &decision));
+    }
     EXPECT_TRUE(scene.ensureCapturing.empty());
     EXPECT_NE(0u, scene.comm->ddaIpcLazyScratchBytes);
   });

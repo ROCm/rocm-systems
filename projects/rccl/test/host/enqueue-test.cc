@@ -5278,28 +5278,44 @@ struct CeAppendScene {
   bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
 };
 
-// A forced CE-scratch Gather on a comm whose DDA IPC scratch is deferred runs the deferred setup,
+// A forced CE-scratch Gather on a comm whose DDA IPC scratch is deferred runs the deferred setup
 // outside a user group (depth 1 is ncclEnqueueCheck's own), on a stream that is not capturing.
-TEST_F(EnqueueMicrotest, TaskAppend_CeScratchGatherRunsDeferredDdaIpcSetup) {
-  CollTaskComm cc;
-  cc.get()->ddaIpcLazyScratchBytes = 1 << 20;
-  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
-  info.coll = ncclFuncGather;
-  info.count = 8;
-  std::vector<bool> ensureCapturing;
-  ScopedHook algoEnv(g_rcclNcclAlgoEnvIsSet, [] { return false; });
-  ScopedHook forceCeScratch(g_rcclForceCeScratchEnabled, [](const ncclComm*) { return true; });
-  ScopedHook ceScratch(g_ceScratchAvailable,
-                       [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
-  ScopedHook ensure(g_ddaIpcEnsureInit, [&](struct ncclComm*, bool capturing) {
-    ensureCapturing.push_back(capturing);
-    return ncclInternalError;  // stop taskAppend here
-  });
-  const int savedDepth = ncclGroupDepth;
-  ncclGroupDepth = 1;
-  EXPECT_EQ(ncclInternalError, taskAppend(cc.get(), &info));
-  ncclGroupDepth = savedDepth;
-  EXPECT_EQ(std::vector<bool>{false}, ensureCapturing);
+// Inside a user group (depth 2) it skips the setup and falls through to the legacy path.
+TEST_F(EnqueueMicrotest, TaskAppend_CeScratchGatherRunsDeferredDdaIpcSetupOnlyOutsideUserGroups) {
+  for (int depth : {1, 2}) {
+    SCOPED_TRACE(depth);
+    CollTaskComm cc;
+    cc.get()->ddaIpcLazyScratchBytes = 1 << 20;
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+    info.coll = ncclFuncGather;
+    info.count = 8;
+    std::vector<bool> ensureCapturing;
+    int captureProbes = 0;
+    ScopedHook algoEnv(g_rcclNcclAlgoEnvIsSet, [] { return false; });
+    ScopedHook forceCeScratch(g_rcclForceCeScratchEnabled, [](const ncclComm*) { return true; });
+    ScopedHook ceScratch(g_ceScratchAvailable,
+                         [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; });
+    ScopedHook ensure(g_ddaIpcEnsureInit, [&](struct ncclComm*, bool capturing) {
+      ensureCapturing.push_back(capturing);
+      return ncclInternalError;  // stop taskAppend at the trigger
+    });
+    // The first probe is the CE capture check; the second is the legacy path's, which stops taskAppend there.
+    ScopedHook probe(g_cudaGetCapturingGraph, [&](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+      *graph = ncclCudaGraphNone(mode);
+      return ++captureProbes == 1 ? ncclSuccess : ncclInternalError;
+    });
+    const int savedDepth = ncclGroupDepth;
+    ncclGroupDepth = depth;
+    EXPECT_EQ(ncclInternalError, taskAppend(cc.get(), &info));
+    ncclGroupDepth = savedDepth;
+    if (depth == 1) {
+      EXPECT_EQ(std::vector<bool>{false}, ensureCapturing);
+      EXPECT_EQ(1, captureProbes);
+    } else {
+      EXPECT_TRUE(ensureCapturing.empty());
+      EXPECT_EQ(2, captureProbes);
+    }
+  }
 }
 
 TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
