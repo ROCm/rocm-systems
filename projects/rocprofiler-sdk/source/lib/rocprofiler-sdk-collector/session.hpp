@@ -38,8 +38,8 @@ struct trace_session_config
     std::string              name           = {};
     std::string              trace_path     = {};  // where the consumer daemon writes CTF
     std::vector<std::string> providers      = {};  // "<provider>:*" is enabled for each
-    uint64_t                 subbuffer_size = 0;   // 0: LTTng's default
-    uint64_t                 num_subbuffers = 0;   // 0: LTTng's default
+    uint64_t                 subbuffer_size = 0;   // 0: LTTng's per-process default
+    uint64_t                 num_subbuffers = 0;   // 0: LTTng's per-process default
 };
 
 struct trace_session

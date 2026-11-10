@@ -83,8 +83,10 @@ typedef struct rocprofiler_collector_config_t
     /// "rocm_hip". NULL: { "rocm_hip", "rocm_hsa", NULL }.
     const char* const* providers;
 
-    uint64_t subbuffer_size;  ///< bytes per sub-buffer, a power of 2; 0: LTTng's default
-    uint64_t num_subbuffers;  ///< sub-buffers per buffer, a power of 2; 0: LTTng's default
+    /// Bytes per sub-buffer, a power of 2; 0: 512 KiB. Each traced process has a buffer
+    /// per CPU; when it is full, new events are discarded (and counted).
+    uint64_t subbuffer_size;
+    uint64_t num_subbuffers;  ///< sub-buffers per buffer, a power of 2; 0: 4
 
     uint8_t reserved_padding[32];
 } rocprofiler_collector_config_t;

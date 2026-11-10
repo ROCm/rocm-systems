@@ -58,6 +58,11 @@ constexpr auto min_config_size = offsetof(rocprofiler_collector_config_t, reserv
 
 const auto default_providers = std::vector<std::string>{"rocm_hip", "rocm_hsa"};
 
+// LTTng's per-process defaults (4 sub-buffers of a page per CPU) discard events of busy
+// threads; these are its per-user defaults, which recorded the rocBLAS tests without loss.
+constexpr uint64_t default_subbuffer_size = 512 * 1024;
+constexpr uint64_t default_num_subbuffers = 4;
+
 struct collector_state
 {
     uint64_t                   id            = 0;
@@ -195,9 +200,11 @@ rocprofiler_collector_create(const rocprofiler_collector_config_t* config,
     auto session_config = collector::trace_session_config{};
     session_config.name = "rocprofiler-collector-" + std::to_string(::getpid()) + "-" +
                           std::to_string(++collector::get_next_id());
-    session_config.trace_path     = state->trace_path;
-    session_config.subbuffer_size = config->subbuffer_size;
-    session_config.num_subbuffers = config->num_subbuffers;
+    session_config.trace_path = state->trace_path;
+    session_config.subbuffer_size =
+        (config->subbuffer_size > 0) ? config->subbuffer_size : collector::default_subbuffer_size;
+    session_config.num_subbuffers =
+        (config->num_subbuffers > 0) ? config->num_subbuffers : collector::default_num_subbuffers;
     if(config->providers)
     {
         for(const auto* const* itr = config->providers; *itr; ++itr)
