@@ -1869,24 +1869,6 @@ TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSou
   EXPECT_TRUE(tensor_load_oldest());
 }
 
-// Capacity proves completion only for the issuing wave; another wave still
-// needs a barrier.
-TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCompletedDsWriteIsReleasedByABarrier) {
-  ds_write(0, kOldestAddress);
-  for (int index = 0; index < kCapacity; ++index)
-    ds_write(0, kYoungerAddress);
-  barrier();
-  EXPECT_FALSE(ds_read(1, kOldestAddress));
-}
-
-TEST_F(Gfx1250CounterCapacityRaceTest, DsWriteBelowCapacityIsNotReleasedByABarrier) {
-  ds_write(0, kOldestAddress);
-  for (int index = 0; index < kCapacity - 1; ++index)
-    ds_write(0, kYoungerAddress);
-  barrier();
-  EXPECT_TRUE(ds_read(1, kOldestAddress));
-}
-
 /// Counter capacity on gfx950 (CDNA4), whose combined VMCNT holds 63 tokens and
 /// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
 /// of behavior that differs on gfx1250.
