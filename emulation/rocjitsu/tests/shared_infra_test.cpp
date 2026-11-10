@@ -4460,6 +4460,9 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     }
   };
 
+  // gfx1100/gfx1201 observations establish that suppressed carry bits clear.
+  // The migrated RDNA handler applies the destination mask to both outputs.
+  constexpr bool masked_carry = std::is_same_v<Traits, Rdna4DppTraits>;
   const uint64_t full_exec = wf->wf_size() == 64 ? ~0ULL : 0xFFFFFFFFULL;
   const uint64_t vcc_hi_sentinel = wf->wf_size() == 32 ? 0xA5A5A5A500000000ULL : 0;
 
@@ -4469,14 +4472,14 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
 
     fill_vgprs(0, 0);
 
-    // ROW_SHR1 has no source for lane 0. BOUND_CTRL=0 suppresses both the
-    // vector destination and the VCC side result for that active lane.
+    // ROW_SHR1 has no source for lane 0. BOUND_CTRL=0 suppresses the
+    // vector destination; the carry bit clears on the migrated RDNA path.
     wf->set_exec(full_exec);
     wf->set_vcc_raw(vcc_hi_sentinel | 1);
     auto bc0_raw = make_raw();
     execute(bc0_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), kSentinel);
-    EXPECT_EQ(wf->vcc(), vcc_hi_sentinel | 1);
+    EXPECT_EQ(wf->vcc(), vcc_hi_sentinel | (masked_carry ? 0u : 1u));
 
     // BOUND_CTRL=1 supplies zero instead, so the lane executes normally and
     // consumes its incoming carry bit.
@@ -4489,8 +4492,8 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), Traits::dpp_carry_has_carry_in ? 1u : 0u);
     EXPECT_EQ(wf->vcc(), vcc_hi_sentinel);
 
-    // Row/bank masks select only the VGPR destination. A bank-masked lane's
-    // carry bit is still fully written.
+    // The migrated RDNA path also masks carry; other architectures retain
+    // their existing VGPR-only row/bank policy.
     fill_vgprs(0xFFFFFFFFu, 1);
     wf->set_exec(full_exec);
     wf->set_vcc_raw(0);
@@ -4500,9 +4503,9 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     execute(row_bank_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), kSentinel);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 4), 0u);
-    EXPECT_EQ(wf->vcc(), full_exec);
+    EXPECT_EQ(wf->vcc(), masked_carry ? (full_exec & 0xfff0fff0ULL) : full_exec);
 
-    // Row masking has the same VGPR-only scope. Exercise a distinct row so
+    // Row masking follows the same policy. Exercise a distinct row so
     // this cannot pass solely through the bank-mask implementation.
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       cu->write_vgpr(vbase + kDst, lane, kSentinel);
@@ -4514,11 +4517,11 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     execute(row_mask_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), kSentinel);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, wf->wf_size() == 64 ? 32 : 0), 0u);
-    EXPECT_EQ(wf->vcc(), full_exec);
+    EXPECT_EQ(wf->vcc(), masked_carry ? (full_exec & ~0xffff0000ULL) : full_exec);
 
     // On modern DPP16, FI=0 makes lane 1's ROW_SHR1 source invalid when lane
-    // 0 is inactive. BOUND_CTRL=0 therefore preserves lane 1's old carry,
-    // while the inactive destination lane itself is cleared in VCC.
+    // 0 is inactive. The migrated RDNA path clears its carry; other paths
+    // preserve it. The inactive destination lane itself clears in VCC.
     if constexpr (Traits::dpp_carry_has_fi) {
       fill_vgprs(0, 0);
       wf->set_exec(full_exec & ~1ULL);
@@ -4527,7 +4530,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
       inactive_source_raw.fi = 0;
       execute(inactive_source_raw);
       EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), kSentinel);
-      EXPECT_EQ(wf->vcc(), 2u);
+      EXPECT_EQ(wf->vcc(), masked_carry ? 0u : 2u);
     } else {
       // CDNA4 is Wave64-only. Verify that source suppression and legacy
       // inactive-source reads work in upper rows with sparse EXEC/VCC masks.
@@ -4927,6 +4930,8 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
 
+  constexpr bool filtered_carry =
+      Traits::arch == ROCJITSU_CODE_ARCH_RDNA3 || Traits::arch == ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t kSrc0 = 4;
   constexpr uint32_t kSrc1 = 8;
   constexpr uint32_t kDst = 12;
@@ -4976,7 +4981,7 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xABCD0000u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), 1u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 2), 0u);
-    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFEFFFDu);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), filtered_carry ? 0xFFFEFFFCu : 0xFFFEFFFDu);
     EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut + 1), 0xA5A5A5A5u);
 
     initialize();
@@ -5004,7 +5009,7 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
     masked.execute_impl(*wf);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xABCD0000u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 4), 0u);
-    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFFFFFFu);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), filtered_carry ? 0xFFF0FFF0u : 0xFFFFFFFFu);
   }
 }
 

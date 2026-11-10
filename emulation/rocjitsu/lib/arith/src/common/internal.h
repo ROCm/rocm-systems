@@ -8,6 +8,7 @@
 #define RJ_ARITH_INTERNAL_H_
 
 #include "common/bits.h"
+#include "common/exec_mask.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
@@ -37,11 +38,6 @@ inline constexpr uint32_t kFma16InstructionFlags = kFma32InstructionFlags | RJ_A
 inline constexpr uint32_t kWmmaInstructionFlags = RJ_ARITH_WMMA_NEG_LO_A | RJ_ARITH_WMMA_NEG_LO_B |
                                                   RJ_ARITH_WMMA_NEG_C | RJ_ARITH_WMMA_NEG_HI_A |
                                                   RJ_ARITH_WMMA_NEG_HI_B | RJ_ARITH_WMMA_ABS_C;
-
-// EXEC has one bit per lane in the instruction wave.
-template <int Lanes>
-  requires(Lanes == 32 || Lanes == 64)
-using ExecMask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
 
 // Reinterpret FP32 bits as float without conversion or aliasing violations.
 inline float as_float(uint32_t v) { return rocjitsu::arith::bit_cast<float>(v); }

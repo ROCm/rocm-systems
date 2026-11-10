@@ -78,7 +78,8 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
         '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
         '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]});',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]}, 0xF, 0xF,',
+        '      wf.exec() & wf.vgpr_write_mask());',
     ]
     return '\n'.join(lines)
 
