@@ -313,6 +313,7 @@ jobs:
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
               ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+            assert_built "${LOG_FILE}"
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1
