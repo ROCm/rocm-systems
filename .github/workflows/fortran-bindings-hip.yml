@@ -1,0 +1,30 @@
+# Fortran binding of hip: see fortran-bindings.yml.
+name: Fortran bindings (hip)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hip/include/**.h'
+      - 'projects/clr/hipamd/include/**.h'
+      - 'bindings/fortran/metadata/hip.toml'
+      - '.github/workflows/fortran-bindings-hip.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      lib: hip
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
