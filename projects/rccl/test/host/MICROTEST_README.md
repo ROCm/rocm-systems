@@ -1423,6 +1423,38 @@ produce the same report and a diff between them means a test changed. And the
 run that hangs names the binaries it is waiting on — with several in flight they
 are starts, not a record of what has finished.
 
+### When one binary hangs
+
+By default a child may run for as long as it likes, which is what a dispatcher
+waiting on `waitpid` has always done. That is fine for a developer, who can see
+which banner line has no completion and go look, but it is bad under a CI
+timeout: the merged report is written only once the **last** child is reaped, so
+an outer kill loses the results of every binary, including the ~87 that already
+passed. A single hang then reads as ~11,000 timed-out cases rather than one
+binary's worth.
+
+`RCCL_HOST_DISPATCH_CHILD_TIMEOUT` bounds each child instead:
+
+```bash
+RCCL_HOST_DISPATCH_CHILD_TIMEOUT=120   # no binary may run longer than two minutes
+```
+
+A child still running at its deadline is sent `SIGTERM`, so one with a handler
+can flush its log and say where it was, and `SIGKILL` five seconds later,
+because a child wedged in the kernel will never act on the first. It is then
+reported like any other child that produced nothing usable — a one-case failure
+suite naming the limit it exceeded and the log holding the case it was stuck in
+— and its remaining parts, if its selection was split, are skipped rather than
+each waiting out the same timeout to learn the same thing. Every other binary
+runs and reports as normal, which is the point.
+
+The limit is per **binary**, not per case or per run, and it applies from the
+moment that child is forked. Unset or `0` means no limit; a value that is not a
+number of seconds is said on stderr and leaves the run unbounded, since guessing
+a limit could kill binaries the caller never meant to bound. Only a run that
+asks for a timeout pays for one: without it the dispatcher blocks in `waitpid`
+exactly as before, and with it the wait polls on a 5 ms interval.
+
 ### Where the children's output goes
 
 The children do **not** print to the dispatcher's console. Each one's stdout and

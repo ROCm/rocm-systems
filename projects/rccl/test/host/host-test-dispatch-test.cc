@@ -24,7 +24,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
+#include <csignal>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ScopedDir.h"
@@ -945,6 +949,36 @@ TEST(HostDispatchParallelismMicrotest, ThisMachineIsReportedAsAtLeastOneProcesso
     EXPECT_GE(detectedParallelism(), 1u);
 }
 
+// ── resolveChildTimeout ─────────────────────────────────────────────
+
+TEST(HostDispatchChildTimeoutMicrotest, AnUnconfiguredRunHasNoChildTimeout)
+{
+    // The dispatcher has always waited for its children indefinitely. A caller that has not
+    // asked for a limit must keep that, or a slow machine would start killing passing binaries.
+    EXPECT_EQ(resolveChildTimeout(nullptr), std::chrono::seconds{0});
+    EXPECT_EQ(resolveChildTimeout(""), std::chrono::seconds{0});
+}
+
+TEST(HostDispatchChildTimeoutMicrotest, TheEnvironmentSetsHowLongAChildMayRun)
+{
+    EXPECT_EQ(resolveChildTimeout("120"), std::chrono::seconds{120});
+    EXPECT_EQ(resolveChildTimeout("1"), std::chrono::seconds{1});
+}
+
+TEST(HostDispatchChildTimeoutMicrotest, ZeroIsAnExplicitOptOut)
+{
+    EXPECT_EQ(resolveChildTimeout("0"), std::chrono::seconds{0});
+}
+
+TEST(HostDispatchChildTimeoutMicrotest, ARequestThatIsNotSecondsLeavesTheRunUnbounded)
+{
+    // Unbounded is the only safe reading of a value that cannot be honoured -- a guessed limit
+    // would kill binaries the caller never meant to limit. main() says so on stderr, because
+    // silently unbounded is the outcome the caller set the variable to avoid.
+    EXPECT_EQ(resolveChildTimeout("soon"), std::chrono::seconds{0});
+    EXPECT_EQ(resolveChildTimeout("-30"), std::chrono::seconds{0});
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ProfileDirectoryIsTakenFromThePattern)
@@ -1412,7 +1446,7 @@ TEST(HostDispatchCoverageMicrotest, NoBinaryExportedMeansNoTracefileAtAll)
 
 // ── runSelections ───────────────────────────────────────────────────
 
-// A scheduler driven through its spawn and reap seams, with no process ever created.
+// A scheduler driven through the operations it performs, with no process ever created.
 //
 // Each "child" writes a one-suite report at the path it was given, named after its own filter,
 // so a fragment can be traced back to the exact part that produced it. Children are reaped in
@@ -1446,23 +1480,75 @@ public:
 
     // Reaps the most recently started child first, so completions come back in an order the
     // scheduler did not choose.
+    //
+    // A child the test has marked as hanging is not reapable until it has been killed, so a
+    // bounded reap expires against it exactly as a real one would; the clock then advances by
+    // the interval the scheduler asked to wait, which is what makes the deadline deterministic.
     ReapFn reapNewestFirst()
     {
-        return [this](int &status) {
+        return [this](int &status, std::optional<std::chrono::milliseconds> within) {
             status = 0;
-            if (live_.empty()) {
-                return pid_t{-1};
+            boundedReaps_ += within.has_value() ? 1 : 0;
+            const auto reapable = std::find_if(live_.rbegin(), live_.rend(), [this](pid_t pid) {
+                return hanging_.count(pid) == 0 || killed_.count(pid) != 0;
+            });
+            if (reapable == live_.rend()) {
+                if (live_.empty()) {
+                    return pid_t{-1};
+                }
+                // Only hanging children are left. A bounded wait expires; an unbounded one would
+                // block forever against a real child, so a test that gets here without a timeout
+                // has gone wrong and says so rather than looping.
+                EXPECT_TRUE(within.has_value()) << "an unbounded reap would never return here";
+                now_ += within.value_or(std::chrono::milliseconds{0});
+                // An escalation that never reaches SIGKILL would signal this child forever.
+                // Bounded here so that shows up as a failed assertion rather than a suite that
+                // hangs and has to be read from a stack trace.
+                if (++expiries_ > kMaxExpiries) {
+                    ADD_FAILURE() << "the scheduler signalled a hanging child " << expiries_
+                                  << " times without ever killing it";
+                    return pid_t{-1};
+                }
+                return pid_t{0};
             }
-            const pid_t pid = live_.back();
-            live_.pop_back();
+            const pid_t pid = *reapable;
+            live_.erase(std::next(reapable).base());
             inFlightHighWater_ = std::max(inFlightHighWater_, live_.size() + 1);
+            status = killed_.count(pid) != 0 ? 128 + SIGKILL : 0;
             return pid;
         };
+    }
+
+    // The child started *index*-th never finishes on its own, so only a SIGKILL ends it.
+    void hangChild(size_t index) { hanging_.insert(static_cast<pid_t>(100 + index)); }
+
+    KillFn kill()
+    {
+        return [this](pid_t pid, int signal) {
+            signals_.push_back({pid, signal});
+            if (signal == SIGKILL) {
+                killed_.insert(pid);
+            }
+        };
+    }
+
+    NowFn now()
+    {
+        return [this] { return now_; };
+    }
+
+    SchedulerOperations ops()
+    {
+        return SchedulerOperations{spawn(), reapNewestFirst(), kill(), now(), reportPaths()};
     }
 
     const std::vector<Started> &started() const { return started_; }
     // The most children ever started but not yet reaped.
     size_t inFlightHighWater() const { return inFlightHighWater_; }
+    // Every signal the scheduler sent, in order, as (pid, signal).
+    const std::vector<std::pair<pid_t, int>> &signals() const { return signals_; }
+    // How many reaps were given a deadline to wait until rather than left to block.
+    size_t boundedReaps() const { return boundedReaps_; }
 
     ReportPathFn reportPaths()
     {
@@ -1477,6 +1563,13 @@ private:
     std::string directory_;
     std::vector<Started> started_;
     std::vector<pid_t> live_;
+    std::set<pid_t> hanging_;
+    std::set<pid_t> killed_;
+    std::vector<std::pair<pid_t, int>> signals_;
+    std::chrono::steady_clock::time_point now_{};
+    static constexpr size_t kMaxExpiries = 16;
+    size_t expiries_ = 0;
+    size_t boundedReaps_ = 0;
     size_t inFlightHighWater_ = 0;
     pid_t nextPid_ = 100;
 };
@@ -1522,7 +1615,7 @@ TEST(HostDispatchSchedulerMicrotest, EveryPartOfASplitBinaryIsRun)
     int failures = 0;
     const std::vector<SuiteFragment> fragments =
         runSelections({selection}, filters, ScheduleOptions{4, ReportFormat::Xml, {}, ""},
-                      fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+                      fake.ops(), failures);
 
     ASSERT_EQ(fake.started().size(), filters[0].size());
     for (size_t part = 0; part < filters[0].size(); ++part) {
@@ -1544,7 +1637,7 @@ TEST(HostDispatchSchedulerMicrotest, PartsOfOneBinaryNeverRunAtTheSameTime)
 
     int failures = 0;
     runSelections({selection}, filters, ScheduleOptions{8, ReportFormat::Xml, {}, ""},
-                  fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+                  fake.ops(), failures);
 
     // Eight jobs were allowed, but one binary's parts are serial, so only ever one was live.
     EXPECT_EQ(fake.inFlightHighWater(), 1u);
@@ -1562,8 +1655,8 @@ TEST(HostDispatchSchedulerMicrotest, NoMoreChildrenThanJobsRunAtOnce)
     }
 
     int failures = 0;
-    runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""}, fake.spawn(),
-                  fake.reapNewestFirst(), fake.reportPaths(), failures);
+    runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""}, fake.ops(),
+                  failures);
 
     EXPECT_EQ(fake.inFlightHighWater(), 2u);
     EXPECT_EQ(fake.started().size(), selections.size());
@@ -1587,7 +1680,7 @@ TEST(HostDispatchSchedulerMicrotest, FragmentsComeOutInSelectionOrderNotCompleti
     // selection order.
     const std::vector<SuiteFragment> fragments =
         runSelections(selections, filters, ScheduleOptions{3, ReportFormat::Xml, {}, ""},
-                      fake.spawn(), fake.reapNewestFirst(), fake.reportPaths(), failures);
+                      fake.ops(), failures);
 
     ASSERT_EQ(fragments.size(), 3u);
     EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
@@ -1603,16 +1696,153 @@ TEST(HostDispatchSchedulerMicrotest, AChildThatCannotBeStartedIsReportedAndItsRe
     const Selection selection = schedulerSelection("Alpha", 1);
 
     int failures = 0;
-    const std::vector<SuiteFragment> fragments = runSelections(
-        {selection}, {childFilters(selection)}, ScheduleOptions{1, ReportFormat::Xml, {}, ""},
-        [](const std::string &, const std::vector<std::string> &, const std::string &) {
-            return pid_t{-1};
-        },
-        fake.reapNewestFirst(), fake.reportPaths(), failures);
+    SchedulerOperations ops = fake.ops();
+    ops.spawn = [](const std::string &, const std::vector<std::string> &, const std::string &) {
+        return pid_t{-1};
+    };
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, {childFilters(selection)},
+                      ScheduleOptions{1, ReportFormat::Xml, {}, ""}, ops, failures);
 
     ASSERT_EQ(fragments.size(), 1u);
     EXPECT_NE(fragments[0].xml.find("fork failed"), std::string::npos) << fragments[0].xml;
     EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildStillRunningAtItsDeadlineIsTermedThenKilled)
+{
+    // SIGTERM first so a child with a handler can flush its log and say where it was; SIGKILL
+    // after the grace period, because a child wedged in the kernel will never act on SIGTERM and
+    // the run cannot wait for it.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.hangChild(0);
+
+    int failures = 0;
+    runSelections({selection}, {childFilters(selection)},
+                  ScheduleOptions{1, ReportFormat::Xml, {}, "", std::chrono::seconds{30}},
+                  fake.ops(), failures);
+
+    ASSERT_EQ(fake.signals().size(), 2u);
+    EXPECT_EQ(fake.signals()[0], std::make_pair(pid_t{100}, SIGTERM));
+    EXPECT_EQ(fake.signals()[1], std::make_pair(pid_t{100}, SIGKILL));
+}
+
+TEST(HostDispatchSchedulerMicrotest, ATimedOutChildIsReportedAsATimeoutNotAMissingReport)
+{
+    // A killed child leaves no report, so without this it would be reported as a binary that
+    // wrote none -- which reads as a crash and sends the reader looking for one. The message
+    // has to name the limit it exceeded and the log holding the case it was stuck in.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.hangChild(0);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments = runSelections(
+        {selection}, {childFilters(selection)},
+        ScheduleOptions{1, ReportFormat::Xml, {}, dir.path(), std::chrono::seconds{30}},
+        fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("timed out after 30 s"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[0].xml.find("Alpha.log"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(fragments[0].xml.find("wrote no gtest report"), std::string::npos)
+        << fragments[0].xml;
+    EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, ATimedOutBinaryDoesNotGetToHangItsRemainingPartsToo)
+{
+    // Each part of a split binary would wait out the whole timeout again to learn what the first
+    // one already established, so a hang in a binary split five ways would cost five timeouts.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = splitSelection();
+    const std::vector<std::vector<std::string>> filters = {childFilters(selection)};
+    ASSERT_GT(filters[0].size(), 1u);
+    fake.hangChild(0);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, filters,
+                      ScheduleOptions{1, ReportFormat::Xml, {}, "", std::chrono::seconds{30}},
+                      fake.ops(), failures);
+
+    EXPECT_EQ(fake.started().size(), 1u);
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("remaining part"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, TheBinariesBesideAHangingOneStillReportTheirResults)
+{
+    // This is the whole point of the per-binary timeout: an outer CI timeout kills the
+    // dispatcher before it writes the merged report, so a single hang costs every binary's
+    // results rather than its own.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+    fake.hangChild(1);   // Beta, the one started second
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters,
+                      ScheduleOptions{3, ReportFormat::Xml, {}, "", std::chrono::seconds{30}},
+                      fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 3u);
+    EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[1].xml.find("timed out"), std::string::npos) << fragments[1].xml;
+    EXPECT_NE(fragments[2].xml.find("GammaCase0"), std::string::npos) << fragments[2].xml;
+    EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatFinishesWithinItsDeadlineIsNeverSignalled)
+{
+    // The timeout must be inert for a run that does not hang, or a binary that merely ran long
+    // on a loaded machine would come back killed and the suite would be flaky by configuration.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters,
+                      ScheduleOptions{2, ReportFormat::Xml, {}, "", std::chrono::seconds{30}},
+                      fake.ops(), failures);
+
+    EXPECT_TRUE(fake.signals().empty());
+    EXPECT_EQ(fragments.size(), 2u);
+    EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AnUnconfiguredRunNeverBoundsItsReap)
+{
+    // No timeout means no deadline to wake for, and a bounded reap has to poll to honour one.
+    // The default run blocks in waitpid() as it always has, and costs nothing for a feature it
+    // is not using.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+
+    int failures = 0;
+    runSelections({selection}, {childFilters(selection)},
+                  ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
+
+    EXPECT_EQ(fake.boundedReaps(), 0u);
+    EXPECT_EQ(failures, 0);
 }
 
 }  // namespace

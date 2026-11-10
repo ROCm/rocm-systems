@@ -20,6 +20,8 @@
 #include <cctype>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -35,6 +37,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <unordered_set>
 #include <vector>
@@ -80,6 +83,22 @@ constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
 
 // How many fronted binaries may run at once. Defaults to half the machine's processors.
 constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
+
+// How long one child may run before it is terminated, in seconds. Unset or 0 means no limit,
+// which is this dispatcher's own behaviour; a caller under an outer CI timeout sets it so that
+// one hung binary costs its own cases rather than every binary's, since the merged report is
+// only written once the last child is reaped.
+constexpr std::string_view kChildTimeoutEnv = "RCCL_HOST_DISPATCH_CHILD_TIMEOUT";
+
+// How long a child gets to act on the SIGTERM it is sent at its deadline before it is sent
+// SIGKILL. Long enough for a stuck-in-a-test child to run its handlers and flush its log, short
+// enough that a child ignoring the signal does not extend the run by much.
+constexpr std::chrono::seconds kTerminateGrace{5};
+
+// How often a timed reap looks for a finished child. Only a run with a child timeout polls at
+// all -- without one the reap blocks as it always has -- and the interval only bounds how late
+// a deadline is noticed, which against a timeout measured in seconds need not be tight.
+constexpr std::chrono::milliseconds kReapPollInterval{5};
 
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
 // test, and nvtx is vendored. Overridable for a consumer that wants a different view.
@@ -1073,6 +1092,27 @@ size_t resolveParallelism(const char *request, size_t fallbackJobs)
     return requested >= 1 ? static_cast<size_t>(requested) : fallback;
 }
 
+// How long one child may run, given *request* from the environment. Zero means no limit.
+//
+// A request that is not a positive number is said rather than silently ignored: a caller that
+// set the variable wanted a limit, and a typo that quietly leaves the run unbounded is the one
+// outcome they were trying to avoid. "0" is an explicit opt-out and says nothing.
+std::chrono::seconds resolveChildTimeout(const char *request)
+{
+    if (request == nullptr || *request == '\0') {
+        return std::chrono::seconds{0};
+    }
+    const long seconds = toLong(std::string_view(request), -1);
+    if (seconds < 0) {
+        fmt::print(stderr,
+                   "host-test-dispatch: {}=\"{}\" is not a number of seconds -- no child timeout"
+                   " will be applied\n",
+                   kChildTimeoutEnv, request);
+        return std::chrono::seconds{0};
+    }
+    return std::chrono::seconds{seconds};
+}
+
 // The number of processors available to this process, or 1 when that cannot be determined.
 size_t detectedParallelism()
 {
@@ -1143,19 +1183,36 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
 
 // Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
 // if killed) and returning its pid; -1 when there is nothing left to wait for.
-pid_t reapAnyChild(int &exitStatus)
+//
+// *within*, when set, bounds the wait: 0 comes back if it elapses with no child finished, and the
+// caller is then the one to decide what that means. Only a bounded wait polls; an unbounded one
+// blocks in waitpid() and costs nothing, which is what a run with no child timeout does.
+pid_t reapAnyChild(int &exitStatus, std::optional<std::chrono::milliseconds> within)
 {
-    int status = 0;
-    pid_t pid = 0;
-    while ((pid = waitpid(-1, &status, 0)) < 0 && errno == EINTR) {
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + within.value_or(std::chrono::milliseconds{0});
+    for (;;) {
+        int status = 0;
+        pid_t pid = 0;
+        while ((pid = waitpid(-1, &status, within ? WNOHANG : 0)) < 0 && errno == EINTR) {
+        }
+        if (pid < 0) {
+            exitStatus = 1;
+            return -1;
+        }
+        if (pid > 0) {
+            exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
+                                           : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+            return pid;
+        }
+        const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            exitStatus = 0;
+            return 0;
+        }
+        std::this_thread::sleep_for(std::min<std::chrono::nanoseconds>(kReapPollInterval,
+                                                                      deadline - now));
     }
-    if (pid < 0) {
-        exitStatus = 1;
-        return -1;
-    }
-    exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
-                                   : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
-    return pid;
 }
 
 // Read *path* whole, or return an empty string.
@@ -1520,12 +1577,25 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     std::fflush(stdout);
 }
 
-// The seams runSelections() is driven through: starting a child, reaping whichever finishes
-// first, and naming the file a part writes its report to.
+// The operations runSelections() performs on the world outside its loop: starting a child,
+// reaping whichever finishes first, signalling one that has outstayed its deadline, reading the
+// clock those deadlines are measured on, and naming the file a part writes its report to.
 using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
                                     const std::string &logPath)>;
-using ReapFn = std::function<pid_t(int &exitStatus)>;
+// Returns the pid reaped, 0 if *within* elapsed first, or -1 if there was nothing to wait for.
+using ReapFn =
+    std::function<pid_t(int &exitStatus, std::optional<std::chrono::milliseconds> within)>;
+using KillFn = std::function<void(pid_t pid, int signal)>;
+using NowFn = std::function<std::chrono::steady_clock::time_point()>;
 using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
+
+struct SchedulerOperations {
+    SpawnFn spawn;
+    ReapFn reap;
+    KillFn kill;
+    NowFn now;
+    ReportPathFn reportPath;
+};
 
 struct ScheduleOptions {
     size_t jobs = 1;                                 // children allowed to run at once
@@ -1533,6 +1603,8 @@ struct ScheduleOptions {
                                                      // ever transcoded between the two formats
     std::vector<std::string> passthrough;            // the caller's own flags, handed to each child
     std::string logDirectory;                        // empty means the children inherit our stdio
+    std::chrono::seconds childTimeout{0};            // 0 means a child may run for as long as it
+                                                     // likes, which is the unconfigured behaviour
 };
 
 // Run every part of every selection, at most *schedule.jobs* at a time, and return their
@@ -1542,18 +1614,23 @@ struct ScheduleOptions {
 // the next part is only made ready again once the previous one has been reaped.
 std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selections,
                                          const std::vector<std::vector<std::string>> &filters,
-                                         const ScheduleOptions &schedule, const SpawnFn &spawn,
-                                         const ReapFn &reap, const ReportPathFn &reportPathFor,
-                                         int &failures)
+                                         const ScheduleOptions &schedule,
+                                         const SchedulerOperations &ops, int &failures)
 {
     std::vector<size_t> nextPart(selections.size(), 0);
     std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
+    const bool timed = schedule.childTimeout > std::chrono::seconds{0};
 
     struct RunningChild {
         pid_t pid;
         size_t selection;
         std::string reportPath;
         std::string logPath;
+        // When this child is next due a signal: its deadline while it is still running freely,
+        // then one grace period later each time it has been signalled and is still here.
+        std::chrono::steady_clock::time_point due;
+        bool termed = false;     // SIGTERM has been sent, so the next signal is SIGKILL
+        bool timedOut = false;   // whatever it writes, it is a timeout and is reported as one
     };
     std::deque<size_t> ready;   // selections with a part still to start
     for (size_t index = 0; index < selections.size(); ++index) {
@@ -1567,7 +1644,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
             ready.pop_front();
             const Selection &selection = selections[index];
             const size_t part = nextPart[index]++;
-            const std::string reportPath = reportPathFor(selection.qualifier, part);
+            const std::string reportPath = ops.reportPath(selection.qualifier, part);
             std::vector<std::string> childArgs = {
                 fmt::format("--gtest_filter={}", filters[index][part]),
                 fmt::format("--gtest_output={}:{}", formatName(schedule.outputFormat), reportPath),
@@ -1591,7 +1668,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                        logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
             std::fflush(stdout);
 
-            const pid_t pid = spawn(selection.path, childArgs, logPath);
+            const pid_t pid = ops.spawn(selection.path, childArgs, logPath);
             if (pid < 0) {
                 perSelection[index].push_back(crashFragment(
                     selection.qualifier, "binary could not be started -- fork failed"));
@@ -1599,11 +1676,42 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                 nextPart[index] = filters[index].size();
                 continue;
             }
-            running.push_back({pid, index, reportPath, logPath});
+            running.push_back({pid, index, reportPath, logPath,
+                               ops.now() + schedule.childTimeout});
+        }
+
+        // Bounded only when there are deadlines to honour, and then only until the nearest of
+        // them: an unbounded reap blocks in waitpid() and costs nothing, which is what a run
+        // without a child timeout gets.
+        std::optional<std::chrono::milliseconds> within;
+        if (timed && !running.empty()) {
+            const auto nearest = std::min_element(running.begin(), running.end(),
+                                                  [](const RunningChild &a, const RunningChild &b) {
+                                                      return a.due < b.due;
+                                                  });
+            within = std::max(std::chrono::milliseconds{0},
+                              std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  nearest->due - ops.now()));
         }
 
         int status = 0;
-        const pid_t finished = reap(status);
+        const pid_t finished = ops.reap(status, within);
+        if (finished == 0) {
+            // Nothing finished before the nearest deadline. Every child now past its own is
+            // signalled and given another grace period, so one that ignores SIGKILL costs a
+            // signal every kTerminateGrace rather than a spin.
+            const std::chrono::steady_clock::time_point now = ops.now();
+            for (RunningChild &child : running) {
+                if (now < child.due) {
+                    continue;
+                }
+                child.timedOut = true;
+                ops.kill(child.pid, child.termed ? SIGKILL : SIGTERM);
+                child.termed = true;
+                child.due = now + kTerminateGrace;
+            }
+            continue;
+        }
         const auto slot = std::find_if(running.begin(), running.end(),
                                        [finished](const RunningChild &child) {
                                            return child.pid == finished;
@@ -1621,6 +1729,29 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
 
         const size_t index = slot->selection;
         const Selection &selection = selections[index];
+        if (slot->timedOut) {
+            // Whatever it exited with, and whatever report it left behind, it was killed partway
+            // through: the report would be missing exactly the cases that hung. Its remaining
+            // parts are skipped too, since they are more of the same binary and would each cost
+            // another timeout to learn the same thing.
+            const size_t remaining = filters[index].size() - nextPart[index];
+            perSelection[index].push_back(crashFragment(
+                selection.qualifier,
+                fmt::format("binary timed out after {} s and was killed{}{}",
+                            schedule.childTimeout.count(),
+                            slot->logPath.empty() ? std::string()
+                                                  : fmt::format("; output in {}", slot->logPath),
+                            remaining == 0
+                                ? std::string()
+                                : fmt::format("; its {} remaining part(s) were skipped",
+                                              remaining))));
+            ++failures;
+            nextPart[index] = filters[index].size();
+            std::error_code ec;
+            fs::remove(slot->reportPath, ec);
+            running.erase(slot);
+            continue;
+        }
         bool cleanReport = false;
         if (std::optional<SuiteFragment> fragment =
                 parseChildReport(readFile(slot->reportPath), selection.qualifier,
@@ -1843,16 +1974,22 @@ int main(int argc, char **argv)
         filters.push_back(childFilters(selection));
         ran.push_back(selection.path);
     }
-    const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir};
-    std::vector<SuiteFragment> ranFragments = runSelections(
-        selections, filters, schedule,
+    const std::chrono::seconds childTimeout =
+        resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
+    const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir,
+                                   childTimeout};
+    const SchedulerOperations ops{
         [](const std::string &path, const std::vector<std::string> &args,
            const std::string &logPath) { return spawnChild(path, args, logPath); },
         reapAnyChild,
+        [](pid_t pid, int signal) { ::kill(pid, signal); },
+        [] { return std::chrono::steady_clock::now(); },
         [&reportDir, &options](const std::string &qualifier, size_t part) {
             return reportDir.reportPath(qualifier, part, options.outputFormat);
         },
-        failures);
+    };
+    std::vector<SuiteFragment> ranFragments =
+        runSelections(selections, filters, schedule, ops, failures);
     for (SuiteFragment &fragment : ranFragments) {
         fragments.push_back(std::move(fragment));
     }
