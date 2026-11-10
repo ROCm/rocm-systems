@@ -9,174 +9,151 @@ Using kernel replay with rocprofv3
 ======================================
 
 ``rocprofv3 --replay-mode kernel --kernel-replay-beta-enabled`` collects several hardware-counter
-groups in **one application run**. For each kernel dispatch, the profiler snapshots every tracked
-coarse-grained allocation owned by that dispatch's agent -- not only the memory the kernel itself
-can reach -- re-executes that dispatch once per ``--pmc`` group, and restores the snapshot between
-passes so every group observes identical inputs. Host RAM use and copy time therefore scale with
-the agent's whole tracked footprint rather than with the kernel's working set, as
-`What is snapshotted`_ describes.
+groups in **one application run**. For each kernel dispatch, the profiler copies that GPU's tracked
+device memory to the host, runs the dispatch once per ``--pmc`` group, and copies the memory back
+between passes. Every group sees the same captured inputs.
 
-Without ``--replay-mode kernel``, multiple ``--pmc`` groups use *application replay*: the whole
-application is re-run from start to finish once per group. Kernel replay is useful when those full
-re-runs are expensive or non-deterministic.
+.. code-block:: text
 
-This page is the command-line how-to. The SDK callback domain, ``replay_pass_count``, and localized
-context control are documented in :ref:`using-kernel-replay`.
+   one process, one dispatch of kernel K on one GPU
+
+   host RAM                              GPU device memory
+   +---------------------------+         +-------------------------------+
+   | snapshot (full copy)      | <------ | hipMalloc / coarse-grained    |
+   | held until the dispatch   | ------> | __device__ and __constant__   |
+   | finishes                  |         +-------------------------------+
+                                             restored before pass 1, 2, ...
+                                             left as the last pass wrote it
+
+   GPU time -------------------------------------------------------------------->
+   pass 0: execute K, counters = group 0
+           restore snapshot
+   pass 1: execute K, counters = group 1
+           restore snapshot
+   pass 2: execute K, counters = group 2
+   application continues; it observes one completion, and the memory of the last pass
+
+The copy covers every tracked coarse-grained allocation owned by that dispatch's GPU, plus
+module-scope ``__device__`` and ``__constant__`` variables. It is the GPU's tracked footprint, which
+is wider than the buffers the kernel's source names. Host RAM use and copy time scale with that
+footprint. Details of the inventory are in :ref:`kernel-replay-memory-snapshot`.
+
+Without ``--replay-mode kernel``, several ``--pmc`` groups use :ref:`using-application-replay`: the
+whole application runs again from the start, once per group.
 
 .. warning::
 
-   Kernel replay is **experimental**. Use ``--replay-mode kernel`` together with
-   ``--kernel-replay-beta-enabled`` to acknowledge that the behaviour may change in a future
-   release. The SDK header lives under ``rocprofiler-sdk/experimental/``. Use it when you
-   understand the limitations below.
+   Kernel replay is **experimental**. Pass ``--kernel-replay-beta-enabled`` together with
+   ``--replay-mode kernel``. The behavior, the SDK header under ``rocprofiler-sdk/experimental/``,
+   and the output schema can change.
 
 How it compares
 ===============
 
-Hardware has a limited number of counter registers per block. When the counters you want do not
-fit in one hardware pass, ``rocprofv3`` has three ways to collect them:
-
 .. list-table::
    :header-rows: 1
-   :widths: 22 28 25 25
+   :widths: 24 28 24 24
 
    * - Approach
-     - Scope
-     - Memory handling
+     - What runs again
+     - Memory
      - Cost
-   * - Application replay (default for multiple ``--pmc`` groups)
-     - Whole application, re-run once per group
-     - None; each run is a fresh process
-     - ``O(N × application runtime)``
-   * - **Kernel replay** (``--replay-mode kernel --kernel-replay-beta-enabled``)
-     - One dispatch, re-executed in place
-     - Device memory snapshot and restore between passes
-     - ``O(N × kernel time + N × snap/restore)``
-   * - Counter group rotation (``pmc_groups`` / ``pmc_group_interval``)
-     - Amortized across successive dispatches
-     - None; different dispatches sample different groups
-     - ``O(1 × application runtime)``, but not the same dispatch
+   * - :ref:`Application replay <using-application-replay>` (default)
+     - The whole process, once per group
+     - None. Each run is a new process
+     - ``N`` times the application runtime
+   * - **Kernel replay**
+     - One dispatch, in place
+     - Device snapshot and restore between passes
+     - ``N`` times the kernel, plus ``N`` snapshot copies
+   * - Counter group rotation (``pmc_groups``)
+     - Nothing. Later dispatches sample other groups
+     - None
+     - One application run. Groups are from different dispatches
 
-Kernel replay is **not** the same as :ref:`using-spm`. SPM streams counter samples over time from
-hardware ring buffers; kernel replay re-executes a dispatch so each pass can collect a different
-counter group against the same inputs.
+Kernel replay collects counters. :ref:`using-spm` streams counter samples over time from hardware
+ring buffers, which is a different measurement. :ref:`using-thread-trace` and :ref:`using-pc-sampling`
+are rejected on this command line; a custom tool can enable them on selected passes
+(:ref:`using-kernel-replay`).
 
-Collecting counters with kernel replay
-======================================
+Collecting counters
+===================
 
-``--replay-mode kernel`` requires counter collection (``--pmc``, input-file ``pmc``, or
-``pmc_groups``) and ``--kernel-replay-beta-enabled``. The number of replay passes is the number of
-counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
-callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
+``--replay-mode kernel`` requires counter collection (``--pmc``, an input-file ``pmc`` line, or
+``pmc_groups``) and ``--kernel-replay-beta-enabled``. The number of passes is the number of counter
+groups that GPU can collect. There is no pass-count flag.
 
 .. code-block:: bash
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
 
-The preceding command collects both counter groups in a **single** run of ``<application_path>``.
-Each targeted dispatch is replayed twice: pass 0 collects ``SQ_WAVES`` and ``GRBM_COUNT``; pass 1
-collects ``GRBM_GUI_ACTIVE``. Device memory is restored between those passes.
+Both groups are collected in one run of ``<application_path>``. Each targeted dispatch runs twice.
+Pass 0 collects ``SQ_WAVES`` and ``GRBM_COUNT``. The snapshot is restored. Pass 1 collects
+``GRBM_GUI_ACTIVE``.
 
-A single ``--pmc`` group still works. In that case the tool asks the SDK for one pass, which does
-not snapshot or restore — the dispatch takes the ordinary path.
+A single ``--pmc`` group still works. The tool asks for one pass, and the dispatch takes the
+ordinary path: no snapshot and no restore.
 
 .. code-block:: bash
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
 
-Input files are unaffected by the flag. An input file's jobs each describe a run of their own --
-their own output configuration, kernel filters and ranges -- so ``rocprofv3`` runs them exactly as
-it would without ``--replay-mode kernel``, and replay applies within each job to the
-counter groups that job asks for.
+List counters with ``rocprofv3 --list-avail`` or ``rocprofv3-avail``, and check a group with
+``rocprofv3-avail pmc-check`` before a long run. See :ref:`using-rocprofv3-avail`. Each ``--pmc``
+group must fit in one hardware pass. Kernel replay does not split a group the hardware cannot
+collect together.
 
-List counters first with ``rocprofv3 --list-avail`` or ``rocprofv3-avail list --pmc``. Each
-individual ``--pmc`` group must still fit in one hardware pass; kernel replay does not split a
-group that the hardware cannot collect together. Use ``rocprofv3-avail pmc-check`` to verify a
-group before profiling.
-
-Pass count
-==========
-
-The pass count is **not** a user-supplied integer. ``rocprofv3`` derives it per dispatch from the
-number of counter groups collectable on **that dispatch's GPU agent**. Pass ``i`` maps to group
-``i``. An agent with fewer collectable groups than the global ``--pmc`` list is replayed only as
-many times as it has groups, so pass and group stay aligned.
-
-There is no ``--kernel-replay-passes`` flag and no pass-count environment variable. The CLI does
-not wire ``replay_continue`` or the localized start/stop context callbacks; those remain SDK
-tool APIs (:ref:`using-kernel-replay`).
+An input file's jobs each describe a run of their own. ``rocprofv3`` runs those jobs as it would
+without ``--replay-mode kernel``, and replay applies inside each job to the groups that job asks
+for.
 
 Output
 ======
 
-All counter groups from one kernel-replay run are written together (there is no ``pass_n/``
-directory per group, unlike application replay).
+All groups from one kernel-replay run are written together. There is no ``pass_n/`` directory per
+group. ``pass_n`` is the :ref:`application replay <using-application-replay>` layout.
 
 JSON
 ----
 
-JSON counter records include a ``replay_pass`` field (0-based). All passes of one logical dispatch
-share the same ``dispatch_id``; ``replay_pass`` is what distinguishes them. That identity is
-enforced by the SDK: one dispatch id is reserved before the first pass and reused for every pass.
+JSON counter records include ``replay_pass`` (0-based). Every pass of one dispatch shares
+``dispatch_id``. ``replay_pass`` is what distinguishes them. The SDK reserves that dispatch id
+before the first pass and reuses it.
 
 CSV
 ---
 
-CSV ``counter_collection.csv`` uses the same columns as a non-replay run. There is **no**
-``Replay_Pass`` column in this design. Passes of a replayed dispatch share ``Dispatch_Id``, and each
-pass contributes the counters from its ``--pmc`` group, so a pass can be identified from
-``Counter_Name`` only when the groups request distinct counters -- as in the example above. When a
-counter is repeated across groups (a sanity counter such as ``SQ_WAVES`` in every group, which the
-kernel-replay integration test does deliberately), the rows for one dispatch share both
-``Dispatch_Id`` and ``Counter_Name``, and CSV alone cannot attribute them to a pass.
+``counter_collection.csv`` has the same columns as a non-replay run. There is no ``Replay_Pass``
+column. Passes share ``Dispatch_Id``, and each pass contributes the counters from its group, so the
+counter name identifies the pass when the groups request different counters. When the same counter
+is repeated in several groups, those rows share both ``Dispatch_Id`` and ``Counter_Name``. Use
+``--output-format json``, or JSON together with CSV, so ``replay_pass`` is explicit.
 
-To attribute those rows, use ``--output-format json`` (or ``json`` together with ``csv``), where
-``replay_pass`` is explicit.
-
-Default ``rocpd``
------------------
+rocpd
+-----
 
 The default output format is ``rocpd``. Convert with ``rocpd convert`` as described in
 :ref:`using-rocpd-output-format`.
 
-What is snapshotted
-===================
+What memory comes back
+======================
 
-Snapshot and restore are implemented in the SDK. Between passes, kernel replay restores
-coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. Unified,
-managed, ``hipMallocAsync``, host, fine-grained, kernarg, and executable allocations are not
-restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``. See
-:ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
+Between passes, kernel replay restores:
 
-The last executed pass is **not** restored, so the application sees the memory the kernel actually
-produced.
+* Coarse-grained device allocations from ``hipMalloc``, ``hsa_amd_memory_pool_allocate``, and
+  ``hsa_memory_allocate``. See
+  `HIP memory management <https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_runtime_api/memory_management.html>`_.
+* Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
 
-Limitations (CLI)
-=================
+It leaves these as the application last wrote them:
 
-* **Beta.** The flag, the SDK API, and the output schema may change.
-* **Requires** ``--pmc``. The flag is an alternative to application replay for counter groups, not
-  a general "replay my kernel N times" switch.
-* **Each** ``--pmc`` **group must fit one hardware pass.**
-* **Fixed pass count** equal to the number of collectable groups on that agent. No
-  ``replay_continue`` and no per-pass local-context toggles from the CLI.
-* **Counters only.** ``--att``, PC sampling, and ``--spm`` are rejected alongside
-  ``--replay-mode kernel``. Because the CLI has no per-pass toggles, any other service
-  would remain enabled for every pass and report each kernel once per pass, all under the single
-  dispatch ID that replay reuses. The SDK itself is not restricted this way -- a custom tool can
-  enable and disable services per pass through the local-context API (see
-  :ref:`using-kernel-replay`) -- so this is a CLI limitation, not a hardware or SDK one.
-* **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
-  runs un-replayed (not a hard error).
-* **Only single-packet, single-dispatch submissions** are replayed.
-* **Single process.** There is no MPI or cross-process coordination, and there is no multi-GPU
-  end-to-end CLI test. Replaying a kernel that participates in an inter-process collective is
-  unsafe. The SDK already selects groups per agent; what is missing is a multi-GPU / MPI test.
-* **Async copies are not fenced** (SDK). An ``hsa_amd_memory_async_copy`` on another thread can
-  mutate device memory during the replay window.
-* **Stuck drains abort the process** (SDK, roughly 60 s).
-* **Host RAM duplication** of the tracked device footprint. For large footprints, snapshot plus
-  restore can cost more than re-running the application.
+* Unified and managed memory.
+* ``hipMallocAsync`` and other stream-ordered pools.
+* Host memory, fine-grained memory, kernarg, and executable allocations.
+
+The copy is a full in-memory copy of every tracked region. Cost is proportional to tracked bytes
+times passes. The last pass is left in place, so the application continues with the memory that
+pass produced. :ref:`kernel-replay-memory-snapshot` is the inventory and the restore path.
 
 When to use kernel replay
 =========================
@@ -184,21 +161,111 @@ When to use kernel replay
 Use it when:
 
 * You need several counter groups on the **same** dispatches.
-* Re-running the whole application per group is too slow, or the run is non-deterministic so
-  application replay would not compare the same work.
-* The kernels of interest write coarse-grained ``hipMalloc`` buffers (and optionally module-scope
-  device variables), not unified/managed/async-pool memory.
+* Re-running the whole application per group is too slow, or the run is not deterministic, so
+  :ref:`application replay <using-application-replay>` would not compare the same work.
+* The kernels of interest write coarse-grained ``hipMalloc`` buffers, and optionally module-scope
+  device variables.
 
 Prefer application replay or counter-group rotation when:
 
-* The tracked device footprint is huge (snapshot/restore bandwidth can dominate).
-* The application uses HIP graphs, unified memory, or ``hipMallocAsync`` for the buffers kernels
-  write.
-* You only need one counter group, or you can rotate groups across successive dispatches.
+* The tracked device footprint is large. Snapshot and restore bandwidth can dominate a short kernel.
+* The application uses HIP graphs, unified memory, or ``hipMallocAsync`` for the buffers kernels write.
+* You only need one counter group, or later dispatches can sample other groups.
+
+.. _kernel-replay-rocprofv3-advanced:
+
+Advanced
+========
+
+Pass count
+----------
+
+The pass count is not a user-supplied integer. ``rocprofv3`` derives it per dispatch from the number
+of counter groups collectable on **that dispatch's GPU**. Pass ``i`` maps to group ``i``. A GPU with
+fewer collectable groups than the global ``--pmc`` list is replayed only as many times as it has
+groups, so the pass index and the group stay aligned.
+
+Filters
+-------
+
+``--kernel-include-regex``, ``--kernel-exclude-regex``, and ``--kernel-iteration-range`` are applied
+per dispatch on the first pass. A dispatch they reject is still replayed, without counters.
+
+``--selected-regions``
+----------------------
+
+A dispatch launched while ``roctxProfilerPause`` has stopped counter collection gets one pass. It
+runs once, with no snapshot, no queue drain, and no counters. Replay resumes on the next dispatch
+after ``roctxProfilerResume``. Marker ranges themselves are described in
+:ref:`using-rocprofiler-sdk-roctx`.
+
+Other services
+--------------
+
+``--att``, PC sampling, and ``--spm`` are rejected together with ``--replay-mode kernel``. The
+command line has no per-pass switch, so any other service would stay enabled for every pass and
+report each kernel once per pass, all under the one dispatch id replay reuses. Collect those in a
+separate run, or from a custom tool that toggles contexts per pass (:ref:`using-kernel-replay`).
+
+There is no ``--kernel-replay-passes`` flag. The CLI does not wire an early-exit callback or the
+localized start/stop context callbacks. Those are SDK tool APIs.
+
+Cost
+----
+
+For one replayed dispatch the tool pays:
+
+* One drain of that GPU's queues, then one snapshot of its tracked device memory.
+* One restore before every pass after the first.
+* The kernel itself, once per group.
+
+A phase of ``K`` dispatches pays that snapshot once per dispatch. A short kernel over a large pool
+spends more time in the copy than on the GPU. ``ROCPROFILER_LOG_LEVEL=info`` logs the phase times
+for a replayed dispatch. The fields and the nightly measurements are in
+:ref:`kernel-replay-performance`.
+
+Clocks and caches
+-----------------
+
+The tool does not pin GPU clocks and does not flush L1 or L2 between passes. A later pass can hit
+in a cache the previous pass filled, and a long replay can run at a higher clock than the first
+pass. Pin a performance level when you compare passes. See :ref:`gpu-performance-level`.
+:ref:`Application replay <using-application-replay>` starts a new process, so its caches start cold.
+
+Isolation
+---------
+
+The replay window holds that GPU's replay lock and drains its queues before the snapshot. Other
+kernels on that GPU wait. Other GPUs use other locks.
+
+These cases run once, with a warning, and are not replayed:
+
+* A HIP graph launch.
+* A submission that is more than one packet or more than one dispatch.
+
+These cases are outside what the snapshot covers:
+
+* An ``hsa_amd_memory_async_copy`` or a HIP async copy on another thread can write device memory
+  during the window. The copy is not fenced.
+* A kernel that participates in an inter-process collective. There is no MPI coordination, and
+  replaying one rank's kernel leaves the other ranks waiting. Stay on application replay for that
+  kernel.
+* A drain that does not finish. The process aborts after about 60 seconds rather than continuing
+  on a partial window.
+
+Host memory holds a second copy of the tracked device footprint for the dispatch. Under host memory
+pressure the snapshot is declined and the dispatch runs once.
 
 See also
 ========
 
-* :ref:`using-kernel-replay` — SDK callback how-to
+* :ref:`using-application-replay` — one process per counter group
+* :ref:`using-kernel-replay` — the same service from a custom tool
 * :ref:`kernel-replay-sdk-api` — payload and operations
 * :ref:`kernel-replay-callback-api` — API contract
+* :ref:`kernel-replay-memory-snapshot` — what ``snap()`` and ``restore()`` capture
+* :ref:`kernel-replay-performance` — phase timings
+* :ref:`kernel-counter-collection` — ``--pmc``, input files, and group rotation
+* :ref:`gpu-performance-level` — pinning clocks
+* :ref:`using-rocprofiler-sdk-roctx` — markers and ``roctxProfilerPause``
+* `HIP memory management <https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_runtime_api/memory_management.html>`_

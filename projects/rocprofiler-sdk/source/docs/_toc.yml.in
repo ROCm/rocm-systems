@@ -39,7 +39,11 @@ subtrees:
     - file: how-to/using-thread-trace
     - file: how-to/using-rocprofv3-on-wsl
     - file: how-to/using-spm
+    - file: how-to/using-application-replay
+      title: Using application replay
     - file: how-to/using-kernel-replay
+    - file: how-to/using-kernel-replay-rocprofv3
+      title: Using kernel replay with rocprofv3
     - file: how-to/samples
       title: Samples
   - caption: API reference
