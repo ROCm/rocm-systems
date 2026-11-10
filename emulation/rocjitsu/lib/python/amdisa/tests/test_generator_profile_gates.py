@@ -330,9 +330,14 @@ def cdna4_generated_root(amdgpu_generated_root: Path) -> Path:
     return amdgpu_generated_root / 'cdna4'
 
 
-def _shared_execute_body(execute_shared: str, name: str, next_name: str) -> str:
+def _shared_execute_body(
+    execute_shared: str, name: str, next_name: str | None = None
+) -> str:
     start = execute_shared.index(f'inline void execute_{name}')
-    end = execute_shared.index(f'inline void execute_{next_name}', start)
+    if next_name is None:
+        return execute_shared[start : execute_shared.index('\n}', start) + 2]
+    end_marker = f'inline void execute_{next_name}' if next_name else '\n}\n'
+    end = execute_shared.index(end_marker, start)
     return execute_shared[start:end]
 
 
@@ -897,6 +902,13 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
 
             if sem is not None:
                 body = generator._gen_execute_body(inst, sem, enc.enc_name)
+                if 'scalar_fp::compare<' in body:
+                    implementation = (
+                        _repo_root()
+                        / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
+                        / 'arch/amdgpu/shared/scalar_fp.h'
+                    ).read_text()
+                    body += _generated_function_body(implementation, 'void compare(')
                 body_reads_scc = 'read_scc()' in body
                 body_writes_scc = 'write_scc(' in body
                 if body_reads_scc != mrisa_reads_scc:
@@ -1782,7 +1794,9 @@ def test_rdna4_s_waitcnt_compat_formats_with_gfx11_layout():
 
 def test_readlane_family_uses_source_vgpr_operand_type():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(operand_types=['OPR_VGPR', 'OPR_SRC_VGPR'])
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna3', operand_types=['OPR_VGPR', 'OPR_SRC_VGPR']
+    )
     sem = InstructionSemantics('V_READFIRSTLANE_B32', 'vector_readfirstlane')
     src0 = Operand('src0', 32, 'OPR_VGPR', True, False, False, False, 0)
     vdst = Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0)
@@ -2033,6 +2047,22 @@ def test_vector_cmpx_can_delegate_exec_commit():
     )
     assert 'commit_result(result);' in class_body
     assert 'wf.set_exec(result);' not in class_body
+
+
+@pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
+def test_cdna_vop3_cmpx_class_commits_explicit_sgpr_and_exec(dtype):
+    body = gen_vector_cmp_class(
+        ['vdst'],
+        ['src0', 'src1'],
+        dtype,
+        is_cmpx=True,
+        cmpx_writes_vcc=True,
+        is_vop3=True,
+        result_writer='commit_result',
+    )
+    assert 'amdgpu::write_wave_mask_scalar(vdst, wf, result);' in body
+    assert 'commit_result(result);' in body
+    assert 'wf.set_vcc_mask' not in body
 
 
 def test_vector_cmp_class_omits_redundant_mask_clears():
@@ -2954,7 +2984,8 @@ def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
     body = _generated_function_body(source, f'void {class_name}::execute_impl')
     assert 'amdgpu::exec_smfmac_i32_i8<' in body
-    assert 'idx, inst_.cbsz, inst_.abid);' in body
+    assert 'idx, inst_.cbsz, inst_.abid' in body
+    assert ('wf.fp16_ovfl()' in body) == (arch == 'cdna4')
     assert 'inst_.acc_cd' in body
     assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
@@ -2981,6 +3012,25 @@ def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
     )
 
     assert 'amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd)' in body
+
+    # Per-target generation owns its compact, DPP/SDWA and extended numerical
+    # bodies locally. All three routes must collect the same wave status.
+    vop2 = (tmp_path / 'cdna3' / 'vop2_exec.cpp').read_text()
+    vop3 = (tmp_path / 'cdna3' / 'vop3_exec.cpp').read_text()
+    for cls in ('Add', 'Sub', 'Subrev', 'Mul'):
+        status = f'cdna3::execute_half_with_status<cdna3::HalfOp::{cls}>'
+        compact = vop2.split(f'void V{cls}F16Vop2::execute_impl(', 1)[1].split(
+            '\n}', 1
+        )[0]
+        modifier = vop2.split(f'void V{cls}F16Vop2::execute_modifier_impl(', 1)[
+            1
+        ].split('\n}', 1)[0]
+        extended = vop3.split(f'void V{cls}F16Vop3::execute_impl(', 1)[1].split(
+            '\n}', 1
+        )[0]
+        assert status in compact
+        assert modifier.index('ScopedOperandDelegate') < modifier.index(status)
+        assert status in extended
 
 
 def test_gfx1250_wmma_f32_passes_c_modifier_to_accumulator_helper():
@@ -3873,21 +3923,16 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     add_co = _generated_method_body(cdna4_vop2_exec, 'VAddCoU32Vop2', 'VSubCoU32Vop2')
     assert 'execute_v_add_co_u32_vop2' in add_co
 
-    for name, next_name in (
-        ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
-        ('ds_permute_b32_vds', 'ds_swizzle_b32_ds'),
-        ('ds_swizzle_b32_vds', 'lds_param_load_ldsdir'),
-    ):
-        body = _shared_execute_body(shared, name, next_name)
+    for name in ('ds_bpermute_b32_vds', 'ds_permute_b32_vds', 'ds_swizzle_b32_vds'):
+        body = _generated_function_body(shared, f'inline void execute_{name}(')
         assert 'regs.read_lane(inst.addr' in body
         assert 'regs.write_lane(inst.vdst' in body
         assert 'vb + inst.inst_' not in body
 
     assert 'regs.read_lane(inst.data0, source);' in shared
-    assert (
-        'd->dst_reg_base =\n'
-        '      wf.vgpr_alloc().base +\n'
-        '      *Isa::resolved_vgpr_offset(' in vds_exec
+    assert re.search(
+        r'd->dst_reg_base\s*=\s*wf\.vgpr_alloc\(\)\.base\s*\+\s*\*Isa::resolved_vgpr_offset\(',
+        vds_exec,
     )
     assert 'data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vds
     assert 'vsrc.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);' in vglobal
@@ -4129,6 +4174,56 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
             inst, semantics.instructions[name], enc.enc_name
         )
 
+        if numeric_sources and arch_name == 'rdna3_5':
+            implementation = (
+                _repo_root()
+                / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
+                / 'arch/amdgpu/shared/scalar_fp.h'
+            ).read_text()
+            # This target shares the typed reader between arithmetic and
+            # conversions. Check the generated call and the actual source path.
+            for operand in inst.src_operands:
+                assert operand.data_format_name == 'FMT_NUM_F16', name
+            reader = _generated_function_body(implementation, 'uint32_t read(')
+            assert 'std::is_same_v<Fmt, F16>' in reader
+            assert 'amdgpu::read_scalar_f16_carrier(op, wf, high)' in reader
+            assert '>> (high ? 16 : 0)' in reader
+            if name == 'S_MIN_F16':
+                assert (
+                    'select<amdgpu::scalar_fp::F16, amdgpu::minmax::LegacyMin>(wf, sdst, ssrc0, ssrc1)'
+                    in body
+                )
+                selection = _generated_function_body(implementation, 'void select(')
+                assert (
+                    'read<Fmt>(wf, lhs)' in selection
+                    and 'read<Fmt>(wf, rhs)' in selection
+                )
+            else:
+                suffix = ', true' if high else ''
+                assert (
+                    f'convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0{suffix})'
+                    in body
+                )
+                conversion = _generated_function_body(implementation, 'void convert(')
+                assert 'read<From>(wf, src, high)' in conversion
+            continue
+
+        if arch_name == 'rdna4' and numeric_sources:
+            for operand in inst.src_operands:
+                if operand.name in numeric_sources:
+                    assert operand.data_format_name == 'FMT_NUM_F16', name
+            if name == arithmetic:
+                assert (
+                    'arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0, ssrc1)'
+                    in body
+                )
+            else:
+                extra = ', true' if high else ''
+                assert (
+                    f'convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0{extra})'
+                    in body
+                )
+            continue
         for operand in inst.src_operands:
             if operand.name in numeric_sources:
                 assert operand.data_format_name == 'FMT_NUM_F16', name
@@ -4286,12 +4381,16 @@ def test_generated_legacy_16bit_alu_destinations_preserve_the_other_half(
         inst, body = constructor(encoding, name)
         destination = next(op for op in inst.dst_operands if op.name == 'vdst')
         assert destination.size == 16, inst.fmt_name
-        assert body.count(statement) == int(legacy), inst.fmt_name
+        mask_statement = statement
+        if (arch_name, name) == ('rdna2', 'V_MAX_I16'):
+            mask_statement = 'vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);'
+            assert statement not in body, inst.fmt_name
+        assert body.count(mask_statement) == int(legacy), inst.fmt_name
         assert body.count(preserve) == int(legacy), inst.fmt_name
         if legacy:
             guarded = ''.join(guard.split()) in ''.join(body.split())
             assert guarded == (encoding in ('ENC_VOP1', 'ENC_VOP2')), inst.fmt_name
-            assert body.index(statement) > body.rfind('vdst = '), inst.fmt_name
+            assert body.index(mask_statement) > body.rfind('vdst = '), inst.fmt_name
 
     exclusions = [
         ('ENC_SOP1', 'S_SEXT_I32_I16'),
@@ -4523,14 +4622,10 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
     ]
     + [('V_ADD_F16', 'finish_arithmetic_f16')],
 )
-def test_generated_f16_sdwa_keeps_unmigrated_ordering(
+def test_generated_f16_sdwa_selects_producer_helper(
     generated_f16_sdwa_consumers, instruction, helper
 ):
-    """Pin current helper selection, not hardware order.
-
-    gfx1030 SDWA captures contradict the arithmetic order (MUL_F16, ADD_F16);
-    no SDWA captures cover TRANS or integral rounding.
-    """
+    """GFX10 arithmetic scales its rounded half at the SDWA store."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if route == 'shared':
@@ -4541,7 +4636,13 @@ def test_generated_f16_sdwa_keeps_unmigrated_ordering(
         class_name = ''.join(word.title() for word in instruction.split('_'))
         signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
     body = _generated_function_body(source, signature)
+    if instruction == 'V_ADD_F16' and route == 'local':
+        assert 'execute_sdwa_float_binary16' in body
+        assert 'finish_arithmetic_f16(' not in body
+        return
     assert f'amdgpu::sdwa::{helper}(' in body
+    if instruction == 'V_ADD_F16':
+        assert 'amdgpu::sdwa::OutputPolicy::ARITHMETIC' in body
     for other in {'finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'} - {
         helper
     }:
@@ -7034,6 +7135,9 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
             if arch == 'rdna3':
                 assert 'arith::execute_float_compare<32>' in cmp_true_body
                 assert 'rj_arith_v_cmp_t_f32_w32,' in cmp_true_body
+            elif arch == 'rdna3_5':
+                assert 'execute_compare_with_exceptions' in cmp_true_body
+                assert 'inst_.clamp, commit_result' in cmp_true_body
             else:
                 assert 'execute_v_cmp_t_f32_vop3' in cmp_true_body
 
@@ -8604,7 +8708,12 @@ def test_rdna3_and_rdna35_vopd_generation_matches_common_profile(tmp_path):
         arch: cpp.replace('rdna3_5', 'rdnaX').replace('rdna3', 'rdnaX')
         for arch, cpp in generated.items()
     }
-    assert normalized['rdna3'] == normalized['rdna3_5']
+    # GFX11.5 tags the source operands whose out-of-range lookup preserves the bank.
+    plain = '    if (op)\n      src_operands_[num_src_++] = op;'
+    tagged = '    if (op) {\n      op->set_vopd_source();\n      src_operands_[num_src_++] = op;\n    }'
+    assert normalized['rdna3'].count(plain) == 1
+    assert normalized['rdna3_5'].count(tagged) == 1
+    assert normalized['rdna3'].replace(plain, tagged) == normalized['rdna3_5']
 
 
 def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path):
@@ -9616,18 +9725,18 @@ def test_ev124_125_arch_gating_in_generated_operand(
             f'constexpr int kM0EncodingValue = {encoding};' in op
         ), f'{arch}: expected kM0EncodingValue = {encoding}'
 
-    # The M0 resolution logic is shared (parameterized by m0_ev) in
-    # scalar_operand_resolve.h rather than emitted per-arch, so verify the gating
-    # there: encoding value 124 is the NULL slot when M0 is 125, and the operand
-    # matching the arch's M0 encoding reads M0.
+        assert f'can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_{arch.upper()})' in op
+
+    # GFX10 and GFX11 assign NULL to different slots. The shared runtime resolver
+    # uses each target's selector mapping for both operand widths.
     shared_resolve = (amdgpu_root / 'shared' / 'scalar_operand_resolve.h').read_text()
-    assert re.search(
-        r'if \(m0_ev == static_cast<int>\(kModernM0Selector\) &&\s*'
-        r'ev == static_cast<int>\(kModernNullSelector\)\)\s*'
-        r'return 0u; // NULL',
-        shared_resolve,
-    )
-    assert 'if (ev == m0_ev)\n    return wf.m0();' in shared_resolve
+    for width in ('32', '64'):
+        name = 'uint' + width + '_t resolve_src_scalar'
+        body = _generated_function_body(shared_resolve, name)
+        assert (
+            'scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev))' in body
+        )
+        assert 'wf.m0()' in body
 
 
 def test_generated_operands_validate_vgpr_source_selectors(
@@ -10163,7 +10272,8 @@ def test_generated_smem_rejects_invalid_complete_scalar_selector_ranges(
             )
         ).read_text()
         assert (
-            'auto dst_register = amdgpu::resolve_scalar_register_range(wf,' in smem_exec
+            'auto dst_register = amdgpu::resolve_scalar_destination_range(wf,'
+            in smem_exec
         )
         assert 'd->dst_register = *dst_register;' in smem_exec
         assert 'auto address = smem_calculate_address(' in smem_exec
@@ -10419,6 +10529,9 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
     )
     migrated = arch in ('cdna3', 'cdna4')
     assert ('amdgpu::arith::exec_dense_fp_matrix<' in body) == migrated
+    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (
+        arch == 'cdna4' and format == 'BF16'
+    )
     assert 'inst_.acc_cd' in body
     assert f'{arch}::resolve_acc' in body
     if migrated:
@@ -10539,6 +10652,7 @@ def test_dense_integer_mfma_library_dispatch(arch, m, k, batch):
         enc_field_names={'acc_cd'},
     )
     assert f'exec_dense_fp_matrix<{m*k*batch//256}, {outputs}, 64>' in body
+    assert 'wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body
     assert f'rj_arith_{name.lower()}_w64' in body
     assert 'inst_.cbsz' in body and 'inst_.blgp' in body and 'inst_.acc_cd' in body
 

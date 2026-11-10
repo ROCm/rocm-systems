@@ -539,6 +539,7 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(first->sgpr_alloc().base, 0u);
   ASSERT_EQ(wf->sgpr_alloc().base, kSgprsPerWave);
+  wf->set_in_trap_handler(true); // The TTMP load checks privileged write routing.
 
   constexpr uint32_t kVccLoSlotSentinel = 0x10610610u;
   constexpr uint32_t kVccHiSlotSentinel = 0x10710710u;

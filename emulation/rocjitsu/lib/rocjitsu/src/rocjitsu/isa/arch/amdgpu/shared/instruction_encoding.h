@@ -32,6 +32,34 @@ inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base,
   return *base + offset;
 }
 
+/// GFX11.5 VALU can broadcast at most two different scalar values. Inline
+/// constants and VGPRs use no scalar port. A repeated literal of another
+/// width is a different broadcast; SGPR tuples at the same base share one.
+constexpr bool gfx115_scalar_sources_fit(uint32_t src0_selector, unsigned src0_bits,
+                                         uint32_t src1_selector, unsigned src1_bits,
+                                         uint32_t src2_selector, unsigned src2_bits,
+                                         bool implicit_vcc = false) {
+  auto bus_key = [implicit_vcc](uint32_t selector, unsigned bits) -> int {
+    // FMAS already broadcasts the full VCC pair. VCC_LO alone is a distinct value.
+    if (implicit_vcc && selector == 106 && bits == 64)
+      return -1;
+    if (selector == 255)
+      return static_cast<int>(selector + bits);
+    if ((selector < 128 && selector != 124) || selector == 253)
+      return static_cast<int>(selector);
+    return -1;
+  };
+  const int src0_key = bus_key(src0_selector, src0_bits),
+            src1_key = bus_key(src1_selector, src1_bits),
+            src2_key = bus_key(src2_selector, src2_bits);
+  if (implicit_vcc)
+    return (src0_key < 0 || src1_key < 0 || src0_key == src1_key) &&
+           (src0_key < 0 || src2_key < 0 || src0_key == src2_key) &&
+           (src1_key < 0 || src2_key < 0 || src1_key == src2_key);
+  return src0_key < 0 || src1_key < 0 || src2_key < 0 || src0_key == src1_key ||
+         src0_key == src2_key || src1_key == src2_key;
+}
+
 /// M0 carries the barrier ID in its low five bits; other operands carry the ID itself.
 constexpr int32_t barrier_operand_id(uint32_t source, bool source_is_m0) {
   return static_cast<int32_t>(source_is_m0 ? source & 0x1fu : source);
@@ -229,11 +257,13 @@ struct RegisterModifiers {
   uint8_t bound_ctrl = 0;
   uint8_t fi = 1;
   const Operand *src0 = nullptr;
+  const Operand *dpp_masked_compare_rhs = nullptr;
   const Operand *src1 = nullptr;
   uint8_t src0_selection = 6;
   uint8_t src1_selection = 6;
   uint8_t dst_selection = 6;
   uint8_t dst_unused = 0;
+  bool constant_float_compare = false; // Only reads inputs when checking for FP exceptions.
 };
 
 /// @brief VOP1/VOP2 src0 encoding values that indicate DPP or SDWA modifiers.

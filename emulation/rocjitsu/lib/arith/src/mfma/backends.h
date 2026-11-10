@@ -6,6 +6,9 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+// XF32 factors retain ten fraction bits before multiplication.
+inline constexpr uint32_t kMfmaXf32InputMask = 0xffffe000u;
+
 template <int M, int Batch>
 void mfma_f64_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c);
@@ -14,24 +17,30 @@ void mfma_f64_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *c
                         const uint32_t *const *b, const uint32_t *const *c);
 
 template <int M, int K, int Batch, bool Wmma>
-void matrix_i8_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                         const uint32_t *const *b, const uint32_t *const *c);
+void matrix_i8_x86_64_v3(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+                         const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *c);
 template <int M, int K, int Batch, bool Wmma>
-void matrix_i8_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                         const uint32_t *const *b, const uint32_t *const *c);
+void matrix_i8_x86_64_v4(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+                         const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *c);
 
 template <int M, int K, int Batch, bool Bf16>
-void mfma_half_x86_64_v3(uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-                         const uint32_t *const *b, const uint32_t *const *c);
+void mfma_half_x86_64_v3(uint64_t instruction_flags, bool clamp_overflow, uint32_t *const *d,
+                         const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *c);
 template <int M, int K, int Batch, bool Bf16>
-void mfma_half_x86_64_v4(uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-                         const uint32_t *const *b, const uint32_t *const *c);
-template <int M, int K, int Batch>
-void mfma_f32_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                        const uint32_t *const *b, const uint32_t *const *c);
-template <int M, int K, int Batch>
-void mfma_f32_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                        const uint32_t *const *b, const uint32_t *const *c);
+void mfma_half_x86_64_v4(uint64_t instruction_flags, bool clamp_overflow, uint32_t *const *d,
+                         const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *c);
+template <int M, int K, int Batch, bool Xf32 = false>
+void mfma_f32_x86_64_v3(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+                        const uint32_t *const *a, const uint32_t *const *b,
+                        const uint32_t *const *c);
+template <int M, int K, int Batch, bool Xf32 = false>
+void mfma_f32_x86_64_v4(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+                        const uint32_t *const *a, const uint32_t *const *b,
+                        const uint32_t *const *c);
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 void mfma_fp8_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c);

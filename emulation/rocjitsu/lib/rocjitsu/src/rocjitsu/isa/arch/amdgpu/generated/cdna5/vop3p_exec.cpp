@@ -196,8 +196,8 @@ void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1, negations);
     const auto b_lo = static_cast<uint16_t>(b);
     const auto b_hi = static_cast<uint16_t>(b >> 16);
-    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo);
-    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi);
+    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, false));
+    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, false));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }
