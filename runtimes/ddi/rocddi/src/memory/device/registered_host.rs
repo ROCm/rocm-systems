@@ -196,7 +196,7 @@ impl Device {
             });
         }
         let backing = host.registration_lease()?;
-        let (address, size) = backing.extent();
+        let (address, size) = backing.extent()?;
         let request = HostRegistration {
             address,
             policy,

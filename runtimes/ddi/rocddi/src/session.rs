@@ -17,6 +17,7 @@ use crate::memory::storage::TryPush;
 use crate::os::{ProcessIdentity, native_error};
 use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologySnapshot};
 use crate::{Error, ErrorKind};
+use std::mem::ManuallyDrop;
 
 /// Maximum lifetime allowed for a driver context acquired through a session.
 ///
@@ -48,8 +49,10 @@ pub enum DriverContextLifetime {
 /// its owning driver instance, while the session coordinates discovery,
 /// routing, and shutdown.
 pub struct Session {
-    /// Shared registry. Each activated device retains only its owning driver.
-    registry: Shared<DriverRegistry>,
+    /// Callback-backed registry, destroyed only in the creating process.
+    registry: ManuallyDrop<Shared<DriverRegistry>>,
+    /// System-backed witness available before callback-backed registry access.
+    process: ProcessIdentity,
 }
 
 /// Set of drivers installed in one logical session. The shared owner makes
@@ -59,8 +62,6 @@ struct DriverRegistry {
     drivers: Vec<DriverInstance>,
     /// Policy validated against every installed driver at construction.
     lifetime: DriverContextLifetime,
-    /// Process that constructed this registry; inherited sessions cannot run.
-    process: ProcessIdentity,
     /// Prevents new work once any driver shutdown has started.
     closing: bool,
 }
@@ -99,12 +100,24 @@ impl Drop for SessionRetirement {
     }
 }
 
+impl Drop for Session {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        if self.process.check().is_ok() {
+            // SAFETY: The wrapper owns this registry until this one Drop call.
+            // A fork child leaves the copied registry and allocator untouched.
+            unsafe { ManuallyDrop::drop(&mut self.registry) };
+        }
+    }
+}
+
 impl Clone for Session {
     /// Shares this session's driver set, identities, and lifetime policy.
     /// A separate call to [`Session::new`] creates an independent session.
     fn clone(&self) -> Self {
         Self {
             registry: self.registry.clone(),
+            process: self.process.clone(),
         }
     }
 }
@@ -189,7 +202,7 @@ impl Session {
     /// Rejects a session inherited through fork before touching driver state
     /// in the child process.
     fn ensure_process(&self) -> Result<(), Error> {
-        self.registry.process.check().map_err(|_| Error::Operation {
+        self.process.check().map_err(|_| Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "session belongs to another process",
         })
@@ -199,11 +212,11 @@ impl Session {
     /// Frontends may use this for host-only paths that do not enter a driver.
     #[must_use]
     pub fn is_current_process(&self) -> bool {
-        self.registry.process.check().is_ok()
+        self.process.check().is_ok()
     }
 
     pub(crate) fn process_identity(&self) -> ProcessIdentity {
-        self.registry.process.clone()
+        self.process.clone()
     }
 
     /// Borrows installed drivers for a platform-specific capability lookup.
@@ -219,6 +232,9 @@ impl Session {
     /// # Errors
     /// Fails with `ResourceExhausted` if driver registry metadata cannot be allocated.
     pub fn new(lifetime: DriverContextLifetime) -> Result<Self, Error> {
+        #[cfg(target_os = "linux")]
+        crate::os::linux::process_identity::note_runtime_image()
+            .map_err(|source| native_error("runtime image identity", source))?;
         let process = ProcessIdentity::capture()
             .map_err(|source| native_error("session process identity", source))?;
         let mut drivers = Vec::new();
@@ -274,12 +290,12 @@ impl Session {
             }
         }
         Ok(Self {
-            registry: Shared::new(DriverRegistry {
+            registry: ManuallyDrop::new(Shared::new(DriverRegistry {
                 drivers,
                 lifetime,
-                process,
                 closing: false,
-            })?,
+            })?),
+            process,
         })
     }
 
@@ -721,6 +737,7 @@ mod tests {
                 Shared::new(inner).unwrap(),
                 Shared::new(HostIntervals::new()).unwrap(),
                 Shared::new(DeviceIntervals::new()).unwrap(),
+                session.process_identity(),
             )),
         };
         let mapping_lease = address.inner.linux_kfd().inner.clone();
@@ -973,11 +990,9 @@ mod tests {
         let (mut session, _) = test_session(&[id]);
         let endpoint = session.open_endpoint(id).unwrap();
         assert!(session.can_access_local_memory(&endpoint, &endpoint));
-        Shared::get_mut(&mut session.registry).unwrap().process =
-            ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
+        session.process = ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
         assert!(!session.can_access_local_memory(&endpoint, &endpoint));
-        Shared::get_mut(&mut session.registry).unwrap().process =
-            ProcessIdentity::capture().unwrap();
+        session.process = ProcessIdentity::capture().unwrap();
         session.destroy().unwrap();
     }
 
