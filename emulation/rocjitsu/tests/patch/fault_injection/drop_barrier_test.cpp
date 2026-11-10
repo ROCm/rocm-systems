@@ -1423,18 +1423,27 @@ void append_disjoint_load(std::vector<uint8_t> &image, FixtureFileRange file_ran
   const std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
   ASSERT_TRUE(segments);
+  uint64_t memory_begin = std::numeric_limits<uint64_t>::max();
   uint64_t memory_end = 0;
   for (const Elf64_Phdr &segment : *segments) {
-    if (segment.p_type == PT_LOAD)
+    if (segment.p_type == PT_LOAD) {
+      memory_begin = std::min(memory_begin, segment.p_vaddr);
       memory_end = std::max(memory_end, segment.p_vaddr + segment.p_memsz);
+    }
   }
   const uint64_t memory_size = std::max(file_range.size, uint64_t{sizeof(uint32_t)});
   ASSERT_LT(memory_end, std::numeric_limits<uint64_t>::max() - memory_size);
+  uint64_t added_vaddr = memory_end + 1;
+  if (prepend) {
+    // A prepended LOAD must precede the existing mappings in address order too.
+    ASSERT_GT(memory_begin, memory_size);
+    added_vaddr = memory_begin - memory_size - 1;
+  }
   const Elf64_Phdr added = {.p_type = PT_LOAD,
                             .p_flags = flags,
                             .p_offset = file_range.offset,
-                            .p_vaddr = memory_end + 1,
-                            .p_paddr = memory_end + 1,
+                            .p_vaddr = added_vaddr,
+                            .p_paddr = added_vaddr,
                             .p_filesz = file_range.size,
                             .p_memsz = memory_size,
                             .p_align = 1};
