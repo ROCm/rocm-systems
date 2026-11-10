@@ -1328,9 +1328,13 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
         pr_debug("poll signal %#" PRIx64 " addr %#" PRIx64 " val %" PRId64 "\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
+        // HACK: We use WAIT_STATE_ACTIVE because SDMA occasionally misses
+        // interrupts. Reason is still unknown.
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
-            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-        assert(value == poll_val);
+            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, kMaxWaitTimeoutTicks, HSA_WAIT_STATE_ACTIVE);
+        if (value != poll_val) {
+          pr_err("poll signal %llu != %llu, stalled for more than %llu ticks?\n", value, poll_val, kMaxWaitTimeoutTicks);
+        }
 
         memset(poll_pkt, 0, skip * sizeof(*poll_pkt));
         poll_pkt += skip;
