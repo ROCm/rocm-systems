@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -20,13 +21,6 @@ struct WaveId {
   bool operator==(WaveId o) const { return value == o.value; }
   bool operator!=(WaveId o) const { return value != o.value; }
   bool operator<(WaveId o) const { return value < o.value; }
-};
-
-/// Number of lanes per wave (32 for RDNA, 64 for CDNA).
-/// Implicitly convertible to int for use in arithmetic and loop bounds.
-struct WaveSize {
-  int value;
-  operator int() const { return value; }
 };
 
 /// Identifies a memory event within a workgroup. Each memory instruction
