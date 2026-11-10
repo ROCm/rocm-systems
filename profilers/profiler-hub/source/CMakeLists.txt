@@ -83,6 +83,19 @@ if(PROFILER_HUB_ENABLE_ROCPD_V2)
     )
 endif()
 
+if(PROFILER_HUB_ENABLE_PYTORCH_KINETO)
+    list(
+        APPEND profiler-hub_sources
+        ${CMAKE_CURRENT_LIST_DIR}/common/utility.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/category_class.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/category_class.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_format.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_format.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.hpp
+    )
+endif()
+
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 
 # ------------------------------------------------------------ #

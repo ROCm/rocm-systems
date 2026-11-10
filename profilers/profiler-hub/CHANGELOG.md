@@ -165,6 +165,11 @@ downstream consumer of the library.
   `writer_t::register_track_info()` + `trace_environment_t::track_name`)
   are now split out of the plain `thread` track into their own
   `thread_sample` track instead of being merged into it.
+- `PROFILER_HUB_ENABLE_PYTORCH_KINETO` (default OFF) builds the parser for
+  PyTorch Kineto traces. It needs zlib: found on the system, or downloaded when
+  `PROFILER_HUB_FETCH_DEPENDENCIES` is ON. With the option OFF, zlib is not
+  looked up. The installed static target lists `ZLIB::ZLIB` as a link
+  requirement when the option is ON. Nothing reads PyTorch traces yet.
 
 ### Changed
 

@@ -23,6 +23,7 @@ option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
 option(PROFILER_HUB_ENABLE_ROCPD_V2 "Read legacy rocpd schema 2 traces" ON)
 option(PROFILER_HUB_ENABLE_ROCPD_V3 "Read rocpd schema 3 traces" ON)
+option(PROFILER_HUB_ENABLE_PYTORCH_KINETO "Read PyTorch Kineto traces" OFF)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(
     PH_USE_NOMUTEX_OPTIMIZATION
@@ -81,6 +82,7 @@ target_compile_definitions(
     PRIVATE
         PROFILER_HUB_ENABLE_ROCPD_V2=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V2}>
         PROFILER_HUB_ENABLE_ROCPD_V3=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V3}>
+        PROFILER_HUB_ENABLE_PYTORCH_KINETO=$<BOOL:${PROFILER_HUB_ENABLE_PYTORCH_KINETO}>
 )
 
 target_compile_options(
@@ -197,6 +199,15 @@ target_link_libraries(profiler-hub-objects PRIVATE spdlog::spdlog)
 
 include(nlohmann_json)
 target_link_libraries(profiler-hub-objects PRIVATE nlohmann_json::nlohmann_json)
+
+# ------------------------------------------------------------ #
+# zlib
+# ------------------------------------------------------------ #
+
+if(PROFILER_HUB_ENABLE_PYTORCH_KINETO)
+    include(zlib)
+    target_link_libraries(profiler-hub-objects PRIVATE ZLIB::ZLIB)
+endif()
 
 # ------------------------------------------------------------ #
 # Logging
@@ -316,7 +327,11 @@ endforeach()
 # _FOUND variable.
 set(profiler_hub_static_iface_libs "")
 set(profiler_hub_static_find_dependencies "")
-foreach(_dep fmt spdlog)
+set(_profiler_hub_static_deps fmt spdlog)
+if(PROFILER_HUB_ENABLE_PYTORCH_KINETO)
+    list(APPEND _profiler_hub_static_deps ZLIB)
+endif()
+foreach(_dep ${_profiler_hub_static_deps})
     set(_profiler_hub_dep_target "${_dep}::${_dep}")
     if(TARGET ${_profiler_hub_dep_target})
         get_target_property(
@@ -350,6 +365,7 @@ foreach(_dep fmt spdlog)
         endif()
     endif()
 endforeach()
+unset(_profiler_hub_static_deps)
 unset(_profiler_hub_dep_target)
 unset(_profiler_hub_dep_aliased)
 unset(_profiler_hub_dep_is_imported)
