@@ -57,6 +57,14 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_USE_CHEAP_POST_SEND_FENCE(cheapOff, registeredOrP2p) (!(cheapOff) && !(registeredOrP2p))
 #endif
 
+// Point-to-point has no collective work. Registered IPC/NVLS (regUsed) and
+// network (netRegUsed) buffers are cacheable, so both keep the full fence
+// when the builtins are absent. prims_simple.h passes ncclDevWorkColl*.
+template <typename CollWork>
+__host__ __device__ inline bool rcclSimplePostSendRegisteredOrP2p(const CollWork* collWork) {
+  return collWork == nullptr || collWork->regUsed || collWork->netRegUsed;
+}
+
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \

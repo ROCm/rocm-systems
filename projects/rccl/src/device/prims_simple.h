@@ -891,7 +891,7 @@ public:
   }
   // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
   skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(
-    ncclShmem.comm.cheapPostSendFenceOff, collWork == nullptr || collWork->regUsed || collWork->netRegUsed);
+    ncclShmem.comm.cheapPostSendFenceOff, rcclSimplePostSendRegisteredOrP2p(collWork));
 }
 
 __forceinline__ __device__ ~Primitives() {

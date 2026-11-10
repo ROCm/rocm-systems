@@ -96,23 +96,39 @@ TEST(CheapPostSendFenceTests, UnknownArchDefaultsOff)
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kForceOn, true), 0);
 }
 
-// RCCL_USE_CHEAP_POST_SEND_FENCE is the expression prims_simple.h assigns to
-// skip_fence. Host compilation takes the no-builtins arm (the macro is 0 outside
-// __HIP_DEVICE_COMPILE__), which is the arm this change adds. registeredOrP2p is
-// collWork == nullptr || regUsed || netRegUsed, so point-to-point and registered
-// buffers are the true case.
+// Stand-in for the ncclDevWorkColl fields rcclSimplePostSendRegisteredOrP2p reads.
+// The fixture TU cannot include device.h. Dropping regUsed or netRegUsed from
+// the helper fails the test below.
+struct SimplePostSendRegFlags {
+    int regUsed;
+    int netRegUsed;
+};
+
+// RCCL_USE_CHEAP_POST_SEND_FENCE is what prims_simple.h assigns to skip_fence,
+// and rcclSimplePostSendRegisteredOrP2p is the predicate it passes. Host
+// compilation takes the no-builtins arm (the macro is 0 outside
+// __HIP_DEVICE_COMPILE__), which is the arm this change adds.
 TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceOn_UnregisteredCollectiveSkipsFullFence)
 {
     const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
     EXPECT_EQ(off, 0);
-    EXPECT_TRUE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, /*registeredOrP2p=*/false));
+    const SimplePostSendRegFlags unregistered{0, 0};
+    EXPECT_FALSE(rcclSimplePostSendRegisteredOrP2p(&unregistered));
+    EXPECT_TRUE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
 }
 
 TEST(CheapPostSendFenceTests, NoBuiltins_RegisteredOrP2pKeepsFullFence)
 {
     const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
     EXPECT_EQ(off, 0);
-    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, /*registeredOrP2p=*/true));
+    const SimplePostSendRegFlags regUsed{1, 0};
+    const SimplePostSendRegFlags netRegUsed{0, 1};
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p<SimplePostSendRegFlags>(nullptr));
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p(&regUsed));
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p(&netRegUsed));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p<SimplePostSendRegFlags>(nullptr)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&regUsed)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&netRegUsed)));
 }
 
 TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceDisabled_KeepsFullFence)
@@ -121,8 +137,9 @@ TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceDisabled_KeepsFullFence)
     // so skip_fence stays false even for an unregistered collective.
     const int gfx90a = rcclComputeCheapPostSendFenceOff(kGfx90a, kAuto, true);
     EXPECT_EQ(gfx90a, 1);
-    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(gfx90a, /*registeredOrP2p=*/false));
-    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(kForceOff, /*registeredOrP2p=*/false));
+    const SimplePostSendRegFlags unregistered{0, 0};
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(gfx90a, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(kForceOff, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
 }
 
 } // namespace RcclUnitTesting
