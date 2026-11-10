@@ -381,7 +381,9 @@ the arch's library holds none of the metrics only that panel lists:
   is a library formula; every library formula is shown by some row. A row that divides
   by the kernel time in seconds shows the GB/s formula scaled by 1e9, its peak too.
   Display variants, listed by positional id and label, write a formula differently; the
-  test checks each one's equation against its metric.
+  test checks each one's equation against its metric. On gfx942, row 16.3.5 wraps the
+  vL1D hit count in `NOISE_CLAMP` and the library formula does not. The metric owners
+  decide on the clamp before Stage 8.
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
   listed as unit variants. A row that shows a GB/s metric in seconds says Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters

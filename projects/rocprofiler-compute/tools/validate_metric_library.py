@@ -6,14 +6,14 @@
 
 For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
 
-- the arch has a directory, and each file loads and merges with its parent's file;
+- the arch has a directory, and each of its files loads;
 - each metric has the required fields and plain ASCII text;
 - each id is named after hardware and lives in the file of its category;
 - units use one spelling, and an id has one name and one unit on every arch;
 - no two metrics on an arch share a formula or a name;
 - a formula has one id on every arch;
 - every formula and peak parses;
-- each roofline ceiling the arch measures is one metric's peak_empirical;
+- each measured roofline ceiling of the arch is the peak_empirical of one metric;
 - top-level keys are sorted.
 
 src/rocprof_compute_soc/metric_library/README.md explains the rules.
@@ -28,16 +28,16 @@ from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Set,
 from format_yaml import normalize_equation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-# Make src/ importable to reuse the library loader and the expression parser.
+# Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader  # noqa: E402
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
 
-# Categories named after panels rather than hardware.
+# Categories named after panels, not hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
-# Alias -> canonical unit. A display scale such as Bytes/s vs GB/s is not an alias.
+# Unit alias -> canonical unit.
 UNIT_ALIASES = {
     "Gbps": "GB/s",
     "GFLOPs": "GFLOP/s",
@@ -50,32 +50,26 @@ UNIT_ALIASES = {
     "Wave": "Wavefronts",
     "Waves": "Wavefronts",
 }
-# A metric id, "{category}.{subcategory}_{name}": lowercase words joined by
-# underscores.
+# Metric id format: {category}.{subcategory}_{name}, in lowercase with underscores.
 METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
-# Metric fields the runtime evaluates.
+# Metric fields with an expression.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 VARIABLE_FIELDS = ("formula",)
-# A roofline benchmark ceiling, the measured peak in "peak_empirical".
+# The measured ceiling in a peak_empirical value.
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
-# Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
-# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
-# arch, the rates the roofline combines or does not show.
+# Measured ceilings with no metric on any arch.
 CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+# Measured ceilings with no metric on one arch.
 ARCH_CEILINGS_WITHOUT_METRIC = {
-    # The roofline shows the combined F6F4 MFMA rate.
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
 }
-# Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+# Ids that may share the formula of another id (id -> that id).
 SHARED_FORMULA_IDS = {
     "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
 }
-# Ids that hold another id's formula on a different arch (id -> that id): one label
-# shows two equations on an arch, and the parent arch's equation keeps the id until
-# the metric owners choose one.
+# Ids that may hold the formula of another id on another arch (id -> that id).
 SPLIT_FORMULA_IDS = {}
 # A display-only ROUND(x, digits) around a whole equation.
 ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
@@ -120,9 +114,9 @@ def validate_arch(metric_dir: Path, arch: str) -> List[str]:
 
 
 def canonical_formula(equation: object) -> Optional[str]:
-    """Return equation in format_yaml.py form without display ROUND() and spaces.
+    """Return equation in format_yaml.py form, without a display ROUND() or spaces.
 
-    Returns None for an empty equation.
+    Return None for an empty equation.
     """
     if equation is None or str(equation) == "None":
         return None
@@ -132,7 +126,7 @@ def canonical_formula(equation: object) -> Optional[str]:
 
 
 def arch_ceilings(arch: str) -> Set[str]:
-    """Return the ceilings the roofline benchmark measures on any device of arch."""
+    """Return the measured roofline ceilings of any device of arch."""
     return set().union(
         *(
             mi_gpu_specs.get_roofline_columns(device)
@@ -156,8 +150,8 @@ def main() -> int:
 
 
 def _directory_errors(metric_dir: Path) -> List[str]:
-    """Report mapped archs without a directory and arch directories that are not
-    mapped."""
+    """Report mapped archs without a directory, and arch directories without a map
+    entry."""
     mapped_archs = loader.METRIC_LIBRARY_PARENT_ARCH
     return [
         *(
@@ -174,7 +168,7 @@ def _directory_errors(metric_dir: Path) -> List[str]:
 
 
 def _load_errors(files: Dict[str, List[Path]]) -> List[str]:
-    """Report each file that does not load or merge."""
+    """Report each library file with a load or merge error."""
     errors = []
     for paths in files.values():
         try:
@@ -185,7 +179,7 @@ def _load_errors(files: Dict[str, List[Path]]) -> List[str]:
 
 
 def _key_order_errors(arch: str, files: Dict[str, List[Path]]) -> List[str]:
-    """Report each file of arch's own directory whose ids are not sorted."""
+    """Report each file in the directory of arch with unsorted ids."""
     own_paths = [paths[-1] for paths in files.values() if paths[-1].parent.name == arch]
     return [
         f"[{arch}/{path.name}] top-level keys are not sorted"
@@ -195,7 +189,7 @@ def _key_order_errors(arch: str, files: Dict[str, List[Path]]) -> List[str]:
 
 
 def _keys_sorted(document: Dict[str, Any]) -> bool:
-    """Return whether the keys of document, apart from the remove list, are sorted."""
+    """Return True if the keys of document are sorted, apart from the remove list."""
     keys = [key for key in document if key != loader.REMOVE_KEY]
     return keys == sorted(keys)
 
@@ -221,7 +215,7 @@ def _metrics_errors(document: Dict[str, Any], source: str) -> List[str]:
 
 
 def _id_errors(metric_id: str, source: str, category: str) -> List[str]:
-    """Report an id that is malformed, names a view, or is not of the file's
+    """Report a malformed id, an id named after a view, and an id outside the file's
     category."""
     errors = []
     if not METRIC_LIBRARY_ID_RE.match(metric_id):
@@ -256,8 +250,7 @@ def _metric_errors(entry: object, source: str, metric_id: str) -> List[str]:
 
 
 def _string_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str]:
-    """Report a unit or description that is no string, non-ASCII text, and a unit
-    alias."""
+    """Report non-string units and descriptions, non-ASCII text and unit aliases."""
     errors = [
         f"[{source}] {metric_id}: '{field}' must be a string"
         for field in ("unit", "description")
@@ -278,8 +271,7 @@ def _string_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[s
 
 
 def _peak_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str]:
-    """Report a peak that is not a theoretical expression, and a malformed
-    peak_empirical."""
+    """Report a bad peak and a malformed peak_empirical."""
     errors = []
     peak = entry.get("peak")
     if isinstance(peak, bool) or not isinstance(peak, (str, int, float, type(None))):
@@ -318,7 +310,7 @@ def _arch_metrics_errors(arch: str, documents: Dict[str, Dict[str, Any]]) -> Lis
 
 
 def _parse_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
-    """Report each expression that build_eval_string() rejects."""
+    """Report each expression rejected by build_eval_string()."""
     errors = []
     for metric_id, metric in metrics.items():
         for field in EXPRESSION_FIELDS:
@@ -329,9 +321,9 @@ def _parse_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
 
 
 def _expression_error(expression: object) -> Optional[str]:
-    """Return why build_eval_string() rejects an expression, or None if it accepts it.
+    """Return the build_eval_string() error of an expression, or None without one.
 
-    Values that are not strings or numbers are left to the field type checks.
+    Skip values other than strings and numbers; the field type checks report them.
     """
     if not isinstance(expression, (str, int, float)):
         return None
@@ -343,8 +335,8 @@ def _expression_error(expression: object) -> Optional[str]:
 
 
 def _ceiling_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
-    """Check that each measured ceiling bounds exactly one metric, or is listed as a
-    ceiling without a metric, and that no metric names an unmeasured ceiling."""
+    """Report a measured ceiling with no metric or with two, and a metric with an
+    unmeasured ceiling."""
     measured = arch_ceilings(arch)
     without_metric = {
         *CEILINGS_WITHOUT_METRIC,
@@ -385,7 +377,7 @@ def _ceiling_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
 
 
 def _shared_formula_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
-    """Report ids of arch with one formula, apart from SHARED_FORMULA_IDS."""
+    """Report ids of arch with the same formula, apart from SHARED_FORMULA_IDS."""
     formulas = {
         metric_id: canonical_formula(metric.get("formula"))
         for metric_id, metric in metrics.items()
@@ -408,7 +400,7 @@ def _shared_formula_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
 
 
 def _shared_name_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:
-    """Report ids of arch with one name, ignoring case."""
+    """Report ids of arch with the same name, ignoring case."""
     return _shared_value_errors(
         arch,
         {
@@ -426,7 +418,7 @@ def _shared_value_errors(
     problem: str,
     allowed_groups: Sequence[Set[str]] = (),
 ) -> List[str]:
-    """Report each group of ids with one value, apart from allowed_groups."""
+    """Report each group of ids with the same value, apart from allowed_groups."""
     ids_by_value = defaultdict(list)
     for metric_id, value in value_by_id.items():
         ids_by_value[value].append(metric_id)
@@ -440,11 +432,8 @@ def _shared_value_errors(
 
 
 def _formula_id_errors(libraries: Dict[str, loader.MetricLibrary]) -> List[str]:
-    """Report a formula with a different id on another arch.
-
-    The per-arch checks leave only ids that share a formula on different archs: a
-    quantity a later arch renamed. SPLIT_FORMULA_IDS lists the pairs kept on purpose.
-    """
+    """Report a formula with a different id on another arch, apart from
+    SPLIT_FORMULA_IDS."""
     allowed_groups = [
         {metric_id, partner}
         for metric_id, partner in {**SHARED_FORMULA_IDS, **SPLIT_FORMULA_IDS}.items()
@@ -486,7 +475,8 @@ def _archs_by_value(
     libraries: Dict[str, loader.MetricLibrary],
     key: Callable[[str, Dict[str, Any]], Tuple[Hashable, Hashable]],
 ) -> Dict[Hashable, Dict[Hashable, List[str]]]:
-    """Return group -> value -> the archs whose metrics key() maps to (group, value)."""
+    """Return group -> value -> archs, with key() giving the group and value of each
+    metric."""
     groups = defaultdict(lambda: defaultdict(list))
     for arch, library in libraries.items():
         for metric_id, metric in library.metrics.items():
@@ -521,7 +511,7 @@ def _field_errors(
 def _text_errors(
     entry: Dict[str, Any], fields: Tuple[str, ...], source: str, item: str
 ) -> List[str]:
-    """Report each field that is not a non-empty string."""
+    """Report each field without a non-empty string value."""
     return [
         f"[{source}] {item}: '{field}' must be a non-empty string"
         for field in fields
