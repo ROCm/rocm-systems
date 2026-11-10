@@ -31,6 +31,7 @@
 #include <barrier>
 #include <chrono>
 #include <condition_variable>
+#include <format>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -1888,12 +1889,17 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     explicit FailingHookPlugin(bool fail_before)
         : ExecutionPlugin("failing_hook"), fail_before_(fail_before) {}
 
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &wave) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
+                                          Wavefront &wave) override {
+      issue_pc = pc;
       if (fail_before_)
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
                                                 "before hook failed");
     }
-    void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &wave) override {
+    void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &,
+                                         Wavefront &wave) override {
+      EXPECT_EQ(pc, issue_pc + 4 * sizeof(uint32_t));
+      EXPECT_EQ(wave.pc, pc);
       ++after_callbacks;
       if (!fail_before_)
         wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
@@ -1902,6 +1908,7 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     void onAmdgpuWavefrontCancelled(Wavefront &) override { ++cancellations; }
     void onAmdgpuWavefrontHalted(Wavefront &) override { ++halts; }
 
+    uint64_t issue_pc = 0;
     unsigned after_callbacks = 0;
     unsigned cancellations = 0;
     unsigned halts = 0;
@@ -1922,13 +1929,19 @@ TEST(ExecutionPluginTest, ReportedInstructionHookFailureCancelsBeforeContinuing)
     unsigned failures = 0;
     fixture.cu()->set_execution_failure_handler([&](Wavefront &wave) {
       ++failures;
+      EXPECT_EQ(wave.pc, observed->issue_pc);
       EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
       EXPECT_STREQ(wave.instruction_execution_error_detail(),
                    fail_before ? "before hook failed" : "after hook failed");
       return false;
     });
-    const uint32_t code[] = {S_NOP, S_ENDPGM};
+    constexpr auto branch = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 4});
+    const uint32_t code[] = {branch[0], S_NOP, S_NOP, S_NOP, S_NOP, S_ENDPGM};
+    testing::internal::CaptureStderr();
     fixture.run_kernel(code, std::size(code));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_NE(diagnostic.find(std::format("at pc={:#x}", observed->issue_pc)), std::string::npos)
+        << diagnostic;
     EXPECT_EQ(fixture.engine->last_exit().code, 1);
     EXPECT_EQ(failures, 1u);
     EXPECT_EQ(observed->after_callbacks, fail_before ? 0u : 1u);

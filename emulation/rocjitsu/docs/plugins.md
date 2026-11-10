@@ -671,10 +671,15 @@ way.
 
 Plugin callbacks, policy queries, constructors, destructors, and output sinks must
 not throw. This is a semantic contract; callback signatures do not require
-`noexcept`. Report expected instruction or reporting failures through
+`noexcept`. From synchronous instruction hooks, report expected instruction or
+reporting failures through
 `Wavefront::report_instruction_execution_error()` and preserve any error already
 recorded on the wave. Every accepted asynchronous instruction must still receive
 its normal completion accounting before cancellation or shutdown.
+
+`onAmdgpuWavefrontHalted` is a terminal notification. The wave's instruction-error
+state is discarded when this hook returns. Use `sink().write()` to report problems
+from this hook.
 
 ## Adding a new plugin
 

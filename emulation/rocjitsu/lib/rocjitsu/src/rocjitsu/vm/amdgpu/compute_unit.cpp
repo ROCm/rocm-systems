@@ -2093,6 +2093,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
+  const uint64_t instruction_pc = active->pc;
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
   const std::string_view instruction_mnemonic = inst->mnemonic();
@@ -2104,7 +2105,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
     if (active->instruction_execution_error_detail())
       execution_failure_detail_ = active->instruction_execution_error_detail();
-    fail_wave_instruction(*active, instruction_mnemonic, active->pc,
+    active->pc = instruction_pc;
+    fail_wave_instruction(*active, instruction_mnemonic, instruction_pc,
                           active->instruction_execution_error(),
                           // Taken before reporting, so a throwing failure handler
                           // cannot leave it for the next instruction.

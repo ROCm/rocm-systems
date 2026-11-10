@@ -289,6 +289,8 @@ public:
 
   /// Called when a wavefront terminates normally, after its memory operations
   /// have drained and before its resources are freed.
+  /// This is a terminal notification; report problems through sink().write().
+  /// Instruction-execution errors recorded here are discarded with the wave.
   /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
