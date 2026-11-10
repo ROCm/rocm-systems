@@ -98,10 +98,22 @@ configure_session(const trace_session_config& config)
     }
     std::strncpy(channel->name, channel_name, sizeof(channel->name) - 1);
     channel->enabled        = 1;
-    channel->attr.overwrite = 0;  // discard: a full buffer drops new events and counts them
+    channel->attr.overwrite = 0;  // a full buffer drops new events and counts them
     channel->attr.output    = LTTNG_EVENT_MMAP;
     if(config.subbuffer_size > 0) channel->attr.subbuf_size = config.subbuffer_size;
     if(config.num_subbuffers > 0) channel->attr.num_subbuf = config.num_subbuffers;
+    // Writers wait for space first, if the target allows it (LTTNG_UST_ALLOW_BLOCKING).
+    if(config.blocking_timeout_us != 0)
+    {
+        if(auto ret =
+               ::lttng_channel_set_blocking_timeout(channel.get(), config.blocking_timeout_us);
+           ret < 0)
+        {
+            ROCP_ERROR << "[rocprofiler-sdk-collector] setting the blocking timeout failed: "
+                       << error_string(ret);
+            return ROCPROFILER_COLLECTOR_STATUS_ERROR_SESSION;
+        }
+    }
 
     if(auto ret = ::lttng_enable_channel(handle.get(), channel.get()); ret < 0)
     {

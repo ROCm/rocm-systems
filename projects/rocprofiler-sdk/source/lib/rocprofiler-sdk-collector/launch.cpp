@@ -28,17 +28,49 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace collector
 {
+namespace
+{
+// This process's environment with the extra variables; built before fork, since the child
+// may only make async-signal-safe calls before exec.
+std::vector<std::string>
+make_environment(const std::vector<std::string>& extra_env)
+{
+    auto result = std::vector<std::string>{};
+    for(char** itr = environ; itr != nullptr && *itr != nullptr; ++itr)
+    {
+        auto entry    = std::string{*itr};
+        auto name     = entry.substr(0, entry.find('='));
+        auto replaced = std::any_of(extra_env.begin(), extra_env.end(), [&name](const auto& extra) {
+            return extra.compare(0, name.size() + 1, name + "=") == 0;
+        });
+        if(!replaced) result.push_back(std::move(entry));
+    }
+    result.insert(result.end(), extra_env.begin(), extra_env.end());
+    return result;
+}
+}  // namespace
+
 rocprofiler_collector_status_t
-launch_process(const char* const* argv, int* pid)
+launch_process(const char* const* argv, const std::vector<std::string>& extra_env, int* pid)
 {
     if(!argv || !argv[0] || !pid) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto environment = make_environment(extra_env);
+    auto envp        = std::vector<char*>{};
+    envp.reserve(environment.size() + 1);
+    for(auto& itr : environment)
+        envp.push_back(itr.data());
+    envp.push_back(nullptr);
 
     int fds[2] = {-1, -1};
     if(::pipe2(fds, O_CLOEXEC) != 0)
@@ -59,8 +91,9 @@ launch_process(const char* const* argv, int* pid)
     {
         ::close(fds[0]);
         // execvp's argv is char* const[] for historical reasons; it does not modify it.
-        ::execvp(argv[0],
-                 const_cast<char* const*>(argv));  // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        ::execvpe(argv[0],
+                  const_cast<char* const*>(argv),  // NOLINT(cppcoreguidelines-pro-type-const-cast)
+                  envp.data());
         auto err = errno;
         auto ret = ::write(fds[1], &err, sizeof(err));
         (void) ret;

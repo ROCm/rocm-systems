@@ -53,6 +53,20 @@ typedef enum rocprofiler_collector_status_t  // NOLINT(performance-enum-size)
 } rocprofiler_collector_status_t;
 
 /**
+ * @brief What a traced process does when its trace buffer is full.
+ */
+typedef enum rocprofiler_collector_buffer_policy_t  // NOLINT(performance-enum-size)
+{
+    /// The writing thread waits for space, up to the blocking timeout, as rocprofiler-sdk's
+    /// ROCPROFILER_BUFFER_POLICY_LOSSLESS does. An event still without space at the timeout
+    /// is discarded and counted.
+    ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS = 0,
+    /// The event is discarded and counted; the thread never waits.
+    ROCPROFILER_COLLECTOR_BUFFER_POLICY_DISCARD,
+    ROCPROFILER_COLLECTOR_BUFFER_POLICY_LAST,
+} rocprofiler_collector_buffer_policy_t;
+
+/**
  * @brief A collector: one trace session, with its private session daemon.
  */
 typedef struct rocprofiler_collector_t
@@ -84,11 +98,20 @@ typedef struct rocprofiler_collector_config_t
     const char* const* providers;
 
     /// Bytes per sub-buffer, a power of 2; 0: 512 KiB. Each traced process has a buffer
-    /// per CPU; when it is full, new events are discarded (and counted).
+    /// per CPU; buffer_policy says what happens when it is full.
     uint64_t subbuffer_size;
     uint64_t num_subbuffers;  ///< sub-buffers per buffer, a power of 2; 0: 4
 
-    uint8_t reserved_padding[32];
+    /// With ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS, the longest a thread waits for
+    /// space for one event, in microseconds. 0: 1 second; UINT64_MAX: no limit.
+    uint64_t blocking_timeout_us;
+
+    /// 0 (ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS) by default. Lossless applies to
+    /// processes started with rocprofiler_collector_launch, and their children: the
+    /// collector sets LTTNG_UST_ALLOW_BLOCKING=1 in their environment.
+    rocprofiler_collector_buffer_policy_t buffer_policy;
+
+    uint8_t reserved_padding[20];
 } rocprofiler_collector_config_t;
 
 /** @} */

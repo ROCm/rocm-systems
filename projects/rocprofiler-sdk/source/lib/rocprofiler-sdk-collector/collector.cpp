@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,6 +64,11 @@ const auto default_providers = std::vector<std::string>{"rocm_hip", "rocm_hsa"};
 constexpr uint64_t default_subbuffer_size = 512 * 1024;
 constexpr uint64_t default_num_subbuffers = 4;
 
+// Lossless: how long a thread waits for buffer space before an event is discarded. Long
+// enough for the consumer daemon to empty a sub-buffer under load; short enough that a
+// dead consumer slows the target instead of hanging it.
+constexpr uint64_t default_blocking_timeout_us = 1000000;
+
 struct collector_state
 {
     uint64_t                   id            = 0;
@@ -73,6 +79,7 @@ struct collector_state
     std::optional<std::string> previous_home = {};
     bool                       stopped       = false;
     std::set<int>              launched      = {};
+    std::vector<std::string>   target_env    = {};  // added to launched targets
 };
 
 std::mutex&
@@ -176,6 +183,9 @@ rocprofiler_collector_create(const rocprofiler_collector_config_t* config,
         return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
     if(config->providers && !config->providers[0])
         return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
+    if(config->buffer_policy != ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS &&
+       config->buffer_policy != ROCPROFILER_COLLECTOR_BUFFER_POLICY_DISCARD)
+        return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto lock = std::unique_lock{collector::get_mutex()};
     if(collector::get_active()) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE;
@@ -205,6 +215,18 @@ rocprofiler_collector_create(const rocprofiler_collector_config_t* config,
         (config->subbuffer_size > 0) ? config->subbuffer_size : collector::default_subbuffer_size;
     session_config.num_subbuffers =
         (config->num_subbuffers > 0) ? config->num_subbuffers : collector::default_num_subbuffers;
+    if(config->buffer_policy == ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS)
+    {
+        auto timeout = (config->blocking_timeout_us > 0) ? config->blocking_timeout_us
+                                                         : collector::default_blocking_timeout_us;
+        // LTTng takes a signed timeout; -1 is no limit.
+        session_config.blocking_timeout_us =
+            (timeout > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                ? -1
+                : static_cast<int64_t>(timeout);
+        // liblttng-ust only waits in processes that allow it.
+        state->target_env.emplace_back("LTTNG_UST_ALLOW_BLOCKING=1");
+    }
     if(config->providers)
     {
         for(const auto* const* itr = config->providers; *itr; ++itr)
@@ -258,7 +280,7 @@ rocprofiler_collector_launch(rocprofiler_collector_t collector, const char* cons
     if(!state->session.started) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE;
 
     // LTTNG_HOME is already set in this process's environment, so the child inherits it.
-    auto status = collector::launch_process(argv, pid);
+    auto status = collector::launch_process(argv, state->target_env, pid);
     if(status == ROCPROFILER_COLLECTOR_STATUS_SUCCESS) state->launched.emplace(*pid);
     return status;
 }

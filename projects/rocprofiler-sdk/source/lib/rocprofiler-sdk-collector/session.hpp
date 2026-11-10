@@ -35,11 +35,12 @@ namespace collector
 // One LTTng capture session with one user-space channel.
 struct trace_session_config
 {
-    std::string              name           = {};
-    std::string              trace_path     = {};  // where the consumer daemon writes CTF
-    std::vector<std::string> providers      = {};  // "<provider>:*" is enabled for each
-    uint64_t                 subbuffer_size = 0;   // 0: LTTng's per-process default
-    uint64_t                 num_subbuffers = 0;   // 0: LTTng's per-process default
+    std::string              name                = {};
+    std::string              trace_path          = {};  // where the consumer daemon writes CTF
+    std::vector<std::string> providers           = {};  // "<provider>:*" is enabled for each
+    uint64_t                 subbuffer_size      = 0;   // 0: LTTng's per-process default
+    uint64_t                 num_subbuffers      = 0;   // 0: LTTng's per-process default
+    int64_t                  blocking_timeout_us = 0;   // 0: discard; -1: wait without limit
 };
 
 struct trace_session
@@ -49,9 +50,9 @@ struct trace_session
     bool        started = false;
 };
 
-// Create the session, its channel (per-process buffers, discard mode, so loss is counted
-// per process and never overwrites), the providers' events at every log level, and the
-// vpid and vtid contexts. Tracing is not started.
+// Create the session, its channel (per-process buffers, never overwritten: a full buffer
+// makes a writer wait up to the blocking timeout, then discards and counts the event), the
+// providers' events at every log level, and the vpid and vtid contexts. Tracing is not started.
 rocprofiler_collector_status_t
 create_trace_session(const trace_session_config& config, trace_session* session);
 

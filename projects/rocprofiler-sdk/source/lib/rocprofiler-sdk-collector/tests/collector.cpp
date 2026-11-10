@@ -192,6 +192,41 @@ TEST(collector, create_rejects_invalid_configuration)
     auto              empty          = make_config(dir.path.c_str(), no_providers);
     EXPECT_EQ(rocprofiler_collector_create(&empty, &collector),
               ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT);
+
+    auto bad_policy          = make_config(dir.path.c_str(), test_providers);
+    bad_policy.buffer_policy = ROCPROFILER_COLLECTOR_BUFFER_POLICY_LAST;
+    EXPECT_EQ(rocprofiler_collector_create(&bad_policy, &collector),
+              ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST(collector, lets_launched_targets_block_only_when_lossless)
+{
+    SKIP_WITHOUT_SESSION_DAEMON();
+
+    // The target exits with 0 when liblttng-ust would let it wait for buffer space.
+    const char* const argv[] = {"/bin/sh", "-c", "test \"$LTTNG_UST_ALLOW_BLOCKING\" = 1", nullptr};
+    ::setenv("LTTNG_UST_ALLOW_BLOCKING", "0", 1);  // replaced, not duplicated, in the target
+
+    for(auto policy :
+        {ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS, ROCPROFILER_COLLECTOR_BUFFER_POLICY_DISCARD})
+    {
+        auto dir             = scratch_dir{};
+        auto config          = make_config(dir.path.c_str(), test_providers);
+        config.buffer_policy = policy;
+        auto collector       = rocprofiler_collector_t{};
+        ASSERT_EQ(rocprofiler_collector_create(&config, &collector),
+                  ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+        ASSERT_EQ(rocprofiler_collector_start(collector), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+        auto pid = 0;
+        ASSERT_EQ(rocprofiler_collector_launch(collector, argv, &pid),
+                  ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+        auto exit_status = -1;
+        ASSERT_EQ(rocprofiler_collector_wait(collector, pid, &exit_status),
+                  ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+        EXPECT_EQ(exit_status, (policy == ROCPROFILER_COLLECTOR_BUFFER_POLICY_LOSSLESS) ? 0 : 1);
+        EXPECT_EQ(rocprofiler_collector_destroy(collector), ROCPROFILER_COLLECTOR_STATUS_SUCCESS);
+    }
+    ::unsetenv("LTTNG_UST_ALLOW_BLOCKING");
 }
 
 TEST(collector, create_rejects_non_empty_output_directory)

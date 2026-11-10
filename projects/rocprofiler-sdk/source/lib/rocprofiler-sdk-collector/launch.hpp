@@ -24,15 +24,19 @@
 
 #include <rocprofiler-sdk-collector/types.h>
 
+#include <string>
+#include <vector>
+
 namespace rocprofiler
 {
 namespace collector
 {
 // Start argv (argv[0] looked up in PATH) as a child of this process, inheriting its
-// environment. An exec failure is reported here (through a close-on-exec pipe), not as a
-// child that exits with 127.
+// environment plus extra_env ("NAME=value", replacing a variable of the same name). An
+// exec failure is reported here (through a close-on-exec pipe), not as a child that exits
+// with 127.
 rocprofiler_collector_status_t
-launch_process(const char* const* argv, int* pid);
+launch_process(const char* const* argv, const std::vector<std::string>& extra_env, int* pid);
 
 // Wait for a child started by launch_process. exit_status is the exit code, or 128 + the
 // signal number when a signal ended it.
