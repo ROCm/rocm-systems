@@ -54,6 +54,17 @@ Run ``rocprof-compute profile -h`` for more details. See
    - Some metrics may show reduced utilization compared to normal execution
      due to the lack of concurrent kernel execution.
 
+.. _profile-rdna-power-gating:
+
+.. warning::
+
+   **Profiling requires power-gating changes.**
+
+   The default ``AUTO`` performance level can gate the perfmon
+   clock. While that clock is gated, counters such as ``TCP_REQ`` report zero
+   even when the kernel issues global memory traffic. For the details and the
+   workaround, see :ref:`faq-tcp-req-zero`.
+
 .. _profile-example:
 
 Profiling example
@@ -748,7 +759,18 @@ that contains both ``roofline.csv`` and application performance counters
    and counter output before relying on WMMA roofline points. One WMMA counter
    covers FP16, BF16, FP8, and BF8, so the WMMA row is compared with the FP16
    WMMA peak. The aggregate VALU instruction counter gives an estimate, not a
-   precision-specific FLOP count. See :doc:`/conceptual/rdna/navi48`.
+   precision-specific FLOP count. See :ref:`rdna4-roofline`.
+
+   Before a gfx1201 collection, set the performance level as described in
+   :ref:`profiling power-gating requirements <profile-rdna-power-gating>`. Then collect System Speed-of-Light and the Memory Chart for a short workload:
+
+   .. code-block:: bash
+
+      HIP_VISIBLE_DEVICES=0 rocprof-compute profile --name vcopy-gfx1201 \
+          -b sol memchart --no-roof -- ./vcopy -n 1048576 -b 256
+
+   ``HIP_VISIBLE_DEVICES`` selects the GPU used by the HIP application. Discover
+   block aliases with ``rocprof-compute --list-metrics-gfx-id gfx1201``.
 
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
 

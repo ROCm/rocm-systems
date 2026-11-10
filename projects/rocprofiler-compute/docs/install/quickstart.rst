@@ -109,17 +109,8 @@ For detailed installation instructions, refer to :doc:`/install/core-install`.
 
 .. note::
 
-   On Navi48 (gfx1201), set the target GPU to ``STABLE_STD`` before collecting
-   counters. For example, if Navi48 is GPU 0:
-
-   .. code-block:: bash
-
-      sudo /opt/rocm/bin/amd-smi set --gpu 0 --perf-level STABLE_STD
-
-   Select the actual Navi48 GPU index from ``amd-smi list``. Omitting ``--gpu``
-   changes the performance level of all GPUs. This changes the clock policy;
-   use the same performance state for baseline comparisons. See
-   :doc:`/conceptual/rdna/navi48` for supported features and unavailable metrics.
+   On gfx115x (RDNA3.5) and gfx1201 (RDNA4), set the performance level to ``STABLE_STD`` before
+   collecting counters. See :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
 
 .. _profile-quickstart:
 

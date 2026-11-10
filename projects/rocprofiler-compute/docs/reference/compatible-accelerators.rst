@@ -64,8 +64,7 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
 
       * - Navi48 (gfx1201), including AMD Radeon RX 9070
         - GPU metrics, Memory Chart, and roofline on Linux. See
-          :doc:`/conceptual/rdna4/rdna4-performance-model` and
-          :doc:`/conceptual/rdna/navi48`.
+          :doc:`/conceptual/rdna/rdna-performance-model`.
 
       * - Navi44 (gfx1200)
         - Not supported in this release.

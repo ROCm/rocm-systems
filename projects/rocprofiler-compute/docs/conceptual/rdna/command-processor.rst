@@ -3,6 +3,7 @@
    :keywords: ROCm Compute Profiler, RDNA, gfx115x, command processor, CPC
 
 .. _rdna-command-processor:
+.. _rdna4-command-processor:
 
 =========================
 Command processor (CP)
@@ -15,6 +16,7 @@ On Instinct GPUs, the profiler often separates the metrics into Command Processo
 Fetcher (CPF) and Command Processor Compute (CPC). The gfx115x analysis panels
 emphasize CPC and ME (Micro Engine) activity, including utilization,
 interface utilization, stall cycles, memory requests, and instruction cache.
+The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. Select the architecture tab on each table.
 
 For the complete CDNA architecture overview and the CPF and CPC metric tabs across AMD Instinct MI-Series GPUs, see
 :doc:`../cdna/command-processor` under CDNA-CDNA4.
@@ -28,10 +30,14 @@ CPC utilization
 .. tab-set::
 
    .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-cpc-utilization-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
 
 CPC interface utilization
 -------------------------
@@ -39,10 +45,14 @@ CPC interface utilization
 .. tab-set::
 
    .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-cpc-interface-utilization-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
 
 Micro Engine (ME) stall cycles
 -------------------------------
@@ -50,10 +60,14 @@ Micro Engine (ME) stall cycles
 .. tab-set::
 
    .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-mec-stall-cycles-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
 
 CPC memory requests
 -------------------
@@ -61,10 +75,14 @@ CPC memory requests
 .. tab-set::
 
    .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-cpc-memory-requests-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.
 
 Micro Engine (ME) instruction cache
 ------------------------------------
@@ -72,7 +90,11 @@ Micro Engine (ME) instruction cache
 .. tab-set::
 
    .. tab-item:: RDNA3.5 (gfx115x)
-      :selected:
 
       .. jinja:: rdna115x-mec-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
+
+   .. tab-item:: RDNA4 (gfx1201)
+      :selected:
+
+      The gfx1201 CPC panel has one table, CPC Utilizations, with metric descriptions in the analysis report. This page does not publish a separate gfx1201 table.

@@ -272,7 +272,7 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
    * - AMD Radeon™ RX 9070 (RDNA4, Navi 48; gfx1201)
      - ✅
      - ✅
-     - Uses WMMA in place of MFMA. The roofline draws the DRAM and Infinity Cache roofs. See :doc:`conceptual/rdna4/rdna4-performance-model`.
+     - Uses WMMA in place of MFMA. The roofline draws the DRAM and Infinity Cache roofs. See :doc:`conceptual/rdna/rdna-performance-model`.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - ❌
      - ❌

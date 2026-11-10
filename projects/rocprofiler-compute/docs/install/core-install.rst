@@ -12,8 +12,8 @@ Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
 For Navi48 (gfx1201), GPU metrics, the Memory Chart, and the roofline are
-supported on Linux. Follow the performance-state prerequisite in
-:doc:`/conceptual/rdna/navi48` before profiling.
+supported on Linux. Set the performance level before profiling, as described
+in :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
 
 For advanced workflows, source builds, or custom configurations, see
 :doc:`./source-install`.

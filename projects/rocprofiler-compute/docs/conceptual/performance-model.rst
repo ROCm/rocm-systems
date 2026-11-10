@@ -29,7 +29,8 @@ overview:
 
   * :doc:`cdna/references`
 
-* **Ryzen APU (RDNA)** - :doc:`RDNA3 <rdna/rdna-performance-model>`: Architecture, top-level RDNA3 block diagram, gfx115x panels, and chapters for:
+* **Ryzen APU and Radeon GPU (RDNA3-RDNA4)** - :doc:`AMD RDNA architecture (RDNA3-RDNA4) <rdna/rdna-performance-model>`:
+  Architecture comparison, block-diagram tabs, and one chapter per block. Each metric table has an RDNA3.5 tab and an RDNA4 tab.
 
   * :doc:`rdna/system-speed-of-light`
 
@@ -52,29 +53,5 @@ overview:
   * :doc:`rdna/grbm`
 
   * :doc:`rdna/references`
-
-* **Radeon GPU (RDNA4)** - :doc:`RDNA4 <rdna4/rdna4-performance-model>`: Architecture, RDNA4 block diagram and memory hierarchy, gfx1201 panels, and chapters for:
-
-  * :doc:`rdna4/system-speed-of-light`
-
-  * :doc:`rdna4/shader-engine` (overview)
-
-    * :doc:`rdna4/spi`
-
-    * :doc:`rdna4/wgp`
-
-    * :doc:`rdna4/gl0-cache`
-
-    * :doc:`rdna4/gl1-cache`
-
-  * :doc:`rdna4/gl2-cache`
-
-  * :doc:`rdna4/gcea`
-
-  * :doc:`rdna4/command-processor`
-
-  * :doc:`rdna4/grbm`
-
-  * :doc:`rdna4/references`
 
 For practical profiling walkthroughs, see :doc:`/tutorial/profiling-by-example`.

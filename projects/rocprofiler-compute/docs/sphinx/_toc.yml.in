@@ -60,10 +60,8 @@ subtrees:
           title: Command processor (CP)
         - file: conceptual/cdna/references.rst
       - file: conceptual/rdna/rdna-performance-model.rst
-        title: RDNA
+        title: RDNA3-RDNA4
         entries:
-        - file: conceptual/rdna/navi48.rst
-          title: Navi48 (gfx1201)
         - file: conceptual/rdna/system-speed-of-light.rst
           title: System Speed-of-Light
         - file: conceptual/rdna/shader-engine.rst
@@ -80,37 +78,12 @@ subtrees:
         - file: conceptual/rdna/gl2-cache.rst
           title: GL2
         - file: conceptual/rdna/gcea.rst
-          title: GCEA
+          title: Efficiency Arbiter (EA)
         - file: conceptual/rdna/command-processor.rst
           title: Command processor (CP)
         - file: conceptual/rdna/grbm.rst
           title: Graphics Register Bus Manager (GRBM)
         - file: conceptual/rdna/references.rst
-      - file: conceptual/rdna4/rdna4-performance-model.rst
-        title: RDNA4
-        entries:
-        - file: conceptual/rdna4/system-speed-of-light.rst
-          title: System Speed-of-Light
-        - file: conceptual/rdna4/shader-engine.rst
-          title: Shader engine
-          entries:
-          - file: conceptual/rdna4/spi.rst
-            title: Workgroup Manager (SPI)
-          - file: conceptual/rdna4/wgp.rst
-            title: Workgroup processor (WGP)
-          - file: conceptual/rdna4/gl0-cache.rst
-            title: GL0 (TCP Vector Cache)
-          - file: conceptual/rdna4/gl1-cache.rst
-            title: GL1
-        - file: conceptual/rdna4/gl2-cache.rst
-          title: GL2
-        - file: conceptual/rdna4/gcea.rst
-          title: Efficiency Arbiter (EA)
-        - file: conceptual/rdna4/command-processor.rst
-          title: Command processor (CP)
-        - file: conceptual/rdna4/grbm.rst
-          title: Graphics Register Bus Manager (GRBM)
-        - file: conceptual/rdna4/references.rst
     - file: conceptual/definitions.rst
 
   - caption: Tutorials

@@ -120,10 +120,12 @@ vLLM V1 runs GPU kernels in a worker process that it terminates with a signal
 on shutdown, and counter data is only written when a process exits normally.
 See :ref:`profile-vllm-workloads` for the workaround and where it applies.
 
+.. _faq-tcp-req-zero:
+
 Why are ``TCP_REQ`` and other PMC counters zero?
 ================================================
 
-On some RDNA GPUs, the default ``AUTO`` performance level can gate the
+On RDNA3.5 and RDNA4 GPUs, the default ``AUTO`` performance level can gate the
 perfmon clock. While that clock is gated, the hardware never increments
 the affected performance counters, so values such as ``TCP_REQ``,
 ``TCP_REQ_READ``, ``TCP_REQ_WRITE``, and ``TCP_REQ_MISS`` -- and the GL0
