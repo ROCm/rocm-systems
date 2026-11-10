@@ -6776,12 +6776,7 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 }
 
 
-// ---------------------------------------------------------------------------
-// JIT-compiled device code: ncclDevCommCreate resolves the version the device
-// code was built against, which is the runtime version (not the caller's
-// compile-time reqs.version) when reqs.useRuntimeVersion or NCCL_DEV_API_JIT=1
-// says so. The requirements struct is still interpreted with the compile-time
-// version, since that is the layout the host caller passed.
+// JIT: useRuntimeVersion or NCCL_DEV_API_JIT=1 queues the runtime version; reqs keep the caller's layout.
 
 // Oldest caller that has useRuntimeVersion, so the oldest one it is read from.
 constexpr uint32_t kJitFieldVersion = NCCL_VERSION(2, 31, 0);
