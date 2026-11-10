@@ -8073,7 +8073,6 @@ TEST(ArithBridgeTest, QuadSadWindowsAccumulatorsAliasesAndMasks) {
 
 namespace rocjitsu::amdgpu {
 namespace {
-
 TEST(ArithBridgeTest, DoubleReciprocalFlushesSubnormalInput) {
   for (bool rdna3 : {false, true}) {
     BridgeFixture fixture(rdna3);
@@ -8092,6 +8091,5 @@ TEST(ArithBridgeTest, DoubleReciprocalFlushesSubnormalInput) {
     EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0x7ff00000U);
   }
 }
-
 } // namespace
 } // namespace rocjitsu::amdgpu

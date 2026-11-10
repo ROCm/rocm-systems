@@ -260,7 +260,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
+## Benchmarking
 
 No benchmark executable is built at this stage. The following describes its intended interface.
 
