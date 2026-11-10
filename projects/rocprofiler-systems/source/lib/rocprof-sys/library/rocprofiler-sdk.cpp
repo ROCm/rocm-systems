@@ -978,10 +978,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             available_domains, [&request](const domains::domain_info& info) {
                 return utility::string::equals_ignore_case(info.name, request.name);
             });
-        const auto is_found = domain != available_domains.end();
-        const auto is_domain_callback =
-            domain->key.mode == domains::collection_mode::callback;
-        if(is_found && is_domain_callback)
+        if(domain != available_domains.end() &&
+           domain->key.mode == domains::collection_mode::callback)
         {
             data->backtrace_operations.emplace(
                 static_cast<sdk_backend_t::callback_tracing_kind_t>(domain->key.value),
@@ -991,16 +989,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection selection;
         selection.name       = std::move(request.name);
         selection.operations = std::move(request.operations);
-        domain_selection_list.push_back(std::move(selection));
-    }
-
-    // Only the restore-rescheduled event is traced for the KFD queue-event domain.
-    for(auto& selection : domain_selection_list)
-    {
+        // Only the restore-rescheduled event is traced for the KFD queue-event domain.
         if(selection.name == "kfd_event_queue")
         {
             selection.operations = { "ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED" };
         }
+        domain_selection_list.push_back(std::move(selection));
     }
 
     try
