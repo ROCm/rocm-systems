@@ -1534,6 +1534,10 @@ silently missing tracefile reads downstream as "this code is not covered".
 `RCCL_HOST_COVERAGE_IGNORE_REGEX` overrides what is filtered out (by default
 the tests' own code and vendored nvtx).
 
+It is also skippable. `RCCL_HOST_COVERAGE_EXPORT=0` leaves the children's
+profiles exactly where they fall and skips the export over them, for a consumer
+that reads the `.profraw` files itself and has no use for `host-coverage.lcov`.
+
 Adding a host test binary therefore needs no change outside this directory.
 
 Each child's `LLVM_PROFILE_FILE` is the inherited one with the child's own name

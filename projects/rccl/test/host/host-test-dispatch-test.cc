@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "LogCapture.hpp"
 #include "ScopedDir.h"
 
 #define RCCL_HOST_DISPATCH_NO_MAIN
@@ -1525,6 +1526,76 @@ TEST(HostDispatchCoverageMicrotest, NoBinaryExportedMeansNoTracefileAtAll)
     EXPECT_TRUE(llvm.commands().empty());
     EXPECT_FALSE(
         std::filesystem::exists(std::filesystem::path(dir.path()) / kCoverageTracefile));
+}
+
+TEST(HostDispatchCoverageMicrotest, NothingIsSaidAboutAnExportThatHasNothingToExport)
+{
+    // LLVM_PROFILE_FILE being set does not mean the tree was built instrumented -- nothing ties
+    // the two together, and run_host_tests.sh exports the variable either way. Announcing the
+    // binaries and then writing no tracefile is indistinguishable from an export that failed
+    // for every one of them, so an uninstrumented run says nothing at all.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    FakeLlvm llvm;
+
+    const std::string printed = RcclUnitTesting::CaptureStdout([&] {
+        writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+    });
+
+    EXPECT_EQ(printed, "");
+}
+
+TEST(HostDispatchCoverageMicrotest, OnlyTheBinariesWithProfilesAreCounted)
+{
+    // The progress count is the reader's only estimate of how long this phase will take, so it
+    // counts what will actually be exported rather than every binary the run knows of.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 1);
+    FakeLlvm llvm;
+
+    const std::string printed = RcclUnitTesting::CaptureStdout([&] {
+        writeMergedCoverage(dir.path(),
+                            {"/build/rccl-UnitTestsMicroNeverRan",
+                             "/build/rccl-UnitTestsMicroInit"},
+                            llvm.command());
+    });
+
+    EXPECT_NE(printed.find("exporting 1 binaries"), std::string::npos) << printed;
+    EXPECT_NE(printed.find("[1/1] rccl-UnitTestsMicroInit"), std::string::npos) << printed;
+    EXPECT_EQ(printed.find("NeverRan"), std::string::npos) << printed;
+}
+
+// ── coverageExportRequested ──────────────────────────────────────────
+
+TEST(HostDispatchCoverageMicrotest, TheExportIsOnUnlessItIsTurnedOff)
+{
+    // Opt-out, never opt-in: run_host_tests.sh builds its overall report from the tracefile this
+    // writes, so a caller who has not heard of the variable must keep getting it.
+    EXPECT_TRUE(coverageExportRequested(nullptr));
+    EXPECT_TRUE(coverageExportRequested(""));
+    EXPECT_TRUE(coverageExportRequested("1"));
+    EXPECT_FALSE(coverageExportRequested("0"));
+}
+
+TEST(HostDispatchCoverageMicrotest, TurningTheExportOffRunsNoLlvmAndWritesNoTracefile)
+{
+    // What it buys the caller who asked: an llvm-profdata merge and an llvm-cov export per
+    // binary, skipped. The profiles are untouched -- the children were handed their
+    // LLVM_PROFILE_FILE long before this -- so a consumer collecting them itself still can.
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 2);
+    FakeLlvm llvm;
+    setenv(std::string(kCoverageExportEnv).c_str(), "0", 1);
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command());
+    unsetenv(std::string(kCoverageExportEnv).c_str());
+
+    EXPECT_TRUE(llvm.commands().empty());
+    EXPECT_FALSE(
+        std::filesystem::exists(std::filesystem::path(dir.path()) / kCoverageTracefile));
+    // The profiles the caller does want are still where the children left them.
+    EXPECT_EQ(profilesIn((std::filesystem::path(dir.path()) / "rccl-UnitTestsMicroInit").string())
+                  .size(),
+              2u);
 }
 
 // ── runSelections ───────────────────────────────────────────────────

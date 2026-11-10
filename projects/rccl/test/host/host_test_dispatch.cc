@@ -104,6 +104,10 @@ constexpr std::chrono::milliseconds kReapPollInterval{5};
 // test, and nvtx is vendored. Overridable for a consumer that wants a different view.
 constexpr std::string_view kCoverageIgnoreRegex = "(/test/|nvtx)";
 
+// Set to 0 to leave the children's profiles where they fall and skip the lcov export over them.
+// For a consumer that reads the .profraw files itself and has no use for host-coverage.lcov.
+constexpr std::string_view kCoverageExportEnv = "RCCL_HOST_COVERAGE_EXPORT";
+
 // Longest --gtest_filter handed to one child. The kernel caps a single argv entry at
 // MAX_ARG_STRLEN (32 pages, 128KiB on Linux) and rejects the exec outright with E2BIG, which the
 // biggest host binary's 2199 case names comfortably exceed, so a long selection is split across
@@ -1541,12 +1545,38 @@ std::vector<std::string> profilesIn(const std::string &directory)
 // installed, so every problem is a warning and the tracefile is simply whatever could be
 // exported. Silence would be worse than either -- a missing tracefile reads downstream as "this
 // code is not covered" -- so each skipped binary says so by name.
+// Whether the lcov export should run at all, given *request* from the environment.
+//
+// Only "0" turns it off, so a caller who has not heard of this gets the export as before. The
+// profiles themselves are unaffected either way: they are written by the children, which were
+// handed their LLVM_PROFILE_FILE long before this.
+bool coverageExportRequested(const char *request)
+{
+    return request == nullptr || std::string_view(request) != "0";
+}
+
 void writeMergedCoverage(const std::string &directory, const std::vector<std::string> &binaries,
                          const CommandFn &run)
 {
     if (directory.empty() || binaries.empty()) {
         return;
     }
+    if (!coverageExportRequested(std::getenv(std::string(kCoverageExportEnv).c_str()))) {
+        return;
+    }
+
+    std::vector<std::pair<std::string, std::vector<std::string>>> pending;
+    for (const std::string &binary : binaries) {
+        const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
+        std::vector<std::string> profiles = profilesIn(binaryDir.string());
+        if (!profiles.empty()) {   // never ran, or ran uninstrumented; nothing to export either way
+            pending.emplace_back(binary, std::move(profiles));
+        }
+    }
+    if (pending.empty()) {
+        return;
+    }
+
     const char *ignore = std::getenv("RCCL_HOST_COVERAGE_IGNORE_REGEX");
     const std::string ignoreRegex =
         ignore == nullptr ? std::string(kCoverageIgnoreRegex) : std::string(ignore);
@@ -1556,21 +1586,17 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     // Each binary costs an llvm-profdata merge and an llvm-cov export over the whole hipified
     // tree, so this phase runs for a while after the last test has printed its result. It says
     // what it is doing, and how far through it is, rather than leave the run looking hung.
-    fmt::print("----- coverage: exporting {} binaries into {} -----\n", binaries.size(),
+    fmt::print("----- coverage: exporting {} binaries into {} -----\n", pending.size(),
                (fs::path(directory) / kCoverageTracefile).string());
     std::fflush(stdout);
 
     std::vector<std::string> tracefiles;
     size_t exported = 0;
-    for (const std::string &binary : binaries) {
-        fmt::print("[{}/{}] {}\n", ++exported, binaries.size(),
+    for (const auto &[binary, profiles] : pending) {
+        fmt::print("[{}/{}] {}\n", ++exported, pending.size(),
                    fs::path(binary).filename().string());
         std::fflush(stdout);
         const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
-        const std::vector<std::string> profiles = profilesIn(binaryDir.string());
-        if (profiles.empty()) {
-            continue;   // never ran, or ran uninstrumented; either way there is nothing to export
-        }
         const std::string profdata = (binaryDir / "merged.profdata").string();
         const std::string tracefile = (binaryDir / "coverage.lcov").string();
         if (run(profdataMergeCommand(profdataTool, profiles, profdata)) != 0) {
