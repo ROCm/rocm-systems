@@ -221,8 +221,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // ceSync window (ready/complete flag arrays).
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
-  // ncclMemAlloc does not zero memory, and the first UC sync waits for its flags to equal 1, so a stale 1 would let
-  // it pass before the peer arrives. Clear them before the registration's barrier lets any peer write them.
+  // ncclMemAlloc does not zero memory, and a stale 1 would pass the first UC sync: clear it before peers can signal.
   CUDACHECKGOTO(hipMemset(ceDevBase, 0, ceDevBaseSize), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceDevBase, ceDevBaseSize, NCCL_WIN_COLL_SYMMETRIC, &ceWinDev), ret,
                 fail);

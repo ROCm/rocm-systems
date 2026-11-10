@@ -398,9 +398,7 @@ TEST_F(CeCollMicrotest, EnsureStaging_AlreadySetUp_ReturnsWithoutRegistering) {
   EXPECT_EQ(0, alloc_.calls);
 }
 
-// ncclCeInit on a 2-rank comm, as in the CE init race NVIDIA/nccl@430afbce fixed. ncclMemAlloc does not zero memory, so
-// each allocation comes back as recycled memory holding 1: the value the first UC sync, and every sync under graph
-// capture, waits for.
+// ncclCeInit on 2 ranks with ncclMemAlloc returning stale 1s, the value the first UC sync waits for.
 class CeInitMicrotest : public ::testing::Test {
  protected:
   static constexpr uint32_t kStaleFlag = 1;
@@ -468,7 +466,6 @@ TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
       << "a stale " << kStaleFlag << " lets the first UC sync pass before its peer arrives";
 }
 
-// The signal buffer gets the same stale memory, and ncclCeInit clears it.
 TEST_F(CeInitMicrotest, StaleSignalBuffer_ClearsIt) {
   ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
 
