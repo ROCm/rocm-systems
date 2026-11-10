@@ -535,6 +535,7 @@ struct ncclKernelPlanner {
 
   struct Peer {
     bool sendSeen, recvSeen;
+    bool sendCeSeen, recvCeSeen;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;
     struct ncclIntruQueue<struct ncclTaskBcast, &ncclTaskBcast::next> bcastQueue;

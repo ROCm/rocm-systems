@@ -65,6 +65,7 @@ test_categories:
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "P2pBatchEligibility.*"
+      - "P2pCeChannelCapTests.*"
       - "ChannelDefaults.*"
       - "P2pChannelBase.*"
       - "Search*.*"
