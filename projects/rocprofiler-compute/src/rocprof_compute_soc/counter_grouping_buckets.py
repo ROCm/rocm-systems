@@ -41,7 +41,7 @@ def counters_fit_one_bucket(
     for ctr in sorted(counters):
         if not trial.add(ctr):
             return False
-    return bool(flat_counters_in_perfmon_file(trial))
+    return True
 
 
 def bucket_counter_set(counter_file: CounterFile) -> Set[str]:
