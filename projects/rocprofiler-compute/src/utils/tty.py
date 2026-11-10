@@ -948,7 +948,7 @@ def show_all(
             _ = is_roofline_shown(args, runs, output, panel)
 
         panel_content = ""  # store content of all data_source from one panel
-        # Metric -> value from every table in this panel, drawn as one chart
+        # Metric id -> value from every table in this panel, drawn as one chart
         mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
@@ -1040,14 +1040,13 @@ def show_all(
                 )
 
                 if is_mem_chart and len(runs) == 1:
+                    # Metric tables are indexed by Metric_ID
                     has_cols = (
-                        "Metric" in processed_df.columns
+                        processed_df.index.name == "Metric_ID"
                         and "Value" in processed_df.columns
                     )
                     if has_cols:
-                        table_mem = dict(
-                            zip(processed_df["Metric"], processed_df["Value"])
-                        )
+                        table_mem = dict(zip(processed_df.index, processed_df["Value"]))
                         mem_chart_data.update(table_mem)
                     # Skip individual table output; merged chart emitted below
                     continue
