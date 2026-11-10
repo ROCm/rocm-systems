@@ -637,6 +637,7 @@ Metric sets filtering
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
+Each set lists metric ids, and analyze shows only the rows of those metrics.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
 See :ref:`profile-selection-options` for the options it can be combined with.
 ``--set`` can't be used with ``--pc-sampling``.
@@ -659,7 +660,7 @@ See :ref:`profile-selection-options` for the options it can be combined with.
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
    INFO Kernel Iteration Range: None
-   INFO Filtered sections: ['11.2.2', '11.2.3', '11.2.4', '11.2.5']
+   INFO Filtered sections: ['compute.salu_util', 'compute.valu_util', 'compute.vmem_util', 'compute.branch_util']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    INFO Collecting Performance Counters
@@ -684,21 +685,21 @@ To see a list of available sets, use the ``--list-sets`` option.
    ===================================================================================================================
    Set Option                          Set Title                           Metric Name                    Metric ID
    -------------------------------------------------------------------------------------------------------------------
-   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               11.2.3
-                                                                           VALU Utilization               11.2.4
-                                                                           VMEM Utilization               11.2.6
-                                                                           Branch Utilization             11.2.7
+   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               compute.salu_util
+                                                                           VALU Utilization               compute.valu_util
+                                                                           VMEM Utilization               compute.vmem_util
+                                                                           Branch Utilization             compute.branch_util
 
    ...
 
-   launch_stats                        Launch Stats                        Grid Size                      7.1.0
-                                                                           Workgroup Size                 7.1.1
-                                                                           Total Wavefronts               7.1.2
-                                                                           VGPRs                          7.1.5
-                                                                           AGPRs                          7.1.6
-                                                                           SGPRs                          7.1.7
-                                                                           LDS Allocation                 7.1.8
-                                                                           Scratch Allocation             7.1.9
+   launch_stats                        Launch Stats                        Grid Size                      dispatch.grid_size
+                                                                           Workgroup Size                 dispatch.workgroup_size
+                                                                           Dispatched Wavefronts          spi.dispatched_wavefronts
+                                                                           VGPRs                          dispatch.vgprs
+                                                                           AGPRs                          dispatch.agprs
+                                                                           SGPRs                          dispatch.sgprs
+                                                                           LDS Allocation                 dispatch.lds_allocation
+                                                                           Scratch Allocation             dispatch.scratch_allocation
 
    Usage Examples:
    rocprof-compute profile --set compute_thruput_util  # Profile this set
