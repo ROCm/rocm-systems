@@ -8,7 +8,6 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
-from pathlib import Path
 
 import yaml
 
@@ -101,9 +100,14 @@ for context_name, section_name in cdna_section_map.items():
                 "data": arch_metrics[arch][section_name],
             }
 
-# Load gfx115x (RDNA 3.5) metrics YAML
-with open("data/metrics/gfx115x_metrics.yaml") as f:
-    gfx115x_metrics = yaml.safe_load(f)
+# Load per-arch RDNA metrics YAMLs
+rdna_metrics = {}
+for arch in ["gfx115x", "gfx1201"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        rdna_metrics[arch] = yaml.safe_load(f)
+
+gfx115x_metrics = rdna_metrics["gfx115x"]
+gfx1201_metrics = rdna_metrics["gfx1201"]
 
 # RDNA gfx115x section mapping: jinja context id -> YAML section name
 rdna_gfx115x_section_map = {
@@ -174,12 +178,6 @@ for context_name, section_name in rdna_gfx115x_section_map.items():
     jinja_contexts[context_name] = {
         "data": gfx115x_metrics.get(section_name, {}),
     }
-
-# Navi48 metrics are generated from the gfx1201 descriptions and panel YAMLs.
-with (Path(__file__).resolve().parent / "data/metrics/gfx1201_metrics.yaml").open(
-    encoding="utf-8"
-) as metrics_file:
-    gfx1201_metrics = yaml.safe_load(metrics_file)
 
 rdna_gfx1201_section_map = {
     "sys-sol-gfx1201": "System Speed-of-Light",

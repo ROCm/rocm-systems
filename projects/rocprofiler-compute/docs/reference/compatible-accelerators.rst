@@ -6,7 +6,7 @@
 Compatible GPUs/APUs
 ***********************
 
-The following table lists SoCs (System on Chip) supported by
+The following table lists SoCs (System on Chip) tested for compatibility with
 ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Instinct™ GPUs and AMD Ryzen™ APUs specifications.
 
 .. _def-soc:

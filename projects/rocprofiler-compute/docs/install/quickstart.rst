@@ -109,8 +109,9 @@ For detailed installation instructions, refer to :doc:`/install/core-install`.
 
 .. note::
 
-   On gfx115x (RDNA3.5) and gfx1201 (RDNA4), set the performance level to ``STABLE_STD`` before
-   collecting counters. See :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
+   On gfx115x (RDNA3.5) and gfx1201 (RDNA4), set the performance level to
+   ``STABLE_STD`` before collecting counters. This requires sudo access. See
+   :ref:`profiling power-gating requirements <profile-rdna-power-gating>`.
 
 .. _profile-quickstart:
 

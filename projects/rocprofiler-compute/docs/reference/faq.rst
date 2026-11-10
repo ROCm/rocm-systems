@@ -136,6 +136,17 @@ This is a hardware power-gating behavior rather than a counter-collection
 defect. It has been observed on gfx115x (RDNA 3.5); the same AUTO
 gating is documented for Navi3x and Navi4x.
 
-For the workaround, see `Setting GPU performance level for PMC profiling
+Setting the performance level requires sudo access. For example, if the target
+GPU is index 0:
+
+.. code-block:: bash
+
+   sudo /opt/rocm/bin/amd-smi set --gpu 0 --perf-level STABLE_STD
+
+Select the GPU index from ``amd-smi list``. Omitting ``--gpu`` changes the
+performance level of every GPU. Use the same performance state when comparing
+runs.
+
+For more detail, see `Setting GPU performance level for PMC profiling
 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling>`_
 in the ROCprofiler-SDK documentation.
