@@ -6236,5 +6236,99 @@ TEST(Instrumentor, RegisterGrowthStillRejectsRelativeSgprAccess) {
       << result.errors.front();
 }
 
+TEST(InstrumentorResources, EntrySgprSnapshotIncludesEnabledInputsBeyondUsedRegisters) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded());
+  std::vector<uint8_t> image = test::with_resource_metadata(
+      make_kernarg_kernel_elf({nop.value(), end.value()}, 0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                              kTestKernargSize),
+      {{"test_kernel", kTestKernargSize, 4, 4, 0}});
+  const AmdGpuCodeObject original(image.data(), image.size());
+  const Section *text = original.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+  set_kernel_descriptor_user_sgpr_count(kArch, descriptor, 16);
+  descriptor.compute_pgm_rsrc2 |= amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  std::memcpy(image.data() + kernels.front().descriptor_file_offset, &descriptor,
+              sizeof(descriptor));
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const uint16_t source : {16, 17}) {
+    SCOPED_TRACE(source);
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    // Metadata can count only used registers while CP still initializes s16.
+    options.register_growth = OriginalRegisterCounts{4, 4};
+    Instrumentor instrumentor(object, kArch, options);
+    InstrumentationPoint point;
+    point.probe_obj = &probe;
+    point.probe_symbol = "snapshots";
+    point.probe_args = {{.source = ProbeArgSource::EntrySgpr, .register_index = source}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (source == 16) {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_FALSE(result.elf_bytes.empty());
+      const FailureOr<amdhsa::MetadataDocument> metadata =
+          amdhsa::MetadataDocument::parse(result.elf_bytes);
+      ASSERT_TRUE(metadata.succeeded());
+      const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+      ASSERT_NE(entries, nullptr);
+      ASSERT_EQ(entries->array.size(), 1u);
+      EXPECT_EQ(entries->array[0].integer_field(".kernarg_segment_size"),
+                result.resources.kernarg_bytes);
+      EXPECT_EQ(entries->array[0].integer_field(".sgpr_count"), result.resources.sgprs);
+      EXPECT_EQ(entries->array[0].integer_field(".vgpr_count"), result.resources.vgprs);
+      EXPECT_EQ(entries->array[0].integer_field(".private_segment_fixed_size"), 0u);
+    } else {
+      ASSERT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_NE(result.errors.front().find("entry SGPR capture"), std::string::npos);
+    }
+  }
+}
+
+TEST(InstrumentorResources, EntrySnapshotsRejectUndeclaredSourcesAndThirdValue) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded());
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      make_kernarg_kernel_elf({nop.value(), end.value()}, 0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                              kTestKernargSize, false, 5),
+      {{"test_kernel", kTestKernargSize, 34, 4, 0}});
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const std::vector<ProbeArgValue> &args :
+       {std::vector<ProbeArgValue>{{.source = ProbeArgSource::EntrySgpr, .register_index = 34}},
+        std::vector<ProbeArgValue>{
+            {.source = ProbeArgSource::EntrySgpr, .register_index = UINT16_MAX}},
+        std::vector<ProbeArgValue>{{.source = ProbeArgSource::EntryVgprLane0, .register_index = 4}},
+        std::vector<ProbeArgValue>{
+            {.source = ProbeArgSource::EntrySgpr, .register_index = 2},
+            {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0},
+            {.source = ProbeArgSource::EntryVgprLane0, .register_index = 1}}}) {
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    options.register_growth = OriginalRegisterCounts{34, 4};
+    Instrumentor instrumentor(object, kArch, options);
+    InstrumentationPoint point;
+    point.probe_obj = &probe;
+    point.probe_symbol = "snapshots";
+    point.probe_args = args;
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_NE(result.errors.front().find("entry"), std::string::npos) << result.errors.front();
+  }
+}
+
 } // namespace
 } // namespace rocjitsu

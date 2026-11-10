@@ -791,5 +791,69 @@ TEST_F(DbiRdna4EntryPrologueSim, DispatchAtTheOriginalEntrySkipsThePrologue) {
   expect_dispatch_at_the_original_entry_skips_the_prologue();
 }
 
+void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch) {
+  SCOPED_TRACE(arch.sim_arch);
+  const util::FailureOr<uint32_t> guest_write = build_v_mov_b32_src(0, 135, arch.arch);
+  const util::FailureOr<uint32_t> guest_read = build_v_mov_b32_src(4, 256, arch.arch);
+  const util::FailureOr<uint32_t> scalar_guest_output = build_v_mov_b32_src(0, 0, arch.arch);
+  const util::FailureOr<uint32_t> scalar_output = build_v_mov_b32_src(2, 256, arch.arch);
+  const util::FailureOr<uint32_t> vector_output = build_v_mov_b32_src(3, 257, arch.arch);
+  const util::FailureOr<uint32_t> scalar_write = build_s_mov_b32(0, 128, arch.arch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch.arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch.arch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch.arch);
+  ASSERT_TRUE(guest_write.succeeded());
+  ASSERT_TRUE(guest_read.succeeded());
+  ASSERT_TRUE(scalar_guest_output.succeeded());
+  ASSERT_TRUE(scalar_output.succeeded());
+  ASSERT_TRUE(vector_output.succeeded());
+  ASSERT_TRUE(scalar_write.succeeded() && nop.succeeded() && end.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> target = test::with_descriptor_metadata(
+      test::make_kernarg_kernel_elf({scalar_write.value(), guest_write.value(), guest_read.value(),
+                                     nop.value(), scalar_guest_output.value(), end.value()},
+                                    64, arch.e_flags, kGuestKernargSize, arch.wave32, 3, 0, 1, 1),
+      arch.arch);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "entry_inputs", {scalar_output.value(), vector_output.value(), ret.value()}, arch.e_flags);
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+  Instrumentor instrumentor(object, arch.arch, options);
+  InstrumentationPoint point;
+  point.anchor_offset = 12;
+  point.probe_obj = &probe;
+  point.probe_symbol = "entry_inputs";
+  point.probe_args = {{.source = ProbeArgSource::EntrySgpr, .register_index = 0},
+                      {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::optional<uint64_t> entry = test::patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
+  if (arch.wave32)
+    sim.set_wave32_dispatch();
+  sim.set_kernarg(make_wrapper_image());
+  sim.set_entry_offset(*entry);
+  const std::vector<std::vector<uint32_t>> values =
+      sim.run_and_read_vgprs(test::section_words(patched, ".text"),
+                             test::patched_private_segment_size(patched), {2, 3, 4, 0});
+  ASSERT_EQ(values.size(), 4u);
+  for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
+    EXPECT_EQ(values[0][lane], static_cast<uint32_t>(kGuestKernargSentinel));
+    EXPECT_EQ(values[1][lane], 0u);
+    EXPECT_EQ(values[2][lane], 7u);
+    EXPECT_EQ(values[3][lane], 0u);
+  }
+}
+
+TEST(DbiEntrySnapshotSim, ScalarAndVectorInputsSurviveGuestOverwrites) {
+  for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4})
+    ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(arch));
+}
+
 } // namespace
 } // namespace rocjitsu

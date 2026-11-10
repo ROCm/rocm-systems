@@ -1094,6 +1094,30 @@ TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
   }
 }
 
+TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
+  for (const ProbeArgSource source : {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0}) {
+    SCOPED_TRACE(static_cast<int>(source));
+    TrampolinePlan plan = make_probe_plan();
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 0,
+         .sgpr = 22,
+         .source_class = source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR}};
+    plan.probe_args = {{source, 0}};
+    std::string error;
+    ASSERT_TRUE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error))
+        << error;
+    plan.entry_register_captures.front().sgpr = kVectorSrcLiteral;
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &error).has_value());
+    const std::string source_name =
+        source == ProbeArgSource::EntrySgpr ? "EntrySgpr" : "EntryVgprLane0";
+    EXPECT_EQ(error, "probe-call emission: argument 0 (" + source_name +
+                         "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
+    EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
+  }
+}
+
 // The envelope materializes the target address with getpc + add + addc.
 TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
   const TrampolinePlan plan = make_probe_plan();
@@ -1455,7 +1479,7 @@ TEST(TrampolineBuilderEmit, MovrelsM0RestorePadsToOneWaitState) {
                            .argument_moves = {},
                            .argument_copy_temp = std::nullopt,
                            .entry_storage_base = std::nullopt,
-                           .entry_vgpr_captures = {},
+                           .entry_register_captures = {},
                            .register_saves = {},
                            .preserve_m0 = true,
                            .special_state_saves = {},

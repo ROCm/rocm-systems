@@ -16,6 +16,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -441,25 +442,35 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       return false;
     }
     entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
-    RegisterSet captured_vgprs;
-    for (const EntryVgprCapture &capture : plan.entry_vgpr_captures) {
+    std::vector<std::pair<RegClass, uint16_t>> captured_registers;
+    for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
       if (capture.sgpr < *plan.entry_storage_base + 2 ||
           capture.sgpr >= *plan.entry_storage_base + 4 || capture.sgpr >= sgpr_bound ||
-          capture.vgpr >= std::min(plan.kernel_vgpr_count, 256u) ||
+          (capture.source_class != RegClass::SGPR && capture.source_class != RegClass::VGPR) ||
+          capture.source_index >= (capture.source_class == RegClass::SGPR
+                                       ? sgpr_bound
+                                       : std::min(plan.kernel_vgpr_count, 256u)) ||
           entry_storage.intersects({RegClass::SGPR, capture.sgpr, 1}) ||
-          captured_vgprs.intersects({RegClass::VGPR, capture.vgpr, 1})) {
-        report(error_out, "entry VGPR capture is outside the framework-owned register run");
+          std::ranges::find(captured_registers,
+                            std::pair{capture.source_class, capture.source_index}) !=
+              captured_registers.end()) {
+        report(error_out, "entry register capture is outside the framework-owned register run");
         return false;
       }
       entry_storage.expand(RegisterRef{RegClass::SGPR, capture.sgpr, 1});
-      captured_vgprs.expand(RegisterRef{RegClass::VGPR, capture.vgpr, 1});
+      captured_registers.emplace_back(capture.source_class, capture.source_index);
     }
     for (const ProbeArgValue &arg : plan.probe_args)
-      if (arg.source == ProbeArgSource::EntryVgprLane0 &&
-          std::ranges::none_of(plan.entry_vgpr_captures, [&](const auto &capture) {
-            return capture.vgpr == arg.register_index;
-          })) {
-        report(error_out, "entry VGPR argument has no framework-owned entry capture");
+      if ((arg.source == ProbeArgSource::EntryVgprLane0 ||
+           arg.source == ProbeArgSource::EntrySgpr) &&
+          std::ranges::none_of(
+              plan.entry_register_captures, [&](const EntryRegisterCapture &capture) {
+                return capture.source_index == arg.register_index &&
+                       capture.source_class == (arg.source == ProbeArgSource::EntrySgpr
+                                                    ? RegClass::SGPR
+                                                    : RegClass::VGPR);
+              })) {
+        report(error_out, "entry register argument has no framework-owned entry capture");
         return false;
       }
     // Excluding the pair from the envelope's temps is not enough on its own: the
@@ -618,6 +629,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     case ProbeArgSource::AnchorExecHi:
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
+    case ProbeArgSource::EntrySgpr:
     case ProbeArgSource::EntryVgprLane0:
       envelope_words += 1;
       break;
@@ -808,7 +820,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     unavailable_backups.expand({RegClass::SGPR, save.temp_base, save.width});
   if (plan.entry_storage_base)
     unavailable_backups.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
-  for (const EntryVgprCapture &capture : plan.entry_vgpr_captures)
+  for (const EntryRegisterCapture &capture : plan.entry_register_captures)
     unavailable_backups.expand({RegClass::SGPR, capture.sgpr, 1});
   RegisterSet register_save_destinations;
   if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
@@ -865,6 +877,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
         return;
       std::string_view source;
       switch (arg.source) {
+      case ProbeArgSource::EntrySgpr:
+        source = "EntrySgpr";
+        break;
       case ProbeArgSource::EntryVgprLane0:
         source = "EntryVgprLane0";
         break;
@@ -908,12 +923,16 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // that on its own: any argument at all opens the full-mask window, which
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
+    case ProbeArgSource::EntrySgpr:
     case ProbeArgSource::EntryVgprLane0: {
-      const std::vector<EntryVgprCapture>::const_iterator captured =
-          std::ranges::find_if(plan.entry_vgpr_captures,
-                               [&](const auto &value) { return value.vgpr == arg.register_index; });
-      if (captured == plan.entry_vgpr_captures.end()) {
-        report(error_out, "probe-call emission: missing entry VGPR capture");
+      const std::vector<EntryRegisterCapture>::const_iterator captured = std::ranges::find_if(
+          plan.entry_register_captures, [&](const EntryRegisterCapture &value) {
+            return value.source_index == arg.register_index &&
+                   value.source_class ==
+                       (arg.source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR);
+          });
+      if (captured == plan.entry_register_captures.end()) {
+        report(error_out, "probe-call emission: missing entry register capture");
         return std::nullopt;
       }
       const util::FailureOr<uint32_t> word =
