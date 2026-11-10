@@ -116,7 +116,8 @@ std::set<std::string> directory_entries(const std::filesystem::path &path) {
 }
 
 TEST(VmConfigApi, CanonicalGpuProfilesAreDiscoverableWithoutActivation) {
-  const rocjitsu::test::ScopedTempDirectory runtime("rocjitsu-passive-config-");
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-passive-config-"));
   const rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR",
                                                               runtime.path());
   const auto tasks = directory_entries("/proc/self/task");
