@@ -5257,7 +5257,8 @@ TEST_F(KfdIoctlTest, DbgTrapFifoNotifierWritesOneBytePerEvent) {
   create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
 
-  rocjitsu::test::ScopedTempFile fifo_path("rocjitsu-debug-notifier-");
+  rocjitsu::test::ScopedTempFile fifo_path;
+  ASSERT_TRUE(fifo_path.initialize("rocjitsu-debug-notifier-"));
   ASSERT_EQ(::unlink(fifo_path.path().c_str()), 0);
   ASSERT_EQ(::mkfifo(fifo_path.path().c_str(), 0600), 0);
   const int notifier = ::open(fifo_path.path().c_str(), O_RDWR | O_CLOEXEC | O_NONBLOCK);
