@@ -2022,4 +2022,14 @@ TEST_F(GroupRegisterSymmetricDevCommTest, QueuedTask_BuildsForTaskDeviceCodeVers
   EXPECT_EQ(static_cast<uint32_t>(NCCL_VERSION_CODE), outDevComm_.version);
 }
 
+// Contrast, AOT case: the task's older device-code version is down-converted through its record.
+TEST_F(GroupRegisterSymmetricDevCommTest, QueuedTask_OlderDeviceCodeVersion_DownConverts) {
+  QueueCreateTask(/*reqsVersion=*/kCompileTimeVersion, /*deviceCodeVersion=*/kCompileTimeVersion);
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
+  EXPECT_EQ(1, newToOldCalls_);
+}
+
 }  // namespace
