@@ -1,0 +1,30 @@
+view: GL0 Texture Data (TXD)
+legacy_panel_id: 1000
+alias: txd
+tables:
+- id: 1001
+  title: TXD Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txd.util
+    label: Utilization
+    legacy_id: 10.1.0
+  - metric: txd.stalled_by_gl0_cache_lds
+    legacy_id: 10.1.1
+  - metric: txd.output_stalled_by_shader
+    legacy_id: 10.1.2
+  - metric: txd.output_stalled_by_spi_wr_to_shader
+    legacy_id: 10.1.3
+  - metric: txd.shader_bus_util_lds_return
+    label: TXD-Shader Bus Util - LDS Return
+    legacy_id: 10.1.4
+  - metric: txd.shader_bus_util_gl0_return
+    label: TXD-Shader Bus Util - GL0 Return
+    legacy_id: 10.1.5
+  - metric: txd.cache_return_stalled_by_txd
+    legacy_id: 10.1.6

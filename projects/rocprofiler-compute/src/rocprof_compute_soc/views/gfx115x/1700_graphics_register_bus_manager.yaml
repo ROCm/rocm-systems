@@ -1,0 +1,31 @@
+view: Graphics Register Bus Manager (GRBM)
+legacy_panel_id: 1700
+alias: grbm
+tables:
+- id: 1701
+  title: GPU Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.gpu_busy
+    legacy_id: 17.1.0
+  - metric: grbm.cp_util
+    label: CP Busy
+    legacy_id: 17.1.1
+  - metric: grbm.gl2c_busy
+    legacy_id: 17.1.2
+- id: 1702
+  title: Shader Engine Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.ta_busy
+    legacy_id: 17.2.0

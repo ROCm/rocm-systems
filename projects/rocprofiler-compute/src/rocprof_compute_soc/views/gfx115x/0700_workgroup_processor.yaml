@@ -1,0 +1,146 @@
+view: Workgroup Processor (WGP)
+legacy_panel_id: 700
+alias: wgp
+tables:
+- id: 702
+  title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+    legacy_id: 7.2.0
+  - metric: dispatch.workgroup_size
+    legacy_id: 7.2.1
+  - metric: dispatch.vgprs
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+  - metric: dispatch.scratch_allocation
+    legacy_id: 7.2.5
+- id: 703
+  title: Wave Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.dispatched_wavefronts
+    label: Dispatched Waves
+    legacy_id: 7.3.0
+  - metric: wave.dispatched_threads
+    legacy_id: 7.3.1
+- id: 704
+  title: Wave Life
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.life
+    label: Wave Life
+    legacy_id: 7.4.0
+- id: 705
+  title: Wave Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_insts
+    legacy_id: 7.5.0
+  - metric: compute.insts_internal
+    legacy_id: 7.5.1
+  - metric: compute.insts_valu
+    legacy_id: 7.5.2
+  - metric: compute.insts_salu
+    legacy_id: 7.5.3
+  - metric: compute.insts_smem
+    legacy_id: 7.5.4
+  - metric: compute.insts_transcendental
+    legacy_id: 7.5.5
+  - metric: compute.insts_dual_valu_vopd
+    legacy_id: 7.5.6
+  - metric: compute.insts_vmem
+    legacy_id: 7.5.7
+  - metric: compute.insts_lds
+- id: 706
+  title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_vmem_flat
+    legacy_id: 7.6.0
+  - metric: compute.insts_tex_load
+    legacy_id: 7.6.1
+  - metric: compute.insts_tex_store
+    legacy_id: 7.6.2
+  - metric: compute.insts_flat_load
+    legacy_id: 7.6.3
+  - metric: compute.insts_flat_store
+    legacy_id: 7.6.4
+- id: 707
+  title: LDS Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.lds_direct_load_insts
+    legacy_id: 7.7.0
+  - metric: compute.lds_parameter_load_insts
+    legacy_id: 7.7.1
+  - metric: compute.wave32_lds_parameter_load_insts
+    legacy_id: 7.7.2
+- id: 709
+  title: Wait State Analysis
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.wait_for_any
+  - metric: wave.wait_for_inst_fetch
+    legacy_id: 7.9.1
+  - metric: wave.wait_for_barrier
+    legacy_id: 7.9.2
+  - metric: wave.wait_for_counter
+    legacy_id: 7.9.3
+- id: 710
+  title: Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.hit_rate_excl_dup
+    label: Icache Hit Rate
+- id: 711
+  title: Scalar Data Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.hit_rate_excl_dup
+    label: DCache Hit Rate

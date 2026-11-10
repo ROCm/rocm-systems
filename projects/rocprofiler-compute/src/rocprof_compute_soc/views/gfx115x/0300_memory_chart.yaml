@@ -1,0 +1,182 @@
+view: Memory Chart
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Instruction Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+    label: ICache Requests
+    legacy_id: 3.1.0
+  - metric: l1i.hit_rate_excl_dup
+    label: ICache Hit Rate
+    legacy_id: 3.1.1
+  - metric: l1i.gl1_rd_bw
+    label: ICache-GL1 Read Bandwidth
+    legacy_id: 3.1.2
+- id: 302
+  title: Scalar Data Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+    label: DCache Requests
+    legacy_id: 3.2.0
+  - metric: sl1d.hit_rate_excl_dup
+    label: DCache Hit Rate
+    legacy_id: 3.2.1
+  - metric: sl1d.gl1_rd_bw
+    label: DCache-GL1 Read Bandwidth
+    legacy_id: 3.2.2
+- id: 303
+  title: TCP Cache (GL0 Vector Cache)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.rd_req
+    label: TCP Read Requests
+    legacy_id: 3.3.0
+  - metric: gl0.wr_req
+    label: TCP Write Requests
+    legacy_id: 3.3.1
+  - metric: gl0.hit_rate
+    label: GL0 Cache Hit Rate (TCP Cache)
+    legacy_id: 3.3.2
+  - metric: gl0.bw
+    label: GL0 Cache BW (TCP Cache)
+    legacy_id: 3.3.3
+- id: 304
+  title: LDS (Local Data Share)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: compute.insts_lds
+    label: LDS Req
+    legacy_id: 3.4.0
+  - metric: lds.util
+    legacy_id: 3.4.1
+  - metric: lds.bank_conflict_rate
+    legacy_id: 3.4.2
+  - metric: lds.theoretical_bw
+    label: LDS Estimated Bandwidth
+    legacy_id: 3.4.3
+- id: 305
+  title: TCP-GL1 Interface
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_bw
+    label: TCP-GL1 Read Bandwidth
+    legacy_id: 3.5.0
+  - metric: gl0.gl1_wr_bw
+    label: TCP-GL1 Write Bandwidth
+    legacy_id: 3.5.1
+- id: 306
+  title: GL1 Cache (L1)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.util
+    legacy_id: 3.6.0
+  - metric: gl1.hit_rate
+    label: GL1 Cache Hit Rate
+    legacy_id: 3.6.1
+  - metric: gl1.stall_gl2_backpressure
+    legacy_id: 3.6.2
+- id: 307
+  title: GL1-GL2 Interface
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_bw
+    legacy_id: 3.7.0
+  - metric: gl1.gl2_wr_bw
+    legacy_id: 3.7.1
+- id: 308
+  title: GL2 Cache (L2)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.util
+    legacy_id: 3.8.0
+  - metric: gl2.hit_rate
+    legacy_id: 3.8.1
+  - metric: gl2.fabric_rd_bw
+    label: GL2-Fabric Read BW
+    legacy_id: 3.8.2
+  - metric: gl2.fabric_wr_bw
+    label: GL2-Fabric Write BW
+    legacy_id: 3.8.3
+- id: 309
+  title: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gcea.sysarb_util
+    legacy_id: 3.9.0
+  - metric: gcea.sysarb_stall_rate
+    legacy_id: 3.9.1
+  - metric: gcea.dram_rd_bw
+    legacy_id: 3.9.2
+  - metric: gcea.dram_wr_bw
+    legacy_id: 3.9.3
+- id: 310
+  title: Workgroup Processors (WGPs)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+    legacy_id: 3.10.0
+  - metric: dispatch.vgprs
+    label: VGPR
+    round: 0
+    legacy_id: 3.10.1
+  - metric: dispatch.sgprs
+    label: SGPR
+    round: 0
+    legacy_id: 3.10.2
+  - metric: dispatch.lds_allocation
+    round: 0
+    legacy_id: 3.10.3
+  - metric: dispatch.scratch_allocation_per_wave
+    label: Scratch Allocation
+    round: 3
+    legacy_id: 3.10.4
+  - metric: dispatch.workgroups_per_wgp
+    label: Workgroups
+    round: 1
+    legacy_id: 3.10.5
