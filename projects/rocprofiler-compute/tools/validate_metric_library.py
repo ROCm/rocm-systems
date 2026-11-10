@@ -51,8 +51,6 @@ UNIT_ALIASES = {
     "Wave": "Wavefronts",
     "Waves": "Wavefronts",
 }
-# Metric id format: {category}.{subcategory}_{name}, in lowercase with underscores.
-METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # Metric fields with an expression.
@@ -249,7 +247,7 @@ def _id_errors(metric_id: str, source: str, category: str) -> List[str]:
     """Report a malformed id, an id named after a view, and an id outside the file's
     category."""
     errors = []
-    if not METRIC_LIBRARY_ID_RE.match(metric_id):
+    if not loader.METRIC_LIBRARY_ID_RE.match(metric_id):
         errors.append(
             f"[{source}] {metric_id}: the id must look like "
             "'{category}.{subcategory}_{name}'"
