@@ -1086,6 +1086,7 @@ if(BUILD_TESTS)
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
+      transport/NetLl128MPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
@@ -1140,6 +1141,7 @@ if(BUILD_TESTS)
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
+      DdaAlltoAllInPlaceMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
