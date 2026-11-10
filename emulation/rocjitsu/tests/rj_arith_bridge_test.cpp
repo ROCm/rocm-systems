@@ -8710,10 +8710,6 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
               }
 }
 
-// Wave32 VOPD: X moves old v7 into v6, Y reads old v6 and writes v7.
-// Values are exactly representable; the existing rj-arith dual/dot suites cover
-// numerical boundaries. This table checks every decoded slot and operand role.
-
 TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
   for (bool rdna3 : {false, true})
     for (uint32_t lanes : {32u, 64u})
@@ -9061,6 +9057,236 @@ TEST(ArithBridgeTest, Dot4DppObservesOnlyWritableLanes) {
   }
 }
 
+// Wave32 VOPD: X moves old v7 into v6, Y reads old v6 and writes v7.
+// Values are exactly representable; the existing rj-arith dual/dot suites cover
+// numerical boundaries. This table checks every decoded slot and operand role.
+TEST(ArithBridgeTest, DualSlotsMasksAliasesLiteralsAndDots) {
+  for (bool rdna3 : {false, true})
+    for (bool loose : {false, true})
+      for (uint32_t exec_mask : {0U, 0x80000005U, 0xffffffffU})
+        for (unsigned op :
+             {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 16U, 17U, 18U})
+          for (unsigned variant = 0; variant < (op == 12 || op == 13 ? 2U : 1U); ++variant) {
+            SCOPED_TRACE(::testing::Message()
+                         << rdna3 << ":" << loose << ":" << exec_mask << ":" << op);
+            ArithmeticPolicy policy{};
+            if (loose) {
+              policy.semantics = ArithmeticSemantics::Loose;
+            }
+            BridgeFixture fixture(rdna3, 32, policy);
+            fixture.wave->set_mode_raw(0xf0);
+            fixture.wave->set_exec(exec_mask);
+            fixture.wave->set_vcc_mask(0xaaaaaaaa);
+            fixture.wave->set_trapsts(0x20);
+            uint32_t a = 0x40000000, b = 0x40400000, c = 0x40a00000;
+            if (op == 12) {
+              a = 0x40003c00;
+              b = 0x44004200;
+            }
+            if (op == 13) {
+              a = 0x40003f80;
+              b = 0x40804040;
+            }
+            if (op >= 16) {
+              a = 2;
+              b = 3;
+            }
+            for (unsigned lane = 0; lane < 32; ++lane) {
+              fixture.cu->write_vgpr(fixture.base() + 6, lane, a);
+              fixture.cu->write_vgpr(fixture.base() + 3, lane, b);
+              fixture.cu->write_vgpr(fixture.base() + 7, lane, c);
+            }
+            const std::array<uint32_t, 3> words = {
+                (0x32U << 26) | (8U << 22) | (op << 17) | (5U << 9) | 263U,
+                (6U << 24) | (3U << 17) | (3U << 9) | (variant ? 242U : 262U), 0x40800000U};
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            fixture.recorder->reads.clear();
+            fixture.recorder->writes.clear();
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            // MOV's unused VSRCX1=5 must not become an observed source read.
+            for (const auto &read : fixture.recorder->reads) {
+              EXPECT_NE(read.reg, fixture.base() + 5);
+              EXPECT_EQ(read.lanes, exec_mask);
+            }
+            EXPECT_EQ(fixture.recorder->writes.size(), exec_mask ? 2U : 0U);
+            for (unsigned lane = 0; lane < 32; ++lane) {
+              uint32_t expected = 0;
+              switch (op) {
+              case 0:
+                expected = 0x41300000;
+                break; // 2*3+5 = 11
+              case 1:
+                expected = 0x41200000;
+                break; // 2*3+4 = 10
+              case 2:
+                expected = 0x41300000;
+                break; // 2*4+3 = 11
+              case 3:
+              case 7:
+                expected = 0x40c00000;
+                break;
+              case 4:
+                expected = 0x40a00000;
+                break;
+              case 5:
+                expected = 0xbf800000;
+                break;
+              case 6:
+                expected = 0x3f800000;
+                break;
+              case 8:
+              case 11:
+                expected = a;
+                break;
+              case 9:
+                expected = lane & 1 ? b : a;
+                break;
+              case 10:
+                expected = b;
+                break;
+              case 12:
+              case 13:
+                expected = variant ? 0x41400000 : 0x41800000;
+                break; // 1*3+2*4+5 = 16
+              case 16:
+                expected = 5;
+                break;
+              case 17:
+                expected = 12;
+                break;
+              case 18:
+                expected = 2;
+                break;
+              }
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, lane),
+                        (exec_mask >> lane) & 1 ? c : a);
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 7, lane),
+                        (exec_mask >> lane) & 1 ? expected : c);
+            }
+            EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+          }
+}
+
+TEST(ArithBridgeTest, DualObservesExecBeforeWriteMask) {
+  for (uint32_t write_mask : {0U, 1U}) {
+    BridgeFixture fixture(false);
+    fixture.wave->set_exec(3);
+    fixture.wave->set_vgpr_write_mask(write_mask);
+    const std::array<uint32_t, 2> words = {(0x32U << 26) | (8U << 22) | (4U << 17) | (1U << 9) |
+                                               256U,
+                                           (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    ASSERT_FALSE(fixture.recorder->reads.empty());
+    for (const auto &read : fixture.recorder->reads) {
+      EXPECT_EQ(read.lanes, 3U);
+    }
+    for (const auto &write : fixture.recorder->writes) {
+      EXPECT_EQ(write.lanes, write_mask);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, DualCompatibilityUsesGuestIeeeForGfx11SignalingNan) {
+  for (bool ieee : {false, true}) {
+    BridgeFixture fixture(true);
+    fixture.wave->set_mode_raw(0x30 | (ieee ? (1u << 9) : 0));
+    fixture.wave->set_exec(1);
+    fixture.cu->write_vgpr(fixture.base(), 0, 0x3f800000);
+    fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x7f800001);
+    const std::array<uint32_t, 2> words = {(0x32U << 26) | (7U << 22) | (8U << 17) | (1U << 9) |
+                                               256U,
+                                           (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, 0), ieee ? 0x7fc00001U : 0x7f800001U);
+  }
+}
+
+TEST(ArithBridgeTest, DualCommitsBothSlotsFpCauses) {
+  ArithmeticPolicy policy{ArithmeticSemantics::BitExactEmpirical};
+  BridgeFixture fixture(false, 32, policy);
+  fixture.wave->set_mode_raw(0xf0);
+  fixture.wave->set_exec(1);
+  fixture.wave->set_trapsts(4);
+  for (unsigned i = 0; auto value : {0x7f7fffffU, 0x40000000U, 0x7f800001U, 0x3f800000U}) {
+    fixture.cu->write_vgpr(fixture.base() + i++, 0, value);
+  }
+  const std::array<uint32_t, 2> words = {(0x32U << 26) | (3U << 22) | (3U << 17) | (1U << 9) | 256U,
+                                         (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(
+      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+  EXPECT_EQ(fixture.wave->pending_alu_causes(), 0x29U);
+  EXPECT_EQ(fixture.wave->trapsts(), 0x2dU);
+}
+
+TEST(ArithBridgeTest, DualSecondSlotRejectionCommitsNeitherResultNorState) {
+  for (bool rdna3 : {false, true}) {
+    ArithmeticPolicy policy{};
+    policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+    BridgeFixture fixture(rdna3, 32, policy);
+    fixture.wave->set_mode_raw(0xf0);
+    fixture.wave->set_exec(0xffffffff);
+    fixture.wave->set_trapsts(0x20);
+    // MOV succeeds on gfx11; gfx12 MUL can report overflow/inexact.
+    // MIN rejects mode 3 because it has no FP-status implementation.
+    const std::array<uint32_t, 2> words = {(0x32U << 26) | ((rdna3 ? 8U : 3U) << 22) | (11U << 17) |
+                                               (1U << 9) | 256U,
+                                           (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      fixture.cu->write_vgpr(fixture.base(), lane, 0x7f7fffff);
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x40000000);
+    }
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    fixture.recorder->writes.clear();
+    EXPECT_FALSE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_TRUE(fixture.recorder->writes.empty());
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, lane), 0x3c003c00U);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 7, lane), 0x3c003c00U);
+    }
+    EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+    EXPECT_EQ(fixture.wave->pending_alu_causes(), 0U);
+  }
+}
+
+} // namespace
+} // namespace rocjitsu::amdgpu
+
+namespace rocjitsu::amdgpu {
+namespace {
+TEST(ArithBridgeTest, DualDx9CompatibilityUnderflowBoundary) {
+  // gfx1201 flushes before rounding at MODE=0x10; the legacy host multiply
+  // rounded up to minimum-normal first. Compatibility follows the GPU here.
+  // gfx11 inherits the ordinary MUL model; this is not a gfx11 capture.
+  for (bool rdna3 : {false, true}) {
+    for (uint32_t mode : {0x10U, 0x30U}) {
+      BridgeFixture fixture(rdna3);
+      fixture.wave->set_mode_raw(mode);
+      fixture.wave->set_exec(1);
+      fixture.cu->write_vgpr(fixture.base(), 0, 0x00800000);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x3f7fffff);
+      const std::array<uint32_t, 2> words = {(0x32U << 26) | (7U << 22) | (8U << 17) | (1U << 9) |
+                                                 256U,
+                                             (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, 0), mode == 0x10 ? 0U : 0x00800000U);
+    }
+  }
+}
 } // namespace
 } // namespace rocjitsu::amdgpu
 
