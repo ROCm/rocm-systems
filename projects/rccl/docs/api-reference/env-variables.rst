@@ -686,6 +686,24 @@ in the following table.
       - | ``1``: Use 2 MiB pages (default).
         | ``0``: Use the regular pinned host allocation.
 
+    * - | ``NCCL_GDRCOPY_ENABLE``
+        | Places control data that the CPU writes and the GPU reads, such as
+          the communicator work FIFO and the network proxy's head and tail
+          synchronization words, in GPU memory that the CPU writes directly
+          instead of in pinned host memory. Applies only to gfx942 and gfx950;
+          on other GPUs it has no effect. With ``NCCL_DEBUG=INFO``, RCCL logs
+          ``Enabled GDRCopy equivalent memory allocation on <arch>`` when it
+          takes effect.
+        | RCCL does not use the GDRCopy library (``libgdrapi.so``) or its
+          ``gdrdrv`` driver, and does not include the CUDA DMA-BUF mmap backend
+          that NCCL 2.31.2 added for GDRCopy, so
+          ``NCCL_GDRCOPY_USE_INTERNAL_DMABUF`` has no effect.
+          ``NCCL_GDRCOPY_FIFO_ENABLE=0`` and ``NCCL_GDRCOPY_SYNC_ENABLE=0`` keep
+          the work FIFO and the synchronization words in host memory.
+        | Read once per process.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled on gfx942 and gfx950.
+
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
           ``IB`` network transport (``net_ib``). By default, the proxy fences
