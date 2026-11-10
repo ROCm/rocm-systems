@@ -27,7 +27,7 @@
 //
 // Usage:
 //   timeout --signal=INT 3s signal-handler-test [--app-signal-handler|--no-app-signal-handler]
-//                                               [--single-process|--fork|--fork-exec|--spawn]
+//                                               [--single-process|--fork-exec|--spawn]
 //
 // Good case (--app-signal-handler): app installs handler, coordinates shutdown.
 //   Used with rocprofv3 --disable-signal-handlers. Profiler flushes via atexit.
@@ -35,13 +35,9 @@
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
 //
-// _Fork skips pthread_atfork handlers and is outside rocprofv3's contract. vfork is used only for
-// the immediate exec/_exit spawn path below.
-
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 
-#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -53,107 +49,10 @@
 
 #include <atomic>
 #include <stdexcept>
-#include <vector>
 
 namespace
 {
 std::atomic<bool> g_shutdown{false};
-
-using profiler_status_query_t = int (*)(int*);
-
-profiler_status_query_t g_profiler_is_initialized = nullptr;
-profiler_status_query_t g_profiler_is_finalized   = nullptr;
-
-void
-resolve_profiler_status_queries()
-{
-    g_profiler_is_initialized = reinterpret_cast<profiler_status_query_t>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
-    g_profiler_is_finalized =
-        reinterpret_cast<profiler_status_query_t>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
-    if(!g_profiler_is_initialized || !g_profiler_is_finalized)
-        throw std::runtime_error{"profiler status queries are unavailable"};
-}
-
-bool
-profiler_is_disabled_in_child()
-{
-    int init = -1;
-    int fini = -1;
-    return g_profiler_is_initialized && g_profiler_is_finalized &&
-           g_profiler_is_initialized(&init) == 0 && g_profiler_is_finalized(&fini) == 0 &&
-           init == 0 && fini == 1;
-}
-
-struct waiting_child
-{
-    pid_t pid      = -1;
-    int   write_fd = -1;
-};
-
-std::vector<waiting_child>
-start_waiting_plain_fork_children(int count)
-{
-    resolve_profiler_status_queries();
-
-    auto children = std::vector<waiting_child>{};
-    children.reserve(count);
-
-    for(int i = 0; i < count; ++i)
-    {
-        int control_pipe[2] = {-1, -1};
-        if(pipe(control_pipe) != 0)
-            throw std::runtime_error{"plain-fork control pipe creation failed"};
-
-        auto pid = fork();
-        if(pid == 0)
-        {
-            close(control_pipe[1]);
-            signal(SIGINT, SIG_IGN);
-
-            char       command  = 0;
-            const auto received = read(control_pipe[0], &command, sizeof(command));
-            close(control_pipe[0]);
-
-            const bool valid = profiler_is_disabled_in_child() &&
-                               received == static_cast<ssize_t>(sizeof(command)) && command == 'q';
-            _exit(valid ? 0 : 78);
-        }
-        if(pid < 0)
-        {
-            close(control_pipe[0]);
-            close(control_pipe[1]);
-            throw std::runtime_error{"plain-fork child creation failed"};
-        }
-
-        close(control_pipe[0]);
-        children.emplace_back(waiting_child{pid, control_pipe[1]});
-    }
-
-    return children;
-}
-
-void
-release_waiting_plain_fork_children(std::vector<waiting_child>& children)
-{
-    for(auto& child : children)
-    {
-        const char command = 'q';
-        if(write(child.write_fd, &command, sizeof(command)) !=
-           static_cast<ssize_t>(sizeof(command)))
-            throw std::runtime_error{"plain-fork child release failed"};
-        close(child.write_fd);
-        child.write_fd = -1;
-    }
-
-    for(const auto& child : children)
-    {
-        int status = 0;
-        if(waitpid(child.pid, &status, 0) != child.pid || !WIFEXITED(status) ||
-           WEXITSTATUS(status) != 0)
-            throw std::runtime_error{"plain-fork child contract check failed"};
-    }
-}
 
 template <typename... Args>
 std::string
@@ -263,26 +162,6 @@ mode_good_single_process()
 }
 
 int
-mode_good_fork()
-{
-    fprintf(stderr, "Mode: good/fork, PID=%d\n", getpid());
-
-    auto children = start_waiting_plain_fork_children(2);
-
-    struct sigaction sa = {};
-    sa.sa_handler       = sigint_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, nullptr);
-
-    run_kernels("parent");
-    release_waiting_plain_fork_children(children);
-
-    emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
-    return 0;
-}
-
-int
 mode_good_fork_exec(const char* self_path)
 {
     fprintf(stderr, "Mode: good/fork-exec, PID=%d\n", getpid());
@@ -361,21 +240,6 @@ mode_bad_single_process()
     fprintf(stderr, "Mode: bad/single-process, PID=%d (no signal handler)\n", getpid());
     run_kernels("parent");
     emit_roctx_marker("exit_marker parent single-process ppid:%d pid:%d", getppid(), getpid());
-    fprintf(stderr, "Parent PID=%d: exit\n", getpid());
-    return 0;
-}
-
-int
-mode_bad_fork()
-{
-    fprintf(stderr, "Mode: bad/fork, PID=%d (no signal handler)\n", getpid());
-
-    auto children = start_waiting_plain_fork_children(2);
-    release_waiting_plain_fork_children(children);
-
-    run_kernels("parent");
-
-    emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());
     return 0;
 }
@@ -515,7 +379,7 @@ main(int argc, char** argv)
 
     for(int i = 1; i < argc; i++)
     {
-        if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
+        if(std::strcmp(argv[i], "--single-process") == 0 ||
            std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
            std::strcmp(argv[i], "--lingering-child") == 0)
         {
@@ -543,14 +407,12 @@ main(int argc, char** argv)
     if(app_handles_signals)
     {
         if(std::strcmp(mode, "--single-process") == 0) return mode_good_single_process();
-        if(std::strcmp(mode, "--fork") == 0) return mode_good_fork();
         if(std::strcmp(mode, "--fork-exec") == 0) return mode_good_fork_exec(argv[0]);
         if(std::strcmp(mode, "--spawn") == 0) return mode_good_spawn(argv[0]);
     }
     else
     {
         if(std::strcmp(mode, "--single-process") == 0) return mode_bad_single_process();
-        if(std::strcmp(mode, "--fork") == 0) return mode_bad_fork();
         if(std::strcmp(mode, "--fork-exec") == 0) return mode_bad_fork_exec(argv[0]);
         if(std::strcmp(mode, "--spawn") == 0) return mode_bad_spawn(argv[0]);
     }

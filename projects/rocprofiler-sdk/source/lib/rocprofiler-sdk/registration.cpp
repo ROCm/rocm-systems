@@ -1096,42 +1096,30 @@ get_client_offset()
 int
 get_init_status()
 {
-    if(fork_child_abandoned()) return 0;
     return (get_status()) ? get_status()->first.load(std::memory_order_acquire) : 1;
 }
 
 int
 get_fini_status()
 {
-    if(fork_child_abandoned()) return 1;
     return (get_status()) ? get_status()->second.load(std::memory_order_acquire) : 1;
-}
-
-bool
-fork_child_abandoned() noexcept
-{
-    return internal_threading::fork_stale();
 }
 
 void
 set_init_status(int v)
 {
-    if(fork_child_abandoned()) return;
     if(get_status()) get_status()->first.store(v, std::memory_order_release);
 }
 
 void
 set_fini_status(int v)
 {
-    if(fork_child_abandoned()) return;
     if(get_status()) get_status()->second.store(v, std::memory_order_release);
 }
 
 void
 client_initialize(std::optional<client_library>& client)
 {
-    if(fork_child_abandoned()) return;
-
     set_init_status(-1);
     invoke_client_configure(client);
     invoke_client_initializer(client);
@@ -1143,9 +1131,6 @@ client_initialize(std::optional<client_library>& client)
 void
 initialize()
 {
-    if(fork_child_abandoned()) return;
-    internal_threading::register_fork_handler();
-
     init_logging();
 
     ROCP_INFO << "rocprofiler initialize called...";
@@ -1177,7 +1162,6 @@ initialize()
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
-            if(fork_child_abandoned()) return;
             finalize();
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
@@ -1220,8 +1204,6 @@ initialize()
 void
 finalize()
 {
-    if(fork_child_abandoned()) return;
-
 #if defined(CODECOV) && CODECOV > 0
     if(get_fini_status() > 0) __gcov_dump();
 #endif
@@ -1287,8 +1269,6 @@ finalize()
 rocprofiler_status_t
 attach()
 {
-    if(fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
-
     if(get_clients() && get_tool_library_load_failed())
     {
         ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded "
@@ -1303,7 +1283,6 @@ attach()
 rocprofiler_status_t
 detach()
 {
-    if(fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     return invoke_client_detaches();
 }
 }  // namespace registration
@@ -1327,8 +1306,6 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
-    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
-
     using scoped_lock_t = rocprofiler::registration::scoped_lock_t;
 
     rocprofiler::registration::init_logging();
@@ -1437,8 +1414,6 @@ rocprofiler_status_t
 rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
                                               void*                                      data)
 {
-    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
-
     auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations(nullptr);
 
     if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
@@ -1459,8 +1434,6 @@ rocprofiler_set_api_table(const char* name,
                           void**      tables,
                           uint64_t    num_tables)
 {
-    if(rocprofiler::registration::fork_child_abandoned()) return 0;
-
     // implementation has a call once
     rocprofiler::registration::init_logging();
 

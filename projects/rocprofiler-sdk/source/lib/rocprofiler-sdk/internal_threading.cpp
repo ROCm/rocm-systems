@@ -268,31 +268,18 @@ get_task_groups()
 }
 
 void
-disable_forked_child()
+mark_forked_callback_threads_stale()
 {
-    // The inherited profiler session remains disabled until exec. Do not allocate, lock, join, or
-    // recreate workers from this async-signal-safe child handler.
+    // Worker threads do not survive fork. Mark inherited task groups stale without recreating
+    // threads or invoking callbacks from the child handler.
     g_fork_generation.fetch_add(1, std::memory_order_release);
 }
 }  // namespace
-
-void
-register_fork_handler()
-{
-    static auto once = std::once_flag{};
-    std::call_once(once, []() {
-        const int status = ::pthread_atfork(nullptr, nullptr, disable_forked_child);
-        ROCP_FATAL_IF(status != 0) << "failed to register SDK fork handler: " << status;
-    });
-}
 
 // initialize the default thread pool
 void
 initialize()
 {
-    if(fork_stale()) return;
-    register_fork_handler();
-
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         // assume a task group per buffer so 1024 * 16 / 64 = 256 task group chunks
@@ -306,14 +293,13 @@ initialize()
         // will be destroyed before finalize is invoked.
         create_callback_thread();
         ::atexit(&registration::finalize);
+        ::pthread_atfork(nullptr, nullptr, mark_forked_callback_threads_stale);
     });
 }
 
 void
 finalize()
 {
-    if(fork_stale()) return;
-
     // PLT::ThreadPool::f_thread_ids() is not destruction order safe
     // if it does become safe, these two calls could be removed.
     if(get_task_groups())
@@ -331,22 +317,18 @@ finalize()
 void
 notify_pre_internal_thread_create(rocprofiler_runtime_library_t libs)
 {
-    if(fork_stale()) return;
     execute_creation_notifiers<notifier_stage::precreation>(libs, creation_notifier_library_seq);
 }
 
 void
 notify_post_internal_thread_create(rocprofiler_runtime_library_t libs)
 {
-    if(fork_stale()) return;
     execute_creation_notifiers<notifier_stage::postcreation>(libs, creation_notifier_library_seq);
 }
 
 rocprofiler_callback_thread_t
 create_callback_thread()
 {
-    if(fork_stale()) return rocprofiler_callback_thread_t{};
-
     // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
@@ -366,7 +348,6 @@ create_callback_thread()
 task_group_t*
 get_task_group(rocprofiler_callback_thread_t cb_tid)
 {
-    if(fork_stale()) return nullptr;
     if(!get_task_groups() || get_task_groups()->empty()) return nullptr;
     return get_task_groups()->at(cb_tid.handle);
 }
@@ -374,8 +355,6 @@ get_task_group(rocprofiler_callback_thread_t cb_tid)
 std::unique_ptr<task_group_t>
 create_task_group(size_t pool_size)
 {
-    if(fork_stale()) return {};
-
     // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
@@ -391,8 +370,6 @@ create_task_group(size_t pool_size)
 task_group_t*
 create_task_group(void* addr, size_t pool_size)
 {
-    if(fork_stale()) return nullptr;
-
     // notify that rocprofiler library is about to create an internal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
@@ -414,7 +391,6 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
                                       int                                      libs,
                                       void*                                    data)
 {
-    if(rocprofiler::internal_threading::fork_stale()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     rocprofiler::internal_threading::update_creation_notifiers(
         precreate,
         postcreate,
@@ -427,7 +403,6 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
 rocprofiler_status_t
 rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
 {
-    if(rocprofiler::internal_threading::fork_stale()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
@@ -447,7 +422,6 @@ rocprofiler_status_t
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
                                    rocprofiler_callback_thread_t cb_thread_id)
 {
-    if(rocprofiler::internal_threading::fork_stale()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 

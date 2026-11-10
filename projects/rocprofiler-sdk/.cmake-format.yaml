@@ -385,7 +385,6 @@ parse:
         PASS_REGEX: '*'
         APP_EXTRA_FLAGS: '*'
         ROCPROFV3_EXTRA_FLAGS: '*'
-        ENVIRONMENT: '*'
     rocprofiler_add_invalid_yaml_test:
       kwargs:
         NAME: '*'

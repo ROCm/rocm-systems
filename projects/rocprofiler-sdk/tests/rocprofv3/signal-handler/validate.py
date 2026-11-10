@@ -32,10 +32,7 @@ The per-scenario expectation is passed explicitly via --expect:
   clean-exit      : exit_marker present in JSON (proves clean atexit finalization). Used
                     when the app handles signals and rocprofv3 doesn't (--disable-signal-handlers)
   flushed-markers : valid JSON with >10 marker entries (proves the profiler flushed before
-                    the process died on the signal). Covers both the "app doesn't handle
-                    signals" case and the coordinated-shutdown case. For the latter,
-                    simply reaching this validator proves there was no deadlock (a
-                    regression trips the execute-step ctest TIMEOUT instead).
+                    the process died on the signal).
 """
 
 import json
@@ -71,13 +68,10 @@ def count_markers_in_json(data):
     return count
 
 
-def test_expected_output_count(output_dir, process_type):
-    """Plain-fork children emit no output; exec/spawn children start fresh sessions."""
+def test_output_files_exist(output_dir):
+    """JSON output files must exist."""
     files = find_json_files(output_dir)
-    expected = 3 if process_type in ("fork-exec", "spawn") else 1
-    assert (
-        len(files) == expected
-    ), f"Expected {expected} JSON output file(s) for {process_type}, found {files}"
+    assert len(files) > 0, f"No JSON output files found in {output_dir}"
 
 
 def test_json_is_valid(output_dir):
@@ -120,10 +114,8 @@ def test_clean_exit(output_dir, expect, process_type):
 
 def test_flushed_markers(output_dir, expect):
     """flushed-markers: JSON must contain >10 marker entries, proving the profiler flushed
-    before the process died on the signal. Covers the "app doesn't handle signals" case and
-    the coordinated-shutdown case (reaching this validator at all already proves the
-    coordinated case did not deadlock -- a regression trips the execute-step ctest
-    TIMEOUT). exit_marker is intentionally NOT required here."""
+    before the process died on the signal. exit_marker is intentionally NOT required here.
+    """
     if expect != "flushed-markers":
         pytest.skip(f"expectation is '{expect}', not flushed-markers")
 

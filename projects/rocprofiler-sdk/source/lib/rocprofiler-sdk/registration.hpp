@@ -67,9 +67,6 @@ get_init_status();
 int
 get_fini_status();
 
-bool
-fork_child_abandoned() noexcept;
-
 void
 set_init_status(int);
 

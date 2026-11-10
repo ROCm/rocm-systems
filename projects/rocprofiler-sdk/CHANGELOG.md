@@ -8,10 +8,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
-- ROCprofiler-SDK now keeps profiling active in the parent after `fork()` and disables the
-  inherited session in the child. The child must proceed to `exec()` or `_exit()`; a successful
-  `exec()` starts a fresh profiling session, while continuing normal execution in the plain-fork
-  child is unsupported.
+- Profiling a child that continues after `fork()` without `exec()` is unsupported. Use
+  `fork()` followed by `exec()` or a spawn operation to profile a new child process.
 
 ### Resolved issues
 

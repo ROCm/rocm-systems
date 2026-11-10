@@ -103,12 +103,6 @@ By default, ``rocprof-attach`` attaches to the target process and all of its des
 
    $ rocprof-attach -p 12345 -t path/to/your-tool-library.so --attach-children=false
 
-Selecting descendants does not restore an inherited disabled SDK session. This restriction applies
-to a child that inherited a loaded core ROCprofiler-SDK. It is not attachable unless it first
-replaces its process image with ``exec()``. A process forked before the core SDK is loaded has no
-inherited SDK session and can be attached later. For the complete process-creation contract, see
-:ref:`rocprofiler-process-creation`.
-
 More information can be found by invoking ``rocprof-attach -h``
 
 Python functions
@@ -176,8 +170,7 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 - **rocattach_attach(int pid)**: Attaches to a single process only.
    - Takes the target process ID as parameter.
    - Doesn't attach to child processes.
-   - To select existing descendants that each have an attachable SDK session, use
-     ``rocattach_attach_tree`` instead.
+   - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
 - **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
    - Detaches exactly the processes recorded by the ``rocattach_attach_tree`` call for the same ``pid``; ``/proc`` is not re-enumerated.

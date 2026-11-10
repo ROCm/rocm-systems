@@ -144,41 +144,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-const pid_t       tool_owner_pid = ::getpid();
-std::atomic<bool> tool_child_process{false};
-static_assert(std::atomic<bool>::is_always_lock_free);
-
-bool
-tool_child_abandoned() noexcept
-{
-    return tool_child_process.load(std::memory_order_acquire);
-}
-
-bool
-tool_signal_child_abandoned() noexcept
-{
-    return tool_owner_pid != ::getpid() || tool_child_abandoned();
-}
-
-void
-register_tool_fork_handler()
-{
-    static auto once = std::once_flag{};
-    std::call_once(once, []() {
-        if(tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_BEFORE_FORK_CHILD_LATCH", false))
-        {
-            const int test_status = ::pthread_atfork(nullptr, nullptr, []() {
-                rocprofv3_error_signal_handler(SIGCHLD, nullptr, nullptr);
-            });
-            ROCP_FATAL_IF(test_status != 0)
-                << "failed to register pre-latch fork test handler: " << test_status;
-        }
-
-        const int status = ::pthread_atfork(
-            nullptr, nullptr, []() { tool_child_process.store(true, std::memory_order_release); });
-        ROCP_FATAL_IF(status != 0) << "failed to register rocprofv3 fork handler: " << status;
-    });
-}
+const pid_t tool_owner_pid = ::getpid();
 
 // Thread for safe cleanup output generation
 auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
@@ -4997,7 +4963,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     (void) info;
     (void) ucontext;
 
-    if(tool_signal_child_abandoned())
+    if(tool_owner_pid != ::getpid())
     {
         restore_signal_disposition(signo);
         raise(signo);
@@ -5118,9 +5084,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    register_tool_fork_handler();
-    if(tool_child_abandoned()) return nullptr;
-
     initialize_logging();
 
     // set the client name
@@ -5195,8 +5158,6 @@ rocprofiler_configure_attach(uint32_t /*version*/,
                              uint32_t /*priority*/,
                              rocprofiler_client_id_t* /*id*/)
 {
-    if(tool_child_abandoned()) return nullptr;
-
     // This function is called right after rocprofiler_configure with the same parameters.
     // The data returned is only used when attaching to a running process.
 
@@ -5228,7 +5189,6 @@ sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler)
 {
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
-    if(tool_signal_child_abandoned()) return get_signal_function()(signum, handler);
 
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_signal_function()(signum, handler);
@@ -5252,7 +5212,6 @@ rocprofv3_sigaction(int signum,
 {
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
-    if(tool_signal_child_abandoned()) return get_sigaction_function()(signum, act, oldact);
 
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_sigaction_function()(signum, act, oldact);
@@ -5294,9 +5253,6 @@ rocprofv3_sigaction(int signum,
 int
 rocprofv3_main(int argc, char** argv, char** envp)
 {
-    register_tool_fork_handler();
-    if(tool_child_abandoned()) return get_main_function()(argc, argv, envp);
-
     auto convert_to_vec = [](char** inp) {
         auto        _data = std::vector<std::string_view>{};
         size_t      n     = 0;
@@ -5324,8 +5280,8 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // fork+exec and spawn children re-init through the normal init path. A plain-fork child never
-    // uses this inherited worker and must proceed to exec or _exit.
+    // fork+exec and spawn children initialize normally after exec. Plain-fork child profiling is
+    // unsupported, so do not recreate this inherited worker after fork.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);

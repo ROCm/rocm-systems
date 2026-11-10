@@ -152,16 +152,6 @@ The tool can invoke this function pointer to explicitly invoke the `finalize` ca
 
 Otherwise, ROCprofiler-SDK invokes the `finalize` callback via an `atexit` handler.
 
-Process creation
-----------------
-
-In a child that continues after ``fork()`` without ``exec()``, the inherited ROCprofiler-SDK
-session is unavailable. A custom tool must not invoke the inherited
-``rocprofiler_client_finalize_t`` callback. ``rocprofiler_is_finalized()`` reports a status of
-``1`` in that child only to mark the session unavailable; it does not indicate that the
-``rocprofiler_tool_finalize_t`` callback ran or that normal tool cleanup occurred. For the
-complete ``fork()``/``exec()``/``_exit()`` contract, see :ref:`rocprofiler-process-creation`.
-
 Full rocprofiler_configure sample
 ----------------------------------
 

@@ -77,12 +77,9 @@ private:
 
 using task_group_t = TaskGroup;
 
-// True in a child that inherited this SDK without exec. Inherited workers are unavailable.
+// True when the current process inherited task groups from an earlier fork generation.
 bool
 fork_stale();
-
-void
-register_fork_handler();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);

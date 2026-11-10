@@ -1677,8 +1677,7 @@ init()
     if(!init_done)
     {
         pthread_atfork(nullptr, nullptr, []() {
-            // The inherited session remains disabled until exec. Drop the child pointer without
-            // joining or recreating the parent's KFD worker.
+            // Drop the child's pointer to the inherited worker without recreating worker state.
             config::reset_on_fork();
         });
 

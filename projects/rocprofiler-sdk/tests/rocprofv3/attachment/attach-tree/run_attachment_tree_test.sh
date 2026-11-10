@@ -82,14 +82,9 @@ if ! command -v pgrep > /dev/null 2>&1; then
 fi
 
 # Start the test application in the background with --fork-child so it spawns
-# a child process before the core SDK is loaded, exercising rocprofv3
-# --attach-children tree attachment. Clear variables that would force the core
-# SDK to load before attachment.
+# a child process, exercising rocprofv3 --attach-children tree attachment.
 echo "Launching test application: ${TEST_APP}"
-env -u ROCP_TOOL_LIBRARIES \
-    -u ROCPROFILER_REGISTER_LIBRARY \
-    -u ROCPROFILER_REGISTER_FORCE_LOAD \
-    LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} --fork-child &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} --fork-child &
 APP_PID=$!
 
 # Wait for the parent to be ready for attachment

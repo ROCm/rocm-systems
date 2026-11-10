@@ -199,16 +199,7 @@ With the default asynchronous output generation, the output thread runs inside t
 Attaching to a process tree
 ----------------------------
 
-By default, ``rocprofv3 --attach`` attempts to attach to the target process **and all of its
-descendant processes**. This is useful for profiling process trees in which each process has its
-own attachable SDK session, such as multiprocess MPI jobs or launchers that start workers through
-an exec-based path.
-
-Selecting a descendant PID does not restore an inherited disabled SDK session. This restriction
-applies to a child that inherited a loaded core ROCprofiler-SDK. It must replace its process image
-with ``exec()`` to initialize a fresh session. A process forked before the core SDK is loaded has no
-inherited SDK session and can be attached later; attachment loads a fresh SDK session into that
-process. For the complete process-creation contract, see :ref:`rocprofiler-process-creation`.
+By default, ``rocprofv3 --attach`` attaches to the target process **and all of its descendant processes**. This is useful for profiling applications that spawn child processes, such as multiprocess MPI jobs or launchers that fork workers.
 
 To attach to a PID and all its children (default behavior), use:
 
@@ -224,8 +215,7 @@ To attach only to the specified PID and skip its descendants, use ``--attach-chi
 
 The child process tree is enumerated once at attach time using ``/proc``. Processes that are spawned after the attachment has begun are not automatically profiled.
 
-Attachment is attempted for every process in the tree with the tool library selected for the
-target PID. For more information, see :ref:`process_attachment_tool_library`.
+Every process in the tree is profiled with the tool library selected for the target PID. For more information, see :ref:`process_attachment_tool_library`.
 
 .. _process_attachment_tool_library:
 

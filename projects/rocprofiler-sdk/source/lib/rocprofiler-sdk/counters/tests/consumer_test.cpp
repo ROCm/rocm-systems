@@ -32,15 +32,10 @@
 #include <utility>
 #include <vector>
 
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <fmt/core.h>
 #include <gtest/gtest.h>
-#include <rocprofiler-sdk/registration.h>
 
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
-#include "lib/rocprofiler-sdk/internal_threading.hpp"
 
 namespace rocprofiler
 {
@@ -141,42 +136,6 @@ TEST(consumer, restart)
 
     for(auto& var : *array)
         EXPECT_EQ(var.load(), static_cast<size_t>(CYCLES));
-}
-
-TEST(consumer, fork_handler_abandons_callback_consumer)
-{
-    // This test links the static SDK, so no shared-library constructor registers the handler.
-    internal_threading::register_fork_handler();
-    callback_thread_start();
-
-    pid_t pid = fork();
-    if(pid < 0)
-    {
-        callback_thread_stop();
-        FAIL() << "fork failed";
-        return;
-    }
-
-    if(pid == 0)
-    {
-        int        initialized = -1;
-        int        finalized   = -1;
-        const bool abandoned =
-            rocprofiler_is_initialized(&initialized) == ROCPROFILER_STATUS_SUCCESS &&
-            rocprofiler_is_finalized(&finalized) == ROCPROFILER_STATUS_SUCCESS &&
-            initialized == 0 && finalized == 1;
-        _exit(abandoned ? 0 : 1);
-    }
-
-    int         status = 0;
-    const pid_t waited = waitpid(pid, &status, 0);
-
-    // The parent retains ownership of the real worker and must still be able to stop it.
-    callback_thread_stop();
-
-    ASSERT_EQ(waited, pid);
-    EXPECT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 // Verifies that calling add() after exit() does not lose work: the
