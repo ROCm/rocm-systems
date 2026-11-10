@@ -1004,8 +1004,9 @@ bool Device::createSampler(const amd::Sampler& owner, device::Sampler** sampler)
   return true;
 }
 
-void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                                    const amd::Sampler& sampler) const {
+  samplerDescriptor.max_anisotropy = sampler.maxAnisotropy();
   samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
                                       ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
                                       : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
@@ -1046,7 +1047,7 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
 }
 
 bool Sampler::create(const amd::Sampler& owner) {
-  hsa_ext_sampler_descriptor_v2_t samplerDescriptor;
+  hsa_ext_sampler_descriptor_v3_t samplerDescriptor;
   fillSampleDescriptor(samplerDescriptor, owner);
 
   hsa_status_t status =

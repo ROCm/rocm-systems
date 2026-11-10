@@ -441,6 +441,7 @@ set(SRC_FILES
   include/tuner.h
   include/tuning.h
   include/utils.h
+  include/warp_speed_plan.h
   init.cc
   init_nvtx.cc
   algorithms/dda/ipc/ipc_gpu_barrier.cu

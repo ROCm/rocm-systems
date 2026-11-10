@@ -32,6 +32,7 @@
 
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -266,6 +267,7 @@ struct HookEvent {
   uint32_t cluster_size_x = 0;
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
+  BarrierKind barrier_kind = BarrierKind::Workgroup;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -567,12 +569,13 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs, BarrierKind kind) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();
       e.wg_id = wfs[0]->wg_id();
     }
+    e.barrier_kind = kind;
     events.push_back(e);
   }
 };
