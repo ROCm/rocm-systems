@@ -978,10 +978,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             available_domains, [&request](const domains::domain_info& info) {
                 return utility::string::equals_ignore_case(info.name, request.name);
             });
-        if(domain != available_domains.end() &&
-           domain->key.mode == domains::collection_mode::callback)
+        const auto is_found = domain != available_domains.end();
+        const auto is_domain_callback =
+            domain->key.mode == domains::collection_mode::callback;
+        if(is_found && is_domain_callback)
         {
-            _data->backtrace_operations.emplace(
+            data->backtrace_operations.emplace(
                 static_cast<sdk_backend_t::callback_tracing_kind_t>(domain->key.value),
                 std::move(request.backtrace_operations));
         }
