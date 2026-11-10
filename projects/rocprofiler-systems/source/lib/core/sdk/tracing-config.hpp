@@ -331,7 +331,8 @@ tracing_config<SdkBackend, Externals>::get_domains()
             continue;
         }
 
-        auto request = domain_request{ .name = std::move(name) };
+        auto request =
+            domain_request{ .name = std::move(name), .backtrace_operations = {} };
         if(!apply_operation_settings(SdkBackend::get_callback_tracing_names(), request))
         {
             apply_operation_settings(SdkBackend::get_buffer_tracing_names(), request);
