@@ -909,13 +909,18 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
                         f'{inst.name}/{inst.enc_name}: generated body writes '
                         f'SCC={body_writes_scc}, MR ISA writes SCC={mrisa_writes_scc}'
                     )
-                if (
-                    sem.semantic_class == 'scalar_addk'
-                    and 'signed_add_overflows' not in body
-                ):
-                    mismatches.append(
-                        f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                if sem.semantic_class == 'scalar_addk':
+                    # RDNA3/4 delegate signed overflow to the corresponding rj-arith
+                    # ADDK API; other architectures still emit the local helper.
+                    overflow = (
+                        f'rj_arith_{inst.name.lower()}('
+                        if isa_name in ('rdna3', 'rdna4')
+                        else 'signed_add_overflows'
                     )
+                    if overflow not in body:
+                        mismatches.append(
+                            f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                        )
 
     assert checked > 0, f'{isa_name}: no instruction SCC contracts checked'
     assert checked_exclusions == expected_exclusions.get(isa_name, set())
@@ -3895,11 +3900,12 @@ def test_gfx1250_generated_vop3_mad_u16_uses_true16_helpers(
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
     assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, true)' in body
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result, false)' in body
 
 
 def test_generated_special_vop3_true16_paths_use_selected_halves(
     execute_shared_path: Path,
+    amdgpu_generated_root: Path,
 ):
     execute_shared = execute_shared_path.read_text()
 
@@ -3927,18 +3933,16 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         in mad_i32
     )
 
-    div_fixup = _shared_execute_body(
-        execute_shared, 'v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3'
+    rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
+    div_fixup = _generated_function_body(
+        rdna2_vop3, 'void VDivFixupF16Vop3::execute_impl'
     )
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
     assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
-    assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
-    assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
-    assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
-    assert (
-        'write_vop3_true16_dst(inst.vdst, wf, lane, opsel, result_bits, true)'
-        in div_fixup
-    )
+    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in div_fixup
+    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in div_fixup
+    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in div_fixup
+    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits,' in div_fixup
 
     pack = _shared_execute_body(
         execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
@@ -4010,6 +4014,7 @@ def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
 
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
+    amdgpu_generated_root: Path,
     gfx1250_generated_root: Path,
 ):
     execute_shared = execute_shared_path.read_text()
@@ -4029,11 +4034,12 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
 
-    ternary = _shared_execute_body(execute_shared, 'v_fma_f16_vop3', 'v_fma_f32_vop3')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' not in ternary
+    rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
+    ternary = _generated_function_body(rdna2_vop3, 'void VFmaF16Vop3::execute_impl')
+    assert 'ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16' in ternary
     assert 'fp_mode::fma_f16' in ternary
-    assert 'read_vop3_true16_src' not in ternary
-    assert 'write_vop3_true16_dst' not in ternary
+    assert 'read_vop3_true16_src' in ternary
+    assert 'write_vop3_true16_dst' in ternary
 
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
@@ -4123,7 +4129,12 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
                 assert f'.read_scalar({operand.name})' in body, name
         if not numeric_sources:
             assert 'read_scalar_f16_carrier' not in body, name
-        assert ('>> 16' in body) or not high, name
+        if high:
+            if arch_name == 'rdna4':
+                # The rj-arith entry point selects the high half of the carrier.
+                assert 'rj_arith_s_cvt_hi_f32_f16(' in body
+            else:
+                assert '>> 16' in body, name
 
 
 @pytest.mark.parametrize('arch_name', ['rdna3', 'rdna4', 'cdna4', 'cdna5'])
@@ -4356,16 +4367,41 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             assert 'vop3_opsel' not in body
             assert 'read_vop3_true16_src' not in body
             assert '>> 16' not in body
-            # The source half is flushed under MODE before it is widened.
-            flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
-            assert flush in body
-            assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
             assert 'read_scalar_f16_carrier' not in body
-            assert body.index('util::f16_to_f32(') < body.index(flush)
-            assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
-            assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
-            assert 'wf.fp_round_mode_f16_f64()' in body
-            assert 'wf.fp_denorm_mode_f16_f64()' in body
+            if generated_root == rdna4_generated_root:
+                # RDNA4 now delegates the same scalar/low-half contract to rj-arith.
+                operation = (
+                    class_name.removeprefix('VS').removesuffix('F16Vop3').lower()
+                )
+                assert f'rj_arith_v_s_{operation}_f16' in body
+                assert 'amdgpu::arith::execute_pseudo_scalar(' in body
+                assert 'src0, true);' in body
+                bridge = (
+                    generated_root.parents[1] / 'shared/rj_arith_float_exec.h'
+                ).read_text()
+                begin = bridge.index('inline void execute_pseudo_scalar(')
+                end = bridge.index('inline uint64_t float32_flags(', begin)
+                adapter = bridge[begin:end]
+                assert 'wave.exec()' not in adapter
+                assert 'registers.read_scalar(source)' in adapter
+                assert 'registers.write_scalar(destination, result)' in adapter
+                assert 'wave.fp_denorm_mode_f16_f64()' in adapter
+                assert 'fp_round_mode' not in adapter  # ISA ignores guest rounding.
+                rj_arith = (
+                    generated_root.parents[7] / 'arith/src/scalar/pseudo_scalar.cpp'
+                ).read_text()
+                assert 'uint16_t(raw)' in rj_arith
+                assert 'raw &= 65535' in rj_arith
+            else:
+                # The source half is flushed under MODE before it is widened.
+                flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+                assert flush in body
+                assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+                assert body.index('util::f16_to_f32(') < body.index(flush)
+                assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
+                assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
+                assert 'wf.fp_round_mode_f16_f64()' in body
+                assert 'wf.fp_denorm_mode_f16_f64()' in body
 
             constructor = _generated_constructor_body(constructor_source, class_name)
             assert 'vop3_opsel' not in constructor
@@ -5197,7 +5233,7 @@ def test_gfx1250_generator_wires_instruction_specific_integer_saturation():
     for name, helper in expected_helpers.items():
         body = generated_body(name, 'ENC_VOP3')
         assert helper in body
-        assert 'inst_.clamp' not in body
+        assert 'inst_.clamp' in body
 
     for name, enc_name, result_writer in (
         ('V_MAD_NC_U64_U32', 'ENC_VOP3', None),
@@ -7143,7 +7179,7 @@ def test_shared_vop2_carry_result_writer_keeps_simd_enabled(
         ),
     ],
 )
-def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
+def test_generated_vop2_dpp_carry_mask(
     amdgpu_generated_root: Path,
     arch: str,
     class_names: tuple[str, ...],
@@ -7152,6 +7188,12 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
     source = _execution_source_path(
         arch_root / 'vop2.cpp', _profile_for_arch(arch)
     ).read_text()
+    clears_masked = arch in ('gfx1250', 'rdna3', 'rdna3_5', 'rdna4')
+    carry_rule = (
+        'final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;'
+        if clears_masked
+        else 'amdgpu::dpp::dpp_source_suppressed_result('
+    )
     classified = set()
     for class_name in re.findall(
         r'^RJ_NOINLINE void (\w+)::execute_modifier_impl', source, re.MULTILINE
@@ -7159,7 +7201,7 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
         body = _generated_function_body(
             source, f'RJ_NOINLINE void {class_name}::execute_modifier_impl'
         )
-        if 'amdgpu::dpp::dpp_source_suppressed_result(' in body:
+        if carry_rule in body:
             classified.add(class_name)
     migrated = arch in ('rdna3', 'rdna4')
     assert classified == (set() if migrated else set(class_names))
@@ -7186,13 +7228,16 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
             assert 'dpp_old_vcc_' not in body
             continue
         assert 'uint64_t dpp_old_exec_ = wf.exec();' in body
-        assert 'uint64_t dpp_old_vcc_ = wf.vcc();' in body
-        assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask;' in body
-        merge_start = body.index('amdgpu::dpp::dpp_source_suppressed_result(')
-        merge_end = body.index('wf.set_vcc_mask(final_result);', merge_start)
-        merge = body[merge_start:merge_end]
-        assert 'dpp_old_vcc_, dpp_old_exec_, dpp_source_write_mask_' in merge
-        assert 'row_bank' not in merge
+        if clears_masked:
+            assert 'dpp_old_vcc_' not in body
+        else:
+            assert 'uint64_t dpp_old_vcc_ = wf.vcc();' in body
+            assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask;' in body
+            merge_start = body.index(carry_rule)
+            merge_end = body.index('wf.set_vcc_mask(final_result);', merge_start)
+            merge = body[merge_start:merge_end]
+            assert 'dpp_old_vcc_, dpp_old_exec_, dpp_source_write_mask_' in merge
+            assert 'row_bank' not in merge
         assert 'ScopedVgprWriteMask' in body
         assert 'commit_result' in body
 

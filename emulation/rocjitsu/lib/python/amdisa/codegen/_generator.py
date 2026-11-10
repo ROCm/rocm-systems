@@ -392,6 +392,16 @@ class _ImplOutputs:
         return self.execution if split else self.model
 
 
+# These VOP3 instructions select each source half and preserve the other
+# destination half, including on GFX9 and GFX10.
+_PRESERVING_VOP3_OPSEL = frozenset(
+    {'V_MAD_I16', 'V_MAD_U16', 'V_MAD_F16', 'V_FMA_F16', 'V_DIV_FIXUP_F16'}
+)
+_LEGACY_F16_VOP3_OPSEL = frozenset(
+    {'V_MAD_LEGACY_F16', 'V_FMA_LEGACY_F16', 'V_DIV_FIXUP_LEGACY_F16'}
+)
+
+
 @dataclass(frozen=True)
 class _True16Vop3Info:
     force_src: bool
@@ -4020,7 +4030,7 @@ class CodeGenerator:
                         inst.opcode
                         for inst in inst_enc.insts
                         if vop3_has_opsel
-                        and profile.uses_true16_vop3_opsel
+                        and self._uses_vop3_half_select(inst.name)
                         and inst.name not in profile.vop3_opsel_omissions
                         and any(opnd.size == 16 for opnd in inst.operands)
                     )
@@ -6718,6 +6728,11 @@ class CodeGenerator:
         src_operands = self._semantic_source_operands(inst, src_operands)
         return src_operands, dst_operands
 
+    def _uses_vop3_half_select(self, name: str) -> bool:
+        return name in _PRESERVING_VOP3_OPSEL or bool(
+            getattr(self.isa_spec.profile, 'uses_true16_vop3_opsel', False)
+        )
+
     def _true16_vop3_info(
         self,
         inst: Instruction,
@@ -6764,7 +6779,7 @@ class CodeGenerator:
             opnd.is_output and (opnd.size == 16 or force_value or force_div_fixup)
             for opnd in dst_operands
         )
-        uses_true16_vop3 = bool(getattr(profile, 'uses_true16_vop3_opsel', False))
+        uses_true16_vop3 = self._uses_vop3_half_select(inst.name)
         ignores_true16_opsel = self._pseudo_scalar_f16_uses_raw_inline(sem)
         enabled = (
             uses_true16_vop3
@@ -7104,10 +7119,12 @@ class CodeGenerator:
             gen_float_ternary_selection,
             gen_packed_fma16,
             gen_mixed_fma,
+            gen_pseudo_scalar,
             gen_packed_binary16,
             gen_float_dot32,
             gen_half_dot,
         )
+        from amdisa.codegen.execute.rj_arith_scalar import gen_scalar
 
         from amdisa.codegen.execute.rj_arith_ds import gen_ds
 
@@ -7163,6 +7180,8 @@ class CodeGenerator:
 
         if result_writer is None:
             for handler in (
+                gen_scalar,
+                gen_pseudo_scalar,
                 gen_integer_dot,
                 gen_packed_integer,
                 gen_widening_integer,
@@ -7456,6 +7475,9 @@ class CodeGenerator:
                 }
                 if is_true16_vop3 and inst.name in true16_special_vop3_ops:
                     src_count, setup, result_expr = true16_special_vop3_ops[inst.name]
+                    zero_high = (
+                        'false' if inst.name in _PRESERVING_VOP3_OPSEL else 'true'
+                    )
                     src_lines = ''.join(
                         f'    uint32_t s{i} = ::rocjitsu::amdgpu::read_vop3_true16_src({src_ops[i]}, wf, lane, opsel, {i});\n'
                         for i in range(src_count)
@@ -7470,7 +7492,7 @@ class CodeGenerator:
                         f'{src_lines}'
                         f'{setup_lines}'
                         f'    uint32_t result = {result_expr};\n'
-                        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, true);\n'
+                        f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({dst_ops[0]}, wf, lane, opsel, result, {zero_high});\n'
                         '  }\n'
                     )
                 if (
@@ -10889,8 +10911,7 @@ class CodeGenerator:
     ) -> bool:
         if inst is None:
             return False
-        profile = getattr(self.isa_spec, 'profile', None)
-        if not bool(getattr(profile, 'uses_true16_vop3_opsel', False)):
+        if not self._uses_vop3_half_select(inst.name):
             return False
         enc_upper = (enc_name or inst.enc_name).upper()
         if enc_upper != 'ENC_VOP3':
@@ -11445,6 +11466,11 @@ class CodeGenerator:
                         if inst_sem and self._issues_image_memory(inst.name)
                         else None
                     )
+                    masked_dpp_carry = (
+                        inst_sem is not None
+                        and inst_sem.semantic_class == 'vector_add_co'
+                        and self.isa_spec.profile.dpp_masks_carry
+                    )
                     _image_d16_preserves_destination = (
                         image_address_form is not None
                         and inst_sem.semantic_class in ('image_load', 'image_sample')
@@ -11465,6 +11491,30 @@ class CodeGenerator:
                     # their own DPP extension layout.
                     inst_dpp_enc_name = (
                         enc.enc_name if inst.is_implied_literal_enc else inst.enc_name
+                    )
+                    # LLVM SIInstrInfo::isSrc1DPPRevOpcode: DPP routes the
+                    # minuend for integer SUBREV and, before GFX11, the value
+                    # for ASHRREV/LSHLREV/LSHRREV.
+                    reverse_subtract = (
+                        inst_sem is not None
+                        and inst_sem.data_type in ('u16', 'u32')
+                        and inst_sem.operation in ('rsub', 'subbrevco')
+                    )
+                    reverse_shift_uses_src1 = (
+                        profile.dpp_reverse_shifts_use_src1
+                        and inst.name.startswith(
+                            ('V_ASHRREV_', 'V_LSHLREV_', 'V_LSHRREV_')
+                        )
+                    )
+                    dpp_routes_src1 = (
+                        reverse_subtract or reverse_shift_uses_src1
+                    ) and (self._supports_dpp_for_instruction(inst, inst_dpp_enc_name))
+                    # GFX11.5+ allows SGPR and inline selectors in VOP3 SRC1.
+                    # Use the GFX12 zero-source behavior for the same routes.
+                    dpp_zero_scalar_minuend = (
+                        dpp_routes_src1
+                        and inst_dpp_enc_name.upper() in ('ENC_VOP3', 'VOP3_SDST_ENC')
+                        and profile.dpp_subrev_zeroes_non_vgpr_src1
                     )
                     if (
                         inst_enc_obj is not None
@@ -12013,6 +12063,19 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if dpp_routes_src1:
+                            source = self._encoded_source_operands(inst)[1].name
+                            access_conditions.append(
+                                f'if (modifiers.dpp || modifiers.dpp8) modifiers.src0 = &{source};'
+                            )
+                        if dpp_zero_scalar_minuend:
+                            public_members.append(
+                                cgen.Line(
+                                    'bool tracks_explicit_source(uint8_t i) const override {'
+                                    'return src_operand(i) != &src1 || src1.decoded_vgpr() || '
+                                    '(!has_encoded_dpp() && !has_encoded_dpp8()); }'
+                                )
+                            )
                         if image_address_form is not None:
                             form = image_address_form
                             access_conditions += [
@@ -12340,6 +12403,7 @@ class CodeGenerator:
                         )
                     _dpp_secondary_mask_preserve_output = bool(
                         self.isa_spec.profile.dpp_bound_ctrl_applies_to_inactive_sources
+                        and not masked_dpp_carry
                         and inst_dpp_enc_name.upper() == 'VOP3_SDST_ENC'
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
@@ -13036,7 +13100,7 @@ class CodeGenerator:
                                     (
                                         _lit_fields.index(opnd.name)
                                         if opnd.size == 16
-                                        and self.isa_spec.profile.uses_true16_vop3_opsel
+                                        and self._uses_vop3_half_select(inst.name)
                                         and self.isa_spec.profile.has_src_modifiers(
                                             enc.enc_name
                                         )
@@ -13581,14 +13645,15 @@ class CodeGenerator:
                         self._wave_mask_stmts(inst.operands, profile.wave_size == 32)
                     )
                     ctor_body_parts.extend(vgpr_msb_role_body)
-                    # GFX10 ordinary 16-bit VALU results preserve the high
-                    # half independently of source OPSEL support. Legacy
-                    # integer and F16 ternary OPSEL source/destination selection
-                    # remains separate follow-up work. SDWA owns its explicit
-                    # placement/unused-byte policy. The encoding filter excludes
-                    # VOP3P packed and MIX forms, which retain their write windows.
+                    # Ordinary OPSEL selects the half written; GFX9 legacy F16
+                    # low-half writes also zero the high half. Other GFX10
+                    # 16-bit destinations preserve the bytes outside their mask.
+                    vop3_opsel_dst = enc.enc_name.upper() == 'ENC_VOP3' and (
+                        inst.name in _PRESERVING_VOP3_OPSEL
+                        or inst.name in _LEGACY_F16_VOP3_OPSEL
+                    )
                     if (
-                        profile.valu16_preserves_unwritten_half
+                        (profile.valu16_preserves_unwritten_half or vop3_opsel_dst)
                         and inst.name.startswith('V_')
                         and enc.enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2', 'ENC_VOP3')
                         # Packed saturation explicitly clears the upper DWORD
@@ -13603,8 +13668,16 @@ class CodeGenerator:
                                 and opnd.size == 16
                                 and self._operand_type_can_name_vgpr(opnd.operand_type)
                             ):
+                                mask = '0x3'
+                                if vop3_opsel_dst:
+                                    low = (
+                                        '0xf'
+                                        if inst.name in _LEGACY_F16_VOP3_OPSEL
+                                        else '0x3'
+                                    )
+                                    mask = f'(amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : {low}'
                                 statement = (
-                                    f'{opnd.name}.set_register_byte_mask(0x3);'
+                                    f'{opnd.name}.set_register_byte_mask({mask});'
                                     f'{opnd.name}.set_preserve_unwritten_bytes();'
                                 )
                                 if _supports_sdwa_encoding:
@@ -14166,6 +14239,10 @@ class CodeGenerator:
                                 if len(_src_input_ops) > 1
                                 else None
                             )
+                            dpp_source = _src1_name if dpp_routes_src1 else _src0_name
+                            dpp_storage = (
+                                'dpp_src1_' if dpp_routes_src1 else 'dpp_src0_'
+                            )
                             _dpp_sign_bits = (
                                 [
                                     self._dpp_source_sign_bit(sem, i, o)
@@ -14223,36 +14300,22 @@ class CodeGenerator:
                             _compare_dst_name = (
                                 'vdst' if _is_compare and not _is_vopc else None
                             )
-                            _reverse_integer_dpp = self.isa_spec.arch_name in (
-                                'rdna3',
-                                'rdna4',
-                            ) and inst.name in (
-                                'V_SUBREV_NC_U32',
-                                'V_SUBREV_CO_U32',
-                                'V_SUBREV_CO_CI_U32',
-                            )
-                            _zero_reverse_scalar = (
-                                _reverse_integer_dpp
-                                and self.isa_spec.arch_name == 'rdna4'
-                                and _dpp_enc_name.upper()
-                                in ('ENC_VOP3', 'VOP3_SDST_ENC')
-                            )
-                            _routed_source = (
-                                _src1_name if _reverse_integer_dpp else _src0_name
-                            )
-                            _routed_storage = (
-                                'dpp_src1_' if _reverse_integer_dpp else 'dpp_src0_'
-                            )
                             _dpp_preamble = ''
-                            if _src0_name:
+                            stage_src0 = _src0_name and (
+                                not dpp_routes_src1
+                                or _has_sdwa_encoding
+                                or any(_dpp_sign_bits[:1])
+                            )
+                            stage_src1 = _src1_name and (
+                                dpp_routes_src1
+                                or _has_sdwa_encoding
+                                or _dpp_modifies_src1
+                            )
+                            if stage_src0:
                                 _dpp_preamble += (
                                     '  std::optional<StagedOperand> dpp_src0_;\n'
                                 )
-                            if (
-                                _has_sdwa_encoding
-                                or _dpp_modifies_src1
-                                or _reverse_integer_dpp
-                            ) and _src1_name:
+                            if stage_src1:
                                 _dpp_preamble += (
                                     '  std::optional<StagedOperand> dpp_src1_;\n'
                                 )
@@ -14337,7 +14400,7 @@ class CodeGenerator:
                             elif not _is_compare:
                                 if (
                                     _uses_implicit_vcc_result_writer
-                                    and not _arith_carry
+                                    and not masked_dpp_carry
                                     and _supports_dpp_encoding
                                 ):
                                     _dpp_preamble += (
@@ -14352,7 +14415,7 @@ class CodeGenerator:
                                 if (
                                     _secondary_mask_dst_name
                                     and _modern_dpp_sources
-                                    and not _arith_carry
+                                    and not masked_dpp_carry
                                 ):
                                     _dpp_preamble += (
                                         '  uint64_t dpp_source_write_mask_ = ~0ULL;\n'
@@ -14378,7 +14441,13 @@ class CodeGenerator:
                                 and (_supports_dpp_encoding or _supports_dpp8)
                             ), f'{inst.name}: reads-all-output semantics do not support DPP/DPP8'
                             _semantic_stages_src0 = self._semantic_stages_src0(sem)
-
+                            dpp_if = 'if'
+                            if dpp_zero_scalar_minuend:
+                                _dpp_preamble += (
+                                    '  if (!src1.decoded_vgpr())\n'
+                                    '    dpp_src1_.emplace(src1, wf.wf_size());\n'
+                                )
+                                dpp_if = 'else if'
                             if (
                                 not _reads_all_outputs
                                 and not _constant_compare
@@ -14393,26 +14462,9 @@ class CodeGenerator:
                                     else 'wf.exec()'
                                 )
                                 _dpp_preamble += (
-                                    (
-                                        '  if (inst_.src0 == amdgpu::SRC_DPP'
-                                        + (
-                                            f' && {_routed_source}.encoding_value() >= 256'
-                                            if _zero_reverse_scalar
-                                            else ''
-                                        )
-                                        + ')\n'
-                                    )
-                                    + f'    amdgpu::dpp::apply_dpp({_routed_source}, dpp_plan_,\n'
-                                    f'        {_dpp_read_exec}, {_routed_storage}, wf{_dpp_src0_byte_mask_arg});\n'
-                                )
-                            if _zero_reverse_scalar:
-                                # gfx1201 DPP8/DPP16 SUBREV substitutes zero for non-VGPR SRC1.
-                                # Ordinary SUBREV retains its scalar-source behavior.
-                                _dpp_preamble += (
-                                    '  if ((inst_.src0 == amdgpu::SRC_DPP || '
-                                    'amdgpu::dpp::is_src_dpp8(inst_.src0)) && '
-                                    f'{_routed_source}.encoding_value() < 256)\n'
-                                    f'    {_routed_storage}.emplace({_routed_source}, wf.wf_size());\n'
+                                    f'  {dpp_if} (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                    f'    amdgpu::dpp::apply_dpp({dpp_source}, dpp_plan_,\n'
+                                    f'        {_dpp_read_exec}, {dpp_storage}, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if (
                                 not _reads_all_outputs
@@ -14422,15 +14474,9 @@ class CodeGenerator:
                                 and _src0_name
                             ):
                                 _dpp_preamble += (
-                                    '  if (amdgpu::dpp::is_src_dpp8(inst_.src0)'
-                                    + (
-                                        f' && {_routed_source}.encoding_value() >= 256'
-                                        if _zero_reverse_scalar
-                                        else ''
-                                    )
-                                    + ')\n'
-                                    + f'    amdgpu::dpp::apply_dpp8({_routed_source}, dpp8_lane_sel_, dpp_fi_,\n'
-                                    f'        {_routed_storage}, wf{_dpp_src0_byte_mask_arg});\n'
+                                    f'  {dpp_if} (amdgpu::dpp::is_src_dpp8(inst_.src0))\n'
+                                    f'    amdgpu::dpp::apply_dpp8({dpp_source}, dpp8_lane_sel_, dpp_fi_,\n'
+                                    f'        {dpp_storage}, wf{_dpp_src0_byte_mask_arg});\n'
                                 )
                             if (
                                 _has_sdwa_encoding
@@ -14488,17 +14534,12 @@ class CodeGenerator:
                                 _dpp_preamble += (
                                     f'  ScopedOperandDelegate dpp_src0_binding_({_src0_name},\n'
                                     '      dpp_src0_ ? &*dpp_src0_ : nullptr);\n'
-                                    if _src0_name
+                                    if stage_src0
                                     else ''
                                 ) + (
                                     f'  ScopedOperandDelegate dpp_src1_binding_({_src1_name},\n'
                                     '      dpp_src1_ ? &*dpp_src1_ : nullptr);\n'
-                                    if (
-                                        _has_sdwa_encoding
-                                        or _dpp_modifies_src1
-                                        or _reverse_integer_dpp
-                                    )
-                                    and _src1_name
+                                    if stage_src1
                                     else ''
                                 )
                             if _supports_dpp_encoding and not _is_compare and _dst_name:
@@ -14547,6 +14588,25 @@ class CodeGenerator:
                                 '    uint64_t final_result = raw_result;\n'
                                 f'{_exec_final_result}'
                                 '    wf.set_exec(final_result);\n'
+                                '  };\n'
+                            )
+                            _result_shared_arg = ', commit_result'
+                        elif (
+                            masked_dpp_carry
+                            and _supports_dpp_encoding
+                            and not _arith_carry
+                        ):
+                            write = (
+                                f'amdgpu::write_wave_mask_scalar({_secondary_mask_dst_name}, wf, final_result);'
+                                if _uses_secondary_result_writer
+                                else 'wf.set_vcc_mask(final_result);'
+                            )
+                            _result_commit_setup = (
+                                '  auto commit_result = [&](uint64_t raw_result) {\n'
+                                '    uint64_t final_result = raw_result;\n'
+                                '    if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                '      final_result &= dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask;\n'
+                                f'    {write}\n'
                                 '  };\n'
                             )
                             _result_shared_arg = ', commit_result'
@@ -15525,7 +15585,14 @@ class CodeGenerator:
                     PACKED_INTEGER_NAMES,
                     INTEGER_DOT_NAMES,
                 )
+                from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
 
+                has_rj_arith_scalar = self.isa_spec.arch_name in (
+                    'rdna3',
+                    'rdna4',
+                ) and any(i.name in SCALAR_NAMES for i in all_insts)
+                if has_rj_arith_scalar:
+                    cpp_includes.append(('rj_arith/rj_arith.h', False))
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
                     i.name in VECTOR32_NAMES
                     or i.name in CARRY32_NAMES
@@ -15548,20 +15615,16 @@ class CodeGenerator:
                     and s.semantic_class == 'mfma'
                     for i in all_insts
                 )
-                requires_compute_unit = any(
-                    (
-                        self.semantics
-                        and (s := self.semantics.instructions.get(i.name))
-                        and (
-                            s.semantic_class
-                            in (
-                                'scalar_shader_cycles',
-                                'scalar_sendmsg_rtn',
-                                'vector_cvt_scale',
-                            )
-                        )
-                        for i in all_insts
+                requires_compute_unit = has_rj_arith_scalar or any(
+                    self.semantics
+                    and (s := self.semantics.instructions.get(i.name))
+                    and s.semantic_class
+                    in (
+                        'scalar_shader_cycles',
+                        'scalar_sendmsg_rtn',
+                        'vector_cvt_scale',
                     )
+                    for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
@@ -16537,20 +16600,6 @@ class CodeGenerator:
                     2,
                     (),
                     'src1 >> (src0 & 15u)',
-                ),
-                'v_mad_i16_vop3': (
-                    3,
-                    (
-                        'int32_t a = static_cast<int16_t>(src0);',
-                        'int32_t b = static_cast<int16_t>(src1);',
-                        'int32_t c = static_cast<int16_t>(src2);',
-                    ),
-                    'static_cast<uint32_t>(static_cast<uint16_t>(a * b + c))',
-                ),
-                'v_mad_u16_vop3': (
-                    3,
-                    (),
-                    '(src0 * src1 + src2) & 0xffffu',
                 ),
             }
             if mnemonic in true16_special_ops and is_true16_vop3:

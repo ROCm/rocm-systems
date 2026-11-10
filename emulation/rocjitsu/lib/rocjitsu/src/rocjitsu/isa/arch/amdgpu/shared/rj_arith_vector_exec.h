@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -17,7 +18,7 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// A normal VGPR retains its observed storage view. Uniform, subword or delegated
+// A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
 class VectorInput32 {
 public:
@@ -29,18 +30,18 @@ public:
       data = values_.data();
       return;
     }
-    if (operand.simd_capable() && byte_mask == 0xF)
-      region_ = registers.read_operand_region(operand, exec_mask);
-    if (region_) {
-      auto lanes = region_->lanes(0);
-      if (lanes.succeeded()) {
-        data = lanes.value().data();
-      } else {
-        // Keep input storage valid; result writers observe the retained wave error.
-        values_.fill(0);
-        data = values_.data();
+    if (operand.simd_capable() && byte_mask == 0xF) {
+      if (auto region = registers.read_operand_region(operand, exec_mask)) {
+        auto lanes = region->lanes(0);
+        if (lanes.succeeded()) {
+          // The span refers to CU storage (or a static zero buffer), not the view.
+          data = lanes.value().data();
+        } else {
+          values_.fill(0);
+          data = values_.data();
+        }
+        return;
       }
-      return;
     }
     if (operand.simd_capable()) {
       auto view = registers.read_operand(operand, exec_mask, byte_mask);
@@ -56,10 +57,26 @@ public:
     data = values_.data();
   }
 
+  // The packed integer API accepts half selectors and clamp. Materialize a
+  // signed source before the call so two copies of one selected half can
+  // receive different signs. Other operands can still use their direct views.
+  void apply_packed_integer_signs(uint32_t lanes, unsigned index, uint32_t negations,
+                                  uint64_t &modifiers) {
+    const uint32_t signs = (negations >> index) & 0x00010001u;
+    if (!signs)
+      return;
+    const uint64_t low_high = RJ_ARITH_PK_LO_A_HIGH << index;
+    const uint64_t high_low = RJ_ARITH_PK_HI_A_LOW << index;
+    for (unsigned lane = 0; lane < lanes; ++lane)
+      values_[lane] = select_packed_halves(data[lane], (modifiers & low_high) != 0,
+                                           (modifiers & high_low) == 0, 0, signs);
+    data = values_.data();
+    modifiers &= ~(low_high | high_low);
+  }
+
   const uint32_t *data;
 
 private:
-  std::optional<RegisterAccess::VgprReadRegion> region_;
   std::array<uint32_t, 64> values_;
 };
 
@@ -68,6 +85,12 @@ class VectorInput64 {
 public:
   VectorInput64(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
                 uint64_t exec_mask) {
+    if (!exec_mask) {
+      values_[0].fill(0);
+      values_[1].fill(0);
+      data = {values_[0].data(), values_[1].data()};
+      return;
+    }
     region_ = registers.read_operand_region(operand, exec_mask, 2);
     if (region_) {
       auto lo = region_->lanes(0);
@@ -476,12 +499,16 @@ inline void execute_qsad(Wavefront &wave, Ternary32Function wave32, Ternary64Fun
 inline void execute_binary32(Wavefront &wave, Binary32Function wave32, Binary64Function wave64,
                              uint64_t flags, uint64_t modifiers, const Operand &destination,
                              const Operand &source_a, const Operand &source_b,
-                             uint8_t destination_bytes = 0xF) {
+                             uint8_t destination_bytes = 0xF, uint32_t packed_negations = 0) {
   const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
   if (!exec_mask)
     return;
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source_a, exec_mask), b(registers, wave, source_b, exec_mask);
+  if (packed_negations) {
+    a.apply_packed_integer_signs(wave.wf_size(), 0, packed_negations, modifiers);
+    b.apply_packed_integer_signs(wave.wf_size(), 1, packed_negations, modifiers);
+  }
   write_vector32_result(
       wave, registers, destination, exec_mask,
       [&](uint32_t *const *d, uint64_t write_mask) {
@@ -534,7 +561,8 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
                               uint64_t flags, uint64_t modifiers, const Operand &destination,
                               const Operand &source_a, const Operand &source_b,
                               const Operand &source_c, uint8_t a_bytes = 0xF, uint8_t b_bytes = 0xF,
-                              uint64_t source_exec_mask = ~uint64_t{0}) {
+                              uint64_t source_exec_mask = ~uint64_t{0},
+                              uint32_t packed_negations = 0) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   source_exec_mask &= wave.exec();
   if (!source_exec_mask)
@@ -543,6 +571,11 @@ inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary
   VectorInput32 a(registers, wave, source_a, source_exec_mask, a_bytes),
       b(registers, wave, source_b, source_exec_mask, b_bytes),
       c(registers, wave, source_c, source_exec_mask);
+  if (packed_negations) {
+    a.apply_packed_integer_signs(wave.wf_size(), 0, packed_negations, modifiers);
+    b.apply_packed_integer_signs(wave.wf_size(), 1, packed_negations, modifiers);
+    c.apply_packed_integer_signs(wave.wf_size(), 2, packed_negations, modifiers);
+  }
   write_vector32_result(
       wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
         return wave.wf_size() == 32

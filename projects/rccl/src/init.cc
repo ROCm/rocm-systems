@@ -252,6 +252,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 
 // RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
+//   Applies to Simple. LL128 honors it only on gfx1250 and otherwise always uses the full fence.
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 #if ENABLE_TDM_SIMPLE
@@ -2375,7 +2376,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 #else
                                                                  false);
 #endif
-  INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "Cheap post-send fence is %s (Simple%s)", comm->cheapPostSendFenceOff ? "OFF" : "ON",
+       comm->cudaArch == 1250 ? " and LL128" : "; LL128 always uses the full fence");
 #if ENABLE_TDM_SIMPLE
   // gfx1250 only; the mover entry points are deleted elsewhere.
   comm->tdmSimpleEnable =

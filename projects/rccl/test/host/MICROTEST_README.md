@@ -357,7 +357,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
   error path is already covered directly by `dev-runtime-test.cc`'s own suite,
   so a fake tests this binary's own error-propagation logic just as well
-  without pulling in that file's dependency floor.
+  without pulling in that file's dependency floor. See
+  `test_categories_micro_scheduler.yaml`.
+- **`rccl-UnitTestsMicroEnqueue-warpspeed`** — the `enqueue.cc` host
+  microtests compiled binary-wide with `ENABLE_WARP_SPEED`. It exercises the
+  emitted plan count, packing mode, and launch mode that the macro-off enqueue
+  binary cannot represent. See `test_categories_micro_enqueue.yaml`.
 
 - **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
   `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
