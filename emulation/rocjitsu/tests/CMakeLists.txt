@@ -587,7 +587,7 @@ add_executable(
     cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     clocked_issue_cycle_test.cpp
-    wave_slot_test.cpp
+    wavefront_slot_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp

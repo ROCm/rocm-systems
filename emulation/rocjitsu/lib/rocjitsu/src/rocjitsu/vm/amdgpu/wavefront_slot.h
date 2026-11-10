@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file wave_slot.h
+/// @file wavefront_slot.h
 /// @brief Per-slot sequencer state for a cycle-level driver of a compute unit.
 
 #pragma once
@@ -23,7 +23,7 @@ class Wavefront;
 /// @brief One wave occupancy: a CU slot and the dispatch that filled it.
 /// @details Work a sequencer has in flight names its wave by key, so it can
 /// tell, when the work returns, whether the wave is still the one that sent it.
-struct WaveKey {
+struct WavefrontKey {
   uint32_t cu = 0; ///< The driver's index for the CU.
   uint32_t slot = 0;
   uint64_t generation = 0; ///< Wavefront::dispatch_generation() of the occupant.
@@ -31,16 +31,19 @@ struct WaveKey {
 
 /// @brief The sequencer state of one CU wave slot (the timing half of Wavefront).
 ///
-/// @details Lives as long as its WaveSlots. A wave launches into it when the
-/// CU dispatches into the slot, runs until it issues s_endpgm or otherwise
-/// halts, and leaves the slot idle for the next launch. The CU's Wavefront
-/// stays the authority on architectural state; the slot holds what only a
-/// cycle-level sequencer needs: the instruction buffer, the register
-/// scoreboard, and the wave's view of its memory counters.
+/// @details Lives as long as its WavefrontSlots. A wave launches into it when
+/// the CU reserves the slot for a dispatch, runs until it issues s_endpgm or
+/// otherwise halts, and leaves the slot idle for the next launch. A dispatch
+/// can still roll back after the reservation; the CU then frees the wave
+/// without the slot hearing of it, so a driver checks active() after dispatch
+/// rather than trusting the launch. The CU's Wavefront stays the authority on
+/// architectural state; the slot holds what only a cycle-level sequencer
+/// needs: the instruction buffer, the register scoreboard, and the wave's view
+/// of its memory counters.
 ///
 /// @code
-///   CU dispatch -- launch() ----> +----------------+
-///   fetch -------- fetched -----> |  WaveSlot      | -- next instruction --> dependence check
+///   CU reservation launch() ----> +----------------+
+///   fetch -------- fetched -----> | WavefrontSlot  | -- next instruction --> dependence check
 ///   arbiter ------ reserve() ---> | buffer         | <- issued() / squash() -- issue
 ///   execution ---- writeback ---> | pending writes | -- has_hazard() ------> dependence check
 ///   memory ------- response ----> | counters       | -- waiting_on_counters() -->
@@ -50,7 +53,7 @@ struct WaveKey {
 /// A register write is reserved when the sequencer picks its instruction to
 /// issue, and becomes visible at writeback: when the execution pipeline that
 /// carries the instruction reports it.
-class WaveSlot {
+class WavefrontSlot {
 public:
   /// Memory-counter increments one wave may have reserved or in flight, the
   /// range of KMCNT, the narrowest counter a compute memory instruction
@@ -59,8 +62,9 @@ public:
   /// type, a simplification that can stall a wave before its own counter is full.
   static constexpr uint32_t kMaxMemoryTokens = WaitCounters::KMCNT_MAX;
 
-  /// @brief Start a newly launched wave in this slot.
-  /// @details Fetch starts from the wave's PC once its frontend is empty.
+  /// @brief Start a wave the CU has reserved this slot for.
+  /// @details Discards whatever the previous occupant left, and points fetch
+  /// at the wave's entry PC, which the CU sets before the reservation.
   /// @param wave The CU's wavefront for this slot.
   /// @param arrival Launch order, for oldest-first arbitration.
   void launch(Wavefront &wave, uint64_t arrival);
@@ -72,7 +76,10 @@ public:
 
   /// @brief Discard the wave's reserved, unissued instructions.
   /// @details Bumps the epoch, so work for them still in flight to issue is
-  /// dropped by its consumer, and frees their register reservations.
+  /// dropped by its consumer, frees their register reservations, and returns
+  /// their buffer entries to next_to_reserve(), to be reserved again. Their
+  /// counter capacity stays reserved until the consumer discards each one
+  /// with cancel().
   /// @param flush Also discard the instruction buffer, for a redirect.
   void squash(bool flush);
 
@@ -81,8 +88,17 @@ public:
   bool has_hazard(const InstructionTiming &inst, uint64_t cycle);
 
   /// @brief Reserve @p inst's register writes and counter capacity for @p seq.
+  /// @details @p inst is next_to_reserve(); it stays buffered until it issues.
   void reserve(const InstructionTiming &inst, uint64_t seq);
-  /// @brief Undo reserve() for instruction @p seq, which did not issue.
+  /// @brief Release the counter capacity of instruction @p seq, discarded by a
+  /// squash() before it issued.
+  /// @details The second half of discarding a reserved instruction, and valid
+  /// only after squash(): squash() rewinds the buffer and frees register
+  /// reservations at once, while the instruction may still be in flight to
+  /// issue; when it arrives there with a stale epoch, its consumer calls this.
+  /// cancel() does not rewind the buffer, so calling it without squash() would
+  /// leave the entry reserved and never offered again.
+  /// @param seq The discarded instruction.
   /// @param tokens The counter capacity reserve() took for it.
   void cancel(uint64_t seq, uint8_t tokens);
   /// @brief Record that @p seq issued; it can no longer be squashed.
@@ -91,8 +107,19 @@ public:
   void written_back(uint64_t seq, uint64_t cycle);
 
   /// @brief Count @p inst's memory request as in flight.
-  void issued_memory(const InstructionTiming &inst);
+  /// @details @p charged are the counters the CU's memory pipeline charged
+  /// once it routed the request's addresses, as MemoryPipeline::issue_counters()
+  /// derives them: a subset of the upper bound in InstructionTiming::counters
+  /// that reserve() took. Only @p charged go
+  /// outstanding; the rest of the reservation is released now, so a global-
+  /// only FLAT load does not hold DSCNT, and the response returns exactly
+  /// @p charged.
+  /// @param inst The issued instruction, as reserved.
+  /// @param charged The counters the CU charged for it.
+  void issued_memory(const InstructionTiming &inst,
+                     const MemoryPipeline::WaitCounterTokens &charged);
   /// @brief Apply @p seq's memory response: release @p counters and write back the result.
+  /// @param counters The counters issued_memory() charged for @p seq.
   void memory_returned(uint64_t seq, const MemoryPipeline::WaitCounterTokens &counters,
                        uint64_t cycle);
 
@@ -100,7 +127,8 @@ public:
   /// @details Clears the wait once the counters satisfy it.
   bool waiting_on_counters();
 
-  /// @brief The buffered instruction the dependence check examines next, or null.
+  /// @brief The buffered instruction the dependence check examines next, or null
+  /// once every buffered instruction is reserved.
   const InstructionTiming *next_to_reserve() const {
     return reserved < buffer.size() ? &buffer[reserved] : nullptr;
   }
@@ -112,10 +140,11 @@ public:
   uint64_t age = 0;        ///< Launch order, for oldest-first arbitration.
   uint64_t epoch = 0;      ///< Bumped by a squash; older unissued work is discarded.
   /// Fetched instructions, oldest first. A vector: it holds a few entries, and
-  /// keeps its capacity across launches, so retiring does not allocate.
+  /// keeps its capacity across launches, so retiring an entry frees only its
+  /// decoded instruction.
   std::vector<InstructionTiming> buffer;
   uint32_t reserved = 0; ///< Entries picked to issue, not yet issued.
-  uint64_t fetch_pc = 0; ///< Next byte address to fetch.
+  uint64_t fetch_pc = 0; ///< Next byte address to fetch; the entry PC at launch.
   bool fetch_pending = false;
   bool fetch_stopped = false;        ///< The last fetched instruction redirects fetch.
   bool in_ready_list = false;        ///< The next instruction is waiting to be picked.
@@ -134,39 +163,42 @@ private:
   std::vector<PendingWrite> pending_writes_;
 };
 
-/// @brief The sequencer state of a CU's wave slots, one WaveSlot per slot.
-/// @details Takes the CU's wave launch handler, so it hears of every wave the
-/// CU dispatches, and releases it on destruction. Construct it before the CU
-/// dispatches, and only one per CU.
-class WaveSlots {
+/// @brief The sequencer state of a CU's wave slots, one WavefrontSlot per slot.
+/// @details Takes the CU's wave reservation handler
+/// (ComputeUnitCore::set_wave_reservation_handler()), so it hears of every slot
+/// the CU reserves for a dispatch, and releases the handler on destruction.
+/// Construct it before the CU dispatches, and only one per CU. A reservation
+/// is not a launch: a dispatch that fails after reserving frees the wave
+/// without notice, so check WavefrontSlot::active() after dispatch.
+class WavefrontSlots {
 public:
   /// @param cu The CU whose slots to track; not owned, must outlive this.
-  /// @param cu_index The driver's index for @p cu, carried in each WaveKey.
-  WaveSlots(ComputeUnitCore &cu, uint32_t cu_index);
-  ~WaveSlots();
-  WaveSlots(const WaveSlots &) = delete;
-  WaveSlots &operator=(const WaveSlots &) = delete;
+  /// @param cu_index The driver's index for @p cu, carried in each WavefrontKey.
+  WavefrontSlots(ComputeUnitCore &cu, uint32_t cu_index);
+  ~WavefrontSlots();
+  WavefrontSlots(const WavefrontSlots &) = delete;
+  WavefrontSlots &operator=(const WavefrontSlots &) = delete;
 
-  WaveSlot &operator[](uint32_t slot) { return slots_[slot]; }
+  WavefrontSlot &operator[](uint32_t slot) { return slots_[slot]; }
   /// @returns The slot's wave if @p key still names it, or null once it has left.
-  WaveSlot *live(const WaveKey &key);
+  WavefrontSlot *live(const WavefrontKey &key);
   /// @returns The wave if @p key still names it and it has not been squashed
   /// since @p epoch, or null: the staleness test for work that precedes issue.
-  WaveSlot *current(const WaveKey &key, uint64_t epoch) {
-    WaveSlot *slot = live(key);
+  WavefrontSlot *current(const WavefrontKey &key, uint64_t epoch) {
+    WavefrontSlot *slot = live(key);
     return slot && slot->epoch == epoch ? slot : nullptr;
   }
   /// @brief Return the key of the wave in @p slot.
-  WaveKey key(uint32_t slot) const { return {cu_index_, slot, slots_[slot].generation}; }
+  WavefrontKey key(uint32_t slot) const { return {cu_index_, slot, slots_[slot].generation}; }
   uint32_t size() const { return static_cast<uint32_t>(slots_.size()); }
 
 private:
-  /// Start @p wave in the slot it launched into.
-  void launch(Wavefront &wave);
+  /// Start @p wave in the slot the CU reserved for it.
+  void slot_reserved(Wavefront &wave);
 
   ComputeUnitCore &cu_;
   uint32_t cu_index_;
-  std::vector<WaveSlot> slots_;
+  std::vector<WavefrontSlot> slots_;
   uint64_t next_arrival_ = 0;
 };
 

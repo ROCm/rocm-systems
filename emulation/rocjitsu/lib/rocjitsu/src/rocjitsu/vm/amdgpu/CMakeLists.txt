@@ -36,8 +36,8 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     sdma_queue_scheduler.cpp
     sdma_ring_consumer.cpp
     shader_engine.cpp
-    wave_slot.cpp
     wavefront.cpp
+    wavefront_slot.cpp
     xcd.cpp
 )
 
