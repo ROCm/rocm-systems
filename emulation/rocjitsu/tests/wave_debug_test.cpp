@@ -449,6 +449,49 @@ TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
   }
 }
 
+// Only the second operand is ignored: the return address is a real read, so
+// loading it straight into the return without a wait is reported there.
+TEST(WaveDebugTest, RfeRestoreWaitsOnItsReturnAddress) {
+  constexpr uint32_t kSavedPcAddr = kTrapHandlerAddr + 0x100;
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    WaveDebugFixture fx(arch);
+    fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
+    fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
+    fx.gpu_mem.write32(kSavedPcAddr, kKernelAddr + 4);
+    fx.gpu_mem.write32(kSavedPcAddr + 4, 0);
+
+    const uint32_t handler[] = {
+        0xC0060001u, 0x00000000u, // s_load_dwordx2 s[0:1], s[2:3], 0
+        0x95800500u,              // s_rfe_restore_b64 s[0:1], s5
+    };
+    for (uint32_t i = 0; i < std::size(handler); ++i)
+      fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+    fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+      return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+    });
+    // The handler's scalar load needs the cache hierarchy's functional path.
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+
+    auto *wf = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t sbase = wf->sgpr_alloc().base;
+    fx.cu->write_sgpr(sbase + 2, kSavedPcAddr);
+    fx.cu->write_sgpr(sbase + 3, 0);
+
+    fx.cu->step();
+    ASSERT_TRUE(wf->in_trap_handler());
+    for (int i = 0; i < 2 && wf->in_trap_handler(); ++i)
+      fx.cu->step();
+    ASSERT_FALSE(wf->in_trap_handler());
+    EXPECT_EQ(wf->pc, kKernelAddr + 4);
+    EXPECT_FALSE(wf->instruction_execution_failed());
+    EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), 1u);
+  }
+}
+
 TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
   WaveDebugFixture fx;
   constexpr uint32_t kProcessId = 7;
