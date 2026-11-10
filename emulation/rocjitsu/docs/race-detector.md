@@ -355,9 +355,10 @@ that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
-token of issue-time pressure, on LGKMCNT before GFX12 and on KMcnt on gfx1250,
-but message occupancy and returning
+through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+issue-time pressure: one LGKMCNT token before GFX12, and on gfx1250 one KMcnt
+token, or two for `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5
+ISA 5.4). Message occupancy and returning
 message results are not retained as pending events. Timestamp-query operations
 such as `s_memtime` and `s_memrealtime` are not accounted for, nor are the
 gfx1250 barrier instructions that use KMcnt: `s_barrier_signal_isfirst`,
