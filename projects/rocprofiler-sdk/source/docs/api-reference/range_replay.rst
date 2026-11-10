@@ -168,6 +168,8 @@ The payload is in the ``CALLBACK_TRACING_SERVICE`` group:
 See also
 --------
 
+* :ref:`using-range-replay-rocprofv3` — command line, diagrams, application replay
+* :ref:`using-range-replay` — custom tool how-to
 * :ref:`range-replay-conceptual` — the model and its carve-outs
 * :ref:`range-replay-callback-api` — API contract
 * :ref:`range-replay-soundness` — what makes a range replayable

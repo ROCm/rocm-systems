@@ -187,25 +187,9 @@ Limitations (CLI)
 Range replay
 ============
 
-``--replay-mode range`` collects every ``--pmc`` group once per marked phase instead of once per
-dispatch. The phase is an outermost ``roctxRangePush`` / ``roctxRangePop`` (or ``roctxRangeStart``
-/ ``roctxRangeStop``). An application can mark it directly with ``rocprofiler_range_replay_begin``
-and ``rocprofiler_range_replay_end``. One device-memory snapshot covers the whole phase.
-
-``--replay-mode range-host`` re-runs the application's own code for each extra pass, so copies,
-several streams, and graph launches inside the phase take part. The application has to open the
-range with ``ROCPROFILER_RANGE_REPLAY_HOST_BEGIN``. ``rocprofv3`` does not insert that jump.
-
-Both require ``--kernel-replay-beta-enabled`` and counter collection, and they reject ``--att``,
-PC sampling, and ``--spm`` for the same reason kernel replay does. A phase that packet replay
-cannot reproduce is declined and runs once. This includes a copy into device memory, a second
-queue, or a graph launch.
-
-.. code-block:: shell
-
-   rocprofv3 --pmc SQ_WAVES --pmc TCC_HIT --replay-mode range --kernel-replay-beta-enabled -- ./app
-
-Range replay is experimental. The SDK service is not in a ROCm release yet.
+``--replay-mode range`` and ``--replay-mode range-host`` repeat a marked phase instead of one
+dispatch. Commands, the memory and GPU-execution diagrams, and the host-replay contract are in
+:ref:`using-range-replay-rocprofv3`. That page starts from application replay.
 
 When to use kernel replay
 =========================

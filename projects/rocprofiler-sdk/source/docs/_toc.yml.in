@@ -40,6 +40,10 @@ subtrees:
     - file: how-to/using-rocprofv3-on-wsl
     - file: how-to/using-spm
     - file: how-to/using-kernel-replay
+    - file: how-to/using-range-replay
+      title: Using range replay
+    - file: how-to/using-range-replay-rocprofv3
+      title: Using range replay with rocprofv3
     - file: how-to/samples
       title: Samples
   - caption: API reference
