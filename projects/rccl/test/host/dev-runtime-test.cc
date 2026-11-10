@@ -7368,6 +7368,60 @@ TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCom
 
 
 // ---------------------------------------------------------------------------
+// JIT-compiled device code, devComm side: ncclDevrCommCreateInternal picks the
+// compat record from deviceCodeVersion, so a devComm for runtime-version
+// device code is written in the runtime layout and not down-converted, while
+// one for older AOT device code still is.
+
+class DevrCommCreateInternalJitTest : public DevrCommCreateInternalTest {
+protected:
+  struct NewToOldCall {
+    void* dst;
+    uint32_t srcVersion;
+  };
+  static std::vector<NewToOldCall>& NewToOldCalls() {
+    static std::vector<NewToOldCall> calls;
+    return calls;
+  }
+
+  void SetUp() override {
+    DevrCommCreateInternalTest::SetUp();
+    NewToOldCalls().clear();
+    // As under JIT: reqs carry the caller's compile-time version, so any use of
+    // reqs.version in place of deviceCodeVersion shows up below.
+    reqs.version = kJitFieldVersion;
+    // The compile-time version gets a record with a down-converter; the runtime
+    // version gets one without, as the current version's record has in production.
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22902.devCommCopyNewToOld = [](ncclComm_t, void* oldDevComm, ncclDevComm const* newDevComm) {
+      NewToOldCalls().push_back({oldDevComm, newDevComm->version});
+      return ncclSuccess;
+    };
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
+
+  ncclResult_t CreateFor(uint32_t deviceCodeVersion) {
+    return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false, deviceCodeVersion);
+  }
+};
+
+// Runtime-version device code reads the runtime layout, so the devComm is
+// written straight into the caller's (runtime-sized) buffer and stamped with
+// the runtime version.
+TEST_F(DevrCommCreateInternalJitTest, RuntimeDeviceCodeVersion_WritesRuntimeLayoutWithoutDownConversion) {
+  ASSERT_EQ(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+
+  EXPECT_TRUE(NewToOldCalls().empty());
+  EXPECT_EQ(outDevComm.magic, static_cast<uint32_t>(NCCL_API_MAGIC));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
 // ranks' copies: everything from `rank` up to but excluding `railGinBarrier`.
 
