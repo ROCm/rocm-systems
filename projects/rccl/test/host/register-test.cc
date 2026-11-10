@@ -971,12 +971,14 @@ TEST_F(RegisterAutoLocalMicrotest, AddressRangeQueryFails_LeavesUnregistered) {
   EXPECT_EQ(Population(), 0);
 }
 
+#if HIP_VERSION >= 71260540
 TEST_F(RegisterAutoLocalMicrotest, SingleNodeLegacyAllocation_LeavesUnregistered) {
   comm_->nNodes = 1;
   legacyIpcCap_ = 1;
   EXPECT_EQ(Auto(0x10000, kPage), nullptr);
   EXPECT_EQ(Population(), 0);
 }
+#endif
 
 TEST_F(RegisterAutoLocalMicrotest, SingleNodeCuMemAllocation_CreatesOwnedRecord) {
   comm_->nNodes = 1;
@@ -1113,18 +1115,38 @@ TEST_F(RegisterAutoLocalMicrotest, RetiredBytesPassWarnThreshold_WarnsOnceAndKee
   g_loadParam = ParamOverride({{"RCCL_RING_AUTO_REGISTER_WARN_BYTES", 0x18000}});
   std::string log = CaptureLog([&]() {
     // Each round frees the allocation and gets a new one at the same address, retiring a whole 0x10000 record.
-    for (unsigned long long id = 7; id < 10; ++id) {
+    for (unsigned long long id = 7; id < 11; ++id) {
       bufferId_ = id;
       ncclReg* reg = Auto(0x10000, kPage);
       ASSERT_NE(reg, nullptr);
       EXPECT_TRUE(reg->rcclAuto.owned);
     }
   });
-  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0x20000u);
-  EXPECT_EQ(Retired().size(), 2u);
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0x30000u);
+  EXPECT_EQ(Retired().size(), 3u);
   EXPECT_TRUE(LogHas(log, "keeps freeing and reallocating them"));
   EXPECT_TRUE(LogHas(log, "Set RCCL_RING_AUTO_REGISTER=0"));
   EXPECT_EQ(log.find("RCCL_RING_AUTO_REGISTER is holding"), log.rfind("RCCL_RING_AUTO_REGISTER is holding"));
+}
+
+TEST_F(RegisterAutoLocalMicrotest, RegisterRetiresStaleRecordAndInserts_ReturnsNewOwnedRecord) {
+  ASSERT_NE(Auto(0x50000, kPage), nullptr);  // [0x50000, 0x60000)
+  bufferId_ = 8;
+  allocSize_ = 0x40000;
+  ASSERT_NE(Auto(0x40000, kPage), nullptr);  // [0x40000, 0x80000); lookup stops before the stale record above
+  ASSERT_EQ(Population(), 2);
+  bufferId_ = 9;
+  allocSize_ = 0x10000;
+  // Lookup retires the wide record; ncclRegister then retires the first one and inserts a new record in its place,
+  // so the cache population is unchanged.
+  ncclReg* reg = Auto(0x50000, kPage);
+  ASSERT_NE(reg, nullptr);
+  EXPECT_TRUE(reg->rcclAuto.owned);
+  EXPECT_EQ(reg->rcclAuto.bufferId, 9u);
+  EXPECT_EQ(reg->localRefs, 1);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(Retired().size(), 2u);
 }
 
 TEST_F(RegisterAutoLocalMicrotest, RetiredBytesBelowWarnThreshold_DoesNotWarn) {

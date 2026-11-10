@@ -3772,6 +3772,9 @@ protected:
             why = "NCCL_LOCAL_REGISTER=0";
         else if (!ncclCuMemEnable())
             why = "Requires cuMem (NCCL_CUMEM_ENABLE=1) so buffers IPC-register";
+        else if (!rcclNcclAlgoEnvIsSet())
+            // RCCL caches NCCL_ALGO on first use; without it CE/DDA/symmetric selection can bypass Ring.
+            why = "NCCL_ALGO was unset when RCCL first read it; launch with NCCL_ALGO=Ring NCCL_PROTO=Simple";
         return mpiCoordinatedSkipReason(why != nullptr, why);
     }
 

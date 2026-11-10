@@ -254,7 +254,6 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   if (buff == NULL || size == 0) return ncclSuccess;
 
   // ncclRegFind drops a record whose allocation was freed and the address reused, so a hit is safe to use.
-  struct ncclRegCache* cache = &comm->regCache;
   NCCLCHECK(ncclRegFind(comm, buff, size, reg));
   if (*reg) return ncclSuccess;
 
@@ -287,14 +286,15 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   }
 #endif
 
-  int population = cache->population;
   void* handle = NULL;
   if (ncclRegister(comm, (void*)base, baseSize, /*isGraph=*/false, &handle) != ncclSuccess || handle == NULL) {
     (void)cudaGetLastError();
     return ncclSuccess;
   }
   struct ncclReg* found = (struct ncclReg*)handle;
-  if (cache->population == population) {
+  // A record ncclRegister just created holds only our reference. The cache population cannot tell, because the same
+  // call may also have retired a stale record.
+  if (found->localRefs != 1 || found->graphRefs != 0) {
     // ncclRegister reused a record ncclRegFind did not return; keep its owner's reference count unchanged.
     --found->localRefs;
     return ncclSuccess;
