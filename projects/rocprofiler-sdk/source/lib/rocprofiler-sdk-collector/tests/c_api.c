@@ -24,6 +24,7 @@
 // as C into the unit test executable.
 
 #include <rocprofiler-sdk-collector/collector.h>
+#include <rocprofiler-sdk-collector/records.h>
 
 #include <stddef.h>
 
@@ -33,14 +34,16 @@ rocprofiler_collector_c_api_compiles(void);
 int
 rocprofiler_collector_c_api_compiles(void)
 {
-    rocprofiler_collector_config_t config      = {0};
-    rocprofiler_collector_t        collector   = {0};
-    const char*                    providers[] = {"rocm_hip", NULL};
-    const char*                    argv[]      = {"true", NULL};
-    const char*                    path        = NULL;
-    int                            pid         = 0;
-    int                            exit_status = 0;
-    uint32_t                       major       = 0;
+    rocprofiler_collector_config_t          config      = {0};
+    rocprofiler_collector_t                 collector   = {0};
+    const char*                             providers[] = {"rocm_hip", NULL};
+    const char*                             argv[]      = {"true", NULL};
+    const char*                             path        = NULL;
+    int                                     pid         = 0;
+    int                                     exit_status = 0;
+    uint32_t                                major       = 0;
+    rocprofiler_collector_read_config_t     read_config = {0};
+    rocprofiler_collector_read_statistics_t statistics  = {0};
 
     config.size       = sizeof(config);
     config.output_dir = "/proc/rocprofiler-collector-c-api"; /* not creatable, even as root */
@@ -53,6 +56,8 @@ rocprofiler_collector_c_api_compiles(void)
     (void) rocprofiler_collector_wait(collector, pid, &exit_status);
     (void) rocprofiler_collector_stop(collector);
     (void) rocprofiler_collector_get_trace_path(collector, &path);
+    read_config.size = sizeof(read_config);
+    (void) rocprofiler_collector_read(collector, &read_config, &statistics);
     (void) rocprofiler_collector_destroy(collector);
     return rocprofiler_collector_get_status_name(ROCPROFILER_COLLECTOR_STATUS_SUCCESS) != NULL;
 }

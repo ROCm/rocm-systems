@@ -49,6 +49,8 @@ typedef enum rocprofiler_collector_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_COLLECTOR_STATUS_ERROR_SESSION,           ///< Trace session control failed
     ROCPROFILER_COLLECTOR_STATUS_ERROR_OUTPUT_DIRECTORY,  ///< Output directory not usable
     ROCPROFILER_COLLECTOR_STATUS_ERROR_LAUNCH,            ///< The target could not be started
+    ROCPROFILER_COLLECTOR_STATUS_ERROR_PROBE_SCHEMA,      ///< Probe schema missing or invalid
+    ROCPROFILER_COLLECTOR_STATUS_ERROR_TRACE,             ///< The trace could not be read
     ROCPROFILER_COLLECTOR_STATUS_LAST,
 } rocprofiler_collector_status_t;
 

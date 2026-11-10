@@ -26,11 +26,13 @@
 #define ROCPROFILER_COLLECTOR_NONNULL(...)
 
 #include <rocprofiler-sdk-collector/collector.h>
+#include <rocprofiler-sdk-collector/records.h>
 
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk-collector/clock.hpp"
 #include "lib/rocprofiler-sdk-collector/daemon.hpp"
 #include "lib/rocprofiler-sdk-collector/launch.hpp"
+#include "lib/rocprofiler-sdk-collector/read.hpp"
 #include "lib/rocprofiler-sdk-collector/session.hpp"
 
 #include <unistd.h>
@@ -83,6 +85,7 @@ struct collector_state
     std::vector<std::string>   target_env    = {};  // added to launched targets
     clock_sample               start_clocks  = {};  // converts the trace's timestamps
     clock_sample               stop_clocks   = {};
+    string_store               strings       = {};  // records' strings, until destroy
 };
 
 std::mutex&
@@ -326,6 +329,30 @@ rocprofiler_collector_stop(rocprofiler_collector_t collector)
 }
 
 rocprofiler_collector_status_t
+rocprofiler_collector_read(rocprofiler_collector_t                    collector,
+                           const rocprofiler_collector_read_config_t* config,
+                           rocprofiler_collector_read_statistics_t*   statistics)
+{
+    if(!config) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
+    if(config->size < offsetof(rocprofiler_collector_read_config_t, reserved_padding))
+        return ROCPROFILER_COLLECTOR_STATUS_ERROR_INCOMPATIBLE_ABI;
+
+    // Held while reading: the records' strings belong to the collector.
+    auto  lock  = std::unique_lock{collector::get_mutex()};
+    auto* state = collector::lookup(collector);
+    if(!state) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
+    if(!state->stopped) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_STATE;
+
+    auto request       = collector::read_request{};
+    request.trace_path = state->trace_path;
+    request.schema_dir = collector::resolve_schema_dir(config->schema_dir);
+    request.clocks     = collector::get_clock_conversion(state->start_clocks, state->stop_clocks);
+    request.hip_api_callback = config->hip_api_callback;
+    request.user_data        = config->user_data;
+    return collector::read_hip_api_calls(request, &state->strings, statistics);
+}
+
+rocprofiler_collector_status_t
 rocprofiler_collector_get_trace_path(rocprofiler_collector_t collector, const char** path)
 {
     if(!path) return ROCPROFILER_COLLECTOR_STATUS_ERROR_INVALID_ARGUMENT;
@@ -368,6 +395,8 @@ rocprofiler_collector_get_status_name(rocprofiler_collector_status_t status)
         ROCPROFILER_COLLECTOR_STATUS_NAME_CASE(ROCPROFILER_COLLECTOR_STATUS_ERROR_SESSION)
         ROCPROFILER_COLLECTOR_STATUS_NAME_CASE(ROCPROFILER_COLLECTOR_STATUS_ERROR_OUTPUT_DIRECTORY)
         ROCPROFILER_COLLECTOR_STATUS_NAME_CASE(ROCPROFILER_COLLECTOR_STATUS_ERROR_LAUNCH)
+        ROCPROFILER_COLLECTOR_STATUS_NAME_CASE(ROCPROFILER_COLLECTOR_STATUS_ERROR_PROBE_SCHEMA)
+        ROCPROFILER_COLLECTOR_STATUS_NAME_CASE(ROCPROFILER_COLLECTOR_STATUS_ERROR_TRACE)
         case ROCPROFILER_COLLECTOR_STATUS_LAST: break;
     }
 #undef ROCPROFILER_COLLECTOR_STATUS_NAME_CASE
@@ -393,6 +422,9 @@ rocprofiler_collector_get_status_string(rocprofiler_collector_status_t status)
         case ROCPROFILER_COLLECTOR_STATUS_ERROR_OUTPUT_DIRECTORY:
             return "Output directory cannot be created, or is not empty";
         case ROCPROFILER_COLLECTOR_STATUS_ERROR_LAUNCH: return "Target could not be started";
+        case ROCPROFILER_COLLECTOR_STATUS_ERROR_PROBE_SCHEMA:
+            return "Probe schema missing or invalid";
+        case ROCPROFILER_COLLECTOR_STATUS_ERROR_TRACE: return "Trace could not be read";
         case ROCPROFILER_COLLECTOR_STATUS_LAST: break;
     }
     return nullptr;

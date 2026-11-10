@@ -8,7 +8,7 @@ configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
 
 set(ROCPROFILER_COLLECTOR_HEADER_FILES
     # core headers
-    collector.h
+    collector.h records.h
     # secondary headers
     defines.h types.h ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
