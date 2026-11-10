@@ -820,6 +820,10 @@ Vintrp::Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, Execute
 
 bool Vintrp::default_encoding() { return 1; }
 
+bool Vop3::displays_vop3_op_sel() const {
+  return inst_.op == 832 || inst_.op == 843 || (inst_.op >= 862 && inst_.op <= 863);
+}
+
 uint32_t Vop3::vop3_encoded_source_count() const {
   uint32_t count = 0;
   for (uint8_t src = 0; src < num_src_; ++src) {

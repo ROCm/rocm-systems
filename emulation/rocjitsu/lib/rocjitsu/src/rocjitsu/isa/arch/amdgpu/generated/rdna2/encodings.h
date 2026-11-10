@@ -708,6 +708,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
   bool has_encoded_literal32() const;
@@ -715,7 +716,7 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
-                                         vop3_encoded_source_count(), false);
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];

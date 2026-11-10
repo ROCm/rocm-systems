@@ -1612,7 +1612,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # 64-bit shift/add (VOP3-only)
     if name == 'V_LSHL_ADD_U64':
         return InstructionSemantics(
-            name, 'vector_ternary', operation='lshl_add', data_type='u64'
+            name, 'vector_ternary', operation='lshl_add_u64', data_type='u64'
         )
     if name == 'V_LSHLREV_B64':
         return InstructionSemantics(
