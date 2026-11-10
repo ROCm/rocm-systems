@@ -1370,7 +1370,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     for (uint32_t address : {0u, 64u}) {
       const std::array ranges{LdsByteRange{.address = address, .bytes = 16}};
       wave.registerLdsRangeEvent(testInstruction(address), MemoryEventType::GLOBAL_TO_LDS, ranges,
-                                 /*elementBytes=*/4, obligations, c.eventOrder);
+                                 obligations, c.eventOrder);
     }
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
@@ -1394,8 +1394,8 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
                                                                MemoryOrderClass::TENSOR}};
   constexpr int kTransfers = 4096;
   for (int i = 0; i < kTransfers; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {},
-                               /*elementBytes=*/4, obligations, MemoryOrderClass::TENSOR);
+    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {}, obligations,
+                               MemoryOrderClass::TENSOR);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
     wave.dispatch(wait);
@@ -1592,7 +1592,7 @@ TEST(RaceDetector, TensorDma_TensorcntDoesNotRetireDsWrite) {
 }
 
 TEST(RaceDetector, TensorDma_CrossWaveLoadBarrierWithoutTensorcntRace) {
-  // A barrier retires only transfers their wave has already waited for.
+  // A barrier retires only transfers that their wave has already waited for.
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.barrier();
@@ -1670,6 +1670,87 @@ TEST(RaceDetector, TensorDma_StoreReadsSameWaveCompletedDtlSafe) {
   EXPECT_FALSE(b.hasRace());
 }
 
+TEST(RaceDetector, TensorDma_TransferWithoutRangesTakesATensorcntSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_EachTransferWithoutRangesTakesOneTensorcntSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/2);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_PartialWaitRetiresAnOlderTransferWithoutRanges) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(4));
+}
+
+TEST(RaceDetector, TensorDma_StoreWithoutRangesTakesATensorcntSlot) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorStoreFromLds(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_TransferWithoutRangesConflictsWithNothing) {
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.tensorStoreFromLds(/*wave=*/0, {});
+  for (int wave : {0, 1}) {
+    b.checkLdsRead(wave, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    b.checkLdsWrite(wave, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  }
+  EXPECT_FALSE(b.hasRace());
+}
+
+TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
+  // Without LDS bytes, the wait alone finishes the transfer; it needs no
+  // barrier. Later loads alone could not show that, since they are newer.
+  const EventId empty{0};
+  ASSERT_EQ(b.events().totalAllocated(), 1);
+  EXPECT_TRUE(b.events().isTrimmable(empty));
+  b.barrier();
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 64, .bytes = 16}});
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/64, /*bytes=*/4);
+  EXPECT_TRUE(b.hasLdsRace(64));
+}
+
+TEST(RaceDetector, TensorDma_UnwaitedTransferWithoutRangesKeepsItsSlotAcrossBarrier) {
+  // A barrier retires only transfers that their wave has waited for, so the
+  // unwaited transfer without ranges still holds the newest slot afterwards:
+  // waiting for all but one completes the load before it. Had it lost its
+  // slot, the load would still be pending and the read would race.
+  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
+  b.tensorLoadToLds(/*wave=*/0, {});
+  b.barrier();
+  b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/1);
+  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/4, /*bytes=*/4);
+  EXPECT_FALSE(b.hasRace());
+}
+
 TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
@@ -1679,6 +1760,15 @@ TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
   EXPECT_TRUE(b.hasLdsRace(15));
   b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
   EXPECT_TRUE(b.hasLdsRace(14));
+}
+
+TEST(RaceDetector, TensorDma_RangeEndingMidElementTracksItsTailBytes) {
+  // A range can end mid-element, as when an element straddles the end of the
+  // wave's LDS allocation. Its trailing bytes are tracked, not rounded away.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 6}});
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/2);
+  EXPECT_TRUE(b.hasLdsRace(4));
 }
 
 // ---- Exec mask ----

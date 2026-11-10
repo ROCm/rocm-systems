@@ -191,6 +191,7 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
   case amdgpu::WaitCounterType::DSCNT:
   case amdgpu::WaitCounterType::KMCNT:
   case amdgpu::WaitCounterType::TENSORCNT:
+  case amdgpu::WaitCounterType::SAMPLECNT:
   case amdgpu::WaitCounterType::ASYNCCNT:
     return;
   default:
@@ -281,12 +282,12 @@ void WaveRaceState::registerLdsEvent(
 
 void WaveRaceState::registerLdsRangeEvent(
     InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
-    int elementBytes, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
   IntervalSet intervals;
   for (const auto &range : ranges)
     appendLdsInterval(intervals, range.address, static_cast<int>(range.bytes), *detector,
-                      elementBytes);
+                      /*elementBytes=*/1);
   intervals.finalize();
   registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
                              counterObligations, memoryOrder);
@@ -437,6 +438,8 @@ int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
     return amdgpu::WaitCounters::TENSORCNT_MAX;
   case amdgpu::WaitCounterType::ASYNCCNT:
     return amdgpu::WaitCounters::ASYNCCNT_MAX;
+  case amdgpu::WaitCounterType::SAMPLECNT:
+    return amdgpu::WaitCounters::SAMPLECNT_MAX;
   }
   assert(false && "invalid wait counter type");
   return -1;

@@ -34,8 +34,7 @@ namespace rocjitsu::plugins::race_detector {
 namespace {
 
 InstructionSnapshot capture_instruction(uint64_t pc, const Instruction &inst) {
-  static_assert(InstructionSnapshot::kMaxWords * sizeof(uint32_t) ==
-                amdgpu::InstructionCache::kFetchBytes);
+  static_assert(InstructionSnapshot::kMaxWords == amdgpu::DecodedInstructionCache::kNumWords);
   if (!inst.raw_encoding())
     throw std::logic_error(
         std::format("race detector instruction at PC {:#x} has no encoding", pc));
@@ -255,6 +254,15 @@ std::string RaceDetectorPlugin::getSummary() const {
                                "========================================\n";
 }
 
+size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  return detectors_.size();
+}
+
+bool RaceDetectorPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
+  return wf != nullptr && wf->has_plugin_state(slot_index());
+}
+
 void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   std::lock_guard<std::mutex> lock(report_mutex_);
   KernelNames kernel_names{info.kernelNameOrUnknown(), info.kernelSymbolOrUnknown()};
@@ -355,6 +363,34 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
+}
+
+void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  // Each wave released its pointer into this detector when it halted.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
+}
+
+void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  if (RaceWavefrontState *state = get_state(wf); state && state->race_state) {
+    // Normal termination drains the wave's memory operations before this hook.
+    // Model s_endpgm's implicit wait, retaining LDS history until a subsequent
+    // workgroup barrier supplies ordering with the surviving waves.
+    const amdgpu::WaitcntModel model = amdgpu::waitcnt_model(wf.cu().arch()).value();
+    PendingWaitCount wait;
+    for (size_t index = 0; index < amdgpu::kWaitCounterCount; ++index) {
+      const auto kind = static_cast<amdgpu::WaitCounterKind>(index);
+      if (const std::optional<amdgpu::WaitCounterType> counter =
+              amdgpu::memory_wait_counter_type(kind, model))
+        wait.add(*counter, 0);
+    }
+    state->race_state->dispatch(wait);
+  }
+  release_wave_state(wf);
+}
+
+void RaceDetectorPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  release_wave_state(wf);
 }
 
 void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
@@ -556,7 +592,11 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // against a pending load's destination.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
-  const int elementBytes = static_cast<int>(issue.element_size_bytes);
+  // An observed range can end mid-element: an element that straddles the end
+  // of the wave's LDS allocation transfers only its leading bytes. Validate the
+  // ranges at byte granularity, as registerLdsRangeEvent registers them;
+  // rounding them to whole elements would drop those bytes.
+  constexpr int kByteGranularity = 1;
 
   // A transfer has no lanes; its violations report lane -1. The core takes
   // its own range type, independent of the observation protocol.
@@ -564,7 +604,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   ranges.reserve(issue.lds_ranges.size());
   for (const auto &range : issue.lds_ranges) {
     ranges.push_back({.address = range.address, .bytes = range.bytes});
-    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, elementBytes);
+    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
     if (bytes == 0)
       continue;
     const int addr = static_cast<int>(range.address);
@@ -574,15 +614,16 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }
 
-  // An instruction that moves no data, such as a store wholly outside the
-  // tensor, still occupies a TENSORCNT slot, so its event is registered even
-  // without LDS ranges. A NULL descriptor is registered the same way, matching
-  // the emulator's assumption that it counts on TENSORCNT.
+  // An instruction that moves no data, such as a NOP tile, a gather with no
+  // valid indices or a store wholly outside the tensor, still occupies a
+  // TENSORCNT slot, so its event is registered even without LDS ranges. A NULL
+  // descriptor is registered the same way, matching the emulator's assumption
+  // that it counts on TENSORCNT.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
   rs->registerLdsRangeEvent(
       instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
-      ranges, elementBytes, obligations, memoryOrder);
+      ranges, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
@@ -663,7 +704,16 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     s->race_state->dispatch(wait);
 }
 
-void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                                 BarrierKind kind) {
+  if (wavefronts.empty())
+    return;
+  if (kind == BarrierKind::Workgroup) {
+    auto *s = get_state(wavefronts.front());
+    assert(s && s->race_state);
+    s->race_state->getDetector()->flushWorkgroupBarrierEvents();
+    return;
+  }
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);

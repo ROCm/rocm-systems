@@ -806,6 +806,9 @@ public:
       });
     }
 
+    /// @brief Return raw lane words for one register in the region.
+    /// @returns Failure for a partial-byte region, reporting InvalidRegisterAccess
+    /// through the wavefront's instruction-execution error channel.
     FailureOr<std::span<const uint32_t>> lanes(uint32_t relative_reg = 0) const {
       assert(relative_reg < reg_count_ && "relative VGPR outside read region");
       if (byte_mask_ != rocjitsu::ExecutionPlugin::kFullByteMask)
