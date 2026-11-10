@@ -94,9 +94,10 @@
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
+ * - 1.38 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_SVM
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 37
+#define HSA_AMD_INTERFACE_VERSION_MINOR 38
 
 #ifdef __cplusplus
 extern "C" {
@@ -3237,13 +3238,21 @@ typedef enum {
   */
   HSA_EXT_POINTER_TYPE_IPC = 4,
   /*
-  No backend memory but virtual address
+  Virtual address reserved with hsa_amd_vmem_address_reserve that has not been
+  registered with hsa_amd_svm_attributes_set.  There is no memory backing this
+  address, so it cannot be used for data access or communication.
   */
   HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5,
   /*
   Memory was allocated with an HSA virtual memory allocator
   */
-  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6
+  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6,
+  /*
+  Virtual address reserved with hsa_amd_vmem_address_reserve and registered with
+  hsa_amd_svm_attributes_set.  The range is system memory managed by the SVM
+  subsystem and may be accessed as host memory.
+  */
+  HSA_EXT_POINTER_TYPE_SVM = 7
 } hsa_amd_pointer_type_t;
 
 /**
@@ -4998,11 +5007,11 @@ hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
  * to hsa_amd_vmem_handle_release.
  *
  * @param[out] memory_handle memory handle for this mapped address
- * @param[in] mapped address
+ * @param[in] addr Any address within a mapping created with hsa_amd_vmem_map.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid address
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p addr is not within a mapping
  */
 hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memory_handle,
                                               void* addr);

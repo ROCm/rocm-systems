@@ -141,13 +141,10 @@ void SBfeI64Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_bfe_i6
 void SCbranchGForkSop2::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
-  constexpr uint64_t kPcSignBit = 1ULL << 47;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);
   uint64_t target = encoded & kPcAddressMask;
-  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
+  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
     target = wf.code_load_bias() + static_cast<int32_t>(encoded);
-  else if (target & kPcSignBit)
-    target |= ~kPcAddressMask;
   wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;
 }
 

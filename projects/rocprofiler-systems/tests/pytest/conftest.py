@@ -8,21 +8,19 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from functools import lru_cache
-from typing import Any, Callable, Generator, Mapping, Optional
 
-import os
-import sys
 import json
+import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
 import traceback
+import warnings
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, Mapping
 
 try:
     import yaml
@@ -281,6 +279,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "backend_include_ompt",
     ]
 
     # Informational markers, only used for test labeling
@@ -337,6 +336,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "domain_flags",
         "tool_runner",
         "cli_help",
         "rocsys",
@@ -349,6 +349,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "validation_usm",
         "selective_regions",
         "minimal",
+        "backend_flags",
         "rank_filter",
         "rocattach",
         "pytest_impl",
@@ -490,6 +491,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(pytest.mark.skip(reason="UCX not available"))
         if "mpi" in item.keywords:
             _msg = mpi_unavailable_reason(rocprof_config, config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
+        if "backend_include_ompt" in item.keywords:
+            _msg = backend_include_ompt_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
         if "mpi_implementation" in item.keywords:
@@ -674,6 +679,18 @@ def pytest_collection_finish(session) -> None:
                 f"CTestTestfile.cmake generation failed due to:\n{failures}",
                 returncode=1,
             )
+        if not session.items:
+            opts = session.config.option
+            active = [
+                f"-m '{opts.markexpr}'" if opts.markexpr else "",
+                f"-k '{opts.keyword}'" if opts.keyword else "",
+            ]
+            filters = " ".join(a for a in active if a) or "none"
+            pytest.exit(
+                f"CTestTestfile.cmake generation collected 0 tests (filters: {filters}); "
+                "check python_files in pytest-generate.ini and the -m/-k filters",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)
@@ -834,11 +851,44 @@ def parse_metadata_settings(metadata_file: Path) -> dict:
     }
 
 
+def cpu_frequency_available(
+    sysfs_cpu_root: Path = Path("/sys/devices/system/cpu"),
+) -> bool:
+    """Return True if at least one CPU exposes a readable cpufreq ``scaling_cur_freq``.
+
+    With no readable file to sample CPU frequency, there will be no ``Frequency (S)``
+    counter reaching the trace. Containers and VMs often hide cpufreq.
+    """
+    for freq_file in sysfs_cpu_root.glob("cpu[0-9]*/cpufreq/scaling_cur_freq"):
+        try:
+            with freq_file.open("r") as handle:
+                handle.read(1)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def host_counters_expected(counters: list[str]) -> list[str]:
+    """Drop ``Frequency (S)`` from ``counters`` when cpufreq is unavailable.
+
+    Emits a warning so the dropped check stays visible in the pytest summary.
+    """
+    if "Frequency (S)" not in counters or cpu_frequency_available():
+        return counters
+    warnings.warn(
+        "cpufreq (scaling_cur_freq) is not readable on this host; skipping the "
+        "'Frequency (S)' counter check",
+        stacklevel=2,
+    )
+    return [name for name in counters if name != "Frequency (S)"]
+
+
 def assert_resolved_settings(
     result: TestResult,
     expected: Mapping[str, Any],
     *,
-    metadata_file: Optional[Path] = None,
+    metadata_file: Path | None = None,
 ) -> None:
     """Fail unless every key in ``expected`` is present with an equal value.
 
@@ -970,6 +1020,39 @@ def mpi_unavailable_reason(
 ) -> str | None:
     if rocprof_config.capabilities.mpiexec_exec is None:
         return "MPI not available"
+    return None
+
+
+@lru_cache(maxsize=1)
+def _ompt_include_choice_supported(rocprofsys_run: str) -> bool | None:
+    """Cached probe for whether ``-I ompt`` is a valid backend-include choice.
+
+    Returns None if the probe itself failed (binary missing/timeout), so the
+    caller can distinguish "not supported" from "could not tell".
+    """
+    try:
+        result = subprocess.run(
+            [rocprofsys_run, "-I", "ompt", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    combined = (result.stdout or "") + (result.stderr or "")
+    return "Invalid choice: 'ompt'" not in combined
+
+
+def backend_include_ompt_unavailable_reason(
+    rocprof_config: RocprofsysConfig,
+) -> str | None:
+    """Skip ``-I ompt`` tests when this build omits ompt from backend choices."""
+    supported = _ompt_include_choice_supported(str(rocprof_config.rocprofsys_run))
+    if supported is None:
+        return "Could not query backend include choice 'ompt'"
+    if not supported:
+        return "Backend include choice 'ompt' not available in this build"
     return None
 
 
@@ -2150,6 +2233,36 @@ def validation_rules_dir(rocprof_config) -> Path:
     return rocprof_config.rocpd_validation_rules
 
 
+# Shared by the domain-flag (test_presets.py) and backend-flag
+# (test_tool_runner.py) transpose tests, so the launch args and baseline
+# env/rules live in one place.
+# threads, iterations, sync-every-N. amd-smi-rules.json wants more than
+# 100 samples; 2 100 50 only captured ~72 on MI355.
+DOMAIN_BACKEND_TRANSPOSE_ARGS = ["4", "300", "50"]
+
+
+@pytest.fixture
+def domain_backend_flag_env() -> dict[str, str]:
+    return {
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_USE_PID": "OFF",
+    }
+
+
+@pytest.fixture
+def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
+    return [validation_rules_dir / "default-rules.json"]
+
+
+@pytest.fixture
+def cpu_workload(rocprof_config) -> str:
+    """CPU workload with real, instrumentable functions (parallel-overhead)."""
+    try:
+        return str(rocprof_config.get_target_executable("parallel-overhead"))
+    except FileNotFoundError:
+        pytest.skip("parallel-overhead example not built")
+
+
 # ----------------------------------------------------------------------------
 # Module-scoped Fixtures
 # ----------------------------------------------------------------------------
@@ -2417,6 +2530,22 @@ class RocprofsysTest:
         self.num_threads = get_test_num_threads
         self.test_output_dir = test_output_dir
         self.library_path = library_path
+
+    def run_transpose_sample(
+        self, env: dict[str, str], sampling_args: list[str]
+    ) -> object:
+        """Run the transpose HIP workload via rocprof-sys-sample.
+
+        Shared by the domain-flag and backend-flag artifact tests.
+        """
+        return self.run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            sampling_args=sampling_args,
+            run_args=DOMAIN_BACKEND_TRANSPOSE_ARGS,
+            check_target_arch=True,
+        )
 
 
 # ============================================================================

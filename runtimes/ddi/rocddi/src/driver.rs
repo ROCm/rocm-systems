@@ -43,12 +43,13 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+    SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo,
+    VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
@@ -56,7 +57,8 @@ use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory =
+    fn(DriverContextLifetime, crate::os::ProcessIdentity) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -70,9 +72,12 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+fn new_linux_kfd(
+    lifetime: DriverContextLifetime,
+    process: crate::os::ProcessIdentity,
+) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime),
+        KfdDriver::with_context_lifetime(lifetime, process),
     )?))
 }
 
@@ -266,8 +271,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         device: &Self::DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<Self::VirtualMemory>, Error>;
     /// Releases physical backing after its mappings are gone.
     fn free_virtual_memory(memory: &mut Self::VirtualMemory) -> Result<(), Error>;
@@ -507,9 +511,7 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         &self,
         device: &Self::DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error>;
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
 }

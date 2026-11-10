@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include <memory>
@@ -1116,6 +1117,7 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   src0.set_register_byte_mask(
       src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
@@ -1421,6 +1423,7 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1470,6 +1473,7 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1519,6 +1523,7 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1568,6 +1573,7 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1618,6 +1624,7 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1651,6 +1658,7 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1682,6 +1690,7 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1729,6 +1738,7 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1762,6 +1772,7 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1809,6 +1820,7 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -1858,6 +1870,7 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2546,6 +2559,7 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2605,6 +2619,7 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2783,6 +2798,7 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2842,6 +2858,7 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2901,6 +2918,7 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -2960,6 +2978,7 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3019,6 +3038,7 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3493,6 +3513,7 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3552,6 +3573,7 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -3785,6 +3807,7 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3844,6 +3867,7 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3897,6 +3921,7 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7201,6 +7226,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7267,6 +7293,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9211,6 +9238,11 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9536,6 +9568,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9615,6 +9649,9 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9694,6 +9731,9 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9773,6 +9813,9 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9852,6 +9895,9 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9931,6 +9977,9 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10010,6 +10059,9 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10089,6 +10141,11 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10168,6 +10225,8 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -10487,6 +10546,8 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
 
 namespace detail {
@@ -10555,6 +10616,8 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
 
 namespace detail {
@@ -10696,6 +10759,8 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   src2.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11083,6 +11148,7 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::BF16);
 }
 
 namespace detail {
@@ -11689,6 +11755,7 @@ VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11722,6 +11789,8 @@ VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11754,6 +11823,7 @@ VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11787,6 +11857,8 @@ VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11819,6 +11891,7 @@ VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11852,6 +11925,8 @@ VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11884,6 +11959,7 @@ VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11917,6 +11993,8 @@ VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11949,6 +12027,7 @@ VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -11982,6 +12061,8 @@ VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= TRANSCENDENTAL;
 }
 
 namespace detail {
@@ -12045,6 +12126,8 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12114,6 +12197,8 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12183,6 +12268,8 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12362,6 +12449,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12431,6 +12520,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12500,6 +12591,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12569,6 +12662,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12638,6 +12733,8 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12707,6 +12804,8 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13808,6 +13907,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13878,6 +13979,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13948,6 +14051,8 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14247,6 +14352,8 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14316,6 +14423,8 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14385,6 +14494,8 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17177,6 +17288,8 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17241,6 +17354,8 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17305,6 +17420,8 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17369,6 +17486,8 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17433,6 +17552,8 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17497,6 +17618,8 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17561,6 +17684,8 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17625,6 +17750,8 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17689,6 +17816,8 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17753,6 +17882,8 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17817,6 +17948,8 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17881,6 +18014,8 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -21616,6 +21751,8 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21683,6 +21820,8 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21750,6 +21889,8 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21817,6 +21958,8 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21884,6 +22027,8 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21951,6 +22096,8 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22018,6 +22165,8 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22085,6 +22234,8 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22152,6 +22303,8 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22219,6 +22372,8 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22286,6 +22441,8 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -22353,6 +22510,8 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -23816,14 +23975,6 @@ DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
@@ -23886,14 +24037,6 @@ DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
@@ -23955,14 +24098,6 @@ DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
   return std::make_unique<VSubrevCoCiU32Vop3SdstEnc>(opcode);
 }
 } // namespace detail
-
-void VSubrevCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -24217,14 +24352,6 @@ DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
@@ -24284,14 +24411,6 @@ DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
@@ -24350,14 +24469,6 @@ DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
   return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
 }
 } // namespace detail
-
-void VSubrevCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
 
 } // namespace rdna4
 } // namespace rocjitsu
