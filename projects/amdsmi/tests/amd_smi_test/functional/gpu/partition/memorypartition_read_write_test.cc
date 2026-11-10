@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -22,6 +23,14 @@ const uint32_t MAX_SPX_PARTITIONS = 1;  // Single GPU node
 const uint32_t MAX_DPX_PARTITIONS = 2;
 const uint32_t MAX_TPX_PARTITIONS = 3;
 const uint32_t MAX_QPX_PARTITIONS = 4;
+
+// Setting a memory partition other than the current one queues an NPS change that the driver
+// applies at the next reload. Setting the original mode again does not cancel it, so the test
+// cannot undo it; staging such a change is opt-in.
+static bool StageNpsChangeRequested() {
+  const char* env = std::getenv("AMDSMI_TEST_STAGE_NPS_CHANGE");
+  return env != nullptr && std::string(env) == "1";
+}
 
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
   set_title("AMDSMI Memory Partition Read Test");
@@ -545,6 +554,16 @@ void TestMemoryPartitionReadWrite::Run(void) {
         }
       }
 
+      if (ret_caps == AMDSMI_STATUS_SUCCESS &&
+          new_memory_partition != current_memory_config.mp_mode && !StageNpsChangeRequested()) {
+        std::cout << "\t** Skipping set to " << memoryPartitionString(new_memory_partition)
+                  << ": it would queue a memory partition change that is applied at the next "
+                  << "driver reload and cannot be cancelled by restoring "
+                  << memoryPartitionString(current_memory_config.mp_mode)
+                  << ". Set AMDSMI_TEST_STAGE_NPS_CHANGE=1 to run it.\n";
+        continue;
+      }
+
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Available Memory Partition Capabilities: " << memory_caps_str << "\n"
@@ -601,6 +620,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
       auto ret_caps_post =
           amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind], &post_set_config);
       if (ret_caps_post == AMDSMI_STATUS_SUCCESS && ret_caps == AMDSMI_STATUS_SUCCESS) {
+        EXPECT_EQ(post_set_config.mp_mode, current_memory_config.mp_mode);
         EXPECT_EQ(post_set_config.partition_caps.nps_flags.nps1_cap,
                   current_memory_config.partition_caps.nps_flags.nps1_cap);
         EXPECT_EQ(post_set_config.partition_caps.nps_flags.nps2_cap,
@@ -661,9 +681,11 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 ret == AMDSMI_STATUS_NOT_SUPPORTED)
         << "amdsmi_set_gpu_memory_partition returned unexpected status: "
         << smi_amdgpu_get_status_string(ret, false);
-    std::cout << "\t** Memory partition restore staged to " << orig_memory_partition
-              << ". A driver reload is required to apply: "
-              << "sudo modprobe -r amdgpu && sudo modprobe amdgpu\n";
+    if (StageNpsChangeRequested()) {
+      std::cout << "\t** WARNING: a memory partition change staged above stays pending and is "
+                << "applied at the next driver reload; restoring " << orig_memory_partition
+                << " does not cancel it.\n";
+    }
   }  // END DEVICE FOR LOOP
 
   // Restore original compute partition settings (see orig_dev_config ^)
