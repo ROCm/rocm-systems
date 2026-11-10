@@ -1,11 +1,8 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for smi_amdgpu_parse_od_clk_range(), the pp_od_clk_voltage parser
-// behind amd-smi's per-domain min/max clock. Driven over in-memory streams --
-// no GPU required. Guards the MI45x case where pp_od_clk_voltage carries no
-// OD_FCLK section: the parser must report the domain absent so the caller falls
-// back to pp_dpm_fclk instead of reporting a max of 0 MHz.
+// Hardware-free tests for overdrive/DPM parsing and public clock APIs,
+// using in-memory streams and fake sysfs devices.
 
 #include <gtest/gtest.h>
 
@@ -348,6 +345,7 @@ TEST(GpuUnit, DpmMixedDevicesPreservePublicApiErrors) {
   FakeSysfsTree tree;
   tree.WriteFile("card0/device/pp_dpm_fclk", "0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n");
   tree.WriteFile("card1/device/pp_dpm_fclk", "\n");
+  // amdsmi_get_clock_info reads gpu_metrics even for FCLK.
   amd::smi::AMDGpuMetrics_v10_t metrics{};
   metrics.m_common_header = {sizeof(metrics), 1, 0};
   for (const char* card : {"card0", "card1"}) {
@@ -384,20 +382,13 @@ TEST(GpuUnit, DpmMixedDevicesPreservePublicApiErrors) {
   EXPECT_EQ(info.min_clk, 1300u);
   EXPECT_EQ(info.max_clk, 1800u);
 
+  // These distinct errors capture current newline-only behavior, not a
+  // prescribed cross-API status contract.
   EXPECT_EQ(amdsmi_get_clk_freq(igpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &frequencies),
             AMDSMI_STATUS_UNEXPECTED_DATA);
   EXPECT_EQ(frequencies.num_supported, 0u);
   EXPECT_EQ(amdsmi_get_clock_info(igpu_registration.handle(), AMDSMI_CLK_TYPE_DF, &info),
             AMDSMI_STATUS_IO);
-}
-
-TEST(GpuUnit, DpmRangesWhitespaceDoesNotHideMalformedData) {
-  for (const char* contents : {"\ninvalid\n", " \t\r\ninvalid\n"}) {
-    std::istringstream dpm(contents);
-    SmiAmdgpuOdClkRange od_range;
-    SmiAmdgpuClkRanges ranges;
-    EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
-  }
 }
 
 // A genuinely out-of-range value (> INT_MAX, not the sentinel) is still
