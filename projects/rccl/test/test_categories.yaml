@@ -117,6 +117,7 @@ test_categories:
       - "TunerPluginConstants.*"
       - "CpuAffinity.*"
       - "RasDiagnostics.*"
+      - "ProfilerApiEventRank.*"
     exclude_windows:
       - "*"
     labels:
