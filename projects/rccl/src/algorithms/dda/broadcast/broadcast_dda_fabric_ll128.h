@@ -41,9 +41,7 @@ constexpr size_t ddaLL128BcSlotSlices(size_t bankSize, int nRanks, size_t sliceW
 // A block's warps take consecutive slices (a "group"). Root grid: (nRanks-1)
 // peer columns x blocks per peer, as in AllGather LL128. Non-root grid: blocks x 1.
 template <bool kAligned>
-#if defined(USE_ROCM)
 __launch_bounds__(512)
-#endif
   __global__ void ddaBroadcastFabricLL128(char* const* __restrict__ peerScratch, // nRanks scratch bases
                                           char* __restrict__ recvbuff, const char* __restrict__ sendbuff,
                                           size_t bytes, // multiple of 16
