@@ -18,9 +18,11 @@ from vendored import yaml
 METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx908": None,
     "gfx90a": "gfx908",
+    "gfx942": "gfx90a",
+    "gfx950": "gfx942",
 }
 VARIABLES_FILENAME = "variables.yaml"
-# Top-level key of a child file that lists the parent ids the child drops.
+# Top-level key for the list of parent ids to drop in a child file.
 REMOVE_KEY = "remove"
 # Metric fields whose expressions can name hardware counters.
 COUNTER_EXPRESSION_FIELDS = ("formula", "peak")
@@ -36,7 +38,7 @@ def default_metric_library_dir() -> Path:
 
 
 def arch_chain(arch: str) -> List[str]:
-    """Return the archs whose files the library of arch merges, base first."""
+    """Return the chain of archs for arch, base first."""
     config_arch = canonical_config_arch(arch)
     if config_arch not in METRIC_LIBRARY_PARENT_ARCH:
         raise ValueError(f"No metric library is defined for arch {arch}")
@@ -89,7 +91,7 @@ def load_file(paths: List[Path]) -> Dict[str, Any]:
 def merge_documents(
     parent: Dict[str, Any], child: Dict[str, Any], source: str
 ) -> Dict[str, Any]:
-    """Return a new document: parent without the ids child removes, then child on top.
+    """Return parent without the removed ids, with child merged on top.
 
     Mappings merge key by key; scalars and lists replace the parent's value.
     """
@@ -119,7 +121,7 @@ def combine_metric_documents(
 def _removed_ids(
     parent: Dict[str, Any], child: Dict[str, Any], source: str
 ) -> Set[str]:
-    """Return the ids that child lists under REMOVE_KEY, after checking them."""
+    """Return the checked ids of the REMOVE_KEY list in child."""
     removed_ids = child.get(REMOVE_KEY, [])
     if not isinstance(removed_ids, list) or not all(
         isinstance(metric_id, str) for metric_id in removed_ids
@@ -190,7 +192,7 @@ class MetricLibrary:
     def get_counters_for_metrics(
         self, metric_ids: List[str], gpu_series: str
     ) -> Set[str]:
-        """Return the hardware counters that the formulas and peaks of metric_ids read.
+        """Return the hardware counters in the formulas and peaks of metric_ids.
 
         Raises ValueError if an id is not a metric of the arch.
         """

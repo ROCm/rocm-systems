@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for rocprof_compute_soc/metric_library."""
+"""Unit tests for rocprof_compute_soc/metric_library/loader.py."""
 
 import copy
 import importlib
@@ -10,8 +10,8 @@ import sys
 import pytest
 from conftest import ProfileModeImportGuard
 
-from rocprof_compute_soc import metric_library
-from rocprof_compute_soc.metric_library import MetricLibrary, MetricLibraryError
+from rocprof_compute_soc.metric_library import loader
+from rocprof_compute_soc.metric_library.loader import MetricLibrary, MetricLibraryError
 
 GPU_SERIES = "MI300"
 
@@ -82,36 +82,39 @@ def write_file(path, text):
 @pytest.fixture
 def family(tmp_path, monkeypatch):
     """The synthetic family under tmp_path, as the only metric library chain."""
-    monkeypatch.setattr(
-        metric_library, "METRIC_LIBRARY_PARENT_ARCH", FAMILY_PARENT_ARCH
-    )
+    monkeypatch.setattr(loader, "METRIC_LIBRARY_PARENT_ARCH", FAMILY_PARENT_ARCH)
     for arch, text in FAMILY_COMPUTE_FILES.items():
         write_file(tmp_path / arch / "compute.yaml", text)
     return tmp_path
 
 
 def test_arch_chain_of_real_archs():
-    assert metric_library.arch_chain("gfx90a") == ["gfx908", "gfx90a"]
+    assert loader.arch_chain("gfx950") == [
+        "gfx908",
+        "gfx90a",
+        "gfx942",
+        "gfx950",
+    ]
 
 
 def test_arch_chain_rejects_unknown_arch():
     with pytest.raises(ValueError, match="gfx000"):
-        metric_library.arch_chain("gfx000")
+        loader.arch_chain("gfx000")
 
 
 def test_arch_chain_rejects_a_cycle(monkeypatch):
     monkeypatch.setattr(
-        metric_library,
+        loader,
         "METRIC_LIBRARY_PARENT_ARCH",
         {"gfx_a": "gfx_b", "gfx_b": "gfx_a"},
     )
     with pytest.raises(ValueError, match="cycle at gfx_a"):
-        metric_library.arch_chain("gfx_a")
+        loader.arch_chain("gfx_a")
 
 
 def test_arch_files_lists_each_file_base_first(family):
     write_file(family / "gfx_base" / "wave.yaml", "{}\n")
-    files = metric_library.arch_files(family, "gfx_c2")
+    files = loader.arch_files(family, "gfx_c2")
     assert files == {
         "compute.yaml": [
             family / "gfx_base" / "compute.yaml",
@@ -126,7 +129,7 @@ def test_missing_arch_directory_fails(family):
     (family / "gfx_c1" / "compute.yaml").unlink()
     (family / "gfx_c1").rmdir()
     with pytest.raises(MetricLibraryError, match="gfx_c1"):
-        metric_library.arch_files(family, "gfx_c2")
+        loader.arch_files(family, "gfx_c2")
 
 
 @pytest.mark.parametrize(
@@ -135,13 +138,13 @@ def test_missing_arch_directory_fails(family):
 )
 def test_read_file_fails_on_a_bad_file(tmp_path, text, message):
     with pytest.raises(MetricLibraryError, match=message):
-        metric_library.read_file(write_file(tmp_path / "x.yaml", text))
+        loader.read_file(write_file(tmp_path / "x.yaml", text))
 
 
 def test_merge_modifies_adds_and_keeps_order():
     parent = {"a.one": {"name": "One", "unit": "Waves"}, "a.two": {"name": "Two"}}
     child = {"a.one": {"unit": "Instructions"}, "a.three": {"name": "Three"}}
-    merged = metric_library.merge_documents(parent, child, "child.yaml")
+    merged = loader.merge_documents(parent, child, "child.yaml")
     assert merged == {
         "a.one": {"name": "One", "unit": "Instructions"},
         "a.two": {"name": "Two"},
@@ -152,7 +155,7 @@ def test_merge_modifies_adds_and_keeps_order():
 
 def test_merge_drops_removed_ids():
     parent = {"a.one": {"name": "One"}, "a.two": {"name": "Two"}}
-    merged = metric_library.merge_documents(parent, {"remove": ["a.one"]}, "child.yaml")
+    merged = loader.merge_documents(parent, {"remove": ["a.one"]}, "child.yaml")
     assert merged == {"a.two": {"name": "Two"}}
 
 
@@ -167,7 +170,7 @@ def test_merge_drops_removed_ids():
 )
 def test_bad_remove_fails(child, message):
     with pytest.raises(MetricLibraryError, match=message):
-        metric_library.merge_documents({"a.one": {}}, child, "child.yaml")
+        loader.merge_documents({"a.one": {}}, child, "child.yaml")
 
 
 def test_lists_and_scalars_are_replaced():
@@ -175,7 +178,7 @@ def test_lists_and_scalars_are_replaced():
     null value may be replaced by any kind."""
     parent = {"tags": ["a", "b"], "title": "Old", "peak": "100", "note": None}
     child = {"tags": ["c"], "title": "New", "peak": 100, "note": {"a": 1}}
-    assert metric_library.merge_documents(parent, child, "child.yaml") == child
+    assert loader.merge_documents(parent, child, "child.yaml") == child
 
 
 @pytest.mark.parametrize(
@@ -191,7 +194,7 @@ def test_value_of_another_kind_fails(parent_value, child_value, kinds):
     with pytest.raises(
         MetricLibraryError, match=f"child.yaml: 'a.one' replaces {kinds}"
     ):
-        metric_library.merge_documents(
+        loader.merge_documents(
             {"a.one": parent_value}, {"a.one": child_value}, "child.yaml"
         )
 
@@ -204,7 +207,7 @@ def test_merge_leaves_its_inputs_unchanged():
     child = {"remove": ["a.two"], "a.one": {"unit": "Y"}}
     parent_before = copy.deepcopy(parent)
     child_before = copy.deepcopy(child)
-    metric_library.merge_documents(parent, child, "child.yaml")
+    loader.merge_documents(parent, child, "child.yaml")
     assert parent == parent_before
     assert child == child_before
 
@@ -267,15 +270,15 @@ def test_counters_of_unknown_metric_ids_fail(family):
 
 
 def test_shipped_library_loads():
-    for arch in metric_library.METRIC_LIBRARY_PARENT_ARCH:
-        library = MetricLibrary.load(metric_library.default_metric_library_dir(), arch)
+    for arch in loader.METRIC_LIBRARY_PARENT_ARCH:
+        library = MetricLibrary.load(loader.default_metric_library_dir(), arch)
         assert library.metrics and library.variables
 
 
 def test_imports_under_profile_mode_guard(monkeypatch):
     """The metric library uses only stdlib, project and vendored code."""
     monkeypatch.delitem(
-        sys.modules, "rocprof_compute_soc.metric_library", raising=False
+        sys.modules, "rocprof_compute_soc.metric_library.loader", raising=False
     )
     with ProfileModeImportGuard():
-        importlib.import_module("rocprof_compute_soc.metric_library")
+        importlib.import_module("rocprof_compute_soc.metric_library.loader")

@@ -61,9 +61,9 @@ returns its columns. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops` and `I64Ops`: no row shows them as a peak), or in
-  `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline combines or does not
-  show;
+  rates `I8Ops`, `I32Ops` and `I64Ops`, and `MALLBw`, which analyze skips: no row shows
+  them as a peak), or in `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline
+  combines or does not show (the gfx950 F4 and F6 MFMA rates);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -136,8 +136,7 @@ and its [grouping algorithm](../../single-pass_and_multi-pass_metrics/lld-metric
 
 ### Inheritance loader
 
-The loader is part of the metric library package, `src/rocprof_compute_soc/metric_library/`
-(Stage 2). A child arch's file inherits the file of the same name from its parent arch in
+The loader is `src/rocprof_compute_soc/metric_library/loader.py` (Stage 2). A child arch's file inherits the file of the same name from its parent arch in
 `METRIC_LIBRARY_PARENT_ARCH`. The parent is named once, in that map, and no key in the
 file repeats it.
 
@@ -236,8 +235,9 @@ The risk is covered instead by:
 
 ### MetricLibrary
 
-New package `src/rocprof_compute_soc/metric_library/`, next to its YAML files and
-README. `MetricLibrary.load(metric_dir: Path, arch: str) -> MetricLibrary`:
+New module `src/rocprof_compute_soc/metric_library/loader.py`, next to its YAML files
+and README, as `src/memory_chart/loader.py` sits next to its layouts.
+`MetricLibrary.load(metric_dir: Path, arch: str) -> MetricLibrary`:
 
 1. Resolve the architecture's base arch and inheritance chain:
    ```python
@@ -371,17 +371,19 @@ At the cutover, counters come from the metrics that the selected views place
 
 ### Validation
 
-The unit test `tests/unit/rocprof_compute_soc/test_metric_library_sync.py` compares each
-arch's library with today's analysis configs. An arch without a roofline benchmark
-(gfx908) never shows its roofline panel, so the test leaves that panel out and the
-arch's library holds none of the metrics only that panel lists:
+The unit test `tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py`
+compares each arch's library with today's analysis configs. An arch without a roofline
+benchmark (gfx908) never shows its roofline panel, so the test leaves that panel out and
+the arch's library holds none of the metrics only that panel lists:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
   with none of these, each of its table's value columns; without display-only `ROUND()`)
   is a library formula; every library formula is shown by some row. A row that divides
   by the kernel time in seconds shows the GB/s formula scaled by 1e9, its peak too.
   Display variants, listed by positional id and label, write a formula differently; the
-  test checks each one's equation against its metric.
+  test checks each one's equation against its metric. On gfx942, row 16.3.5 wraps the
+  vL1D hit count in `NOISE_CLAMP` and the library formula does not. The metric owners
+  decide on the clamp before Stage 8.
 - **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
   listed as unit variants. A row that shows a GB/s metric in seconds says Bytes/s.
 - **Counters:** the counters the whole library selects equal the counters
@@ -523,7 +525,9 @@ flowchart TD
 - Two ids with the same formula on one arch are one metric: the validator rejects them,
   and they are merged into one id (each panel's label becomes a view label in Phase B).
   The exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a
-  different measured ceiling; a row whose label names the listed id shows that id.
+  different measured ceiling (gfx950 counts MXF8 matrix work in the F8 counter, so
+  `compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`); a row whose
+  label names the listed id shows that id.
 - The validator compares formulas as text, after `format_yaml.py` normalization. A
   metric whose formula is written differently but computes an existing metric's
   quantity reuses that metric's id; the metric library README asks contributors and
@@ -563,6 +567,10 @@ panel that shows it:
 - A per-channel metric ends with `per Channel`.
 - It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
   `under`, `vs`) stay lowercase.
+- A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
+- A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
+  words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D); its
+  abbreviations are spelled out like any other name.
 - Names are unique on an arch, ignoring case; the validator rejects two metrics with the
   same name. Two quantities that panels show under one label get names that tell them
   apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).
@@ -674,6 +682,16 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 A one-time local script converts each arch. It is not committed; each PR says how the
 files were generated and lists the hand edits made afterwards (for example, the
 approved description changes).
+
+A metric's description is the text of one panel that shows the metric, word for word,
+with only these edits:
+
+- plain ASCII (`->` for an arrow, no trademark mark);
+- no sentence about how a panel shows the metric ("also presented as a percent of the
+  peak");
+- no panel 3000 `Equation:` sentence, since the `formula` field holds the equation.
+
+Better wording goes to the metric owners in a separate change.
 
 1. Read each current panel config YAML for a given architecture.
 2. For each metric: generate the Layer 2 format with string `id`, canonical `name`,
