@@ -68,6 +68,18 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Operator call trees now show each operator's arguments.
   * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
 
+* `rocprof-compute profile` collects all counters of a metric in one application replay where they fit, so a ratio no longer mixes values from different replays. This adds replays. Pass counts with the shipped configs, before and after this change:
+  * gfx908: 12 to 14.
+  * gfx90a: 12 to 16.
+  * gfx942: 12 to 16.
+  * gfx950: 20 to 23.
+  * gfx1250: 16 to 24.
+  * gfx1150, gfx1151, gfx1152, and gfx1153: 10 to 12.
+
+* Perfmon input and result files are numbered `pmc_perf_N`, for example `results_pmc_perf_0.csv.gz`. The `pmc_perf_SQ_*` and `pmc_perf_SQC_*` files are no longer written.
+
+* `rocprof-compute analyze` reads each metric from one replay. A metric in a custom config whose counters don't fit one pass shows `N/A`. Workloads profiled with an earlier version keep their values and print a warning to profile again.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
