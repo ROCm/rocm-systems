@@ -88,6 +88,9 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
 /// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
     plain_boundary(|| {
+        if let Err(status) = crate::platform::bind_process() {
+            return status;
+        }
         let _entry = match LifecycleCallScope::enter() {
             Ok(entry) => entry,
             Err(status) => return status,
@@ -155,6 +158,9 @@ pub extern "C" fn hsa_init() -> Status {
 /// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
     plain_boundary(|| {
+        if !crate::platform::process_is_current() {
+            return NOT_INITIALIZED;
+        }
         let _entry = match LifecycleCallScope::enter() {
             Ok(entry) => entry,
             Err(status) => return status,
