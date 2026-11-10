@@ -5028,7 +5028,7 @@ hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
  * @brief Sets memory pool for memory location and allocation type.
  * @param [in] location location type to set the memory pool, currently only
  * hipMemLocationTypeDevice is supported
- * @param [in] type allocation type for which to get the default memory pool,
+ * @param [in] type allocation type for which to set the default memory pool,
  * currently only hipMemAllocationTypePinned & hipMemAllocationTypeManaged are supported
  * @param [in] pool memory pool to set
  *
