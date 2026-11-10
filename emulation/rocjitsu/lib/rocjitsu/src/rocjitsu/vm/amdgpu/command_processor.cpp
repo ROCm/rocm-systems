@@ -4646,11 +4646,19 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
                         write_idx - read_idx);
   });
 
+  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
+  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  // Reservations can advance beyond a full ring while its live headers remain
+  // valid. Bound admission by the public retirement cursor before replacing it
+  // with the private fetch cursor; a reservation does not release a ring slot.
+  uint64_t process_limit = write_idx;
+  if (write_idx > read_idx && write_idx - read_idx > num_slots)
+    process_limit = read_idx + num_slots;
+
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
   // stays ahead of the consumer cursor while admitted dispatches are live, so
   // those packets remain visible without being fetched twice.
   read_idx = std::max(read_idx, queue.fetch_cursor);
-  uint64_t process_limit = write_idx;
   if (queue.doorbell_mode != QueueDoorbellMode::VmPolled) {
     const uint64_t doorbell = queue.last_doorbell;
     // KFD leaves the queue unarmed until its first doorbell notification.
@@ -4663,9 +4671,6 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
       process_limit = std::min(process_limit, doorbell + 1);
   }
   process_limit = std::max(process_limit, read_idx);
-
-  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
-  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
 
   while (read_idx < process_limit) {
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);

@@ -6370,6 +6370,100 @@ TEST(CommandProcessorTest, AqlPublicationAcceptsOutOfOrderDoorbells) {
   }
 }
 
+TEST(CommandProcessorTest, AqlReservationsWaitForRingSlotRetirement) {
+  constexpr uint32_t kQueueId = 20;
+  constexpr uint32_t kCapacity = 4;
+  constexpr uint64_t kRing = 0xF0100000;
+  constexpr uint64_t kReadPointer = kRing + kCapacity * amdgpu::kAqlPacketBytes;
+  constexpr uint64_t kWritePointer = kReadPointer + 8;
+  constexpr uint64_t kDoorbell = kWritePointer + 8;
+  constexpr uint64_t kSignals = kRing + 512;
+
+  for (const uint64_t index : {uint64_t{0}, uint64_t{3}, (uint64_t{1} << 32) + 3}) {
+    SCOPED_TRACE(index);
+    for (const auto mode :
+         {amdgpu::QueueDoorbellMode::HostPolled, amdgpu::QueueDoorbellMode::VmPolled,
+          amdgpu::QueueDoorbellMode::Explicit}) {
+      SCOPED_TRACE(static_cast<int>(mode));
+      uint64_t doorbell = index + kCapacity - 1;
+      VmFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1));
+      // The host still owns a producer waiting to publish after retirement.
+      fixture.engine->register_as_primary();
+      std::vector<uint32_t> code(amdgpu::ComputeUnitCore::kFunctionalQuantum * 2, SOPP_S_NOP);
+      code.push_back(SOPP_S_ENDPGM);
+      const uint64_t kernel =
+          fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+      fixture.mem()->write64(kReadPointer, index);
+      fixture.mem()->write64(kWritePointer, index + kCapacity);
+      fixture.mem()->write64(kDoorbell, doorbell);
+      for (uint32_t offset = 0; offset < kCapacity; ++offset) {
+        const uint64_t signal = kSignals + offset * 64;
+        auto packet = make_dispatch_packet(kernel, 0, 64, 64);
+        packet.completion_signal.handle = signal;
+        fixture.mem()->write64(signal + 8, 1);
+        const uint64_t slot = kRing + ((index + offset) % kCapacity) * amdgpu::kAqlPacketBytes;
+        fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), slot);
+      }
+      amdgpu::ComputeQueueConfig queue{};
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRing;
+      queue.ring_size = kCapacity * amdgpu::kAqlPacketBytes;
+      queue.read_ptr_va = kReadPointer;
+      queue.write_ptr_va = kWritePointer;
+      queue.doorbell_mode = mode;
+      queue.doorbell_base = &doorbell;
+      queue.doorbell_va = kDoorbell;
+      queue.last_doorbell = UINT64_MAX;
+      const uint64_t registration = fixture.cp()->register_queue(std::move(queue));
+      ASSERT_NE(registration, 0u);
+      fixture.cp()->notify_queue_doorbell(registration, doorbell);
+      ASSERT_TRUE(fixture.engine->step());
+      ASSERT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      ASSERT_EQ(fixture.mem()->read64(kReadPointer), index);
+      const uint64_t wrapped_slot = kRing + (index % kCapacity) * amdgpu::kAqlPacketBytes;
+      ASSERT_EQ(fixture.mem()->read32(wrapped_slot) & 0xFFu, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+
+      // Reserve the next index while every ring slot still belongs to live
+      // work. Its producer cannot overwrite the old header or ring yet.
+      fixture.mem()->write64(kWritePointer, index + kCapacity + 1);
+      const uint64_t passes = fixture.cp()->doorbell_handle_count_for_test();
+      fixture.engine->schedule_event_now(fixture.cp()->doorbell_event());
+      while (fixture.cp()->doorbell_handle_count_for_test() == passes)
+        ASSERT_TRUE(fixture.engine->step());
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index);
+      while (fixture.mem()->read64(kReadPointer) < index + kCapacity)
+        ASSERT_TRUE(fixture.engine->step());
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + kCapacity);
+      for (uint32_t offset = 0; offset < kCapacity; ++offset)
+        EXPECT_EQ(fixture.mem()->read64(kSignals + offset * 64 + 8), 0u);
+
+      // Only retirement releases the wrapped slot. Publish the genuine next
+      // packet and verify it still executes exactly once.
+      const uint64_t signal = kSignals + kCapacity * 64;
+      auto packet = make_dispatch_packet(kernel, 0, 64, 64);
+      packet.completion_signal.handle = signal;
+      fixture.mem()->write64(signal + 8, 1);
+      fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                                wrapped_slot);
+      std::atomic_ref(doorbell).store(index + kCapacity, std::memory_order_release);
+      fixture.mem()->write64(kDoorbell, index + kCapacity);
+      fixture.cp()->notify_queue_doorbell(registration, index + kCapacity);
+      while (fixture.mem()->read64(kReadPointer) < index + kCapacity + 1)
+        ASSERT_TRUE(fixture.engine->step());
+      fixture.engine->primary_release();
+      fixture.engine->run();
+      EXPECT_EQ(fixture.cp()->dispatched_count(), kCapacity + 1);
+      EXPECT_EQ(fixture.mem()->read64(kReadPointer), index + kCapacity + 1);
+      EXPECT_EQ(fixture.mem()->read64(signal + 8), 0u);
+      EXPECT_EQ(fixture.mem()->read32(wrapped_slot) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, 0));
+    }
+  }
+}
+
 TEST(CommandProcessorTest, AqlPublicationWaitsForFirstDoorbell) {
   constexpr uint64_t kRing = 0xF0100000;
   constexpr uint64_t kReadPointer = kRing + 256;
