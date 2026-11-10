@@ -4,6 +4,7 @@
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
@@ -287,6 +288,56 @@ TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
   EXPECT_NE(error.message.find("without intervening memory operations or barriers"),
             std::string::npos)
       << error.message;
+}
+
+TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
+  for (const char *name : {"native-25", "native-26", "native-27", "native-30", "native-31"}) {
+    SCOPED_TRACE(name);
+    std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, name));
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_TRUE(input.value().repeated);
+    const AmdGpuCodeObject object(original.data(), original.size());
+    const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(decoder);
+    const std::array entries{input.value().kernel.entry_text_offset};
+    const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+        BasicBlock::build_reachable(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries);
+    ASSERT_TRUE(blocks.succeeded());
+    const Instruction *backedge = nullptr;
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      for (const Instruction &instruction : block->instructions()) {
+        const std::optional<int64_t> branch = instruction.branch_offset_bytes();
+        if (branch && *branch <= -static_cast<int64_t>(instruction.size())) {
+          ASSERT_EQ(backedge, nullptr);
+          backedge = &instruction;
+        }
+      }
+    ASSERT_NE(backedge, nullptr);
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrierLoop);
+    EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+    const AmdGpuCodeObject prepared(artifact.value().image.data(), artifact.value().image.size());
+    const Section &prepared_text = *prepared.text_sections().front();
+    EXPECT_EQ(
+        wire::read_u32(artifact.value().image, prepared_text.sectionOffset() + backedge->src_loc()),
+        backedge->raw_encoding()[0]);
+    // Redirect the real conditional backedge to the preheader. The resulting
+    // multi-block cycle is outside the currently admitted single-block shape.
+    const int64_t delta = (static_cast<int64_t>(input.value().kernel.entry_text_offset) -
+                           static_cast<int64_t>(backedge->src_loc()) - 4) /
+                          4;
+    wire::write_u32(original, input.value().text_file_offset + backedge->src_loc(),
+                    (backedge->raw_encoding()[0] & 0xffff0000u) | static_cast<uint16_t>(delta));
+    EXPECT_TRUE(
+        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+  }
 }
 
 TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation) {

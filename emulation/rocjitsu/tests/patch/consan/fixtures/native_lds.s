@@ -103,6 +103,90 @@ CONSAN_KERNEL:
   v_mov_b32 v2, s4
   v_mov_b32 v5, 0
 
+#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38
+#if CONSAN_CASE == 25
+  s_mov_b32 s10, 0
+#elif CONSAN_CASE == 26
+  s_mov_b32 s10, 1
+#elif CONSAN_CASE == 28
+  s_mov_b32 s10, 6
+#elif CONSAN_CASE == 29 || CONSAN_CASE == 35
+  s_mov_b32 s10, 20
+#elif CONSAN_CASE == 34
+  s_mov_b32 s10, 16
+#elif CONSAN_CASE == 32
+  s_mov_b32 s10, 10
+#else
+  s_mov_b32 s10, 3
+#endif
+#if CONSAN_CASE == 32
+  // 576 = 64 * (10 - 1): delay the only cross-wave pair until cycle 10.
+  // Nine decrements select W0 lane 0 / W1 lane 0 only after the sixteen retained
+  // barrier completions, isolating missing sync evidence from access-bank loss.
+  s_mov_b32 s11, 576
+#else
+  s_mov_b32 s11, 0
+#endif
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  GLOBAL_STORE v5, v2, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  s_cmp_eq_u32 s10, 0
+  s_cbranch_scc1 .Lloop_done
+#if CONSAN_CASE == 33
+  v_and_b32 v4, 31, v0
+  v_lshlrev_b32 v1, 2, v4
+#endif
+.Lloop:
+#if CONSAN_CASE == 33
+  v_cmp_gt_u32 MASK_VCC, 5, v0
+#else
+  v_cmp_eq_u32 MASK_VCC, s11, v0
+#endif
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE != 30 && CONSAN_CASE != 34 && CONSAN_CASE != 35
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+#endif
+  s_add_u32 s12, s11, 32
+#if CONSAN_CASE == 33
+  // All waves read their own first five lanes after the full-workgroup barrier.
+  v_cmp_gt_u32 MASK_VCC, 5, v4
+#else
+  v_cmp_eq_u32 MASK_VCC, s12, v0
+#endif
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE != 31
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+#endif
+#if CONSAN_CASE == 38
+  // A non-power-of-two group count exercises integer-only occurrence division.
+  s_wait_dscnt 0
+  s_barrier_signal -1
+  s_barrier_wait -1
+#endif
+#if CONSAN_CASE == 32
+  s_sub_u32 s11, s11, 64
+#else
+  s_add_u32 s11, s11, 1
+#endif
+  s_sub_u32 s10, s10, 1
+  s_cmp_eq_u32 s10, 0
+  s_cbranch_scc0 .Lloop
+.Lloop_done:
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2 offset:4
+#else
 #if CONSAN_CASE == 10 || CONSAN_CASE == 11 || CONSAN_CASE == 12
   // Distinct addresses exercise grouping, bounded reservation and empty EXEC.
   v_lshlrev_b32 v1, 2, v0
@@ -148,10 +232,10 @@ CONSAN_KERNEL:
   GLOBAL_STORE v5, v3, s[6:7]
 #endif
   .endr
-#elif CONSAN_CASE == 25 || CONSAN_CASE == 26
+#elif CONSAN_CASE == 36 || CONSAN_CASE == 37
   // Initialize the shared word before racing a delayed producer against the
   // consumer. The first barrier makes the old value deterministic in both
-  // variants; case 26 omits only the publication barrier.
+  // variants; case 37 omits only the publication barrier.
   v_cmp_eq_u32 MASK_VCC, 0, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   v_mov_b32 v2, 0
@@ -172,7 +256,7 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
 .Lpublication:
   MASK_MOVE MASK_EXEC, MASK_SAVE
-#if CONSAN_CASE == 25
+#if CONSAN_CASE == 36
   s_wait_dscnt 0
   s_barrier_signal -1
   s_barrier_wait -1
@@ -208,7 +292,7 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
-#if (CONSAN_CASE >= 15 && CONSAN_CASE <= 24) || CONSAN_CASE == 27
+#if (CONSAN_CASE >= 15 && CONSAN_CASE <= 24) || CONSAN_CASE == 39
 #if CONSAN_CASE == 19
   s_cmp_eq_u32 s4, 7
   s_cbranch_scc1 .Lskip_barrier
@@ -236,9 +320,9 @@ CONSAN_KERNEL:
 #else
   s_barrier_wait -1
 #endif
-#if CONSAN_CASE == 24 || CONSAN_CASE == 27
+#if CONSAN_CASE == 24 || CONSAN_CASE == 39
   // B0 publishes the first store. B1 protects the consumer's load before
-  // wave 0 reuses the word; case 27 omits only that second barrier group.
+  // wave 0 reuses the word; case 39 omits only that second barrier group.
   v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_LOAD v3, v1
@@ -254,7 +338,7 @@ CONSAN_KERNEL:
 #elif CONSAN_CASE == 7
   s_barrier
 #endif
-#if CONSAN_CASE == 24 || CONSAN_CASE == 27
+#if CONSAN_CASE == 24 || CONSAN_CASE == 39
   v_cmp_eq_u32 MASK_VCC, 0, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_STORE v1, v2
@@ -273,6 +357,7 @@ CONSAN_KERNEL:
 #endif
   consan_wait_all
   GLOBAL_STORE v5, v3, s[6:7]
+#endif
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_all
