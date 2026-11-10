@@ -43,6 +43,19 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
 }
 
+// Device and host copies of the per-rank scratch pointers. On error, the caller frees what was allocated.
+static ncclResult_t ddaFabricPeerTables(ncclFabricMemHandler* handler, int nRanks, std::vector<void*>& h_ptrs,
+                                        void** peerDev, void*** peerHost) {
+  CUDACHECK(cudaMalloc(peerDev, nRanks * sizeof(void*)));
+  for (int i = 0; i < nRanks; ++i) {
+    NCCLCHECK(handler->getPeerDeviceMemPtr(i, &h_ptrs[i]));
+  }
+  CUDACHECK(cudaMemcpy(*peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice));
+  NCCLCHECK(ncclCalloc(peerHost, nRanks));
+  CUDACHECK(cudaMemcpy(*peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost));
+  return ncclSuccess;
+}
+
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
@@ -145,32 +158,29 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
+  // Every rank must make the same bootstrap calls: agree on local failures before
+  // the scratch exchange, and fold later ones into the ready flag.
+  bool allOk = false;
 
   res = ncclCuMemAlloc(&scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
   if (res != ncclSuccess || scratch == nullptr) {
     INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
     scratch = nullptr;
-    goto fail;
+  } else {
+    handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
+    if (handler == nullptr) {
+      WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
+    } else {
+      res = handler->addSelfDeviceMem(scratch, scratchHandle, bytes);
+    }
   }
+  NCCLCHECKGOTO(ncclFabricAllRanksOk(comm->bootstrap, comm->rank, nRanks, handler != nullptr && res == ncclSuccess,
+                                     &allOk),
+                res, fail);
+  if (!allOk) goto fail;
 
-  handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
-  if (handler == nullptr) {
-    WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
-    goto fail;
-  }
-
-  NCCLCHECKGOTO(handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
+  // exchangeMemPtrs fails on every rank together.
   NCCLCHECKGOTO(handler->exchangeMemPtrs(), res, fail);
-
-  CUDACHECKGOTO(cudaMalloc(&peerDev, nRanks * sizeof(void*)), res, fail);
-
-  for (int i = 0; i < nRanks; ++i) {
-    NCCLCHECKGOTO(handler->getPeerDeviceMemPtr(i, &h_ptrs[i]), res, fail);
-  }
-
-  CUDACHECKGOTO(cudaMemcpy(peerDev, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToDevice), res, fail);
-  NCCLCHECKGOTO(ncclCalloc(&peerHost, nRanks), res, fail);
-  CUDACHECKGOTO(cudaMemcpy(peerHost, h_ptrs.data(), nRanks * sizeof(void*), cudaMemcpyHostToHost), res, fail);
 
   {
     auto cudaOk = [](cudaError_t err, const char* what) {
@@ -180,8 +190,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       }
       return true;
     };
-    // Past the barrier's pointer exchange, failures set !ready so every rank still reaches the allgather.
-    bool ready = true;
+    // Past the scratch exchange, failures set !ready so every rank still reaches the allgather.
+    bool ready = ddaFabricPeerTables(handler, nRanks, h_ptrs, &peerDev, &peerHost) == ncclSuccess;
     auto barrierPair =
       dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
                                                    dda::common::DdaKernelParams{comm->abortFlagDev});

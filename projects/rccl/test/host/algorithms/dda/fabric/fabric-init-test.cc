@@ -608,9 +608,10 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_RanksAtCap_SetsUpFabricPath) {
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabricState) {
   // MirrorAllGather copies this rank's slot to every peer. The sizeof(int)
-  // gathers are the block cap, the scratch and barrier handle-exchange votes,
-  // then the LL-buffer ready flag, where one peer reports 0.
-  constexpr int kLLReadyGather = 4;
+  // gathers are the block cap, the scratch ok flag, the scratch exchange vote,
+  // the barrier ok flag, the barrier exchange vote, then the LL-buffer ready
+  // flag, where one peer reports 0.
+  constexpr int kLLReadyGather = 6;
   int intGathers = 0;
   int readyFlag = -1;
   auto mirror = g_bootstrapAllGather;
@@ -634,9 +635,100 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabric
   EXPECT_TRUE(AllReleased());
 }
 
+// Bootstrap gathers of a successful init, in order: I = sizeof(int), E = handle
+// exchange. Block caps, scratch ok, scratch exchange and its vote, barrier ok,
+// barrier exchange and its vote, ready.
+constexpr char kInitGathers[] = "IIEIIEII";
+
+constexpr char kScratchOkFails[] = "II";
+constexpr char kScratchExportFails[] = "IIE";  // a size-0 entry fails the exchange on every rank
+constexpr char kScratchVoteFails[] = "IIEI";
+constexpr char kBarrierOkFails[] = "IIEIII";  // then ready
+constexpr char kBarrierExportFails[] = "IIEIIEI";
+
+std::string GatherKind(int size) { return size == static_cast<int>(sizeof(int)) ? "I" : "E"; }
+
+// Gathers when some rank publishes 0 on gather `notOkAt`. A failure inside the
+// barrier setup (its ok flag or its exchange vote) still reaches the ready gather.
+std::string GathersWhenNotOkAt(size_t notOkAt) {
+  return std::string(kInitGathers, notOkAt + 1) + (notOkAt == 4 || notOkAt == 6 ? "I" : "");
+}
+
+TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_MakesTheAgreedGatherSequence) {
+  std::string gathers;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [&gathers, mirror](void* state, void* allData, int size) {
+    gathers += GatherKind(size);
+    return mirror(state, allData, size);
+  });
+
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(gathers, kInitGathers);
+}
+
+// A peer that failed publishes 0 on the next ok or vote gather. This rank then
+// makes the same gathers as the failing peer, and falls back.
+class FabricInitPeerNotOkMicrotest : public FabricInitMicrotest, public ::testing::WithParamInterface<size_t> {};
+
+TEST_P(FabricInitPeerNotOkMicrotest, CommInit_PeerNotOk_MakesTheFailingPeersGathersAndFallsBack) {
+  const size_t notOkAt = GetParam();
+  ASSERT_EQ(kInitGathers[notOkAt], 'I');
+  std::string gathers;
+  int published = -1;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [&, mirror](void* state, void* allData, int size) {
+    ncclResult_t result = mirror(state, allData, size);
+    if (gathers.size() == notOkAt) {
+      auto* slots = static_cast<int*>(allData);
+      published = slots[comm_->rank];
+      slots[PeerRanks(comm_->nRanks, comm_->rank)[0]] = 0;
+    }
+    gathers += GatherKind(size);
+    return result;
+  });
+
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(published, 1);
+  EXPECT_EQ(gathers, GathersWhenNotOkAt(notOkAt));
+  ExpectNoFabricState(*comm_);
+  EXPECT_TRUE(AllReleased());
+}
+
+INSTANTIATE_TEST_SUITE_P(FabricInitAgreement, FabricInitPeerNotOkMicrotest, ::testing::Values(1, 3, 4, 6),
+                         [](const ::testing::TestParamInfo<size_t>& info) {
+                           switch (info.param) {
+                             case 1: return std::string("ScratchOk");
+                             case 3: return std::string("ScratchExchangeVote");
+                             case 4: return std::string("BarrierFlagsOk");
+                             case 6: return std::string("BarrierExchangeVote");
+                             default: return "Gather" + std::to_string(info.param);
+                           }
+                         });
+
 // ---------------------------------------------------------------------------
 // ncclDdaFabricCommInit: failure
 // ---------------------------------------------------------------------------
+
+// Current behaviour: a failed ok gather takes the fallback path, which returns
+// ncclSuccess, so init silently continues without the fabric path.
+TEST_F(FabricInitCommInitMicrotest, CommInit_AgreementGatherFails_FallsBackWithoutFabricStateOrLeaks) {
+  constexpr size_t kScratchOkGather = 1;
+  std::string gathers;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [&gathers, mirror](void* state, void* allData, int size) {
+    gathers += GatherKind(size);
+    if (gathers.size() == kScratchOkGather + 1) return ncclRemoteError;
+    return mirror(state, allData, size);
+  });
+
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(gathers, std::string(kInitGathers, kScratchOkGather + 1));
+  ExpectNoFabricState(*comm_);
+  EXPECT_TRUE(AllReleased());
+}
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_BlockCapGatherFails_ReturnsErrorWithoutAllocating) {
   ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclRemoteError; });
@@ -647,37 +739,30 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BlockCapGatherFails_ReturnsErrorWit
   EXPECT_TRUE(AllReleased());
 }
 
-// Current behaviour, tracked as AICOMRCCL-2827: a rank that fails before the
-// barrier's pointer exchange skips exchanges its peers still enter. A failure
-// from FabricGpuBarrier::mallocAndInit on records ready=0 and still enters the
-// ready allgather; `publishesNotReady` marks those cases.
+// A rank whose step fails makes the same gathers as a peer that sees it fail
+// (FabricInitPeerNotOkMicrotest), then falls back.
 struct FailCase {
   const char* name;
   std::function<void()> install;
-  bool publishesNotReady;
+  const char* gathers;  // see kInitGathers
 };
 
 class FabricInitFailMicrotest : public FabricInitMicrotest, public ::testing::WithParamInterface<FailCase> {};
 
-TEST_P(FabricInitFailMicrotest, CommInit_StepFails_FallsBackWithoutFabricStateOrLeaks) {
+TEST_P(FabricInitFailMicrotest, CommInit_StepFails_MakesTheAgreedGathersThenFallsBackWithoutLeaks) {
   GetParam().install();
-  // This rank's slot on every sizeof(int) allgather. The block cap is the first;
-  // a later 0 is the ready flag.
-  std::vector<int> intSlots;
+  std::string gathers;
   auto mirror = g_bootstrapAllGather;
-  ScopedHook gather(g_bootstrapAllGather, [this, &intSlots, mirror](void* state, void* allData, int size) {
-    if (size == static_cast<int>(sizeof(int))) intSlots.push_back(static_cast<int*>(allData)[comm_->rank]);
+  ScopedHook gather(g_bootstrapAllGather, [&gathers, mirror](void* state, void* allData, int size) {
+    gathers += GatherKind(size);
     return mirror(state, allData, size);
   });
 
   EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
+  EXPECT_EQ(gathers, GetParam().gathers);
   ExpectNoFabricState(*comm_);
   EXPECT_TRUE(AllReleased());
-  if (GetParam().publishesNotReady) {
-    EXPECT_NE(std::find(intSlots.begin(), intSlots.end(), 0), intSlots.end())
-        << "this rank never published a ready flag of 0";
-  }
 }
 
 constexpr size_t kPeerTableBytes = kNRanks * sizeof(void*);
@@ -723,8 +808,7 @@ INSTANTIATE_TEST_SUITE_P(
                          return size == static_cast<size_t>(kScratchBytes);
                        },
                        hipErrorOutOfMemory);
-                 },
-                 false},
+                 }, kScratchOkFails},
         FailCase{"ScratchExchange",
                  [] {
                    int calls = 0;
@@ -733,14 +817,22 @@ INSTANTIATE_TEST_SUITE_P(
                        [calls](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                                unsigned long long) mutable { return ++calls == 1; },
                        hipErrorInvalidValue);
-                 },
-                 false},
+                 }, kScratchExportFails},
+        FailCase{"ScratchImport",
+                 [] {
+                   int calls = 0;
+                   FailWhen(
+                       g_hipMemImportFromShareableHandle,
+                       [calls](hipMemGenericAllocationHandle_t*, void*, hipMemAllocationHandleType) mutable {
+                         return ++calls == 1;
+                       },
+                       hipErrorInvalidValue);
+                 }, kScratchVoteFails},
         FailCase{"PeerTableAlloc",
                  [] {
                    FailWhen(
                        g_hipMalloc, [](void**, size_t size) { return size == kPeerTableBytes; }, hipErrorOutOfMemory);
-                 },
-                 false},
+                 }, kInitGathers},
         FailCase{"PeerTableCopy",
                  [] {
                    // The barrier's table has the same size; fail only init's.
@@ -755,17 +847,15 @@ INSTANTIATE_TEST_SUITE_P(
                        g_hipMemcpy,
                        [table](void* dst, const void*, size_t, hipMemcpyKind) { return dst == *table; },
                        hipErrorInvalidValue);
-                 },
-                 false},
-        FailCase{"PeerTableHostAlloc", [] { g_hostAllocs.failBytes = kPeerTableBytes; }, false},
+                 }, kInitGathers},
+        FailCase{"PeerTableHostAlloc", [] { g_hostAllocs.failBytes = kPeerTableBytes; }, kInitGathers},
         FailCase{"PeerTableHostCopy",
                  [] {
                    FailWhen(
                        g_hipMemcpy,
                        [](void*, const void*, size_t, hipMemcpyKind kind) { return kind == hipMemcpyHostToHost; },
                        hipErrorInvalidValue);
-                 },
-                 false},
+                 }, kInitGathers},
         FailCase{"Barrier",
                  [] {
                    FailWhen(
@@ -773,25 +863,31 @@ INSTANTIATE_TEST_SUITE_P(
                        [](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
                           unsigned long long) { return size < static_cast<size_t>(kScratchBytes); },
                        hipErrorOutOfMemory);
-                 },
-                 true},
-        FailCase{"ZeroStreamCreate", [] { FailFabricZeroStreamCreate(); }, true},
-        FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }, true},
+                 }, kBarrierOkFails},
+        FailCase{"BarrierExchange",
+                 [] {
+                   int calls = 0;
+                   FailWhen(
+                       g_hipMemExportToShareableHandle,
+                       [calls](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                               unsigned long long) mutable { return ++calls == 2; },
+                       hipErrorInvalidValue);
+                 }, kBarrierExportFails},
+        FailCase{"ZeroStreamCreate", [] { FailFabricZeroStreamCreate(); }, kInitGathers},
+        FailCase{"ScratchZeroing", [] { FailFabricScratchZeroing(); }, kInitGathers},
         FailCase{"EpochAlloc",
                  [] {
                    FailWhen(
                        g_hipMalloc, [](void**, size_t size) { return size == kEpochBytes; }, hipErrorOutOfMemory);
-                 },
-                 true},
+                 }, kInitGathers},
         FailCase{"EpochZeroing",
                  [] {
                    FailWhen(
                        g_hipMemsetAsync,
                        [](void*, int, size_t bytes, hipStream_t) { return bytes == kEpochBytes; },
                        hipErrorInvalidValue);
-                 },
-                 true},
-        FailCase{"ZeroFillSync", [] { FailFabricZeroFillSync(); }, true}),
+                 }, kInitGathers},
+        FailCase{"ZeroFillSync", [] { FailFabricZeroFillSync(); }, kInitGathers}),
     ParamName<FailCase>);
 
 // ---------------------------------------------------------------------------
