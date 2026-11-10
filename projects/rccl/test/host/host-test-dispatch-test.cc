@@ -891,6 +891,89 @@ TEST(HostDispatchLogMicrotest, TheEnvironmentCanMoveTheLogsOrTurnThemOff)
     EXPECT_EQ(resolveLogDirectory("/p/report.xml", "-"), "");
 }
 
+// ── prepareLogDirectory ─────────────────────────────────────────────
+
+TEST(HostDispatchLogMicrotest, ANewLogDirectoryIsCreatedPrivateToThisUser)
+{
+    // The default directory's name is derived from the report's, which the test runner makes
+    // with mkstemp() in /tmp. Another local user who sees that name appear can create the
+    // matching .logs directory first, so what this process makes must be its own to write.
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::string logs = (std::filesystem::path(dir.path()) / "run.logs").string();
+
+    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+
+    ASSERT_TRUE(std::filesystem::is_directory(logs));
+    EXPECT_EQ(std::filesystem::status(logs).permissions(),
+              std::filesystem::perms::owner_all);
+}
+
+TEST(HostDispatchLogMicrotest, MissingParentsOfTheLogDirectoryAreMade)
+{
+    // The log directory follows the report, and a caller may name a report in a directory that
+    // does not exist yet. Only the leaf is ours to hold alone; the parents are ordinary.
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::string logs =
+        (std::filesystem::path(dir.path()) / "a" / "b" / "run.logs").string();
+
+    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+    EXPECT_TRUE(std::filesystem::is_directory(logs));
+}
+
+TEST(HostDispatchLogMicrotest, ADirectoryThisUserAlreadyOwnsIsReused)
+{
+    // Re-running into the same report path is the ordinary case, and the second run finds its
+    // own directory from the first. Refusing that would turn every repeat run console-only.
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::string logs = (std::filesystem::path(dir.path()) / "run.logs").string();
+    ASSERT_FALSE(prepareLogDirectory(logs).has_value());
+
+    EXPECT_FALSE(prepareLogDirectory(logs).has_value());
+}
+
+TEST(HostDispatchLogMicrotest, ALogDirectoryThatIsASymlinkIsRefused)
+{
+    // This is the planted directory: a link whose target is a directory this user does own, so
+    // every ownership check passes while the logs land wherever it points. Only lstat sees it.
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::filesystem::path elsewhere = std::filesystem::path(dir.path()) / "elsewhere";
+    std::filesystem::create_directory(elsewhere);
+    const std::filesystem::path logs = std::filesystem::path(dir.path()) / "run.logs";
+    std::filesystem::create_directory_symlink(elsewhere, logs);
+
+    const std::optional<std::string> problem = prepareLogDirectory(logs.string());
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_NE(problem->find("symbolic link"), std::string::npos) << *problem;
+}
+
+TEST(HostDispatchLogMicrotest, ALogDirectoryThatIsAFileIsRefused)
+{
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::filesystem::path logs = std::filesystem::path(dir.path()) / "run.logs";
+    std::ofstream(logs.string(), std::ios::binary) << "not a directory";
+
+    const std::optional<std::string> problem = prepareLogDirectory(logs.string());
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_NE(problem->find("not a directory"), std::string::npos) << *problem;
+}
+
+TEST(HostDispatchLogMicrotest, ALogDirectoryThatCannotBeMadeIsRefusedWithItsReason)
+{
+    // The caller turns the redirection off on any refusal, so the reason is all the user gets
+    // to work out why their logs went to the console.
+    const ScopedDir dir("rccl-host-dispatch-logdir");
+    const std::filesystem::path blocked = std::filesystem::path(dir.path()) / "blocked";
+    std::filesystem::create_directory(blocked);
+    std::filesystem::permissions(blocked, std::filesystem::perms::owner_read |
+                                              std::filesystem::perms::owner_exec);
+
+    const std::optional<std::string> problem = prepareLogDirectory((blocked / "run.logs").string());
+    std::filesystem::permissions(blocked, std::filesystem::perms::owner_all);   // so it can be removed
+
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_FALSE(problem->empty());
+}
+
 // ── resolveParallelism ──────────────────────────────────────────────
 
 TEST(HostDispatchParallelismMicrotest, AnUnconfiguredRunTakesTheDefault)
@@ -1826,6 +1909,26 @@ TEST(HostDispatchSchedulerMicrotest, AChildThatFinishesWithinItsDeadlineIsNeverS
     EXPECT_TRUE(fake.signals().empty());
     EXPECT_EQ(fragments.size(), 2u);
     EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, APlantedLogSymlinkIsNotTruncatedThroughToItsTarget)
+{
+    // The first part of a binary truncates its log so a re-run does not append to the last
+    // one's. Through a symlink someone else planted, that truncation lands on their target --
+    // the destructive half of the hazard prepareLogDirectory() covers, and the one that still
+    // applies when the caller named a log directory this process did not create.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    const std::filesystem::path target = std::filesystem::path(dir.path()) / "precious";
+    std::ofstream(target.string(), std::ios::binary) << "do not truncate me";
+    std::filesystem::create_symlink(target, std::filesystem::path(dir.path()) / "Alpha.log");
+
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    int failures = 0;
+    runSelections({selection}, {childFilters(selection)},
+                  ScheduleOptions{1, ReportFormat::Xml, {}, dir.path()}, fake.ops(), failures);
+
+    EXPECT_EQ(std::filesystem::file_size(target), std::string("do not truncate me").size());
 }
 
 TEST(HostDispatchSchedulerMicrotest, AnUnconfiguredRunNeverBoundsItsReap)

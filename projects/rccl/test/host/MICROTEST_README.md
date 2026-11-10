@@ -1488,7 +1488,7 @@ artefact they explain, and two runs writing different reports into one directory
 cannot overwrite each other's logs. `RCCL_HOST_DISPATCH_LOG_DIR` puts them
 somewhere else; `RCCL_HOST_DISPATCH_LOG_DIR=-` turns the redirection off and
 lets the children inherit the console, which is what running one binary's cases
-by hand wants. A log directory that cannot be created is a warning, not a
+by hand wants. A log directory that cannot be used is a warning, not a
 failure — a missing transcript must not cost a passing run — and the children
 fall back to the console.
 

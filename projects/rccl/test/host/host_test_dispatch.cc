@@ -1081,6 +1081,36 @@ std::string resolveLogDirectory(std::string_view outputPath, const char *overrid
     return std::string_view(override_) == "-" ? std::string() : std::string(override_);
 }
 
+// Make *directory* ready to hold the children's logs, or say why it cannot be trusted with them.
+std::optional<std::string> prepareLogDirectory(const std::string &directory)
+{
+    const fs::path path{directory};
+    if (path.has_parent_path() && !path.parent_path().empty()) {
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+    }
+    if (mkdir(directory.c_str(), 0700) == 0) {
+        return std::nullopt;
+    }
+    if (errno != EEXIST) {
+        return std::string(std::strerror(errno));
+    }
+    struct stat info {};
+    if (lstat(directory.c_str(), &info) != 0) {
+        return std::string(std::strerror(errno));
+    }
+    if (S_ISLNK(info.st_mode)) {
+        return "it is a symbolic link";
+    }
+    if (!S_ISDIR(info.st_mode)) {
+        return "it is not a directory";
+    }
+    if (info.st_uid != geteuid()) {
+        return fmt::format("it belongs to uid {}, not to this process", info.st_uid);
+    }
+    return std::nullopt;
+}
+
 // How many binaries run at once.
 size_t resolveParallelism(const char *request, size_t fallbackJobs)
 {
@@ -1160,7 +1190,8 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
             setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
         }
         if (!logPath.empty()) {
-            const int fd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+            const int fd =
+                open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0644);
             if (fd < 0) {
                 fmt::print(stderr, "host-test-dispatch: cannot write {}: {} -- {} will print to"
                                    " the console instead\n",
@@ -1661,7 +1692,11 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                     ? std::string()
                     : childLogPath(schedule.logDirectory, selection.qualifier);
             if (part == 0 && !logPath.empty()) {
-                std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
+                const int fd = open(logPath.c_str(),
+                                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0644);
+                if (fd >= 0) {
+                    close(fd);
+                }
             }
             fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
                        selection.cases.size(), part_note,
@@ -1937,17 +1972,15 @@ int main(int argc, char **argv)
     }
 
     // The children's console output, one file per binary. Created up front so a directory that
-    // cannot be made is said once, here, rather than once per child; failing to make it turns
+    // cannot be used is said once, here, rather than once per child; failing to make it turns
     // the redirection off, because a missing transcript must not cost a passing run.
     std::string logDir =
         resolveLogDirectory(options.outputPath, std::getenv(std::string(kLogDirectoryEnv).c_str()));
     if (!logDir.empty()) {
-        std::error_code ec;
-        fs::create_directories(logDir, ec);
-        if (ec && !fs::is_directory(logDir)) {
-            fmt::print(stderr, "host-test-dispatch: cannot create {}: {} -- the binaries will"
+        if (const std::optional<std::string> problem = prepareLogDirectory(logDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot use {}: {} -- the binaries will"
                                " print to the console instead\n",
-                       logDir, ec.message());
+                       logDir, *problem);
             logDir.clear();
         }
     }
