@@ -115,6 +115,25 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
 /// either way its admission is sound.
 bool exec_zero_memory_issue_counts(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
 
+/// Record the counter slot of a gfx1250 memory instruction issued with EXEC
+/// zero, as an event with no registers and no LDS bytes. The instruction is
+/// skipped only when every counter it could add to is zero (CDNA5 ISA 3.2.2.1);
+/// otherwise it counts, in order with its class, so later capacity checks and
+/// partial waits must count its slot. Recording it is sound even if it was
+/// skipped: its counters were then zero, so every earlier operation on them had
+/// completed, and oldest-first retirement reaches the slot before any later
+/// operation. A FLAT instruction's slots are recorded by
+/// register_unused_flat_domains(), so its routed obligations here are empty.
+void register_exec_zero_slot(WaveRaceState &race, const InstructionSnapshot &instruction,
+                             std::span<const amdgpu::MemoryCounterObligation> obligations,
+                             MemoryOrderClass memoryOrder, bool is_load) {
+  if (obligations.empty())
+    return;
+  race.registerEvent(instruction,
+                     is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL,
+                     /*registers=*/{}, /*execMask=*/0, /*byteMask=*/0xF, obligations, memoryOrder);
+}
+
 /// On gfx1250 (CDNA5) "Every Flat instruction increments both DScnt and either
 /// LOADcnt or STOREcnt when the instruction issues" (CDNA5 ISA 5.7.1.3),
 /// whichever memory its addresses resolve to.
@@ -523,8 +542,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     // dependencies, but do not access bytes in the ordinary LDS allocation.
     const uint64_t ldsMask = (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) &
                              ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
-    if (execMask == 0)
+    if (execMask == 0) {
+      if (exec_zero_memory_issue_counts(wf.cu().arch()))
+        register_exec_zero_slot(*rs, instruction, obligations, memoryOrder, d.is_load);
       return;
+    }
     LdsAccess ldsAccess{
         .read_modify_write =
             (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
@@ -623,22 +645,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     if (d.exec_mask == 0) {
-      // A VMEM instruction with EXEC zero issues and counts like any other; the
-      // hardware may skip it only when LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt
-      // are all zero (CDNA5 ISA 3.2.2.1). An async copy is therefore registered
-      // as an event without LDS bytes, so later partial waits complete the copies
-      // issued before it. Registering it is safe even if it was skipped: every
-      // earlier async copy had then completed, and partial waits retire the
-      // oldest copies first, so counting it never retires a later copy.
-      const bool asyncCopy =
-          (d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
-            return obligation.wait_counter_type() == amdgpu::WaitCounterType::ASYNCCNT;
-          });
-      if (asyncCopy)
-        rs->registerLdsRangeEvent(instruction,
-                                  d.lds_src ? MemoryEventType::LDS_TO_GLOBAL
-                                            : MemoryEventType::GLOBAL_TO_LDS,
-                                  {}, obligations, memoryOrder);
+      if (exec_zero_memory_issue_counts(wf.cu().arch()))
+        register_exec_zero_slot(*rs, instruction, obligations, memoryOrder, d.is_load);
       return;
     }
     if (d.lds_dst) {
