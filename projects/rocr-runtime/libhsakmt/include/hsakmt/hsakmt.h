@@ -1236,10 +1236,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
 
 /**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
