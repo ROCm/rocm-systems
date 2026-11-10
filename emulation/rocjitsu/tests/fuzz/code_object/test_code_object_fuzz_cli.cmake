@@ -141,7 +141,8 @@ function(assert_cli_failure expected_diagnostic)
         OUTPUT_VARIABLE stdout
         ERROR_VARIABLE stderr
     )
-    if(NOT result EQUAL 2 OR NOT stderr MATCHES "${expected_diagnostic}")
+    string(FIND "${stderr}" "${expected_diagnostic}" diagnostic_position)
+    if(NOT result EQUAL 2 OR diagnostic_position EQUAL -1)
         message(
             FATAL_ERROR
             "expected exit 2 and '${expected_diagnostic}', got ${result}: ${stdout}${stderr}"
@@ -152,7 +153,7 @@ endfunction()
 assert_cli_failure("expected an unsigned integer" --random 18446744073709551616)
 assert_cli_failure("expected an unsigned integer" --random 1tail)
 assert_cli_failure("threads must be positive" --random 1 --threads 0)
-assert_cli_failure("cannot open input: ${WORK_DIRECTORY}/missing.bin" --input "${WORK_DIRECTORY}/missing.bin")
+assert_cli_failure("cannot open input: ${WORK_DIRECTORY}/missing++.bin" --input "${WORK_DIRECTORY}/missing++.bin")
 file(WRITE "${WORK_DIRECTORY}/empty.bin" "")
 execute_process(
     COMMAND "${FUZZ_EXECUTABLE}" --input "${WORK_DIRECTORY}/empty.bin"
@@ -191,8 +192,12 @@ if(
     )
 endif()
 file(READ "${flush_output}/failure.seed" flush_seed)
-file(SIZE "${flush_output}/failure.bin" flush_input_size)
-if(NOT flush_seed STREQUAL "58\n" OR NOT flush_input_size EQUAL 4)
+file(READ "${flush_output}/failure.bin" flush_input HEX)
+file(READ "${WORK_DIRECTORY}/seeds/seed-0003.bin" expected_flush_input HEX)
+if(
+    NOT flush_seed STREQUAL "58\n"
+    OR NOT flush_input STREQUAL expected_flush_input
+)
     message(
         FATAL_ERROR
         "seed flush failure did not preserve the seed and replay input"
