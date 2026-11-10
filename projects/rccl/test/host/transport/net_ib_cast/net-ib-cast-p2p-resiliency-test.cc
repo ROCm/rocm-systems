@@ -166,12 +166,15 @@ TEST_F(P2pResiliencyMicrotest, DeviceNumSet_SingleProbingQp_IsStillConfigured) {
   EXPECT_EQ(res_->nProbingQps, 2);
 }
 
+// Resiliency forces the scheduler off, so the sizing follows the default QP set: one QP per
+// device, or every QP under NCCL_IB_SPLIT_DATA_ON_QPS. schedParms stays zeroed throughout and
+// must not move the result.
 TEST_F(P2pResiliencyMicrotest, DataCqSizeGet_Sender_HoldsEveryRequestOnOneSurvivingDevice) {
   MakeSender(2, 4);
   int cqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 0, &cqSize), ncclSuccess);
-  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 1 * 2);
-  send_->base.schedParms.splitData = true;
+  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 2);
+  send_->base.splitDataOnQps = 1;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 1, &cqSize), ncclSuccess);
   EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 4 * 2);
 }
@@ -180,15 +183,15 @@ TEST_F(P2pResiliencyMicrotest, DataCqSizeGet_Receiver_CountsTheCtsCompletionToo)
   MakeReceiver(3, 3);
   int cqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataCqSizeGet(res_, 0, &cqSize), ncclSuccess);
-  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 1 * 3);
+  EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * 3 * 3);
 }
 
 TEST_F(P2pResiliencyMicrotest, DataRqSizeGet_Receiver_HoldsEveryRequestOnOneQp) {
   MakeReceiver(2, 4);
   uint32_t rqSize = 0;
   ASSERT_EQ(IbCastResiliencyDataRqSizeGet(res_, 0, &rqSize), ncclSuccess);
-  EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS);
-  recv_->base.schedParms.doWrr = true;
+  EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS * 2);
+  recv_->base.splitDataOnQps = 1;
   ASSERT_EQ(IbCastResiliencyDataRqSizeGet(res_, 0, &rqSize), ncclSuccess);
   EXPECT_EQ(rqSize, (uint32_t)NET_IB_MAX_REQUESTS * 4);
 }
