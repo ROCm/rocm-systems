@@ -2879,6 +2879,30 @@ TEST_F(SymMemoryObtainTest, DestroyIsIdempotent) {
   EXPECT_EQ(unmap.calls, unmaps);
 }
 
+// A registration that owns RCCL-created memory gives its allocTracker bytes back exactly once.
+TEST_F(SymMemoryObtainTest, DestroyReleasesOwnedTrackerBytesOnce) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
+  struct ncclDevrMemory* mem = nullptr;
+  ASSERT_EQ(symMemoryObtain(comm, &memHandle, /*numSegments=*/1, reinterpret_cast<void*>(0x100000),
+                            /*size=*/4096, /*winFlags=*/0, &mem),
+            ncclSuccess);
+  ASSERT_NE(mem, nullptr);
+  EXPECT_EQ(mem->allocTrackedBytes, 0u);  // a user window owns nothing
+  mem->allocTrackedBytes = 4096;
+  allocTracker[comm->cudaDev].totalAlloc = 1;
+  allocTracker[comm->cudaDev].totalAllocSize = 4096;
+
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  symMemoryDestroy(comm, mem);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+
+  symMemoryDestroy(comm, mem);  // stale pointer: no second untrack
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+}
+
 TEST_F(SymMemoryObtainTest, DestroyIsIdempotentWhileAnotherMemoryIsLinked) {
   hipMemGenericAllocationHandle_t memHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
   struct ncclDevrMemory* first = nullptr;
@@ -7075,6 +7099,7 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
 // cuMemCreate after recording its requested size to avoid constructing the
 // unrelated symmetric-memory window.
 TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCount) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   // 4 discriminates: ROUNDUP(4, 4) = 4 but ROUNDUP(4, 3) = 6.
   reqs.ginContextCount = 4;
@@ -7096,6 +7121,47 @@ TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCoun
   EXPECT_EQ(create.calls, 1);
   // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
   EXPECT_EQ(allocationSize, 96u);
+  // A failed cuMemCreate is never counted.
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+}
+
+// The resource window is counted once cuMemCreate succeeds, and a failure before its
+// registration takes ownership releases both the handle and the count.
+TEST_F(DevrCommCreateInternalTest, ResourceWindow_CountedAtCreateAndReleasedWhenObtainFails) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  ncclDevResourceRequirements res{};
+  res.bufferSize = 4096;
+  reqs.resourceRequirementsList = &res;
+
+  const auto kHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+  size_t createdSize = 0;
+  ScopedHook create(g_hipMemCreate, [&](hipMemGenericAllocationHandle_t* handle, size_t size,
+                                        const hipMemAllocationProp*, unsigned long long) {
+    *handle = kHandle;
+    createdSize = size;
+    return hipSuccess;
+  });
+  // symMemoryObtain's segment-info exchange is the first gather after the create.
+  auto gatherBeforeCreate = g_devrBootstrapAllGather;
+  uint64_t countedAtObtain = 0;
+  ScopedHook gather(g_devrBootstrapAllGather, [&](void* state, void* data, int size) {
+    if (createdSize == 0) return gatherBeforeCreate(state, data, size);
+    countedAtObtain = allocTracker[comm->cudaDev].totalAllocSize;
+    return ncclSystemError;
+  });
+  int releases = 0;
+  ScopedHook release(g_hipMemRelease, [&](hipMemGenericAllocationHandle_t handle) {
+    if (handle == kHandle) releases++;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(create.calls, 1);
+  ASSERT_GT(createdSize, 0u);
+  EXPECT_EQ(countedAtObtain, createdSize);
+  EXPECT_EQ(releases, 1);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
 }
 
 // Branch: GIN connect fails. GIN must stay unlatched so the next create

@@ -140,12 +140,14 @@ class DdaIpcLifecycleMicrotest : public ::testing::Test {
 protected:
   void SetUp() override {
     g_ddaEnable = 1;
+    std::memset(allocTracker, 0, sizeof(allocTracker));
     for (int rank = 0; rank < kRanks; ++rank) {
       peerInfo_[rank].rank = rank;
       peerInfo_[rank].cudaDev = rank;
       comms_[rank] = std::make_unique<ncclComm>();
       ncclComm* comm = comms_[rank].get();
       comm->rank = rank;
+      comm->cudaDev = rank;
       comm->nRanks = kRanks;
       comm->nNodes = 1;
       comm->archName = archName_;
@@ -325,6 +327,42 @@ TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialComm
   for (int rank = 0; rank < kRanks; ++rank) {
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
   }
+}
+
+// The scratch is counted on its own device while the comm holds it, and fini takes it back.
+TEST_F(DdaIpcLifecycleMicrotest, ScratchIsCountedOnItsDeviceUntilFini) {
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;
+    ASSERT_NE(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(1u, allocTracker[rank].totalAlloc) << "rank " << rank;
+    EXPECT_EQ(static_cast<uint64_t>(DDA_IPC_BUFFER_SIZE), allocTracker[rank].totalAllocSize) << "rank " << rank;
+  }
+
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(0u, allocTracker[rank].totalAlloc) << "rank " << rank;
+    EXPECT_EQ(0u, allocTracker[rank].totalAllocSize) << "rank " << rank;
+  }
+}
+
+// A failure after the scratch is allocated frees it and takes its count back.
+TEST_F(DdaIpcLifecycleMicrotest, InitFailureAfterScratchAllocReleasesTheCount) {
+  // The device peer table is the only plain hipMalloc in init; fail it on every rank.
+  ScopedHook<hipError_t(void**, size_t)> failPeerTable{g_hipMalloc, [](void** ptr, size_t) {
+    *ptr = nullptr;
+    return hipErrorOutOfMemory;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;  // DDA IPC is optional
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(0u, allocTracker[rank].totalAlloc) << "rank " << rank;
+    EXPECT_EQ(0u, allocTracker[rank].totalAllocSize) << "rank " << rank;
+  }
+  EXPECT_TRUE(liveAllocations_.empty());
 }
 
 TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaKeepsScratchForCeScratchCollectives) {

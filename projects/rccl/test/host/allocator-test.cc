@@ -259,23 +259,24 @@ class AllocatorMicrotest : public ::testing::Test {
 
 #if ROCM_VERSION >= 70000
 TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
-  void* p = nullptr;
-  ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
-  EXPECT_NE(p, nullptr);
-  EXPECT_EQ(mallocs_, std::vector<size_t>{100});
-  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
-  EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
-  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 100u);
-
+  // The runtime reports a mapping larger than the request: that is what both sides count.
   ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* base, size_t* bytes, hipDeviceptr_t ptr) {
     *base = ptr;
-    *bytes = 100;
+    *bytes = 128;
     return hipSuccess;
   });
   ScopedHook ordinal(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
     *static_cast<int*>(data) = kDev;
     return hipSuccess;
   });
+  void* p = nullptr;
+  ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
+  EXPECT_NE(p, nullptr);
+  EXPECT_EQ(mallocs_, std::vector<size_t>{100});
+  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 128u);
+
   ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
   EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
@@ -290,6 +291,22 @@ TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
   EXPECT_EQ(g_rocmLibraryInitCalls, 2);
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
   Release(p);
+}
+
+// When the size query fails, ncclMemFree subtracts nothing, so ncclMemAlloc must count nothing.
+TEST_F(AllocatorMicrotest, MemAlloc_UnqueryableHipMallocIsNotCounted) {
+  ScopedHook ordinal(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
+    *static_cast<int*>(data) = kDev;
+    return hipSuccess;
+  });
+  void* p = nullptr;
+  ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);  // default range fake fails
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
+  ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
+  EXPECT_EQ(frees_, std::vector<void*>{p});
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
 }
 
 TEST_F(AllocatorMicrotest, MemAlloc_DeviceLookupFailures) {

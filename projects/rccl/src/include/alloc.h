@@ -533,14 +533,14 @@ extern struct allocationTracker allocTracker[];
 // ncclCuMemAllocAddr / ncclCuMemFreeAddr and the ncclCuda* helpers already update it;
 // direct cuMemCreate, cuMemMap and hipExtMalloc sites must pair these two calls.
 static inline void ncclAllocTrack(int dev, size_t bytes, const char* tag) {
-  if (bytes == 0 || (unsigned)dev >= MAX_ALLOC_TRACK_NGPU) return;
+  if ((unsigned)dev >= MAX_ALLOC_TRACK_NGPU) return;
   __atomic_fetch_add(&allocTracker[dev].totalAlloc, 1, __ATOMIC_RELAXED);
   __atomic_fetch_add(&allocTracker[dev].totalAllocSize, (uint64_t)bytes, __ATOMIC_RELAXED);
   INFO(NCCL_ALLOC, "%s: Memory used = %ld on device = %d", tag, allocTracker[dev].totalAllocSize, dev);
 }
 
 static inline void ncclAllocUntrack(int dev, size_t bytes, const char* tag) {
-  if (bytes == 0 || (unsigned)dev >= MAX_ALLOC_TRACK_NGPU) return;
+  if ((unsigned)dev >= MAX_ALLOC_TRACK_NGPU) return;
   __atomic_fetch_add(&allocTracker[dev].totalAlloc, (uint64_t)-1, __ATOMIC_RELAXED);
   __atomic_fetch_add(&allocTracker[dev].totalAllocSize, (uint64_t)(-(int64_t)bytes), __ATOMIC_RELAXED);
   INFO(NCCL_ALLOC, "%s: Memory used = %ld on device = %d", tag, allocTracker[dev].totalAllocSize, dev);
@@ -590,12 +590,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void** ptr, CUmemGenericAllocation
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   CUCHECKGOTO(cuMemSetAccess((CUdeviceptr)*ptr, size, &accessDesc, 1), result, fail);
   TRACE(NCCL_ALLOC, "CuMem Map Size %zu pointer %p handle %p", size, *ptr, (void*)(uintptr_t)*handleIn);
-  if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
-    __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
-  }
-  INFO(NCCL_ALLOC, "ncclCuMemAllocAddr: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize,
-       cudaDev);
+  ncclAllocTrack(cudaDev, size, "ncclCuMemAllocAddr");
   return result;
 fail:
   WARN("ncclCuMemAllocAddr failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -660,14 +655,8 @@ fail:
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
-  size_t trackSize = totalSize;
-  trackSize *= -1;
   CUDACHECK(hipGetDevice(&dev));
-  if (dev < MAX_ALLOC_TRACK_NGPU) {
-    __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&allocTracker[dev].totalAllocSize, trackSize, __ATOMIC_RELAXED);
-  }
-  INFO(NCCL_ALLOC, "ncclCuMemFreeAddr: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+  ncclAllocUntrack(dev, totalSize, "ncclCuMemFreeAddr");
   return result;
 }
 
@@ -761,11 +750,7 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
     NCCLCHECKGOTO(ncclMemTrack(manager, *ptr, size, handle, type, memType), result, fail);
   }
 
-  if (cudaDev < MAX_ALLOC_TRACK_NGPU) {
-    __atomic_fetch_add(&allocTracker[cudaDev].totalAlloc, 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&allocTracker[cudaDev].totalAllocSize, size, __ATOMIC_RELAXED);
-  }
-  INFO(NCCL_ALLOC, "ncclCuMemAlloc: Memory used = %ld on device = %d", allocTracker[cudaDev].totalAllocSize, cudaDev);
+  ncclAllocTrack(cudaDev, size, "ncclCuMemAlloc");
   return result;
 fail:
   WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
@@ -837,11 +822,7 @@ fail:
 
   int dev;
   CUDACHECK(hipGetDevice(&dev));
-  if (dev < MAX_ALLOC_TRACK_NGPU) {
-    __atomic_fetch_add(&allocTracker[dev].totalAlloc, -1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&allocTracker[dev].totalAllocSize, -(int64_t)totalSize, __ATOMIC_RELAXED);
-  }
-  INFO(NCCL_ALLOC, "ncclCuMemFree: Memory used = %ld on device = %d", allocTracker[dev].totalAllocSize, dev);
+  ncclAllocUntrack(dev, totalSize, "ncclCuMemFree");
   return result;
 }
 

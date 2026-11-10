@@ -1042,6 +1042,9 @@ TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
   for (const TrackCall& t : tracked_) EXPECT_EQ(t.type, kFabricHandle);
   EXPECT_EQ(Count("extMalloc"), 0);
   EXPECT_EQ(Count("memset"), 3);  // ncclCuMemAlloc's own zeroing only
+  // ncclCuMemAlloc counts each buffer once at its aligned size; the helpers add nothing.
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 3 * kGran);
 }
 
 TEST_F(AllocMicrotest, CudaAllocs_FailuresReturnNull) {
