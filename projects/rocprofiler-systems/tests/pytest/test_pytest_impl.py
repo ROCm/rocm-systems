@@ -23,6 +23,7 @@ from conftest import (
 )
 from rocprofsys import GPUInfo, ValidationResult, cache
 from rocprofsys import TestResult as RocprofsysTestResult
+from rocprofsys.gpu import GFX_XXXX_PATTERN, ROCMINFO_NAME_GFX_PATTERN
 from rocprofsys.runners import (
     BinaryRewriteRunner,
     CausalRunner,
@@ -98,10 +99,11 @@ def cache_store(tmp_path, monkeypatch):
 
 @pytest.mark.class_name("gpu-info")
 class TestGPUInfo(RocprofsysTest):
-    def test_gfx1250_uses_gfx1250_counter_set(self):
+    @pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
+    def test_gfx1250_uses_gfx1250_counter_set(self, arch):
         gpu_info = GPUInfo(
             available=True,
-            architectures=["gfx1250"],
+            architectures=[arch],
             device_count=1,
             categories={"instinct"},
         )
@@ -152,6 +154,42 @@ class TestGPUInfo(RocprofsysTest):
 
         assert gpu_info.rocm_events_for_test == "SQ_WAVES"
         assert gpu_info.counter_names == ["SQ_WAVES"]
+
+    def test_rocminfo_name_pattern_keeps_target_suffix(self):
+        rocminfo_stdout = (
+            "  Name:                    AMD EPYC 9575F\n"
+            "  Name:                    gfx000\n"
+            "  Name:                    gfx1250-strict\n"
+            "  Marketing Name:          AMD Instinct MI455X\n"
+            "  Name:                    gfx942\n"
+            "      Name:                    amdgcn-amd-amdhsa--gfx1250-strict\n"
+            "      Name:                    amdgcn-amd-amdhsa--gfx9-4-generic:xnack-\n"
+        )
+
+        assert ROCMINFO_NAME_GFX_PATTERN.findall(rocminfo_stdout) == [
+            "gfx000",
+            "gfx1250-strict",
+            "gfx942",
+        ]
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (
+                "Extracting offload bundle: ./a.0.hip-amdgcn-amd-amdhsa--gfx1250",
+                "gfx1250",
+            ),
+            (
+                "Extracting offload bundle: ./a.0.hip-amdgcn-amd-amdhsa--gfx1250-strict",
+                "gfx1250-strict",
+            ),
+            ("hipv4-amdgcn-amd-amdhsa--gfx90a:sramecc+:xnack-", "gfx90a"),
+        ],
+    )
+    def test_offload_bundle_pattern_keeps_target_suffix(self, line, expected):
+        match = GFX_XXXX_PATTERN.search(line)
+        assert match is not None
+        assert match.group(1) == expected
 
 
 @pytest.mark.class_name("test-result")
