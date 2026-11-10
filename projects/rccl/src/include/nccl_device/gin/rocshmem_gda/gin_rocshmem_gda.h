@@ -83,15 +83,14 @@ NCCL_DEVICE_INLINE ncclResult_t quietPeer(ncclGinCtx ctx, int peer, uint64_t tar
 
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
-                                      size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
-                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
-                                      bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
-                                      ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
-                                      cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
+  template <bool threadSafe, typename Coop>
+  NCCL_DEVICE_INLINE static void callImpl(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
+                                          size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
+                                          ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
+                                          uint64_t signalOpArg, bool hasCounter, ncclGinCounter_t counterId,
+                                          cuda::thread_scope required, cuda::thread_scope given) {
     using nccl::utility::loadConst;
-    using rocshmem::PostOpt, rocshmem::RingDB;
+    using rocshmem::PostOpt, rocshmem::RingDB, rocshmem::ThreadSafe;
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
@@ -118,16 +117,18 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
         // GIN API design prevents us from determining at compile-time whether we have a signal
         if (hasSignal) {
-          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<false>});
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info,
+                      PostOpt{RingDB<false>, ThreadSafe<threadSafe>});
         } else {
-          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info, PostOpt{RingDB<true>});
+          qp->put_nbi(dstAddr, dstRkey, srcAddr, srcLkey, bytes, wf_info,
+                      PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
         }
       }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         auto target = nccl::gin::rocshmem_gda::detail::gdaSignalTarget(rsCtx, peer, signal);
-        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>});
+        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -138,18 +139,38 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     }
     coop.sync();
   }
+
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins, ncclGinWindow_t dstWin,
+                                      size_t dstOff, ncclGinWindow_t srcWin, size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp, uint64_t signalOpArg,
+                                      bool hasCounter, ncclGinCounter_t counterId, bool hasDescriptor,
+                                      ncclGinDescriptorSmem* descriptor, cuda::thread_scope required,
+                                      cuda::thread_scope given, uint32_t optFlags = ncclGinOptFlagsDefault) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)optFlags;
+    // THREAD == exclusive QP ownership -> safe to drop the SQ lock. GPU and CTA
+    // sharing both keep the lock (rocSHMEM only has agent-scope locks; there is no
+    // cheaper CTA-scope variant to exploit yet).
+    if ((ncclGinResourceSharingMode)ctx.resourceSharingMode == NCCL_GIN_RESOURCE_SHARING_THREAD) {
+      callImpl<false>(ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes, signal, signalOp, signalOpArg,
+                      hasCounter, counterId, required, given);
+    } else {
+      callImpl<true>(ctx, coop, peer, hasWins, dstWin, dstOff, srcWin, srcOff, bytes, signal, signalOp, signalOpArg,
+                     hasCounter, counterId, required, given);
+    }
+  }
 };
 
 template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  template <typename Coop, typename T>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
-                                      T srcVal, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
-                                      uint64_t signalOpArg, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given,
-                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+  template <bool threadSafe, typename Coop, typename T>
+  NCCL_DEVICE_INLINE static void callImpl(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
+                                          T srcVal, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
+                                          uint64_t signalOpArg, cuda::thread_scope required, cuda::thread_scope given) {
     using nccl::utility::loadConst;
-    using rocshmem::PostOpt, rocshmem::RingDB;
+    using rocshmem::PostOpt, rocshmem::RingDB, rocshmem::ThreadSafe;
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
@@ -175,18 +196,34 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
                     "ncclGin::putValue must inline srcVal into WQE");
       // GIN API design prevents us from determining at compile-time whether we have a signal
       if (hasSignal) {
-        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>});
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<false>, ThreadSafe<threadSafe>});
       } else {
-        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>});
+        qp->put_nbi(dstAddr, dstRkey, srcAddr, 0, sizeof(T), wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         auto target = nccl::gin::rocshmem_gda::detail::gdaSignalTarget(rsCtx, peer, signal);
-        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>});
+        qp->atomic_add(target.raddr, target.rkey, signalOpArg, wf_info, PostOpt{RingDB<true>, ThreadSafe<threadSafe>});
       }
     }
     coop.sync();
+  }
+
+  template <typename Coop, typename T>
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin, size_t dstOff,
+                                      T srcVal, ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
+                                      uint64_t signalOpArg, bool hasDescriptor, ncclGinDescriptorSmem* descriptor,
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
+    (void)hasDescriptor;
+    (void)descriptor;
+    (void)optFlags;
+    if ((ncclGinResourceSharingMode)ctx.resourceSharingMode == NCCL_GIN_RESOURCE_SHARING_THREAD) {
+      callImpl<false>(ctx, coop, peer, dstWin, dstOff, srcVal, signal, signalOp, signalOpArg, required, given);
+    } else {
+      callImpl<true>(ctx, coop, peer, dstWin, dstOff, srcVal, signal, signalOp, signalOpArg, required, given);
+    }
   }
 };
 

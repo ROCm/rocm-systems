@@ -118,3 +118,28 @@ TEST(FpRcpF64, OutputDenormalControls) {
     }
   }
 }
+
+// Native RCP/RSQ/SQRT operations ignore guest rounding; output scaling still uses that field.
+TEST(FpNativeSfuF64, GuestRounding) {
+  using namespace rocjitsu::arith::test;
+  for (auto call :
+       {rj_arith_v_rcp_f64_w32_gfx12, rj_arith_v_rsq_f64_w32_gfx12, rj_arith_v_sqrt_f64_w32_gfx12,
+        rj_arith_v_rcp_f64_w32, rj_arith_v_rsq_f64_w32, rj_arith_v_sqrt_f64_w32}) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      Registers<4, 32> r;
+      for (int lane = 0; lane < 32; ++lane) {
+        write_fp(r.v, lane, 64, 0x4008000000000000ULL); // 3, nonexact for each core.
+      }
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, ~0U, 0, r.v + 2, r.v, nullptr),
+                RJ_ARITH_SUCCESS);
+      const uint64_t nearest = read_fp(r.v + 2, 0, 64);
+      for (uint64_t rounding :
+           {RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+        ASSERT_EQ(
+            call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | rounding, ~0U, 0, r.v + 2, r.v, nullptr),
+            RJ_ARITH_SUCCESS);
+        EXPECT_EQ(read_fp(r.v + 2, 0, 64), nearest);
+      }
+    }
+  }
+}

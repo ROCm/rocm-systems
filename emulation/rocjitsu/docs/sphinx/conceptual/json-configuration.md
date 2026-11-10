@@ -41,11 +41,12 @@ objects for the virtual machine and the topology.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
+| `max_ticks` | int | Finite tick horizon. A finite run also stops if an active primary has no queued work before the limit; `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
 | `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `arithmetic` | object | CPU arithmetic policy; see [CPU arithmetic policy](../../configuration.md#cpu-arithmetic-policy). |
 | `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |

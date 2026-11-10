@@ -147,6 +147,12 @@ class NullDevice : public amd::Device {
 
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
+  }
+
   virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
                                         void* shareableHandle) {
     return false;
@@ -532,6 +538,9 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const { return xferQueue_; }
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
+
   //! Retrieves the internal format from the OCL format
   Pal::ChNumFormat getPalFormat(const amd::Image::Format& format,  //! OCL image format
                                 Pal::ChannelMapping* channel) const;
@@ -554,7 +563,8 @@ class Device : public NullDevice {
                      const uint* addressMode,              //!< Address modes in X, Y and Z
                      uint32_t mipFilter = CL_FILTER_NONE,  //!< Mip filter
                      float minLod = 0.f,                   //!< Min level of detail
-                     float maxLod = CL_MAXFLOAT            //!< Max level of detail
+                     float maxLod = CL_MAXFLOAT,           //!< Max level of detail
+                     uint32_t maxAnisotropy = 0            //!< Max anisotropy, 0/1 = isotropic
   ) const;
 
   //! host memory alloc
