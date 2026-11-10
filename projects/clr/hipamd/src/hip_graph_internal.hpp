@@ -999,7 +999,8 @@ class Graph {
     // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
     // For all multi-segment graphs we always require leaf sync: a single leaf segment
     // can still be on a different HW queue (e.g. child-graph segments dispatch on their
-    // own stream pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply.
+    // own stream pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply,
+    // unless a profiler tool is attached (see the comment there).
     return segments_.size() > 1;
   }
 

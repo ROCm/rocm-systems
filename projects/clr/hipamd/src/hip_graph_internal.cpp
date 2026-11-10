@@ -5,6 +5,7 @@
  */
 
 #include "hip_graph_internal.hpp"
+#include "platform/activity.hpp"
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -2866,12 +2867,22 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   }
 
   // Sync parallel-stream leaves back to launch_stream via graph_accumulate's
-  // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead.
+  // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead,
+  // unless a profiler tool is attached (a rocprofiler-sdk tool registered through
+  // rocprofiler-register; see tool_attached). A tool may hold a completion signal
+  // past its packet: rocprofiler-sdk adds 1 to it at submission and subtracts it
+  // only after recording the dispatch. Queue order then no longer shows that the
+  // signal is done, and the launch's signal set would be re-armed while the tool
+  // still owes it a decrement. Non-leaf signals need no extra wait: a non-leaf
+  // segment gets a signal only when a barrier on another stream waits on it, and
+  // that barrier is ordered before some leaf.
+  const bool wait_same_stream_leaves =
+      amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
       if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
       hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
-      if (seg_stream == launch_stream) continue;
+      if (seg_stream == launch_stream && !wait_same_stream_leaves) continue;
       int hw_slot = sync_plan_.seg_to_hw_event[seg_id];  // PASS 1 guarantees >= 0; guard defensively.
       if (hw_slot < 0 || hw_slot >= static_cast<int>(segment_hw_events.size())) continue;
       graph_accumulate->addDepHwEvent(segment_hw_events[hw_slot]);
