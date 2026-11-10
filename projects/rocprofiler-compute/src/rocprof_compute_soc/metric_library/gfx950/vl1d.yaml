@@ -1,4 +1,3 @@
-inherit: ../gfx942/vl1d.yaml
 vl1d.access_lat_norm:
   name: vL1D Access Latency Cycles
   formula: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)

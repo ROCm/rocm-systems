@@ -1,4 +1,3 @@
-inherit: ../gfx90a/td.yaml
 td.wr_ack_insts:
   name: TD Write Ack Instructions
   formula: SUM(TD_WRITE_ACKT_WAVEFRONT_sum) / SUM($denom)

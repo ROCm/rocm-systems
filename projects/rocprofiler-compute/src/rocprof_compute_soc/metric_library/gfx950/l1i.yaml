@@ -1,4 +1,3 @@
-inherit: ../gfx908/l1i.yaml
 l1i.bw:
   description: >-
     The number of bytes looked up in the L1I cache per unit time.

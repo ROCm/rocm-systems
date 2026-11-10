@@ -1,4 +1,11 @@
-inherit: ../gfx942/fabric.yaml
+remove:
+  - fabric.hbm_rd
+  - fabric.hbm_rd_bw_est
+  - fabric.hbm_wr_atomic
+  - fabric.hbm_wr_atomic_bw_est
+  - fabric.rd_128b
+  - fabric.remote_rd
+  - fabric.remote_wr_atomic
 fabric.ai_hbm:
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64)
 fabric.ea_hbm_atomic_pressure:
@@ -36,7 +43,6 @@ fabric.hbm_atomic_bw:
     the accelerator's local HBM (DRAM), divided by total duration.
 fabric.hbm_bw:
   formula: SUM(TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32 + TCC_EA0_WRREQ_64B_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
-fabric.hbm_rd: !remove
 fabric.hbm_rd_bw:
   name: HBM Read Bandwidth
   formula: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -44,8 +50,6 @@ fabric.hbm_rd_bw:
   description: >-
     Total number of bytes due to L2 read requests routed to Infinity Fabric targeting
     the accelerator's local HBM (DRAM), divided by total duration.
-fabric.hbm_rd_bw_est: !remove
-fabric.hbm_wr_atomic: !remove
 fabric.hbm_wr_atomic_bw:
   name: HBM Write and Atomic Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -53,7 +57,6 @@ fabric.hbm_wr_atomic_bw:
   description: >-
     Combined bandwidth of write and atomic requests from L2 to the accelerator's local
     HBM (DRAM), divided by total duration.
-fabric.hbm_wr_atomic_bw_est: !remove
 fabric.hbm_wr_bw:
   name: HBM Write Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -90,7 +93,6 @@ fabric.pcie_wr_bw:
   description: >-
     Total number of bytes due to L2 write requests routed to PCIe (CPU or non-xGMI
     connected GPU traffic), divided by total duration.
-fabric.rd_128b: !remove
 fabric.rd_128b_ea0:
   name: L2-Fabric Read Requests (128B, EA0 Counter)
   formula: SUM(TCC_EA0_RDREQ_128B_sum) / SUM($denom)
@@ -140,8 +142,6 @@ fabric.remote_access_pressure_gmi:
   description: >-
     Combined GMI read and write credit stall percentage. High values indicate remote
     memory access bottleneck (multi-GPU or multi-socket).
-fabric.remote_rd: !remove
-fabric.remote_wr_atomic: !remove
 fabric.wr_hbm_stall:
   name: L2-Fabric Write Stall (HBM)
   formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)

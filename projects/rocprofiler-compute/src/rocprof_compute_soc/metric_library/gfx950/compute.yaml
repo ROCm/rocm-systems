@@ -1,4 +1,3 @@
-inherit: ../gfx942/compute.yaml
 compute.dual_issue_valu_util:
   name: Dual-Issue VALU Utilization
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)

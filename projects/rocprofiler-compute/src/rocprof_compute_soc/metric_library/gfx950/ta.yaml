@@ -1,4 +1,3 @@
-inherit: ../gfx908/ta.yaml
 ta.global_generic_rd_insts_for_lds:
   name: TA Global/Generic Read Instructions for LDS
   formula: SUM(TA_FLAT_READ_LDS_WAVEFRONTS_sum) / SUM($denom)

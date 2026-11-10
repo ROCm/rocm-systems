@@ -1,4 +1,3 @@
-inherit: ../gfx908/sl1d.yaml
 sl1d.atomic_req:
   description: >-
     The total number of atomic requests from sL1D to the L2, per normalization unit.

@@ -1,4 +1,3 @@
-inherit: ../gfx908/cp.yaml
 cp.cpc_adc_util:
   name: CPC ADC Utilization
   formula: 100 * SUM(CPC_TG_SEND) / SUM(CPC_GD_BUSY)
