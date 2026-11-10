@@ -1799,19 +1799,11 @@ def run(app_args, args, **kwargs):
             f"{ROCPROF_TOOL_LIBRARY}",
             append=True,
         )
-    # Prepend this prefix. An older librocprofiler-sdk-rocpd already on
-    # LD_LIBRARY_PATH (a system /opt/rocm) rejects schema versions this rocprofv3
-    # writes, so the library next to the tool has to win.
     update_env(
         "LD_LIBRARY_PATH",
         f"{ROCM_DIR}/lib",
-        prepend=True,
+        append=True,
     )
-    if not app_env.get("ROCPD_SCHEMA_PATH"):
-        update_env(
-            "ROCPD_SCHEMA_PATH",
-            f"{ROCM_DIR}/share/rocprofiler-sdk-rocpd",
-        )
 
     # -o/-d stay None so a typed option stays distinguishable from an inherited
     # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;

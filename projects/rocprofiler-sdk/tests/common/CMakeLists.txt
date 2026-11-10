@@ -291,6 +291,15 @@ function(rocprofiler_add_integration_execute_test NAME)
             )
     endif()
 
+    # An older librocprofiler-sdk-rocpd already on LD_LIBRARY_PATH rejects schema versions
+    # this build writes. Point the test at this build's schema, the same way
+    # hip-graph-attribution and rocpd-back-compat do, and leave rocprofv3 appending its
+    # lib directory. A test that sets ROCPD_SCHEMA_PATH keeps it.
+    if(NOT "${arg_ENVIRONMENT}" MATCHES "ROCPD_SCHEMA_PATH=.*")
+        list(APPEND arg_ENVIRONMENT
+             "ROCPD_SCHEMA_PATH=${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+    endif()
+
     if(NOT "integration-tests" IN_LIST arg_LABELS)
         list(APPEND arg_LABELS "integration-tests")
     endif()
