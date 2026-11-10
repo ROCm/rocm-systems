@@ -158,7 +158,7 @@ setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
 The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4
 fused floating-point arithmetic, basic floating-point arithmetic and selection,
-division, dot products, conversions, math functions, comparisons, graphics operations and register/lane routing. Other handlers retain their existing
+division, dot products, conversions, math functions, comparisons, integer arithmetic, graphics operations and register/lane routing. Other handlers retain their existing
 implementations.
 
 ### Guest FP controls
@@ -260,7 +260,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
+## Benchmarking
 
 No benchmark executable is built at this stage. The following describes its intended interface.
 

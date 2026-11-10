@@ -1417,6 +1417,14 @@ threshold table introduced for gfx1250.
         | ``0``: Disable DDA Broadcast.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
+    * - | ``RCCL_DDA_LL128_A2A_THREADS``
+        | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
+          When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
+          table; no current table sets it, so the kernel uses 256 threads.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``256``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
