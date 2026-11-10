@@ -226,8 +226,9 @@ before indexing. Reading these policies does not change GPU state.
 
 Native link metrics are packed in physical-source order within the reported
 count. Available counters are retained even when the destination BDF is
-unavailable, so the count can exceed the number of identified peers. Port-map
-read or parse failures return an error instead of a successful incomplete list.
+unavailable, so the count can exceed the number of identified peers. Without a
+kernel XGMI port map, counters are still returned and every peer BDF is unknown.
+A malformed port map returns an error instead of a successful incomplete list.
 Use `GetLinkTopologyNearest` for nearest-peer discovery.
 
 ### Current partitions, ECC, and RAS
