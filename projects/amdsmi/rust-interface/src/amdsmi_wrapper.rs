@@ -1179,6 +1179,39 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct AmdsmiGpuCacheEntryT {
+    pub cache_properties: u32,
+    pub cache_size: u32,
+    pub cache_level: u32,
+    pub cache_line_size: u32,
+    pub min_num_cu_shared: u32,
+    pub max_num_cu_shared: u32,
+    pub num_cache_instance: u32,
+    pub reserved: [u32; 9usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiGpuCacheEntryT"][::std::mem::size_of::<AmdsmiGpuCacheEntryT>() - 64usize];
+    ["Alignment of AmdsmiGpuCacheEntryT"][::std::mem::align_of::<AmdsmiGpuCacheEntryT>() - 4usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::cache_properties"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, cache_properties) - 0usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::cache_size"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, cache_size) - 4usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::cache_level"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, cache_level) - 8usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::cache_line_size"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, cache_line_size) - 12usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::min_num_cu_shared"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, min_num_cu_shared) - 16usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::max_num_cu_shared"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, max_num_cu_shared) - 20usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::num_cache_instance"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, num_cache_instance) - 24usize];
+    ["Offset of field: AmdsmiGpuCacheEntryT::reserved"]
+        [::std::mem::offset_of!(AmdsmiGpuCacheEntryT, reserved) - 28usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct AmdsmiFwInfoT {
     pub num_fw_info: u8,
     pub fw_info_list: [AmdsmiFwInfoTFwInfoList; 80usize],
@@ -4247,6 +4280,13 @@ extern "C" {
     pub fn amdsmi_get_gpu_cache_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiGpuCacheInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_gpu_cache_entries(
+        processor_handle: AmdsmiProcessorHandle,
+        num_caches: *mut u32,
+        caches: *mut AmdsmiGpuCacheEntryT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

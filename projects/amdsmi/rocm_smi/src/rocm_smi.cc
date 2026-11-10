@@ -4492,6 +4492,22 @@ rsmi_status_t rsmi_dev_cache_info_get(uint32_t dv_ind, rsmi_gpu_cache_info_t* in
   CATCH
 }
 
+rsmi_status_t amd::smi::GetDevCacheEntries(uint32_t dv_ind,
+                                           std::vector<amd::smi::KFDCacheEntry>* entries) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  if (entries == nullptr) return RSMI_STATUS_INVALID_ARGS;
+
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  if (kfd_node->get_cache_entries(entries) == 0) return RSMI_STATUS_SUCCESS;
+
+  return RSMI_STATUS_NOT_SUPPORTED;
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
                                         uint64_t* used) {
   TRY rsmi_status_t ret;

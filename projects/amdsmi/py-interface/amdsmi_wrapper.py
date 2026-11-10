@@ -1383,6 +1383,23 @@ struct_amdsmi_gpu_cache_info_t._fields_ = [
 ]
 
 amdsmi_gpu_cache_info_t = struct_amdsmi_gpu_cache_info_t
+class struct_amdsmi_gpu_cache_entry_t(Structure):
+    pass
+
+struct_amdsmi_gpu_cache_entry_t._pack_ = 1 # source:False
+struct_amdsmi_gpu_cache_entry_t._layout_ = 'ms'
+struct_amdsmi_gpu_cache_entry_t._fields_ = [
+    ('cache_properties', ctypes.c_uint32),
+    ('cache_size', ctypes.c_uint32),
+    ('cache_level', ctypes.c_uint32),
+    ('cache_line_size', ctypes.c_uint32),
+    ('min_num_cu_shared', ctypes.c_uint32),
+    ('max_num_cu_shared', ctypes.c_uint32),
+    ('num_cache_instance', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 9),
+]
+
+amdsmi_gpu_cache_entry_t = struct_amdsmi_gpu_cache_entry_t
 class struct_amdsmi_fw_info_t(Structure):
     pass
 
@@ -3758,6 +3775,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_cache_entries = _libraries['libamd_smi.so'].amdsmi_get_gpu_cache_entries
+    amdsmi_get_gpu_cache_entries.restype = amdsmi_status_t
+    amdsmi_get_gpu_cache_entries.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_gpu_cache_entry_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_volt_metric = _libraries['libamd_smi.so'].amdsmi_get_gpu_volt_metric
     amdsmi_get_gpu_volt_metric.restype = amdsmi_status_t
     amdsmi_get_gpu_volt_metric.argtypes = [amdsmi_processor_handle, amdsmi_voltage_type_t, amdsmi_voltage_metric_t, ctypes.POINTER(ctypes.c_int64)]
@@ -5790,7 +5813,8 @@ __all__ = \
     'amdsmi_get_gpu_bad_page_info',
     'amdsmi_get_gpu_bad_page_threshold', 'amdsmi_get_gpu_bdf_id',
     'amdsmi_get_gpu_board_info', 'amdsmi_get_gpu_busy_percent',
-    'amdsmi_get_gpu_cache_info', 'amdsmi_get_gpu_compute_partition',
+    'amdsmi_get_gpu_cache_entries', 'amdsmi_get_gpu_cache_info',
+    'amdsmi_get_gpu_compute_partition',
     'amdsmi_get_gpu_compute_partition_mem_alloc_mode',
     'amdsmi_get_gpu_compute_process_gpus',
     'amdsmi_get_gpu_compute_process_info',
@@ -5862,7 +5886,8 @@ __all__ = \
     'amdsmi_get_utilization_count', 'amdsmi_get_vcn_busy_percent',
     'amdsmi_get_violation_status', 'amdsmi_get_xgmi_info',
     'amdsmi_get_xgmi_plpd', 'amdsmi_gpu_block_t',
-    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
+    'amdsmi_gpu_cache_entry_t', 'amdsmi_gpu_cache_info_t',
+    'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_ras_policy_info_t', 'amdsmi_gpu_ras_policy_v4_0_t',
@@ -5976,6 +6001,7 @@ __all__ = \
     'struct_amdsmi_fabric_telemetry_t',
     'struct_amdsmi_freq_volt_region_t', 'struct_amdsmi_frequencies_t',
     'struct_amdsmi_frequency_range_t', 'struct_amdsmi_fw_info_t',
+    'struct_amdsmi_gpu_cache_entry_t',
     'struct_amdsmi_gpu_cache_info_t', 'struct_amdsmi_gpu_metrics_t',
     'struct_amdsmi_gpu_ras_policy_info_t',
     'struct_amdsmi_gpu_ras_policy_v4_0_t',

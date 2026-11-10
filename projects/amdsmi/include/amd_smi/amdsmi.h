@@ -1106,6 +1106,22 @@ typedef struct {
 } amdsmi_gpu_cache_info_t;
 
 /**
+ * @brief One kind of GPU cache, as returned by amdsmi_get_gpu_cache_entries()
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t cache_properties;   //!< amdsmi_cache_property_type_t which is a bitmask
+  uint32_t cache_size;         //!< Size of one instance, in KB
+  uint32_t cache_level;        //!< 1 for L1, 2 for L2, and so on
+  uint32_t cache_line_size;    //!< In bytes; 0 if not reported
+  uint32_t min_num_cu_shared;  //!< Fewest Compute Units sharing any one instance; 0 if not reported
+  uint32_t max_num_cu_shared;  //!< Most Compute Units sharing any one instance; 0 if not reported
+  uint32_t num_cache_instance;  //!< Number of instances of this cache on the processor
+  uint32_t reserved[9];
+} amdsmi_gpu_cache_entry_t;
+
+/**
  * @brief Firmware Information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
@@ -4915,6 +4931,46 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
  */
 amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_handle,
                                           amdsmi_gpu_cache_info_t* info);
+
+/**
+ *  @brief Returns the GPU's caches, one entry per kind of cache, with no limit
+ *  on the number of entries.
+ *
+ *  @ingroup tagPhysicalStateQuery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details amdsmi_get_gpu_cache_info() reports a cache as several entries
+ *  when its instances differ in how many Compute Units share them, and holds at
+ *  most ::AMDSMI_MAX_CACHE_TYPES entries. This function reports each cache
+ *  once, with the range of sharing counts, and the caller sizes the buffer. Call with
+ *  @p caches set to NULL to get the number of entries, then call again with a
+ *  buffer that large. Each entry also reports the cache line size and the range
+ *  of Compute Units sharing an instance. Entries are in the order the driver
+ *  lists the caches.
+ *
+ *  @param[in] processor_handle PF of a processor for which to query
+ *
+ *  @param[in,out] num_caches As input, the number of ::amdsmi_gpu_cache_entry_t
+ *  that fit in @p caches. On return, the number of entries the GPU has. Must not
+ *  be NULL.
+ *
+ *  @param[out] caches Buffer the entries are written to, or NULL to only query
+ *  the number of entries, in which case the input value of @p num_caches is
+ *  ignored. At most the input @p num_caches entries are written.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS all entries were written, or @p caches is NULL
+ *  @retval ::AMDSMI_STATUS_INSUFFICIENT_SIZE @p caches holds fewer entries than
+ *  the GPU has; the first input @p num_caches entries were written and
+ *  @p num_caches holds the number needed
+ *  @retval ::AMDSMI_STATUS_INVAL @p num_caches is NULL
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED cache information is not available;
+ *  @p num_caches and @p caches are not written
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_cache_entries(amdsmi_processor_handle processor_handle,
+                                             uint32_t* num_caches,
+                                             amdsmi_gpu_cache_entry_t* caches);
 
 /**
  *  @brief Get the voltage metric value for the specified metric, from the

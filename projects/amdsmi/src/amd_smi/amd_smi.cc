@@ -2064,6 +2064,21 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Converts a KFD sysfs cache "type" (HSA cache type bits) to amdsmi_cache_property_type_t bits.
+static uint32_t kfd_cache_type_to_properties(uint32_t kfd_type) {
+  constexpr uint32_t kHsaCacheTypeData = 0x00000001;
+  constexpr uint32_t kHsaCacheTypeInstruction = 0x00000002;
+  constexpr uint32_t kHsaCacheTypeCpu = 0x00000004;
+  constexpr uint32_t kHsaCacheTypeHsaCu = 0x00000008;
+
+  uint32_t properties = 0;
+  if (kfd_type & kHsaCacheTypeData) properties |= AMDSMI_CACHE_PROPERTY_DATA_CACHE;
+  if (kfd_type & kHsaCacheTypeInstruction) properties |= AMDSMI_CACHE_PROPERTY_INST_CACHE;
+  if (kfd_type & kHsaCacheTypeCpu) properties |= AMDSMI_CACHE_PROPERTY_CPU_CACHE;
+  if (kfd_type & kHsaCacheTypeHsaCu) properties |= AMDSMI_CACHE_PROPERTY_SIMD_CACHE;
+  return properties;
+}
+
 amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_handle,
                                           amdsmi_gpu_cache_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -2083,25 +2098,10 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
   rsmi_gpu_cache_info_t rsmi_info;
   status = rsmi_wrapper(rsmi_dev_cache_info_get, processor_handle, 0, &rsmi_info);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
-// Sysfs cache type
-#define HSA_CACHE_TYPE_DATA 0x00000001
-#define HSA_CACHE_TYPE_INSTRUCTION 0x00000002
-#define HSA_CACHE_TYPE_CPU 0x00000004
-#define HSA_CACHE_TYPE_HSACU 0x00000008
 
   info->num_cache_types = rsmi_info.num_cache_types;
   for (unsigned int i = 0; i < rsmi_info.num_cache_types; i++) {
-    // convert from sysfs type to CRAT type(HSA Cache Affinity type)
-    info->cache[i].cache_properties = 0;
-    if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
-      info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_DATA_CACHE;
-    if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
-      info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_INST_CACHE;
-    if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
-      info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_CPU_CACHE;
-    if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
-      info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_SIMD_CACHE;
-
+    info->cache[i].cache_properties = kfd_cache_type_to_properties(rsmi_info.cache[i].flags);
     info->cache[i].cache_size = rsmi_info.cache[i].cache_size_kb;
     info->cache[i].cache_level = rsmi_info.cache[i].cache_level;
     info->cache[i].max_num_cu_shared = rsmi_info.cache[i].max_num_cu_shared;
@@ -2109,6 +2109,80 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
   }
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+static amdsmi_status_t get_kfd_cache_entries(amdsmi_processor_handle processor_handle,
+                                             std::vector<amdsmi_gpu_cache_entry_t>* entries) {
+  std::vector<amd::smi::KFDCacheEntry> kfd_entries;
+  amdsmi_status_t status =
+      rsmi_wrapper(amd::smi::GetDevCacheEntries, processor_handle, 0, &kfd_entries);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  for (const auto& kfd_entry : kfd_entries) {
+    amdsmi_gpu_cache_entry_t entry = {};
+    entry.cache_properties = kfd_cache_type_to_properties(kfd_entry.type);
+    entry.cache_size = kfd_entry.size_kb;
+    entry.cache_level = kfd_entry.level;
+    entry.cache_line_size = kfd_entry.line_size;
+    entry.min_num_cu_shared = kfd_entry.min_cu_shared;
+    entry.max_num_cu_shared = kfd_entry.max_cu_shared;
+    entry.num_cache_instance = kfd_entry.num_instances;
+    entries->push_back(entry);
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+#ifdef ENABLE_WSL_BACKEND
+// The WSL backend only reports the fixed-size form; line size and minimum
+// sharing are not available there and stay 0.
+static amdsmi_status_t get_backend_cache_entries(amd::smi::IGPUBackend* backend,
+                                                 std::vector<amdsmi_gpu_cache_entry_t>* entries) {
+  amdsmi_gpu_cache_info_t info = {};
+  amdsmi_status_t status = backend->GetGpuCacheInfo(&info);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  for (uint32_t i = 0; i < info.num_cache_types; i++) {
+    amdsmi_gpu_cache_entry_t entry = {};
+    entry.cache_properties = info.cache[i].cache_properties;
+    entry.cache_size = info.cache[i].cache_size;
+    entry.cache_level = info.cache[i].cache_level;
+    entry.max_num_cu_shared = info.cache[i].max_num_cu_shared;
+    entry.num_cache_instance = info.cache[i].num_cache_instance;
+    entries->push_back(entry);
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+#endif
+
+amdsmi_status_t amdsmi_get_gpu_cache_entries(amdsmi_processor_handle processor_handle,
+                                             uint32_t* num_caches,
+                                             amdsmi_gpu_cache_entry_t* caches) {
+  AMDSMI_CHECK_INIT();
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // Collect before checking num_caches so NOT_SUPPORTED takes priority over INVAL.
+  std::vector<amdsmi_gpu_cache_entry_t> entries;
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* b = gpu_device->backend()) {
+    status = get_backend_cache_entries(b, &entries);
+  } else
+#endif
+  {
+    status = get_kfd_cache_entries(processor_handle, &entries);
+  }
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+  if (num_caches == nullptr) return AMDSMI_STATUS_INVAL;
+
+  const auto total = static_cast<uint32_t>(entries.size());
+  if (caches == nullptr) {
+    *num_caches = total;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+  const uint32_t written = std::min(*num_caches, total);
+  std::copy_n(entries.begin(), written, caches);
+  *num_caches = total;
+  return written < total ? AMDSMI_STATUS_INSUFFICIENT_SIZE : AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,

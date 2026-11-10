@@ -1417,6 +1417,75 @@ int KFDNode::get_used_memory(uint64_t* used) {
   }
 }
 
+int KFDNode::get_cache_entries(std::vector<KFDCacheEntry>* entries) {
+  if (entries == nullptr) return EINVAL;
+  entries->clear();
+  uint64_t caches_count = 0;
+  int ret = get_property_value("caches_count", &caches_count);
+  if (ret != 0) return ret;
+
+  // /sys/class/kfd/kfd/topology/nodes/1/caches/0/properties
+  std::string f_path = KFDNodesPathRoot();
+  f_path += "/";
+  f_path += std::to_string(node_indx_);
+  f_path += "/";
+  f_path += "caches/";
+
+  for (unsigned int cache_id = 0; cache_id < caches_count; cache_id++) {
+    const auto prop_file = f_path + std::to_string(cache_id) + "/properties";
+    try {
+      std::string level = get_properties_from_file(prop_file, "level ");
+      int cache_level = std::stoi(level);
+      if (cache_level < 0) continue;
+
+      std::string type = get_properties_from_file(prop_file, "type ");
+      int cache_type = std::stoi(type);
+      if (cache_type <= 0) continue;
+
+      std::string size = get_properties_from_file(prop_file, "size ");
+      int cache_size = std::stoi(size);
+      if (cache_size <= 0) continue;
+
+      std::string line_size = get_properties_from_file(prop_file, "cache_line_size ");
+      int cache_line_size = std::stoi(line_size);
+      if (cache_line_size < 0) continue;
+
+      std::string sibling_map = get_properties_from_file(prop_file, "sibling_map ");
+      uint32_t num_cu_shared =
+          static_cast<uint32_t>(std::count(sibling_map.begin(), sibling_map.end(), '1'));
+
+      const KFDCacheEntry record = {static_cast<uint32_t>(cache_level),
+                                    static_cast<uint32_t>(cache_type),
+                                    static_cast<uint32_t>(cache_size),
+                                    static_cast<uint32_t>(cache_line_size),
+                                    num_cu_shared,
+                                    num_cu_shared,
+                                    1};
+
+      // KFD publishes one record per cache instance, each cache kind as one
+      // contiguous run of indices. Fold a run into one entry: instances of a kind
+      // can differ in CU sharing because of harvesting and how KFD splits each
+      // shader array into CU blocks, so keep the sharing range. Distinct kinds
+      // can share level/type/size (e.g. gfx10 vector and scalar L1D are both
+      // 16 KB), so a matching record after a different kind starts a new entry.
+      if (!entries->empty()) {
+        KFDCacheEntry& last = entries->back();
+        if (last.level == record.level && last.type == record.type &&
+            last.size_kb == record.size_kb && last.line_size == record.line_size) {
+          last.num_instances++;
+          last.min_cu_shared = std::min(last.min_cu_shared, num_cu_shared);
+          last.max_cu_shared = std::max(last.max_cu_shared, num_cu_shared);
+          continue;
+        }
+      }
+      entries->push_back(record);
+    } catch (...) {
+      continue;
+    }
+  }
+  return 0;
+}
+
 int KFDNode::get_cache_info(rsmi_gpu_cache_info_t* info) {
   if (info == nullptr) return EINVAL;
   uint64_t caches_count = 0;
