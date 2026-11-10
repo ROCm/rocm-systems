@@ -9,7 +9,7 @@ use super::{
     CpuApicId, CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain,
     HostTopologySnapshot,
 };
-use crate::topology::CacheInfo;
+use crate::topology::{CacheAssociations, CacheInfo};
 use std::path::{Path, PathBuf};
 
 fn parse_memory_bytes(contents: &str) -> Option<usize> {
@@ -188,7 +188,10 @@ fn discover_caches(root: &Path) -> HostCaches {
             records.push(CpuCache {
                 cpu,
                 shared_cpus,
-                info: CacheInfo::new(level, size_bytes, line_size_bytes, kind),
+                info: CacheInfo {
+                    associations: CacheAssociations::CPU,
+                    ..CacheInfo::new(level, size_bytes, line_size_bytes, kind)
+                },
             });
         }
     }
@@ -439,6 +442,10 @@ mod tests {
         assert_eq!(snapshot.caches.records.len(), 3);
         assert_eq!(snapshot.caches.records[0].first_shared_cpu(), Some(0));
         assert_eq!(snapshot.caches.records[0].info.line_size_bytes, Some(64));
+        assert_eq!(
+            snapshot.caches.records[0].info.associations,
+            CacheAssociations::CPU
+        );
         assert_eq!(snapshot.caches.records[1].info.kind, CpuCacheKind::Unified);
         assert!(snapshot.caches.complete);
     }
