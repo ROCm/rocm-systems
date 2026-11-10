@@ -34,7 +34,8 @@ use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
-    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, TopologySnapshot,
+    CacheAssociations, Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo,
+    TopologySnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -485,7 +486,7 @@ impl HsaState {
             let native_caches = cpu.node.into_iter().flat_map(|node| {
                 topology.caches.iter().filter(move |cache| {
                     cache.node == node
-                        && cache.info.cpu_cache
+                        && cache.info.associations.contains(CacheAssociations::CPU)
                         && matches!(cache.info.kind, CpuCacheKind::Data | CpuCacheKind::Other)
                 })
             });
