@@ -202,8 +202,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 557 · build snapshot" aria-label="Stars: 557">557</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 496 · build snapshot" aria-label="Forks: 496">496</li>
       </ul>
     </div>
   </a>
@@ -255,8 +255,8 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: count unavailable · build snapshot" aria-label="Stars: count unavailable">—</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: count unavailable · build snapshot" aria-label="Forks: count unavailable">—</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 557 · build snapshot" aria-label="Stars: 557">557</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 496 · build snapshot" aria-label="Forks: 496">496</li>
       </ul>
     </div>
   </a>
@@ -2073,7 +2073,14 @@ following lifecycle:</p>
    perspective of other waves in the same workgroup.</li>
 <li><strong>RETIRED</strong> — <code>s_barrier</code> has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.</li>
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on <code>loadcnt</code>, keeps every
+   later retired event in the registry.</li>
 </ol>
 <p>Generic <code>FLAT_*</code> instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
