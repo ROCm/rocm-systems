@@ -1553,9 +1553,11 @@ public:
             const std::string reportPath =
                 args.at(1).substr(args.at(1).find(':') + 1);
             started_.push_back({path, filter, reportPath});
-            std::ofstream(reportPath, std::ios::binary | std::ios::trunc)
-                << "<testsuites tests=\"1\" failures=\"0\"><testsuite name=\"" << filter
-                << "\"/></testsuites>";
+            if (silent_.count(nextPid_) == 0) {
+                std::ofstream(reportPath, std::ios::binary | std::ios::trunc)
+                    << "<testsuites tests=\"1\" failures=\"0\"><testsuite name=\"" << filter
+                    << "\"/></testsuites>";
+            }
             live_.push_back(nextPid_);
             return nextPid_++;
         };
@@ -1597,13 +1599,21 @@ public:
             const pid_t pid = *reapable;
             live_.erase(std::next(reapable).base());
             inFlightHighWater_ = std::max(inFlightHighWater_, live_.size() + 1);
-            status = killed_.count(pid) != 0 ? 128 + SIGKILL : 0;
+            const auto exit = exits_.find(pid);
+            status = killed_.count(pid) != 0 ? 128 + SIGKILL
+                                             : (exit == exits_.end() ? 0 : exit->second);
             return pid;
         };
     }
 
     // The child started *index*-th never finishes on its own, so only a SIGKILL ends it.
     void hangChild(size_t index) { hanging_.insert(static_cast<pid_t>(100 + index)); }
+
+    // The child started *index*-th is reaped with *status* rather than 0.
+    void exitChild(size_t index, int status) { exits_[static_cast<pid_t>(100 + index)] = status; }
+
+    // The child started *index*-th leaves no report behind, as a binary dying partway does.
+    void silenceChild(size_t index) { silent_.insert(static_cast<pid_t>(100 + index)); }
 
     KillFn kill()
     {
@@ -1648,6 +1658,8 @@ private:
     std::vector<pid_t> live_;
     std::set<pid_t> hanging_;
     std::set<pid_t> killed_;
+    std::set<pid_t> silent_;
+    std::map<pid_t, int> exits_;
     std::vector<std::pair<pid_t, int>> signals_;
     std::chrono::steady_clock::time_point now_{};
     static constexpr size_t kMaxExpiries = 16;
@@ -1790,6 +1802,87 @@ TEST(HostDispatchSchedulerMicrotest, AChildThatCannotBeStartedIsReportedAndItsRe
     ASSERT_EQ(fragments.size(), 1u);
     EXPECT_NE(fragments[0].xml.find("fork failed"), std::string::npos) << fragments[0].xml;
     EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatWroteNoReportFailsTheRunEvenHavingExitedCleanly)
+{
+    // A binary with no report contributes no cases, and gtest counts only what it was given --
+    // so without a synthesised failure here, a binary that produced nothing is indistinguishable
+    // from a shorter green run. A clean exit deliberately, so this rests on the missing report
+    // alone and not on the status branch below.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.silenceChild(0);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, {childFilters(selection)},
+                      ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("wrote no gtest report"), std::string::npos)
+        << fragments[0].xml;
+    EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatDiedWithoutAReportNamesItsStatusAndItsLog)
+{
+    // The two are all the evidence left of why: the status says how it died, and with no report
+    // to read, its log holds the only record of where it had got to.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.silenceChild(0);
+    fake.exitChild(0, 134);   // SIGABRT, as an assertion failure in the child would give
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments = runSelections(
+        {selection}, {childFilters(selection)},
+        ScheduleOptions{1, ReportFormat::Xml, {}, dir.path()}, fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 1u);
+    EXPECT_NE(fragments[0].xml.find("exit status 134"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[0].xml.find("Alpha.log"), std::string::npos) << fragments[0].xml;
+    EXPECT_EQ(failures, 2);   // no report, and a status saying so too
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatExitsNonzeroAfterAPassingReportFailsTheRun)
+{
+    // The report is green but the binary did not come back clean -- a crash in a global
+    // destructor, a leak check failing at exit. Taking the report at face value would publish
+    // those cases as passed and lose the only sign that anything was wrong.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+    fake.exitChild(0, 1);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, {childFilters(selection)},
+                      ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 2u);   // the child's own report, and the exit reported beside it
+    EXPECT_NE(fragments[1].xml.find("exited 1 after writing a passing report"), std::string::npos)
+        << fragments[1].xml;
+    EXPECT_EQ(failures, 1);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AChildThatExitsCleanlyWithAPassingReportFailsNothing)
+{
+    // The two branches above must not fire on the ordinary case, which is every binary in a
+    // green run: a zero exit and a report with no failures in it.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    const Selection selection = schedulerSelection("Alpha", 1);
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections({selection}, {childFilters(selection)},
+                      ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
+
+    EXPECT_EQ(fragments.size(), 1u);
+    EXPECT_EQ(failures, 0);
 }
 
 TEST(HostDispatchSchedulerMicrotest, AChildStillRunningAtItsDeadlineIsTermedThenKilled)
