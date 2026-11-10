@@ -384,7 +384,6 @@ test_categories:
       - "DdaFabricBarrierStress.*"
       # Skip under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where they run.
       - "DdaIpcMPI_IndexData.*"
-      - "DdaIpcMPI_CommLifecycle.*"
       - "DdaMPI_CollOpCount.*"
     exclude_windows: *mpi_exclude_windows
     labels: &mpi_standard_labels
@@ -557,6 +556,15 @@ test_categories:
     env_variables:
       - "RCCL_DDA_BC=1"
       - "RCCL_DDA_LL_THRESHOLD=262144"
+  standard_env_dda_ipc_cumem:
+    description: "DDA IPC init on communicators created after another one is destroyed. It needs cuMem, and NCCL_PARAM caches NCCL_CUMEM_ENABLE for the process lifetime, so it is set before launch. Needs exactly 8 ranks on one node; skips otherwise."
+    test_patterns:
+      - "DdaIpcMPI_CommLifecycle.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_CUMEM_ENABLE=1"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns
@@ -811,6 +819,7 @@ execution_settings:
     standard_env_dda_a2a_push_all_peer: 1200
     standard_env_dda_a2a_pull: 1200
     standard_env_dda_bc: 1200
+    standard_env_dda_ipc_cumem: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
     full_base: 1200

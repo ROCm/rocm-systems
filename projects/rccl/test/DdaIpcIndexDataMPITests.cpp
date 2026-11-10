@@ -12,12 +12,8 @@
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
  * wrong offset.
  *
- * DdaIpcMPI_CommLifecycle: every communicator exports its DDA IPC barrier mailbox to its peers. If successive
- * mailboxes share one HIP suballocation chunk, the peers' close of a destroyed communicator's mailbox breaks the open
- * of the next one at the same offset: DDA IPC init fails on every rank, the communicator silently falls back, and the
- * HIP error stays pending for the application's next launch check. With cuMem off, the surrounding allocations differ
- * and the bug does not show, so the fixture enables it. NCCL_CUMEM_ENABLE is cached at the first read, so run this
- * suite in its own process, as CI does.
+ * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
+ * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
  *
  * Run (example):
  *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaIpcMPI_IndexData.*
@@ -274,9 +270,11 @@ protected:
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
     // ddaIpcMemHandler is set only on gfx942/gfx950 with full P2P; skip together or the others block.
     const ncclComm* comm = getActiveCommunicator();
+    // ncclCuMemEnable() is 0 also when the runtime probe fails; the bug does not show without cuMem.
+    const bool skipLocal =
+      !ddaIpcReady(comm) || !ncclCuMemEnable() || ddaRoutingOverridden(comm) || rcclCeAllReduceEnabled(comm);
     const std::string skip =
-      mpiCoordinatedSkipReason(!ddaIpcReady(comm) || ddaRoutingOverridden(comm) || rcclCeAllReduceEnabled(comm),
-                               "DDA IPC not initialised, or env routes away from it");
+      mpiCoordinatedSkipReason(skipLocal, "DDA IPC not initialised, cuMem off, or env routes away from it");
     if (!skip.empty()) {
       GTEST_SKIP() << skip;
     }
@@ -286,27 +284,21 @@ protected:
 
   ncclResult_t initComm(ncclComm_t* comm) {
     ncclUniqueId id{};
-    if (rank_ == 0) {
-      const ncclResult_t res = ncclGetUniqueId(&id);
-      if (res != ncclSuccess) {
-        return res;
-      }
+    // Peers learn rank 0's status first, so they fail with it instead of waiting for an id that never comes.
+    int res = rank_ == 0 ? ncclGetUniqueId(&id) : ncclSuccess;
+    MPI_Bcast(&res, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if (res != ncclSuccess) {
+      return static_cast<ncclResult_t>(res);
     }
     MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
     return ncclCommInitRank(comm, nRanks_, id, rank_);
   }
 
-  // One DDA IPC AllReduce on comm: rank r sends r + 1, so every element sums to nRanks * (nRanks + 1) / 2.
-  bool allReduceOk(ncclComm_t comm, hipStream_t stream, std::string* detail) {
+  // Rank r sends r + 1, so every element sums to nRanks * (nRanks + 1) / 2.
+  bool prepareAllReduce(ncclComm_t comm, void* buf, std::string* detail) {
     int algo = -1;
     int protocol = -1;
     int maxChannels = -1;
-    void* buf = nullptr;
-    if (hipMalloc(&buf, kLifecycleCount * sizeof(float)) != hipSuccess) {
-      *detail = "hipMalloc failed";
-      return false;
-    }
-    DeviceBufferAutoGuard guard(buf);
     if (initializeBufferWithPattern<float>(buf, kLifecycleCount, [this](size_t) { return float(rank_ + 1); }) !=
         hipSuccess) {
       *detail = "buffer init failed";
@@ -318,6 +310,10 @@ protected:
       *detail = "AllReduce did not select DDA IPC (algo " + std::to_string(algo) + ")";
       return false;
     }
+    return true;
+  }
+
+  bool allReduceOk(ncclComm_t comm, void* buf, hipStream_t stream, std::string* detail) {
     if (ncclAllReduce(buf, buf, kLifecycleCount, ncclFloat32, ncclSum, comm, stream) != ncclSuccess ||
         hipStreamSynchronize(stream) != hipSuccess) {
       *detail = "AllReduce failed";
@@ -337,8 +333,8 @@ protected:
   }
 };
 
-// Create, check and destroy communicators next to the fixture's one. Each new communicator must bring up DDA IPC,
-// leave no HIP error pending, and run a DDA IPC AllReduce, also when it reuses the memory of a destroyed one.
+// Each communicator created next to the fixture's one, also after a destroy, must bring up DDA IPC with no HIP error
+// pending and run a DDA IPC AllReduce.
 TEST_F(DdaIpcMPI_CommLifecycle, RecreateAfterDestroy) {
   for (int cycle = 0; cycle < kLifecycleCycles; ++cycle) {
     (void)hipGetLastError();
@@ -347,13 +343,22 @@ TEST_F(DdaIpcMPI_CommLifecycle, RecreateAfterDestroy) {
 
     std::string detail;
     const hipError_t pending = hipGetLastError();
+    void* buf = nullptr;
+    DeviceBufferAutoGuard guard;
     bool ok = false;
     if (!ddaIpcReady(comm)) {
       detail = "DDA IPC init failed";
     } else if (pending != hipSuccess) {
       detail = std::string("HIP error pending after init: ") + hipGetErrorName(pending);
+    } else if (hipMalloc(&buf, kLifecycleCount * sizeof(float)) != hipSuccess) {
+      detail = "hipMalloc failed";
     } else {
-      ok = allReduceOk(comm, getActiveStream(), &detail);
+      guard.set(buf);
+      ok = prepareAllReduce(comm, buf, &detail);
+    }
+    // A rank that does not launch leaves its peers blocked in the collective, so all ranks launch or none does.
+    if (MPIHelpers::allRanksTrue(ok)) {
+      ok = allReduceOk(comm, buf, getActiveStream(), &detail);
     }
     EXPECT_TRUE(ok) << "Rank " << rank_ << ", cycle " << cycle << ": " << detail;
     int badRanks = ok ? 0 : 1;

@@ -28,9 +28,7 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
-  /* The mailbox is exported via cudaIpcGetMemHandle. Small allocations are
-   * suballocated from a shared chunk, and peers that open and close handles
-   * to different offsets of that chunk break later opens of it. */
+  /* Exported via cudaIpcGetMemHandle: a suballocated mailbox breaks peers' later opens of its chunk. */
   size_t allocBytes = nRanks * nBlocks * sizeof(FlagType);
   ALIGN_SIZE(allocBytes, CUDA_IPC_MIN);
   auto flagBuf = std::make_unique<DeviceBuffer>(allocBytes);
