@@ -1233,6 +1233,12 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
         return -1;
     }
     if (pid == 0) {
+        // Its own process group, so a timeout can signal the whole tree rather than the one pid:
+        // a test binary forks too -- death tests, ProcessIsolatedTestRunner -- and those
+        // grandchildren would otherwise survive the kill and keep the CI node. The cost is that
+        // the children leave the terminal's foreground group, so an interactive Ctrl-C reaches
+        // the dispatcher alone; it signals them on the way out.
+        setpgid(0, 0);
         // In the child, on its own copy of the environment: what the dispatcher has already
         // decided must not be decided again over the case list this child was handed.
         stripGtestVariablesInChild(strip);
@@ -1259,7 +1265,23 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
                    std::strerror(errno));
         _exit(127);
     }
+    // Again in the parent: whichever of the two runs first, the group is in place before the
+    // first signal could be sent. EACCES means the child has already exec'd, which it can only
+    // have done after setting it itself.
+    setpgid(pid, pid);
     return pid;
+}
+
+// Send *signal* to everything *pid* has spawned, and to *pid* itself.
+//
+// Falls back to the single pid when there is no such group, which is what a child that died
+// between the fork and its setpgid() leaves behind.
+void signalChildGroup(pid_t pid, int signal)
+{
+    if (::kill(-pid, signal) == 0 || errno != ESRCH) {
+        return;
+    }
+    ::kill(pid, signal);
 }
 
 // Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
@@ -2090,7 +2112,7 @@ int main(int argc, char **argv)
         [](const std::string &path, const std::vector<std::string> &args,
            const std::string &logPath) { return spawnChild(path, args, logPath); },
         reapAnyChild,
-        [](pid_t pid, int signal) { ::kill(pid, signal); },
+        signalChildGroup,
         [] { return std::chrono::steady_clock::now(); },
         [&reportDir, &options](const std::string &qualifier, size_t part) {
             return reportDir.reportPath(qualifier, part, options.outputFormat);

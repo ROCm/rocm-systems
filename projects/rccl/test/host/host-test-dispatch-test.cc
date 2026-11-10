@@ -2164,4 +2164,95 @@ TEST(HostDispatchSchedulerMicrotest, AnUnconfiguredRunNeverBoundsItsReap)
     EXPECT_EQ(failures, 0);
 }
 
+// ── signalChildGroup ────────────────────────────────────────────────
+//
+// The two tests below run real processes: the behaviour under test is the kernel's grouping of
+// them, which no fake can stand in for.
+
+// Wait up to a second for *pid* to be gone, and say whether it is.
+bool waitUntilGone(pid_t pid)
+{
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (::kill(pid, 0) != 0 && errno == ESRCH) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    return false;
+}
+
+TEST(HostDispatchSignalMicrotest, AChildIsStartedInAProcessGroupOfItsOwn)
+{
+    // The group is what makes a timeout reach the child's own children, and the child must be
+    // in it before the dispatcher could send the first signal.
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "while :; do sleep 1; done"});
+    ASSERT_GT(pid, 0);
+
+    EXPECT_EQ(getpgid(pid), pid);
+
+    signalChildGroup(pid, SIGKILL);
+    int status = 0;
+    waitpid(pid, &status, 0);
+}
+
+TEST(HostDispatchSignalMicrotest, ASignalReachesWhatTheChildItselfForked)
+{
+    // A test binary forks -- death tests, ProcessIsolatedTestRunner -- and signalling the child
+    // pid alone would leave those grandchildren running on the CI node after the timeout.
+    const ScopedDir dir("rccl-host-dispatch-signal");
+    const std::string pidFile = (std::filesystem::path(dir.path()) / "grandchild.pid").string();
+    const pid_t pid = spawnChild(
+        "/bin/sh", {"-c", "sh -c 'while :; do sleep 1; done' & echo $! > " + pidFile +
+                           "; while :; do sleep 1; done"});
+    ASSERT_GT(pid, 0);
+
+    pid_t grandchild = 0;
+    for (int attempt = 0; attempt < 500 && grandchild <= 0; ++attempt) {
+        std::ifstream(pidFile) >> grandchild;
+        if (grandchild <= 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
+    }
+    ASSERT_GT(grandchild, 0) << "the child never reported the process it forked";
+
+    signalChildGroup(pid, SIGKILL);
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    EXPECT_TRUE(waitUntilGone(grandchild)) << "grandchild " << grandchild << " outlived the kill";
+}
+
+TEST(HostDispatchSignalMicrotest, AChildWithNoGroupOfItsOwnIsStillSignalled)
+{
+    // A child that died between the fork and its own setpgid() leaves no group behind. Taking
+    // the ESRCH for "already gone" would skip the pid that is still there in the race the other
+    // way round, where only the parent's setpgid() has yet to run.
+    const pid_t pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        for (;;) {
+            pause();   // no setpgid(): this process stays in the test's own group
+        }
+    }
+
+    signalChildGroup(pid, SIGKILL);
+
+    // Polled rather than a blocking wait: a signal that never arrives must fail this test, not
+    // hang the run it is meant to protect.
+    int status = 0;
+    pid_t reaped = 0;
+    for (int attempt = 0; attempt < 100 && reaped == 0; ++attempt) {
+        reaped = waitpid(pid, &status, WNOHANG);
+        if (reaped == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
+    }
+    if (reaped != pid) {
+        ::kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+    }
+    EXPECT_EQ(reaped, pid) << "the child outlived a signal aimed at a group it was not in";
+    EXPECT_TRUE(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+}
+
 }  // namespace
