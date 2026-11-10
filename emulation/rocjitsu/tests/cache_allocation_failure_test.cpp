@@ -9,8 +9,10 @@
 
 #include <gtest/gtest.h>
 
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <new>
 #include <utility>
 
@@ -54,6 +56,16 @@ extern "C" void *__wrap_calloc(std::size_t count, std::size_t size) {
     return nullptr;
   }
   return __real_calloc(count, size);
+}
+
+TEST_P(CacheAllocationFailureTest, NoHandlerTerminatesEagerConstruction) {
+  EXPECT_EXIT(
+      {
+        failures_remaining = 1;
+        TestCache store;
+        std::_Exit(0);
+      },
+      ::testing::KilledBySignal(SIGABRT), "");
 }
 
 TEST_P(CacheAllocationFailureTest, ReturningHandlerRetriesWithZeroContents) {
