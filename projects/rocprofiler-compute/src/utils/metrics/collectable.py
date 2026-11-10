@@ -263,11 +263,32 @@ def per_dispatch_ratio_series(
 
     values: Dict[Any, float] = {}
     for dispatch_id, group in raw_pmc_df.groupby(dispatch_col, dropna=False):
-        scalar = _eval_built_expr_on_frame(built_expr, group, sys_vars, empirical_peaks)
+        scoped_vars = _sys_vars_for_rows(sys_vars, group.index)
+        scalar = _eval_built_expr_on_frame(
+            built_expr, group, scoped_vars, empirical_peaks
+        )
         if scalar == "N/A" or pd.isna(scalar):
             continue
         values[dispatch_id] = float(scalar)
     return pd.Series(values, dtype=float)
+
+
+def _sys_vars_for_rows(
+    sys_vars: Dict[str, Any],
+    index: pd.Index,
+) -> Dict[str, Any]:
+    """Keep Series built-ins on the rows of one dispatch.
+
+    A whole-frame Series makes ``SUM($cycles)`` the total of every dispatch.
+    Pass-scoped Series use the same index, so they are sliced the same way.
+    """
+    scoped: Dict[str, Any] = {}
+    for key, value in sys_vars.items():
+        if isinstance(value, pd.Series):
+            scoped[key] = value.reindex(index)
+        else:
+            scoped[key] = value
+    return scoped
 
 
 def cache_collectable_expressions(

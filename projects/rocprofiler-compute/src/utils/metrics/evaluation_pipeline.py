@@ -355,7 +355,62 @@ def evaluate_metric_composites(
                 continue
             cell = df.at[composite.metric_id, avg_col]
             results[(composite.metric_id, avg_col)] = cell
+            _record_composite_extents(
+                results,
+                df,
+                composite.metric_id,
+                raw_pmc_df,
+                sys_vars,
+                empirical_peaks,
+            )
     return results
+
+
+_EXTENT_COLUMNS = ("Min", "Max", "Minimum", "Maximum")
+
+
+def _extent_eval_string(formula: str) -> str:
+    """Return an eval string for a Min or Max cell.
+
+    Cells already rewritten to ``collect_piece(...)`` are left as they are.
+    ``build_eval_string`` rejects that call, so a second rewrite would drop them.
+    """
+    if "collect_piece(" in formula:
+        return formula
+    return build_eval_string(formula)
+
+
+def _record_composite_extents(
+    results: dict[tuple[object, str], object],
+    metric_table: pd.DataFrame,
+    metric_id: object,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
+) -> None:
+    """Evaluate Min/Max with the same collect_piece resolver as analyze."""
+    evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
+    _bind_collect_piece(
+        evaluator,
+        metric_table,
+        raw_pmc_df,
+        sys_vars,
+        empirical_peaks,
+    )
+    for column in _EXTENT_COLUMNS:
+        if column not in metric_table.columns:
+            continue
+        formula = metric_table.at[metric_id, column]
+        if not isinstance(formula, str) or not formula.strip():
+            continue
+        built = _extent_eval_string(formula)
+        if not built:
+            continue
+        try:
+            value = evaluator.eval_expression(built)
+        except (TypeError, NameError, KeyError, AttributeError):
+            continue
+        results[(metric_id, column)] = value
 
 
 def overlay_composite_expression_values(

@@ -9,7 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from utils.metrics.collectable import COLLECT_SUM_SPECS_ATTR
+from utils.metrics.collectable import (
+    COLLECT_SUM_SPECS_ATTR,
+    per_dispatch_ratio_series,
+)
 from utils.metrics.evaluation_pipeline import (
     _gui_active_zero_detected,
     calc_builtin_vars,
@@ -713,3 +716,48 @@ def test_collect_piece_min_stays_unset_without_dispatch_series() -> None:
     assert table.at["3", "Avg"] == pytest.approx(1.25)
     assert table.at["3", "Min"] == "N/A"
     assert table.at["3", "Max"] == "N/A"
+
+
+@pytest.mark.misc
+def test_per_dispatch_ratio_scopes_builtin_series_to_each_dispatch() -> None:
+    """A whole-frame cycle Series must not be the denominator of every dispatch.
+
+    Instructions and cycles are both [10, 30]. Each dispatch is 1, not 0.25/0.75.
+    """
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "INST": [10.0, 30.0],
+    })
+    cycles = pd.Series([10.0, 30.0], index=raw.index, name="cycles")
+    built = "to_sum(raw_pmc_df['INST']) / to_sum(ammolite__CYCLES)"
+    series = per_dispatch_ratio_series(
+        built,
+        raw,
+        {"ammolite__CYCLES": cycles, "ammolite__CYCLES__pass0": cycles},
+        {},
+    )
+    assert series.loc[1] == pytest.approx(1.0)
+    assert series.loc[2] == pytest.approx(1.0)
+
+
+@pytest.mark.misc
+def test_evaluate_metric_composites_includes_min_and_max() -> None:
+    """Database overlay receives the same per-dispatch Min and Max as analyze."""
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "INST_A": [2.0, 6.0],
+        "INST_B": [1.0, 1.0],
+        "CYCLES": [4.0, 4.0],
+    })
+    table = _ipc_collect_table()
+    sys_info = pd.Series(TestEvaluationPipeline.sys_info_fields)
+    filled = evaluate_metric_composites(
+        {1: table},
+        {1: "metric_table"},
+        raw,
+        sys_info,
+        pd.DataFrame(),
+    )
+    assert filled[("3", "Min")] == pytest.approx(0.75)
+    assert filled[("3", "Max")] == pytest.approx(1.75)
+    assert isinstance(table.at["3", "Min"], str)
