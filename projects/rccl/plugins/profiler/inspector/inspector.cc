@@ -629,15 +629,13 @@ FILE* inspectorDumpThread::getOrCreateFileHandle(const char* deviceUuidStr,
   // Open/create file if needed
   if (!deviceFlushEntries[flushIndex].fileHandle) {
     // Create file if flushing, otherwise append
-    const char* mode = needsFlush ? "w" : "a";
-    FILE* file = fopen(filename, mode);
+    FILE* file = jsonOpenOutputFile(filename, /*append=*/!needsFlush);
 
     if (!file) {
-      INFO_INSPECTOR("NCCL Inspector: Failed to open Prometheus file %s", filename);
+      INFO_INSPECTOR("NCCL Inspector: Failed to open Prometheus file %s: %s", filename,
+                     strerror(errno));
       return NULL;
     }
-
-    chmod(filename, 0777);
 
     deviceFlushEntries[flushIndex].fileHandle = file;
 
@@ -731,7 +729,6 @@ inspectorResult_t inspectorDumpThread::inspectorStateDumpJSON(const char* output
       INFO_INSPECTOR("Cannot open %s for writing: %s", tmp, jsonErrorString(result));
       return inspectorFileOpenError;
     }
-    chmod(tmp, 0666);
   }
 
   if (jfo != nullptr) {

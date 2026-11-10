@@ -1572,6 +1572,9 @@ function(rccl_standalone_setup)
   set(ACCL_PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/accl")
   set(RCCL_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
+  # --- inspector profiler plugin directory ---
+  set(INSPECTOR_PLUGIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins/profiler/inspector")
+
   # --- Wrapper library for production .cc files that need link stubs ---
   add_library(rccl-source-wrappers STATIC
     mem_manager_src_wrapper.cc
@@ -1605,6 +1608,37 @@ function(rccl_standalone_setup)
   set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
     COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
   )
+  # --- Inspector plugin under test ---------------------------------------
+  # The inspector vendors its own nccl/ headers (nccl/profiler.h, nccl/common.h)
+  # which collide with RCCL's profiler.h/os.h. Scoping includes per-source is not
+  # enough: the target-level RCCL_INCLUDE_DIRS still win, and inspector.cc's
+  # #include "profiler.h" resolves to the hipified RCCL header. So the plugin
+  # gets its own library whose include path is deliberately only the plugin's own
+  # directories -- it needs nothing from RCCL's include tree.
+  add_library(rccl-inspector-under-test STATIC
+    inspector_wrapper.cc
+    # The inspector's JSON writer is linked for real so the output-file creation
+    # path InspectorPluginTests.cpp exercises is production code end to end.
+    ${INSPECTOR_PLUGIN_DIR}/json.cc
+  )
+  target_include_directories(rccl-inspector-under-test PRIVATE
+    ${INSPECTOR_PLUGIN_DIR}
+    ${INSPECTOR_PLUGIN_DIR}/nccl
+  )
+  # HIP headers only -- rccl-HostUnitTests links no HIP runtime, and the stubs
+  # in fakes/inspector_plugin_stubs.cc satisfy the few hip* symbols reached.
+  foreach(_hip_tgt hip::host hip::device)
+    if(TARGET ${_hip_tgt})
+      target_include_directories(rccl-inspector-under-test PRIVATE
+        $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_INCLUDE_DIRECTORIES>)
+    endif()
+  endforeach()
+  target_compile_definitions(rccl-inspector-under-test PRIVATE
+    __HIP_PLATFORM_AMD__
+    NCCL_OS_LINUX
+  )
+  set_target_properties(rccl-inspector-under-test PROPERTIES
+    POSITION_INDEPENDENT_CODE ON)
   target_compile_definitions(rccl-source-wrappers PRIVATE
     __HIP_PLATFORM_AMD__
     NCCL_OS_LINUX
@@ -1640,6 +1674,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
     ${RCCL_TEST_DIR}/AltRsmiTests.cpp
     ${RCCL_TEST_DIR}/AcclProfilerTests.cpp
+    InspectorPluginTests.cpp
     ${RCCL_TEST_DIR}/common/GpuCountProbe.cpp
     ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
     ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
@@ -1654,6 +1689,9 @@ function(rccl_standalone_setup)
   set_source_files_properties(${RCCL_TEST_DIR}/AcclProfilerTests.cpp PROPERTIES
     COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
   )
+  # InspectorPluginTests.cpp needs no include flags of its own: it reaches the
+  # units under test through inspector_wrapper.cc's C forwarders and deliberately
+  # includes none of the plugin's headers (see rccl-inspector-under-test above).
 
   target_compile_definitions(rccl-HostUnitTests PRIVATE
     __HIP_PLATFORM_AMD__
@@ -1685,6 +1723,7 @@ function(rccl_standalone_setup)
     -Wl,--whole-archive
     rccl-source-wrappers
     -Wl,--no-whole-archive
+    rccl-inspector-under-test
   )
 
   # --- Per-mode variables consumed by the shared micro-binary block ---------

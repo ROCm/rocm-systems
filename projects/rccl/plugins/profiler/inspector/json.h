@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 
 typedef enum {
   JSON_NONE, // A pseudo-state meaning that the document is empty
@@ -32,6 +33,10 @@ typedef struct jsonFileOutput jsonFileOutput;
 jsonResult_t jsonLockOutput(jsonFileOutput *jfo);
 
 jsonResult_t jsonUnlockOutput(jsonFileOutput *jfo);
+
+// Open `outfile` for writing, refusing anything that is not a private regular
+// file owned by this process. Returns NULL on failure with errno set.
+FILE *jsonOpenOutputFile(const char *outfile, bool append);
 
 jsonResult_t jsonInitFileOutput(jsonFileOutput **jfo,
                                 const char *outfile);
