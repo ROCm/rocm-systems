@@ -4273,6 +4273,17 @@ TEST(MemoryWaitFootprintTest, WriteLaneChecksOnlyTheSelectedDestinationLane) {
   }
 }
 
+TEST(MemoryWaitFootprintTest, Cdna4LaneReadsCheckOnlyTheSelectedSourceLane) {
+  std::vector<std::vector<uint32_t>> cases;
+  auto add = [&](auto words) { cases.emplace_back(words.begin(), words.end()); };
+  add(cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4}));
+  add(cdna4::build_vop3(cdna4::kVReadfirstlaneB32Vop3, {.vdst = 4, .src0 = 256}));
+  for (uint16_t selector : {135, 5})
+    add(cdna4::build_vop3(cdna4::kVReadlaneB32Vop3, {.vdst = 4, .src0 = 256, .src1 = selector}));
+  check_vector_footprints(ROCJITSU_CODE_ARCH_CDNA4, 64, 16, cases, 0, 0,
+                          [](Wavefront &wave) { wave.debug_write_sgpr(5, 63); });
+}
+
 TEST(MemoryWaitFootprintTest, Cdna4HazardsMatchObservedVectorAccesses) {
   std::vector<std::vector<uint32_t>> cases;
   auto add = [&](auto words) { cases.emplace_back(words.begin(), words.end()); };
