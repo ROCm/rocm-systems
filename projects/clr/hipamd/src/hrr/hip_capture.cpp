@@ -227,7 +227,7 @@ static void pinned_untrack(void* p) {
 // them in, so a child never inherits it held by a snapshot on a thread it does
 // not have. Registered after writer::open() registers the writer's handlers:
 // prepare handlers run in reverse order of registration.
-[[maybe_unused]] static void pinned_install_atfork() {
+static void pinned_install_atfork() {
 #ifndef _WIN32
   static std::once_flag once;
   std::call_once(once, [] {
@@ -1832,7 +1832,7 @@ static hipError_t pinned_hipHostFree(void* p) { pinned_untrack(p); return g_next
 static hipError_t pinned_hipFreeHost(void* p) { pinned_untrack(p); return g_next_hipFreeHost(p); }
 static hipError_t pinned_hipFree(void* p)     { pinned_untrack(p); return g_next_hipFree(p); }
 
-[[maybe_unused]] static void pinned_wrap_table() {
+static void pinned_wrap_table() {
   static bool done = false;
   if (done) return;
   done = true;
@@ -3033,6 +3033,8 @@ void hip_capture_init() {
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
+    (void)&pinned_wrap_table;
+    (void)&pinned_install_atfork;
     (void)&record_fat_binary_blob;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;
