@@ -13,6 +13,18 @@ static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 thread_local! {
+    /// Pauses one single-signal wait after admission and before its first read.
+    static AFTER_WAIT_ADMISSION: std::cell::RefCell<Option<(Sender<()>, Receiver<()>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn pause_after_wait_admission(entered: Sender<()>, release: Receiver<()>) {
+    AFTER_WAIT_ADMISSION.with(|slot| *slot.borrow_mut() = Some((entered, release)));
+}
+
+#[cfg(test)]
+thread_local! {
     /// Notifies a wait test after this thread has observed an unsatisfied poll.
     static FIRST_UNSATISFIED_POLL: std::cell::RefCell<Option<Sender<()>>> =
         const { std::cell::RefCell::new(None) };
@@ -87,6 +99,14 @@ pub(crate) unsafe fn signal_wait(
         return 0;
     };
     let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
+    #[cfg(test)]
+    AFTER_WAIT_ADMISSION.with(|slot| {
+        let hook = slot.borrow_mut().take();
+        if let Some((entered, release)) = hook {
+            let _ = entered.send(());
+            let _ = release.recv();
+        }
+    });
     let (generation, observed) = {
         let handles = WAIT_SIGNAL_HANDLES
             .read()
