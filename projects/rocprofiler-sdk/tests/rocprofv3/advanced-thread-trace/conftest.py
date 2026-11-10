@@ -166,11 +166,25 @@ def att_marker_trace_out_dir_path(request):
     return output_dir_path
 
 
+def missing_avx512_cpu_flags():
+    with open("/proc/cpuinfo") as inp:
+        flags = next(
+            (ln.split(":", 1)[1].split() for ln in inp if ln.startswith("flags")), []
+        )
+    return [f for f in ["avx512f", "avx512bw", "avx512vbmi"] if f not in flags]
+
+
 @pytest.fixture
 def att_no_intercept_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-no-intercept-out-dir")
     if not output_dir_path:
         pytest.skip("--att-no-intercept-out-dir not provided")
+    missing_flags = missing_avx512_cpu_flags()
+    if missing_flags:
+        pytest.skip(
+            "--att-no-intercept requires a host CPU with AVX-512 support "
+            f"(missing: {', '.join(missing_flags)})"
+        )
     return output_dir_path
 
 

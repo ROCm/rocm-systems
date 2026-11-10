@@ -11,6 +11,7 @@
 /// SIMD-enabled execution may fall back to scalar when a fast-path gate rejects it.
 /// Accumulate forms have separate FMAC and GFX1250 execution-policy coverage.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -169,7 +170,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -239,6 +242,8 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     const uint32_t vdst = (c.kind == Kind::F64) ? kDstVgpr64 : kDstVgpr32;
@@ -318,6 +323,65 @@ TEST(Vop3TernaryFpSimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3TernaryFpSimdCorrectness, F16DestinationHalfPolicy) {
+  ForceScalarGuard guard;
+  auto check_arch = [&](rj_code_arch_t arch, auto builder, auto check_forms) {
+    for (bool force_scalar : {false, true}) {
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx(arch);
+      ASSERT_NE(fx.wf, nullptr);
+      const uint32_t base = fx.wf->vgpr_alloc().base;
+      fx.wf->set_exec(1);
+      // High halves are 2, 3 and 6. MAD/FMA produce 12 and DIV_FIXUP returns 6/3.
+      fx.cu->write_vgpr(base, 0, 0x40003c00);
+      fx.cu->write_vgpr(base + 1, 0, 0x42003c00);
+      fx.cu->write_vgpr(base + 2, 0, 0x46003c00);
+      auto check = [&](uint16_t opcode, uint32_t result, bool legacy = false) {
+        for (bool high : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "arch=" << arch << " opcode=" << opcode
+                                          << " high=" << high << " scalar=" << force_scalar);
+          fx.cu->write_vgpr(base + kDstVgpr32, 0, 0xabcd5555);
+          const auto words = builder(opcode, {.vdst = kDstVgpr32,
+                                              .op_sel = static_cast<uint8_t>(high ? 15 : 7),
+                                              .src0 = 256,
+                                              .src1 = 257,
+                                              .src2 = 258});
+          std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_NE(inst->dst_operand(0), nullptr);
+          EXPECT_EQ(inst->dst_operand(0)->register_byte_mask(), high ? 0xc : legacy ? 0xf : 0x3);
+          ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+          const uint32_t expected =
+              high ? (result << 16) | 0x5555u : (legacy ? 0u : 0xabcd0000u) | result;
+          EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr32, 0), expected);
+        }
+      };
+      check_forms(check);
+    }
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4})
+    check_arch(arch, cdna4::build_vop3, [](auto check) {
+      check(cdna4::kVMadF16Vop3, 0x4a00);
+      check(cdna4::kVFmaF16Vop3, 0x4a00);
+      check(cdna4::kVDivFixupF16Vop3, 0x4000);
+      check(cdna4::kVMadLegacyF16Vop3, 0x4a00, true);
+      check(cdna4::kVFmaLegacyF16Vop3, 0x4a00, true);
+      check(cdna4::kVDivFixupLegacyF16Vop3, 0x4000, true);
+    });
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    check_arch(arch, rdna2::build_vop3, [](auto check) {
+      check(rdna2::kVFmaF16Vop3, 0x4a00);
+      check(rdna2::kVDivFixupF16Vop3, 0x4000);
+    });
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    check_arch(arch, rdna3::build_vop3, [](auto check) {
+      check(rdna3::kVFmaF16Vop3, 0x4a00);
+      check(rdna3::kVDivFixupF16Vop3, 0x4000);
+    });
 }
 
 struct F16OutputCase {
@@ -502,7 +566,7 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
   ForceScalarGuard guard;
   amdgpu::fp_mode::ScopedEnvironment environment(0);
   const auto &test = GetParam();
-  // RDNA2 uses the generic low-half executor; CDNA4/RDNA3 use true16 selection.
+  // The RDNA2 MIN3/MAX3/MED3 cases here use the generic low-half executor.
   const uint8_t selection_count = test.arch == ROCJITSU_CODE_ARCH_RDNA2 ? 1 : 2;
   for (uint8_t selection = 0; selection < selection_count; ++selection)
     for (const uint64_t exec : {~0ULL, 0xA5A5'F0F0'1234'8001ULL}) {
@@ -531,12 +595,14 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         fx.wf->set_mode_raw(test.mode);
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-        if (force_scalar)
+        if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        else
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
+          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
+        }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {

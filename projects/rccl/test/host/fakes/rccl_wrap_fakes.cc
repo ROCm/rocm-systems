@@ -140,11 +140,22 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
 // definitions are dropped by --gc-sections when the option is off.
 bool g_rcclWarpSpeedSupported = false;
 int g_rcclWarpSpeedSupportedCalls = 0;
-bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
-  ++g_rcclWarpSpeedSupportedCalls;
+struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+int g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+static bool DefaultWarpSpeedSupportedPrefix(struct ncclComm*, struct ncclKernelPlan*,
+                                            struct ncclTaskColl*, int) {
   return g_rcclWarpSpeedSupported;
 }
-
+std::function<bool(struct ncclComm*, struct ncclKernelPlan*,
+                   struct ncclTaskColl*, int)> g_rcclWarpSpeedSupportedPrefix =
+    DefaultWarpSpeedSupportedPrefix;
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
+  ++g_rcclWarpSpeedSupportedCalls;
+  g_rcclWarpSpeedSupportedLastCollHead = collHead;
+  g_rcclWarpSpeedSupportedLastNCollTasks = nCollTasks;
+  return g_rcclWarpSpeedSupportedPrefix(comm, plan, collHead, nCollTasks);
+}
 // Identity by default, so an ENABLE_WARP_SPEED=ON build computes the same
 // channel count as an OFF one and the existing topoGetAlgoInfo expectations hold.
 static int DefaultWarpSpeedAdjustChannels(struct ncclComm*, struct ncclTaskColl*, int nc) {
@@ -367,6 +378,9 @@ void ResetRcclWrapFakes() {
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
   g_rcclWarpSpeedSupportedCalls = 0;
+  g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+  g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+  g_rcclWarpSpeedSupportedPrefix = DefaultWarpSpeedSupportedPrefix;
   g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
@@ -435,6 +449,7 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
+// rcclCeAllReduceEnabled and rcclForceCeAllReduceEnabled have controllable fakes above.
 bool rcclForceCeScratchEnabled(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
 }
@@ -444,6 +459,8 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
+// taskAppend and ncclCeInit call this instead of rcclCeAr2ShotMax. No host
+// microtest reaches either site; the stub exists so those binaries link.
 size_t rcclCeArNonRegCap(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
 }

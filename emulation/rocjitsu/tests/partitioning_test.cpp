@@ -28,7 +28,6 @@
 #include <memory>
 #include <set>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,9 +36,9 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
-const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd.json";
-const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
+const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x.json";
+const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd.json";
+const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi350x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 const std::string CONFIG_CDNA5_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
 const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.json";
@@ -47,12 +46,20 @@ const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.
 // Most shipped configs omit num_threads so they pick up the default; the 2-GPU
 // KMD config pins it. Replace the pin when there is one, otherwise insert an
 // override after the opening brace.
-std::string config_json_with_num_threads(const std::string &path, uint32_t num_threads) {
+[[nodiscard]] testing::AssertionResult
+config_json_with_num_threads(std::string &json, const std::string &path, uint32_t num_threads) {
   std::ifstream input(path);
   if (!input.is_open())
-    throw std::runtime_error("Failed to open config: " + path);
+    return testing::AssertionFailure() << "Failed to open config: " + path;
 
-  std::string json((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  json.clear();
+  std::array<char, 4096> buffer;
+  while (input.read(buffer.data(), buffer.size()))
+    json.append(buffer.data(), input.gcount());
+  json.append(buffer.data(), input.gcount());
+  if (input.bad() || !input.eof())
+    return testing::AssertionFailure() << "Failed to read config: " << path;
+
   // Shipped configs indent top-level keys by two spaces; table entries are nested.
   const std::string field = "\n  \"num_threads\":";
   const std::string replacement = field + " " + std::to_string(num_threads);
@@ -61,17 +68,17 @@ std::string config_json_with_num_threads(const std::string &path, uint32_t num_t
   if (field_pos != std::string::npos) {
     const size_t value_end = json.find_first_of(",}\n", field_pos + field.size());
     if (value_end == std::string::npos)
-      throw std::runtime_error("Unterminated num_threads field: " + path);
+      return testing::AssertionFailure() << "Unterminated num_threads field: " + path;
     json.replace(field_pos, value_end - field_pos, replacement);
-    return json;
+    return testing::AssertionSuccess();
   }
 
   const size_t brace_pos = json.find('{');
   if (brace_pos == std::string::npos)
-    throw std::runtime_error("Config is not a JSON object: " + path);
+    return testing::AssertionFailure() << "Config is not a JSON object: " + path;
 
   json.insert(brace_pos + 1, replacement + ",");
-  return json;
+  return testing::AssertionSuccess();
 }
 
 struct PartitionedTopology {
@@ -94,9 +101,11 @@ build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_er
 
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  loaded.wire_links(engine->topology());
+  if (loaded.wire_links(engine->topology(), emit_error).failed())
+    return util::Result::failure();
   bool partitioned = amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads);
-  engine->create();
+  if (engine->create(emit_error).failed())
+    return util::Result::failure();
 
   return PartitionedTopology{std::move(loaded), soc, memory, std::move(engine), partitioned};
 }
@@ -111,6 +120,16 @@ void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionI
 
   for (const auto &child : composite->children())
     expect_subtree_partition(child.get(), expected);
+}
+
+TEST(PartitioningConfigTest, ReportsDirectoryReadFailure) {
+  test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-partitioning-config-"));
+  std::string json;
+  const testing::AssertionResult result = config_json_with_num_threads(json, directory.path(), 1);
+  ASSERT_FALSE(result);
+  EXPECT_NE(std::string(result.message()).find("Failed to read config: " + directory.path()),
+            std::string::npos);
 }
 
 TEST(CpuDispatchBudgetTest, AutoUsesDetectedHostWidthBelowCap) {
@@ -340,7 +359,8 @@ TEST(ExecutionThreadBudgetTest, ConfigLoadingPropagatesInvalidAllocation) {
         std::pair{R"("thread_allocations":[{"num_threads":0,"cpu_dispatch_threads":1}],)",
                   "thread_allocations require num_threads >= 1, "
                   "cpu_dispatch_threads >= 1 and async_helper_threads <= 128"}}) {
-    std::string json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+    std::string json;
+    ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_1XCD_PATH, 1));
     // Replace the preset table so the invalid entry is the one evaluated.
     const size_t table = json.find("\"thread_allocations\"");
     ASSERT_NE(table, std::string::npos);
@@ -460,7 +480,8 @@ TEST(ExecutionThreadBudgetTest, CountsOnlySocsThatTheLoaderConstructs) {
 }
 
 TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
-  auto json = config_json_with_num_threads(CONFIG_PATH, 0);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
@@ -480,7 +501,8 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
 // this pins the same JSON through both routes: one config asks for 32 and the other
 // is the launcher's copy asking for 4, and each gets the plan its own text implies.
 TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
-  std::string json = config_json_with_num_threads(CONFIG_PATH, 0);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
   FailureOr<std::string> relaunched = config::json_with_cpu_thread_budget(json, 4);
   ASSERT_TRUE(relaunched.succeeded());
@@ -503,7 +525,7 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
   util::StringDiagnostic config_diagnostic;
   for (const auto &paths :
-       {std::vector<std::string>{"gfx950_mi355x.json", "gfx950_mi355x_kmd.json"},
+       {std::vector<std::string>{"gfx950_mi350x.json", "gfx950_mi350x_kmd.json"},
         std::vector<std::string>{"gfx942_cdna3.json", "gfx942_cdna3_kmd.json"}}) {
     util::StringDiagnostic expected_diagnostic;
     auto expected_result = config::load_execution_thread_settings(
@@ -522,7 +544,7 @@ TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
 }
 
 TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatchOverrides) {
-  for (const auto &[name, gpus] : {std::pair{"gfx950_mi355x_kmd_2gpu.json", 2u},
+  for (const auto &[name, gpus] : {std::pair{"gfx950_mi350x_kmd_2gpu.json", 2u},
                                    std::pair{"gfx1250_mi455x_kmd_4gpu.json", 4u}}) {
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
@@ -602,7 +624,7 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
   struct Case {
     uint32_t budget, engines, dispatch;
   };
-  for (const auto *name : {"gfx950_mi355x.json", "gfx1250_mi455x.json"}) {
+  for (const auto *name : {"gfx950_mi350x.json", "gfx1250_mi455x.json"}) {
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     util::StringDiagnostic settings_diagnostic;
     auto settings_result = config::load_execution_thread_settings(
@@ -627,7 +649,7 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
 }
 
 TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorkers) {
-  for (const char *name : {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+  for (const char *name : {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     const uint32_t max_cpu = cdna5 ? 40 : 24;
@@ -730,12 +752,14 @@ TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
 }
 
 TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   EXPECT_FALSE(amdgpu::partition_topology_by_xcds(topology, soc, 0));
   EXPECT_TRUE(topology.partitions().empty());
@@ -753,12 +777,14 @@ TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
 }
 
 TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
+  util::StringDiagnostic admission_diagnostic;
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
-  loaded.wire_links(topology);
+  ASSERT_TRUE(loaded.wire_links(topology, admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(topology, soc, 1));
   ASSERT_EQ(topology.partitions().size(), 1u);
@@ -843,7 +869,8 @@ TEST(XcdPartitioningTest, NonXcdComponentsStayOnPartitionZero) {
 }
 
 TEST(XcdPartitioningTest, VmStepRejectsMultipleEnginePartitions) {
-  auto json = config_json_with_num_threads(CONFIG_PATH, 2);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 2));
 
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
@@ -860,7 +887,8 @@ TEST(XcdPartitioningTest, VmStepRejectsMultipleEnginePartitions) {
 }
 
 TEST(XcdPartitioningTest, VmStepSucceedsWithSingleEnginePartition) {
-  auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_1XCD_PATH, 1));
 
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
@@ -874,7 +902,8 @@ TEST(XcdPartitioningTest, VmStepSucceedsWithSingleEnginePartition) {
 }
 
 TEST(XcdPartitioningTest, CApiResolvesZeroThreadsToDefault) {
-  auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 0);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_1XCD_PATH, 0));
 
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
@@ -887,7 +916,8 @@ TEST(XcdPartitioningTest, CApiResolvesZeroThreadsToDefault) {
 }
 
 TEST(XcdPartitioningTest, CApiClampsSingleGpuThreadsToXcdCount) {
-  auto json = config_json_with_num_threads(CONFIG_PATH, 64);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 64));
 
   rj_vm_t *raw_vm = nullptr;
   testing::internal::CaptureStderr();
@@ -903,7 +933,8 @@ TEST(XcdPartitioningTest, CApiClampsSingleGpuThreadsToXcdCount) {
 }
 
 TEST(XcdPartitioningTest, CApiDoesNotWarnWhenThreadCountIsUnchanged) {
-  auto json = config_json_with_num_threads(CONFIG_1XCD_PATH, 1);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_1XCD_PATH, 1));
 
   rj_vm_t *raw_vm = nullptr;
   testing::internal::CaptureStderr();
@@ -982,7 +1013,8 @@ TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
 // 0 -> 1 clamp and the new default, so only an aggregate config distinguishes
 // them, and only load_config() covers extra_gpu_builds.
 TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
-  const std::string json = config_json_with_num_threads(CONFIG_2GPU_PATH, 0);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_2GPU_PATH, 0));
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
@@ -1012,6 +1044,7 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
+      "gfx950_mi350x_kmd_2gpu.json",
       "gfx950_mi355x_kmd_2gpu.json",
       "gfx1250_mi455x_kmd_4gpu.json",
       "gfx1250_mi455x_kmd_2node_net.json",
@@ -1085,7 +1118,8 @@ TEST(XcdPartitioningTest, CApiDefaultsToOnePartitionPerXcdAndRuns) {
 }
 
 TEST(XcdPartitioningTest, CApiClampsMultiGpuThreadsToTotalXcdCountAndRuns) {
-  auto json = config_json_with_num_threads(CONFIG_2GPU_PATH, 64);
+  std::string json;
+  ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_2GPU_PATH, 64));
 
   rj_vm_t *raw_vm = nullptr;
   ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),

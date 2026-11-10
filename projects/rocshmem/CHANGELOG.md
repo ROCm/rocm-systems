@@ -28,6 +28,7 @@
     * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
+    * `rocshmem_signal_add_on_stream` and `rocshmem_signal_set_on_stream`
 
 ### Resolved issues
 * Fixed lost updates and hangs on the RO backend when more blocking operations
@@ -49,6 +50,8 @@
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+* The AMD Pensando IONIC GDA provider now requires
+  network driver and firmware support for CQ collapsing.
 
 ## rocSHMEM 3.7.0 for ROCm 10.1
 

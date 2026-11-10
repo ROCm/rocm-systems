@@ -472,6 +472,17 @@ device:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips: variant skipped. Needs re-triage."
     tags: [multigpu]
+  Unit_hipAmdFileIo_Negative_InvalidFd:
+    <<: *level_default
+  Unit_hipAmdFileIo_Negative_NullDevicePtr:
+    <<: *level_default
+  Unit_hipAmdFileIo_ValidArgs_ErrorStateConsistent:
+    <<: *level_default
+  Unit_hipAmdFileIo_Positive_WriteRead:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2892 - AIS file I/O support is HW specific and needs to be further triaged in CI."
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_default
     tags: [P0]
