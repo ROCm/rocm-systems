@@ -8393,6 +8393,8 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -8721,6 +8723,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9529,6 +9533,8 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -9611,6 +9617,8 @@ VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -23729,14 +23737,6 @@ DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
@@ -23799,14 +23799,6 @@ DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
@@ -23868,14 +23860,6 @@ DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
   return std::make_unique<VSubrevCoCiU32Vop3SdstEnc>(opcode);
 }
 } // namespace detail
-
-void VSubrevCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
@@ -24130,14 +24114,6 @@ DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VAddCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
@@ -24197,14 +24173,6 @@ DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
 }
 } // namespace detail
 
-void VSubCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
-
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
@@ -24263,14 +24231,6 @@ DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
   return std::make_unique<VSubrevCoU32Vop3SdstEnc>(opcode);
 }
 } // namespace detail
-
-void VSubrevCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
-  Vop3SdstEnc::implicit_uses(uses);
-  if (inst_.src0 == amdgpu::SRC_DPP && dpp_bound_ctrl_ == 0 &&
-      (dpp_fi_ == 0 || amdgpu::dpp::dpp_ctrl_produces_oob(dpp_ctrl_)))
-    if (auto r = sdst.to_register_ref())
-      uses.expand(*r);
-}
 
 } // namespace rdna3
 } // namespace rocjitsu
