@@ -45,13 +45,15 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto handle = std::make_unique<rj_code_executable_t>();
-  handle->exec = std::make_unique<Executable>(path);
-  if (!handle->exec->is_valid())
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  return [&]() noexcept -> rj_status_t {
+    auto handle = std::make_unique<rj_code_executable_t>();
+    handle->exec = std::make_unique<Executable>(path);
+    if (!handle->exec->is_valid())
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
-  *exec = handle.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    *exec = handle.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
@@ -123,38 +125,40 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *inst_list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto *decoder = create_decoder_for_target(target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  Instruction::ScopedHeapAllocation heap_allocation;
-  auto owned = std::make_unique<rj_code_inst_list_t>();
+    Instruction::ScopedHeapAllocation heap_allocation;
+    auto owned = std::make_unique<rj_code_inst_list_t>();
 
-  // DBT local caves are emitted into .text, so instruction-list callers only
-  // need the text sections to see translated code.
-  for (const auto *sec : obj->co->text_sections()) {
-    const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
-    std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
-    // Each executable section owns a separate data buffer, so decoding starts
-    // at word zero for each section.
-    std::size_t word_index = 0;
-    while (word_index < inst_data_size) {
-      DecodeResult decoded =
-          decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
-      if (decoded.failed())
-        return ROCJITSU_STATUS_ERROR;
-      std::unique_ptr<Instruction> inst = std::move(decoded).value();
-      owned->list.push_back(*inst);
-      word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
-      owned->storage.push_back(std::move(inst));
+    // DBT local caves are emitted into .text, so instruction-list callers only
+    // need the text sections to see translated code.
+    for (const auto *sec : obj->co->text_sections()) {
+      const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+      std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
+      // Each executable section owns a separate data buffer, so decoding starts
+      // at word zero for each section.
+      std::size_t word_index = 0;
+      while (word_index < inst_data_size) {
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
+        if (decoded.failed())
+          return ROCJITSU_STATUS_ERROR;
+        std::unique_ptr<Instruction> inst = std::move(decoded).value();
+        owned->list.push_back(*inst);
+        word_index += static_cast<std::size_t>(inst->size()) / sizeof(uint32_t);
+        owned->storage.push_back(std::move(inst));
+      }
     }
-  }
 
-  *inst_list = owned.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    *inst_list = owned.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_inst_list_retain(rj_code_inst_list_t *inst_list) {
@@ -186,26 +190,28 @@ rj_status_t rj_code_basic_block_list_create(rj_code_object_t *obj, rj_code_targe
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   *list = nullptr;
 
-  if (!code_object_accepts_target(*obj->co, target_id))
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  return [&]() noexcept -> rj_status_t {
+    if (!code_object_accepts_target(*obj->co, target_id))
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto *decoder = create_decoder_for_target(target_id);
-  if (!decoder)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    auto *decoder = create_decoder_for_target(target_id);
+    if (!decoder)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const rj_code_arch_t arch = arch_for_target(target_id);
-  if (arch == ROCJITSU_CODE_ARCH_INVALID)
-    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    const rj_code_arch_t arch = arch_for_target(target_id);
+    if (arch == ROCJITSU_CODE_ARCH_INVALID)
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  Instruction::ScopedHeapAllocation heap_allocation;
-  auto owned = std::make_unique<rj_code_basic_block_list_t>();
-  auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
-                                  ExternalEntryPolicy::InferPredecessorless, {}, target_id);
-  if (blocks.failed())
-    return ROCJITSU_STATUS_ERROR;
-  owned->blocks = std::move(blocks).value();
-  *list = owned.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    Instruction::ScopedHeapAllocation heap_allocation;
+    auto owned = std::make_unique<rj_code_basic_block_list_t>();
+    auto blocks = BasicBlock::build(*obj->co, *decoder, arch, {}, {},
+                                    ExternalEntryPolicy::InferPredecessorless, {}, target_id);
+    if (blocks.failed())
+      return ROCJITSU_STATUS_ERROR;
+    owned->blocks = std::move(blocks).value();
+    *list = owned.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_code_basic_block_list_retain(rj_code_basic_block_list_t *list) {
