@@ -35,7 +35,7 @@ from rocprof_compute_soc.metric_library import loader  # noqa: E402
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import counters_over_block_limits  # noqa: E402
+from utils.utils_counter_defs import counter_to_block  # noqa: E402
 
 # Categories named after panels, not hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
@@ -101,26 +101,22 @@ def validate(metric_dir: Path) -> List[str]:
 def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     """Return the errors of one arch's library files."""
     files = loader.arch_files(metric_dir, arch)
-    load_errors = _load_errors(files)
-    if load_errors:
-        return load_errors
+    errors = _load_errors(files)
+    if errors:
+        return errors
     documents = {
         file_name: loader.load_file(paths) for file_name, paths in files.items()
     }
     variables = documents.pop(loader.VARIABLES_FILENAME, {})
     sets = documents.pop(loader.SETS_FILENAME, {})
-    set_errors = _sets_errors(sets, f"{arch}/{loader.SETS_FILENAME}")
-    return [
-        *_key_order_errors(arch, files),
-        *_variables_errors(variables, f"{arch}/{loader.VARIABLES_FILENAME}"),
-        *set_errors,
-        *(
-            error
-            for file_name, document in documents.items()
-            for error in _metrics_errors(document, f"{arch}/{file_name}")
-        ),
-        *_arch_metrics_errors(arch, documents, {} if set_errors else sets),
-    ]
+    errors.extend(_key_order_errors(arch, files))
+    errors.extend(_variables_errors(variables, f"{arch}/{loader.VARIABLES_FILENAME}"))
+    errors.extend(_sets_errors(sets, f"{arch}/{loader.SETS_FILENAME}"))
+    for file_name, document in documents.items():
+        errors.extend(_metrics_errors(document, f"{arch}/{file_name}"))
+    if errors:
+        return errors
+    return _arch_metrics_errors(arch, documents, sets)
 
 
 def canonical_formula(equation: object) -> Optional[str]:
@@ -137,13 +133,11 @@ def canonical_formula(equation: object) -> Optional[str]:
 
 def arch_ceilings(arch: str) -> Set[str]:
     """Return the measured roofline ceilings of any device of arch."""
-    return set().union(
-        *(
-            mi_gpu_specs.get_roofline_columns(device)
-            for device in mi_gpu_specs.get_roofline_archs()
-            if canonical_config_arch(device) == arch
-        )
-    )
+    ceilings: Set[str] = set()
+    for device in mi_gpu_specs.get_roofline_archs():
+        if canonical_config_arch(device) == arch:
+            ceilings.update(mi_gpu_specs.get_roofline_columns(device))
+    return ceilings
 
 
 def main() -> int:
@@ -163,18 +157,17 @@ def _directory_errors(metric_dir: Path) -> List[str]:
     """Report mapped archs without a directory, and arch directories without a map
     entry."""
     mapped_archs = loader.METRIC_LIBRARY_PARENT_ARCH
-    return [
-        *(
-            f"[{arch}] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
-            for arch in mapped_archs
-            if not (metric_dir / arch).is_dir()
-        ),
-        *(
-            f"[{path.name}] is not a known metric library arch"
-            for path in sorted(metric_dir.glob("gfx*"))
-            if path.is_dir() and path.name not in mapped_archs
-        ),
+    errors = [
+        f"[{arch}] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
+        for arch in mapped_archs
+        if not (metric_dir / arch).is_dir()
     ]
+    errors.extend(
+        f"[{path.name}] is not a known metric library arch"
+        for path in sorted(metric_dir.glob("gfx*"))
+        if path.is_dir() and path.name not in mapped_archs
+    )
+    return errors
 
 
 def _load_errors(files: Dict[str, List[Path]]) -> List[str]:
@@ -281,11 +274,10 @@ def _metric_errors(entry: object, source: str, metric_id: str) -> List[str]:
     )
     if errors:
         return errors
-    return [
-        *_text_errors(entry, ("name", "formula"), source, metric_id),
-        *_string_errors(entry, source, metric_id),
-        *_peak_errors(entry, source, metric_id),
-    ]
+    errors = _text_errors(entry, ("name", "formula"), source, metric_id)
+    errors.extend(_string_errors(entry, source, metric_id))
+    errors.extend(_peak_errors(entry, source, metric_id))
+    return errors
 
 
 def _string_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str]:
@@ -334,27 +326,21 @@ def _arch_metrics_errors(
 ) -> List[str]:
     """Report problems across all metrics and sets of arch."""
     try:
-        combined = loader.combine_metric_documents(documents)
+        metrics = loader.combine_metric_documents(documents)
     except loader.MetricLibraryError as error:
         return [f"[{arch}] {error}"]
-    metrics = {
-        metric_id: entry
-        for metric_id, entry in combined.items()
-        if isinstance(entry, dict)
-    }
-    return [
-        *_parse_errors(arch, metrics),
-        *_ceiling_errors(arch, metrics),
-        *_shared_formula_errors(arch, metrics),
-        *_shared_name_errors(arch, metrics),
-        *_set_metric_errors(arch, sets, metrics),
-    ]
+    errors = _parse_errors(arch, metrics)
+    errors.extend(_ceiling_errors(arch, metrics))
+    errors.extend(_shared_formula_errors(arch, metrics))
+    errors.extend(_shared_name_errors(arch, metrics))
+    errors.extend(_set_metric_errors(arch, sets, metrics))
+    return errors
 
 
 def _set_metric_errors(
     arch: str, sets: Dict[str, Any], metrics: Dict[str, Any]
 ) -> List[str]:
-    """Report sets with unknown metric ids or more counters than one pass holds."""
+    """Report sets with unknown metric ids or too many counters for one pass."""
     library = loader.MetricLibrary(arch, metrics, {}, sets)
     errors = []
     for set_option, entry in sets.items():
@@ -385,10 +371,28 @@ def _one_pass_errors(
     return [
         f"[{gpu_arch}] set {set_option}: block {block} needs {len(block_counters)} "
         f"counters but one pass holds {limits[block]}"
-        for block, block_counters in counters_over_block_limits(
+        for block, block_counters in _counters_over_block_limits(
             counters, limits
         ).items()
     ]
+
+
+def _counters_over_block_limits(
+    counters: Set[str], perfmon_config: Dict[str, Any]
+) -> Dict[str, Set[str]]:
+    """Return the counters of each block with more counters than one pass allows.
+
+    Skip *_ACCUM counters, since the profiler collects each one in its own pass.
+    """
+    block_counters: Dict[str, Set[str]] = defaultdict(set)
+    for counter in counters:
+        if not counter.endswith("_ACCUM"):
+            block_counters[counter_to_block(counter)].add(counter)
+    return {
+        block: counters_of_block
+        for block, counters_of_block in sorted(block_counters.items())
+        if block in perfmon_config and len(counters_of_block) > perfmon_config[block]
+    }
 
 
 def _member_archs(arch: str) -> List[str]:
