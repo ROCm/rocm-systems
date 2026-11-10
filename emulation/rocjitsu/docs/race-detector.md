@@ -614,12 +614,13 @@ this source tree. The original
   racing with the tensor or async load. These reports are false positives, not
   missing coverage.
 
-- **NULL tensor descriptors**: like the emulator, the detector counts a NULL
-  descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
-  hardware behavior for this encoding is not established. If hardware does not
-  count it, a nonzero `s_wait_tensorcnt` that the detector accepts, or a
-  `tensorcnt` the detector considers full, can leave an earlier transfer
-  pending, so a real race would go unreported.
+- **NULL tensor descriptors and NOP tiles**: like the emulator, the detector
+  counts a NULL descriptor (`count = 0`) and a NOP tile (`tile_dim0 = 0`) on
+  `tensorcnt`. That is an emulator assumption: hardware behavior for these
+  encodings is not established. If hardware does not count them, a nonzero
+  `s_wait_tensorcnt` that the detector accepts, or a `tensorcnt` the detector
+  considers full, can leave an earlier transfer pending, so a real race would
+  go unreported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

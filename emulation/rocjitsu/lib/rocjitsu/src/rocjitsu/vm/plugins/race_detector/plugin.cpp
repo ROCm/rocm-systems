@@ -817,11 +817,13 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }
 
-  // An instruction that moves no data, such as a NOP tile, a gather with no
-  // valid indices or a store wholly outside the tensor, still occupies a
-  // TENSORCNT slot, so its event is registered even without LDS ranges. A NULL
-  // descriptor is registered the same way, matching the emulator's assumption
-  // that it counts on TENSORCNT.
+  // TENSORcnt counts each tensor instruction (CDNA5 ISA 10.11.1), so one that
+  // moves no data, such as a gather with no valid indices or a store wholly
+  // outside the tensor, still occupies a TENSORCNT slot, and its event is
+  // registered even without LDS ranges. A NULL descriptor and a NOP tile (zero
+  // tile_dim0) are registered the same way, matching the emulator's assumption
+  // that they count on TENSORCNT; hardware behavior for them is not
+  // established.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
   rs->registerLdsRangeEvent(
