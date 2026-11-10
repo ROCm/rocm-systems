@@ -7443,6 +7443,25 @@ TEST_F(DevrCommCreateInternalJitTest, UnservedDeviceCodeVersion_ReturnsErrorBefo
   EXPECT_EQ(memcmp(&outDevComm, &untouched, sizeof(untouched)), 0);
 }
 
+// GIN picks the device-side ABI of its backend from the device code's version,
+// so that version, not the caller's compile-time one, has to reach it.
+TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;  // already connected: go straight to setup
+  std::vector<uint32_t> seen;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [&](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t deviceCodeVersion) {
+                     seen.push_back(deviceCodeVersion);
+                     return ncclInternalError;  // stop here; nothing below depends on the version
+                   });
+
+  EXPECT_EQ(CreateFor(NCCL_VERSION_CODE), ncclInternalError);
+  EXPECT_EQ(CreateFor(kJitFieldVersion), ncclInternalError);
+
+  EXPECT_EQ(seen, (std::vector<uint32_t>{static_cast<uint32_t>(NCCL_VERSION_CODE), kJitFieldVersion}));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
