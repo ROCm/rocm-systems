@@ -45,7 +45,10 @@ compute.mfma_flops_f6f4:
   name: MFMA FLOPs (F6F4)
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
-  description: ''
+  description: >-
+    The total number of 4-bit and 6-bit floating-point operations executed on MFMA
+    units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
+    and later only.
   peak: $max_sclk * $cu_per_gpu * 16834 / 1000
   peak_empirical: $MFMAF6F4Flops_empirical_peak
 compute.mfma_flops_f8:

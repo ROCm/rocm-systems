@@ -59,9 +59,8 @@ l2.input_buffer_stall_rate:
   formula: 100 * SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The percentage of active L2 cycles where the input buffer output was stalled,
-    meaning L2 cannot accept new requests from L1. A high rate (>= 10%) indicates
-    L2 is backpressuring L1 (L1-to-L2 interface bottleneck).
+    Percentage of L2 busy time the input buffer was stalled. A rate >= 10% indicates L2
+    is backpressuring L1 (GL1/GL2 potential bottleneck).
 l2.input_buffer_stalled_on_l2:
   name: L2 Input Buffer Stalled on L2
   formula: SUM(TCC_IB_STALL_sum) / SUM($denom)
@@ -72,8 +71,9 @@ l2.lat_fifo_full_rate:
   formula: 100 * SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The percentage of active L2 cycles where the latency FIFO was full, indicating
-    too many requests are pending in the L2 cache.
+    Percentage of L2 busy time the latency FIFO was full. A rate >= 10% indicates L2
+    internal resource exhaustion bottleneck. This is one of the TCC_TAG_STALL breakdown
+    components (LFIFO full, 2-deep).
 l2.rd_bw:
   name: L2 Read Bandwidth
   formula: 32 * SUM(TCC_READ_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -103,5 +103,5 @@ l2.wr_data_fifo_full_rate:
   formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    The percentage of active L2 cycles where the source data FIFO was full, indicating
-    the write data path is saturated.
+    Percentage of L2 busy time the source data FIFO was full. A rate >= 10% indicates L2
+    write data path bottleneck.

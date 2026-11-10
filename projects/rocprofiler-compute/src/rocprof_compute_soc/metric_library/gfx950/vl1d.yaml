@@ -3,8 +3,8 @@ vl1d.access_lat_norm:
   formula: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The total number of cycles vL1D cache line requests spent in the vL1D cache pipeline,
-    summed over all requests, per normalization unit.
+    Calculated as the average number of cycles that a vL1D cache line request spent in
+    the vL1D cache pipeline.
 vl1d.ai:
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
 vl1d.cache_full_stall:
@@ -70,17 +70,17 @@ vl1d.l2_rd_lat_norm:
   formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The total number of cycles the vL1D cache took to issue and receive read requests
-    from the L2 Cache, summed over all requests (including atomics with return values),
-    per normalization unit.
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive read requests from the L2 Cache. This number also includes requests for
+    atomics with return values.
 vl1d.l2_wr_lat_norm:
   name: vL1D-L2 Write Latency Cycles
   formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The total number of cycles the vL1D cache took to issue and receive acknowledgement
-    of write requests to the L2 Cache, summed over all requests (including atomics
-    without return values), per normalization unit.
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive acknowledgement of a write request to the L2 Cache. This number also
+    includes requests for atomics without return values.
 vl1d.lat_fifo_stall:
   name: vL1D Latency FIFO Stall
   formula: SUM(TCP_UTCL1_LFIFO_FULL_sum) / SUM($denom)
@@ -154,22 +154,38 @@ vl1d.tag_ram_0_req:
   name: vL1D Tag RAM 0 Requests
   formula: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 0 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
 vl1d.tag_ram_1_req:
   name: vL1D Tag RAM 1 Requests
   formula: SUM(TCP_TAGRAM1_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 1 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
 vl1d.tag_ram_2_req:
   name: vL1D Tag RAM 2 Requests
   formula: SUM(TCP_TAGRAM2_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 2 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
 vl1d.tag_ram_3_req:
   name: vL1D Tag RAM 3 Requests
   formula: SUM(TCP_TAGRAM3_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: >-
+    The total number of vL1D cache requests (cache line lookups) that mapped to Tag RAM
+    bank 3 during the vL1D tag lookup process, per normalization unit. The vL1D cache
+    uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+    affects lookup efficiency.
 vl1d.thrashing_stall:
   name: vL1D Thrashing Stall
   formula: SUM(TCP_UTCL1_THRASHING_STALL_sum) / SUM($denom)

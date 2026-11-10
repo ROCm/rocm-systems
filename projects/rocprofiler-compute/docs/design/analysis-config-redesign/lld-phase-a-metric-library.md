@@ -683,6 +683,16 @@ A one-time local script converts each arch. It is not committed; each PR says ho
 files were generated and lists the hand edits made afterwards (for example, the
 approved description changes).
 
+A metric's description is the text of one panel that shows the metric, word for word,
+with only these edits:
+
+- plain ASCII (`->` for an arrow, no trademark mark);
+- no sentence about how a panel shows the metric ("also presented as a percent of the
+  peak");
+- no panel 3000 `Equation:` sentence, since the `formula` field holds the equation.
+
+Better wording goes to the metric owners in a separate change.
+
 1. Read each current panel config YAML for a given architecture.
 2. For each metric: generate the Layer 2 format with string `id`, canonical `name`,
    formula, `unit` and `description`.
