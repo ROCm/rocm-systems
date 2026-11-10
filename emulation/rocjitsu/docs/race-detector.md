@@ -13,7 +13,8 @@ instructions.
 The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
 gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
 (CDNA5) is limited and under active development; end-to-end tests currently
-cover its tensor DMA races (see Tensor DMA races below).
+cover its tensor DMA races (see Tensor DMA races below) and its counter-capacity
+backpressure.
 
 ## Quick start
 
@@ -310,11 +311,15 @@ obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
 carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
 unordered; a nonzero wait cannot prove a result ready.
 
-Functional counter acquisition and both runtime checkers use the selected memory
-domains. FLAT capacity constraints are applied after addresses are resolved.
-Before reading the address operands, neither domain is guaranteed to need a
-counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
-prove an older LDS result complete.
+Functional counter acquisition and the core memory-wait checker use the selected
+memory domains. So does the race detector on targets before gfx1250: it applies
+FLAT capacity constraints after addresses are resolved, because before the
+address operands are read, neither domain is guaranteed to need a counter slot.
+On those targets, a full LDS counter followed by a global-only FLAT therefore
+cannot prove an older LDS result complete. On gfx1250, every FLAT instruction
+increments both DScnt and LOADcnt or STOREcnt when it issues (CDNA5 ISA
+5.7.1.3), and the race detector counts it on both; see the gfx1250 capacity
+model below.
 
 A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
 observations still attach both obligations to the whole race-plugin event, so a
@@ -351,7 +356,8 @@ is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
 through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies one
-token of issue-time LGKMCNT pressure, but message occupancy and returning
+token of issue-time pressure, on LGKMCNT before GFX12 and on KMcnt on gfx1250,
+but message occupancy and returning
 message results are not retained as pending events. Timestamp-query operations
 such as `s_memtime` and `s_memrealtime` are not accounted for. These operations
 therefore remain unsupported rather than being treated as complete message or
@@ -386,9 +392,31 @@ s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
 Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
 CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
 GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
-domain and therefore do not create VMCNT pressure. Generic FLAT contributes to
-both modeled domains, so both capacity constraints are applied before operand
-reads.
+domain and therefore do not create VMCNT pressure. Generic FLAT applies the
+capacity constraints of the domains its addresses resolve to, once they are
+resolved.
+
+On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
+ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (CDNA5
+ISA 5.7.1, table "Counter Size Description"), so each holds 63 tokens, or 31
+for KMcnt. These are the capacities the core memory-wait checker uses. Each
+counter constrains only its own events: STOREcnt pressure does not complete a
+pending load, and a scalar load does not complete a pending DS operation.
+Async loads and async stores share ASYNCcnt but complete in order only within
+their own type (CDNA5 ISA 10.8), so a full ASYNCcnt completes the oldest async
+load only when async loads alone fill it, and likewise for stores. Scalar loads
+complete out of order (CDNA5 ISA 5.7.1.1), so a full KMcnt never completes one.
+A memory instruction issued with EXEC zero still applies backpressure, since it
+counts unless every counter it could add to is zero (CDNA5 ISA 3.2.2.1). Tensor
+DMA instructions apply TENSORcnt backpressure when they issue, before their LDS
+bytes are checked, so the oldest transfer a full TENSORcnt completes does not
+conflict with the new one. Every generic FLAT applies backpressure to both
+DScnt and LOADcnt or STOREcnt when it issues, whichever memory its addresses
+resolve to, because it increments both (CDNA5 ISA 5.7.1.3). The slot it takes
+in a domain its addresses did not use is recorded as an event with no registers
+or LDS bytes, in order with that domain's other operations, so later capacity
+checks and partial waits count it as hardware does. The FLAT's own result still
+depends only on the domains its addresses used.
 
 The same completion-order distinction is used for nonzero partial waits; a
 zero wait still completes every event on the selected counter. The detector
@@ -512,9 +540,9 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
-  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
-  them with the corpus HIP toolchain and runs each case under the emulator with
-  the `race` plugin enabled.
+  gfx1250 program covers tensor DMA and counter capacity. The
+  `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain and
+  runs each case under the emulator with the `race` plugin enabled.
 
 ```bash
 # Core detection tests
@@ -589,17 +617,9 @@ this source tree. The original
 - **NULL tensor descriptors**: like the emulator, the detector counts a NULL
   descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
   hardware behavior for this encoding is not established. If hardware does not
-  count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
-  earlier transfer pending, so a real race would go unreported.
-
-- **No counter-capacity backpressure on gfx1250**: hardware stalls issue when a
-  wait counter is full, which proves the oldest pending entry complete without
-  an explicit wait. The detector models this only on CDNA1 through CDNA4 and
-  GFX11. On gfx1250, code that relies on a full counter instead of a wait
-  gets false positives: a wave that issues 64 tensor transfers has completed
-  its first, because the 6-bit `tensorcnt` holds at most 63, but the detector
-  still reports a read of the first transfer's LDS bytes as a race. Explicit
-  `s_wait_*` waits are handled correctly.
+  count it, a nonzero `s_wait_tensorcnt` that the detector accepts, or a
+  `tensorcnt` the detector considers full, can leave an earlier transfer
+  pending, so a real race would go unreported.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

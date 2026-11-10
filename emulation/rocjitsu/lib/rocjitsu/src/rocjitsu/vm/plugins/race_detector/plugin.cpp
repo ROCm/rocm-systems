@@ -100,9 +100,44 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
   case ROCJITSU_CODE_ARCH_CDNA4:
   case ROCJITSU_CODE_ARCH_RDNA3:
   case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     return true;
   default:
     return false;
+  }
+}
+
+/// gfx1250 (CDNA5) issues an EXEC-zero memory instruction and counts it, unless
+/// every counter it could add to is zero (CDNA5 ISA 3.2.2.1), in which case no
+/// older operation remains to complete. Either way, its admission is sound.
+bool exec_zero_memory_issue_counts(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
+
+/// On gfx1250 (CDNA5) "Every Flat instruction increments both DScnt and either
+/// LOADcnt or STOREcnt when the instruction issues" (CDNA5 ISA 5.7.1.3),
+/// whichever memory its addresses resolve to.
+bool flat_counts_on_both_domains(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
+
+/// Record each counter slot that a gfx1250 FLAT instruction takes in a memory
+/// domain its addresses did not use, as an event with no registers and no LDS
+/// bytes. The slot completes in order with that domain's other operations: the
+/// LDS portion of a FLAT stays in order with LDS instructions, and the VMEM
+/// portion with other VMEM operations (CDNA5 ISA 5.7.1.3). Recording it lets
+/// later capacity checks and partial waits count it, as hardware does.
+/// `routed` holds the obligations of the domains the addresses used; its
+/// event carries the instruction's data dependencies.
+void register_unused_flat_domains(WaveRaceState &race, const InstructionSnapshot &instruction,
+                                  const amdgpu::MemoryIssueInfo &decoded,
+                                  const amdgpu::MemoryIssueInfo &routed, bool is_load) {
+  for (const auto obligation : decoded.counter_obligations()) {
+    const bool used = std::ranges::any_of(routed.counter_obligations(), [&](const auto routed_one) {
+      return routed_one.wait_counter_type() == obligation.wait_counter_type();
+    });
+    if (used)
+      continue;
+    const std::array slot{obligation};
+    race.registerEvent(
+        instruction, is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL,
+        /*registers=*/{}, /*execMask=*/0, /*byteMask=*/0xF, slot, obligation.completion_class());
   }
 }
 
@@ -463,11 +498,17 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   const auto &issue = routed ? *routed : *decoded;
   const auto obligations = issue.counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()) &&
-      rs->prepareForMemoryIssue(issue).failed()) {
+  // Before gfx1250, FLAT is admitted here, on the domains its addresses used.
+  // On gfx1250 it counts on both domains and was admitted at issue.
+  const bool flatOnBothDomains = routed && flat_counts_on_both_domains(wf.cu().arch());
+  if (routed && !flatOnBothDomains && access.request_lane_mask != 0 &&
+      supports_counter_capacity(wf.cu().arch()) && rs->prepareForMemoryIssue(issue).failed()) {
     report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
     return;
   }
+  if (flatOnBothDomains)
+    register_unused_flat_domains(*rs, instruction, *decoded, *routed,
+                                 inst.data_as<amdgpu::VectorMemState>()->is_load);
 
   const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
   const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
@@ -745,6 +786,15 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // against a pending load's destination.
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
+  // Tensor instructions carry no memory issue metadata, so their TENSORcnt
+  // backpressure is applied here, once per counted transfer, before the
+  // transfer's LDS bytes are checked. That way the issue can complete the
+  // oldest transfer first, as the stall at a full TENSORcnt does.
+  if (supports_counter_capacity(wf.cu().arch()) &&
+      rs->prepareForCounterIncrement(amdgpu::WaitCounterType::TENSORCNT).failed()) {
+    report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+    return;
+  }
   // An observed range can end mid-element: an element that straddles the end
   // of the wave's LDS allocation transfers only its leading bytes. Validate the
   // ranges at byte granularity, as registerLdsRangeEvent registers them;
@@ -819,24 +869,33 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
-    // FLAT's address-dependent admission is applied after routing. Before its
-    // operands are read, neither memory domain is guaranteed to be used.
-    if (inst.is_memory_op() && !inst.mnemonic().starts_with("flat_")) {
+    // Before gfx1250, FLAT's address-dependent admission is applied after
+    // routing: before its operands are read, neither memory domain is
+    // guaranteed to be used. On gfx1250 every FLAT counts on both domains, so
+    // it is admitted here like any other memory instruction.
+    const bool flat = inst.mnemonic().starts_with("flat_");
+    if (inst.is_memory_op() && (!flat || flat_counts_on_both_domains(wf.cu().arch()))) {
       const auto *info = inst.amdgpu_memory_issue_info();
       assert(info && "memory instruction reached the race detector without issue metadata");
-      if (info && (!info->exec_masked || wf.exec() != 0) &&
+      if (info &&
+          (!info->exec_masked || wf.exec() != 0 || exec_zero_memory_issue_counts(wf.cu().arch())) &&
           s->race_state->prepareForMemoryIssue(*info).failed()) {
         report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
         return;
       }
     }
 
-    // Messages share LGKMCNT on the capacity-modeled targets but are not memory
-    // instructions, so they intentionally remain outside memory issue metadata.
-    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg") &&
-        s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT).failed()) {
-      report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
-      return;
+    // Messages are not memory instructions, so they remain outside memory
+    // issue metadata. They count on LGKMCNT before GFX12 and on KMcnt on
+    // gfx1250 (CDNA5 ISA 5.7.1.5).
+    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg")) {
+      const auto counter = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5
+                               ? amdgpu::WaitCounterType::KMCNT
+                               : amdgpu::WaitCounterType::LGKMCNT;
+      if (s->race_state->prepareForCounterIncrement(counter).failed()) {
+        report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
+        return;
+      }
     }
   }
   s->lds_operand_read.reset();
