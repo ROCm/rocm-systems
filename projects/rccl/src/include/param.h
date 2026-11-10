@@ -40,7 +40,7 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
     static int64_t cache = uninitialized; \
     static int8_t noCache = /*uninitialized*/ -1; \
     if (__builtin_expect(__atomic_load_n(&cache, __ATOMIC_RELAXED) == uninitialized, false)) { \
-      ncclLoadParam("RCCL_" env, deftVal, uninitialized, &cache, &noCache); \
+      return ncclLoadParam("RCCL_" env, deftVal, uninitialized, &cache, &noCache); \
     } \
     return cache; \
   }
@@ -56,8 +56,8 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, i
     static int8_t noCache = /*uninitialized*/ -1; \
     if (__builtin_expect(__atomic_load_n(&cache, __ATOMIC_RELAXED) == uninitialized, false)) { \
       const char* _s = ncclGetEnv("RCCL_" env); \
-      if (_s && strlen(_s) > 0) ncclLoadParam("RCCL_" env, deftVal, uninitialized, &cache, &noCache); \
-      else ncclLoadParam("NCCL_" env, deftVal, uninitialized, &cache, &noCache); \
+      if (_s && strlen(_s) > 0) return ncclLoadParam("RCCL_" env, deftVal, uninitialized, &cache, &noCache); \
+      return ncclLoadParam("NCCL_" env, deftVal, uninitialized, &cache, &noCache); \
     } \
     return cache; \
   }
