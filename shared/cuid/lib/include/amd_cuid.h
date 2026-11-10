@@ -188,10 +188,12 @@ typedef enum {
 static inline int amdcuid_device_type_is_valid(amdcuid_device_type_t type) {
   /* Through unsigned so that a value outside the enumeration (a negative one,
      which the underlying type may be able to hold) fails rather than comparing
-     below AMDCUID_DEVICE_TYPE_RACK. */
-  const unsigned value = (unsigned)type;
-  return (value <= (unsigned)AMDCUID_DEVICE_TYPE_RACK) ||
-         (value == (unsigned)AMDCUID_DEVICE_TYPE_OTHER);
+     below AMDCUID_DEVICE_TYPE_RACK. Without a cast, which C++ consumers
+     building with -Wold-style-cast would be warned about. */
+  const unsigned value = type;
+  const unsigned rack = AMDCUID_DEVICE_TYPE_RACK;
+  const unsigned other = AMDCUID_DEVICE_TYPE_OTHER;
+  return value <= rack || value == other;
 }
 
 /**

@@ -209,6 +209,57 @@ if(AMDCUID_BUILD_LIFECYCLE_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
+# The public header is compiled under its consumers' warning flags. GCC does
+# not report an old-style cast in an extern "C" inline function; Clang does,
+# so it checks the header too where it is installed.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(_strict_flags
+        -Wall
+        -Wextra
+        -Wconversion
+        -Wsign-conversion
+        -Werror
+    )
+    add_library(cuid_header_strict OBJECT packaging/header_strict.cc packaging/header_strict_c.c)
+    target_include_directories(cuid_header_strict PRIVATE ${CMAKE_SOURCE_DIR}/lib/include)
+    target_compile_options(cuid_header_strict PRIVATE ${_strict_flags} $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>)
+    find_program(AMDCUID_CLANGXX NAMES clang++)
+    if(AMDCUID_CLANGXX)
+        add_test(
+            NAME cuid_header_clang_strict
+            COMMAND
+                ${AMDCUID_CLANGXX} -fsyntax-only ${_strict_flags} -Wold-style-cast -I${CMAKE_SOURCE_DIR}/lib/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/packaging/header_strict.cc
+        )
+    endif()
+endif()
+
+# The archive is linked into consumers' shared libraries, and must add nothing
+# to what they export.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_NM)
+    add_library(cuid_exports_probe SHARED packaging/exports_probe.cc)
+    target_link_libraries(cuid_exports_probe PRIVATE amdcuid_static)
+    set_target_properties(cuid_exports_probe PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    add_test(
+        NAME cuid_archive_exports_nothing
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DLIBRARY=$<TARGET_FILE:cuid_exports_probe> -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/packaging/check_exports.cmake
+    )
+endif()
+
+# The installed package must serve a consumer written in C alone.
+if(AMDCUID_INSTALL AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(AMDCUID_PKG_CONFIG NAMES pkg-config pkgconf)
+    add_test(
+        NAME cuid_c_consumer
+        COMMAND
+            ${CMAKE_COMMAND} -DBUILD=${PROJECT_BINARY_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/c-consumer
+            -DCC=${CMAKE_C_COMPILER} "-DCFLAGS=${CMAKE_C_FLAGS} ${CMAKE_EXE_LINKER_FLAGS}"
+            -DPKG_CONFIG=${AMDCUID_PKG_CONFIG} -P ${CMAKE_CURRENT_SOURCE_DIR}/packaging/check_c_consumer.cmake
+    )
+endif()
+
 # Register the privilege suites and the CPU/partition/VF regression cases.
 add_test(NAME cuid_unprivileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstUnprivileged.*)
 add_test(NAME cuid_privileged_tests COMMAND ${AMDCUID_TST_EXECUTABLE} --gtest_filter=cuidtstPrivileged.*)

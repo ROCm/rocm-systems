@@ -57,7 +57,7 @@ set(CUID_HEADERS
 
 # An OBJECT library first, and the archive out of its objects, so a build that
 # has this project as a subdirectory (AMD SMI) can absorb the objects into its
-# own binary instead of linking the archive, as is done with rocm-sha256 below.
+# own binary instead of linking the archive, as is done with SHA-256 below.
 add_library(amdcuid_objs OBJECT ${CUID_SOURCES} ${CUID_HEADERS})
 
 add_library(amdcuid_static STATIC $<TARGET_OBJECTS:amdcuid_objs>)
@@ -121,14 +121,27 @@ if(NOT TARGET rocm-sha256)
     add_subdirectory(${CUID_ROCM_SHA256_DIR} ${CMAKE_CURRENT_BINARY_DIR}/rocm-sha256)
 endif()
 
-# Absorb the shared SHA-256 objects rather than linking the target. amdcuid_static
-# is in an export set, and a link dependency travels with it into that set even
-# when PRIVATE, so exporting a link to rocm-sha256, a build-tree helper that is
-# never installed, names a target the consumer does not have.
+# The shared SHA-256 is compiled again here rather than linked: a private
+# copy, hidden like amdcuid's own objects. rocm-sha256-objects keeps default
+# visibility for its other consumers, so absorbing its objects made every
+# shared library that links this archive export the rocm::sha2 names, which
+# rocprofiler-sdk defines as well. Linking the rocm-sha256 target instead
+# would also put a build-tree helper into this package's export set.
 # The include dir is PUBLIC and BUILD_INTERFACE so in-tree targets that link
 # amdcuid_static and include rocm/sha2/sha256.h directly can find it. Those
 # headers are never installed and sha256.h is not part of the installed API.
-target_sources(amdcuid_static PRIVATE $<BUILD_INTERFACE:$<TARGET_OBJECTS:rocm-sha256-objects>>)
+add_library(amdcuid_sha256_objs OBJECT ${CUID_ROCM_SHA256_DIR}/src/sha256.cc)
+target_include_directories(amdcuid_sha256_objs PRIVATE ${CUID_ROCM_SHA256_DIR}/include)
+target_compile_features(amdcuid_sha256_objs PRIVATE cxx_std_17)
+set_target_properties(
+    amdcuid_sha256_objs
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+)
+target_sources(amdcuid_static PRIVATE $<BUILD_INTERFACE:$<TARGET_OBJECTS:amdcuid_sha256_objs>>)
 foreach(_amdcuid_target IN ITEMS amdcuid_objs amdcuid_static)
     target_include_directories(${_amdcuid_target} PUBLIC $<BUILD_INTERFACE:${CUID_ROCM_SHA256_DIR}/include>)
 endforeach()
@@ -136,7 +149,7 @@ endforeach()
 # A subdirectory consumer must absorb the SHA-256 objects along with amdcuid's.
 set(AMDCUID_IN_TREE_OBJECTS
     $<TARGET_OBJECTS:amdcuid_objs>
-    $<TARGET_OBJECTS:rocm-sha256-objects>
+    $<TARGET_OBJECTS:amdcuid_sha256_objs>
     CACHE INTERNAL
     "Objects an in-tree consumer absorbs to carry libamdcuid without linking it"
 )
@@ -160,6 +173,17 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(amdcuid_static PUBLIC Threads::Threads)
 
+# The archive is C++ behind a C API. CMake adds the C++ runtime to a link only
+# when the consumer enables CXX itself, so a C-only consumer is given the
+# libraries the C++ compiler links beyond what the C compiler does.
+set(AMDCUID_CXX_RUNTIME ${CMAKE_CXX_IMPLICIT_LINK_LIBRARIES})
+if(CMAKE_C_IMPLICIT_LINK_LIBRARIES)
+    list(REMOVE_ITEM AMDCUID_CXX_RUNTIME ${CMAKE_C_IMPLICIT_LINK_LIBRARIES})
+endif()
+foreach(_amdcuid_lib IN LISTS AMDCUID_CXX_RUNTIME)
+    target_link_libraries(amdcuid_static INTERFACE "$<$<NOT:$<LINK_LANGUAGE:CXX>>:${_amdcuid_lib}>")
+endforeach()
+
 if(AMDCUID_INSTALL)
     # Static library, as part of an export set so that consumers get an imported
     # target with its usage requirements attached rather than a bare path they have
@@ -169,7 +193,6 @@ if(AMDCUID_INSTALL)
         EXPORT amdcuidTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${LIB_COMPONENT}
     )
-    install(TARGETS rocm-sha256-objects EXPORT amdcuidTargets COMPONENT ${LIB_COMPONENT})
 
     # Install public headers
     set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
@@ -214,6 +237,25 @@ if(AMDCUID_INSTALL)
     install(
         FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/amdcuid-config-version.cmake
         DESTINATION ${AMDCUID_INSTALL_CMAKEDIR}
+        COMPONENT ${LIB_COMPONENT}
+    )
+
+    # pkg-config, for consumers that do not use CMake. There is no shared
+    # library to carry the C++ runtime and the thread library, so Libs names
+    # them. The prefix is found from the file's own location.
+    set(AMDCUID_PC_LIBS "")
+    foreach(_amdcuid_lib IN LISTS AMDCUID_CXX_RUNTIME)
+        string(APPEND AMDCUID_PC_LIBS " -l${_amdcuid_lib}")
+    endforeach()
+    if(CMAKE_THREAD_LIBS_INIT)
+        string(APPEND AMDCUID_PC_LIBS " ${CMAKE_THREAD_LIBS_INIT}")
+    endif()
+    file(RELATIVE_PATH AMDCUID_PC_PREFIX ${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig ${CMAKE_INSTALL_PREFIX})
+    string(REGEX REPLACE "/$" "" AMDCUID_PC_PREFIX "${AMDCUID_PC_PREFIX}")
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/amdcuid.pc.in ${CMAKE_CURRENT_BINARY_DIR}/amdcuid.pc @ONLY)
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/amdcuid.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
         COMPONENT ${LIB_COMPONENT}
     )
 
