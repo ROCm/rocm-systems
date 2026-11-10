@@ -481,9 +481,8 @@ IDs. Each thread created by the application starts its own tree with a ``start_t
 and GPU kernels and memory copies are nested under the API call that launched them. With
 ``ROCPROFSYS_COLLAPSE_THREADS=ON`` all threads share one tree and the labels have no ``N``.
 The MPI rank is part of the file name, not of the label. ``ROCPROFSYS_TIMING_UNITS`` takes
-the same names as for the other Timemory components, and the report prints the unit with
-the name of its ``std::chrono`` literal: ``ns``, ``us``, ``ms``, ``cs``, ``ds``, ``s`` (the
-default), ``min`` or ``h``.
+the same names as for the other Timemory components, and the report prints the unit as
+``nsec``, ``usec``, ``msec``, ``csec``, ``dsec``, ``sec`` (the default), ``min`` or ``hr``.
 
 For the other Timemory components, the ``N`` field is the thread ID. If MPI support is enabled,
 this becomes ``|M|N>>>`` where ``M`` is the rank.
@@ -499,25 +498,25 @@ relevant per-thread or per-process, such as the ``thread_cpu_clock`` clock compo
    |--------------------------------------------------------------------------------------------------------------------------------------------------------------|
    |                 LABEL                 | COUNT  | DEPTH  |   METRIC   | UNITS  |    SUM    |   MEAN    |    MIN    |    MAX    |   VAR    | STDDEV   | % SELF |
    |---------------------------------------|--------|--------|------------|--------|-----------|-----------|-----------|-----------|----------|----------|--------|
-   | |0>>> openmp-cg.inst                  |      1 |      0 | wall_clock | s      | 14.635682 | 14.635682 | 14.635682 | 14.635682 | 0.000000 | 0.000000 |   12.7 |
-   | |0>>> |_omp_parallel                  |      1 |      1 | wall_clock | s      | 12.775091 | 12.775091 | 12.775091 | 12.775091 | 0.000000 | 0.000000 |    0.0 |
-   | |0>>>   |_pthread_create              |      1 |      2 | wall_clock | s      |  0.007865 |  0.007865 |  0.007865 |  0.007865 | 0.000000 | 0.000000 |  100.0 |
-   | |0>>>   |_omp_implicit_task           |      1 |      2 | wall_clock | s      | 12.767035 | 12.767035 | 12.767035 | 12.767035 | 0.000000 | 0.000000 |    0.0 |
-   | |0>>>     |_main.omp_outlined_debug__ |      1 |      3 | wall_clock | s      | 12.766973 | 12.766973 | 12.766973 | 12.766973 | 0.000000 | 0.000000 |    0.5 |
-   | |0>>>       |_omp_work                |   6891 |      4 | wall_clock | s      | 12.580184 |  0.001826 |  0.000004 |  0.010112 | 0.000013 | 0.003654 |  100.0 |
-   | |0>>>         |_omp_dispatch          |   5410 |      5 | wall_clock | s      |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
-   | |0>>>       |_omp_sync_region         |   6939 |      4 | wall_clock | s      |  0.125058 |  0.000018 |  0.000012 |  0.000607 | 0.000000 | 0.000019 |   49.7 |
-   | |0>>>         |_omp_sync_region_wait  |   6939 |      5 | wall_clock | s      |  0.062949 |  0.000009 |  0.000004 |  0.000596 | 0.000000 | 0.000019 |  100.0 |
-   | |0>>>       |_omp_masked              |    151 |      4 | wall_clock | s      |  0.000865 |  0.000006 |  0.000003 |  0.000012 | 0.000000 | 0.000002 |  100.0 |
-   | |0>>>     |_omp_sync_region           |      1 |      3 | wall_clock | s      |  0.000013 |  0.000013 |  0.000013 |  0.000013 | 0.000000 | 0.000000 |   63.1 |
-   | |0>>>       |_omp_sync_region_wait    |      1 |      4 | wall_clock | s      |  0.000005 |  0.000005 |  0.000005 |  0.000005 | 0.000000 | 0.000000 |  100.0 |
-   | |1>>> omp_thread_begin                |      1 |      0 | wall_clock | s      |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
-   | |1>>> start_thread                    |      1 |      0 | wall_clock | s      | 12.767081 | 12.767081 | 12.767081 | 12.767081 | 0.000000 | 0.000000 |    0.0 |
-   | |1>>> |_main.omp_outlined_debug__     |      1 |      1 | wall_clock | s      | 12.766964 | 12.766964 | 12.766964 | 12.766964 | 0.000000 | 0.000000 |    0.5 |
-   | |1>>>   |_omp_work                    |   6891 |      2 | wall_clock | s      | 12.603233 |  0.001829 |  0.000004 |  0.010106 | 0.000013 | 0.003661 |  100.0 |
-   | |1>>>     |_omp_dispatch              |   5410 |      3 | wall_clock | s      |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
-   | |1>>>   |_omp_sync_region             |   6939 |      2 | wall_clock | s      |  0.105485 |  0.000015 |  0.000012 |  0.000397 | 0.000000 | 0.000011 |   63.1 |
-   | |1>>>     |_omp_sync_region_wait      |   6939 |      3 | wall_clock | s      |  0.038975 |  0.000006 |  0.000004 |  0.000384 | 0.000000 | 0.000011 |  100.0 |
+   | |0>>> openmp-cg.inst                  |      1 |      0 | wall_clock | sec    | 14.635682 | 14.635682 | 14.635682 | 14.635682 | 0.000000 | 0.000000 |   12.7 |
+   | |0>>> |_omp_parallel                  |      1 |      1 | wall_clock | sec    | 12.775091 | 12.775091 | 12.775091 | 12.775091 | 0.000000 | 0.000000 |    0.0 |
+   | |0>>>   |_pthread_create              |      1 |      2 | wall_clock | sec    |  0.007865 |  0.007865 |  0.007865 |  0.007865 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>   |_omp_implicit_task           |      1 |      2 | wall_clock | sec    | 12.767035 | 12.767035 | 12.767035 | 12.767035 | 0.000000 | 0.000000 |    0.0 |
+   | |0>>>     |_main.omp_outlined_debug__ |      1 |      3 | wall_clock | sec    | 12.766973 | 12.766973 | 12.766973 | 12.766973 | 0.000000 | 0.000000 |    0.5 |
+   | |0>>>       |_omp_work                |   6891 |      4 | wall_clock | sec    | 12.580184 |  0.001826 |  0.000004 |  0.010112 | 0.000013 | 0.003654 |  100.0 |
+   | |0>>>         |_omp_dispatch          |   5410 |      5 | wall_clock | sec    |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |0>>>       |_omp_sync_region         |   6939 |      4 | wall_clock | sec    |  0.125058 |  0.000018 |  0.000012 |  0.000607 | 0.000000 | 0.000019 |   49.7 |
+   | |0>>>         |_omp_sync_region_wait  |   6939 |      5 | wall_clock | sec    |  0.062949 |  0.000009 |  0.000004 |  0.000596 | 0.000000 | 0.000019 |  100.0 |
+   | |0>>>       |_omp_masked              |    151 |      4 | wall_clock | sec    |  0.000865 |  0.000006 |  0.000003 |  0.000012 | 0.000000 | 0.000002 |  100.0 |
+   | |0>>>     |_omp_sync_region           |      1 |      3 | wall_clock | sec    |  0.000013 |  0.000013 |  0.000013 |  0.000013 | 0.000000 | 0.000000 |   63.1 |
+   | |0>>>       |_omp_sync_region_wait    |      1 |      4 | wall_clock | sec    |  0.000005 |  0.000005 |  0.000005 |  0.000005 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>> omp_thread_begin                |      1 |      0 | wall_clock | sec    |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>> start_thread                    |      1 |      0 | wall_clock | sec    | 12.767081 | 12.767081 | 12.767081 | 12.767081 | 0.000000 | 0.000000 |    0.0 |
+   | |1>>> |_main.omp_outlined_debug__     |      1 |      1 | wall_clock | sec    | 12.766964 | 12.766964 | 12.766964 | 12.766964 | 0.000000 | 0.000000 |    0.5 |
+   | |1>>>   |_omp_work                    |   6891 |      2 | wall_clock | sec    | 12.603233 |  0.001829 |  0.000004 |  0.010106 | 0.000013 | 0.003661 |  100.0 |
+   | |1>>>     |_omp_dispatch              |   5410 |      3 | wall_clock | sec    |  0.000000 |  0.000000 |  0.000000 |  0.000000 | 0.000000 | 0.000000 |  100.0 |
+   | |1>>>   |_omp_sync_region             |   6939 |      2 | wall_clock | sec    |  0.105485 |  0.000015 |  0.000012 |  0.000397 | 0.000000 | 0.000011 |   63.1 |
+   | |1>>>     |_omp_sync_region_wait      |   6939 |      3 | wall_clock | sec    |  0.038975 |  0.000006 |  0.000004 |  0.000384 | 0.000000 | 0.000011 |  100.0 |
    |--------------------------------------------------------------------------------------------------------------------------------------------------------------|
 
 Timemory JSON output
@@ -620,7 +619,7 @@ root node, which has the name ``unknown-hash=0``.
             "thread_count": 1,
             "thread_scope_only": false,
             "type": "wall_clock",
-            "unit_repr": "s",
+            "unit_repr": "sec",
             "unit_value": 1000000000,
             "upcxx_size": 1
          }
@@ -696,4 +695,4 @@ section is as follows:
 .. code-block:: shell
 
    [openmp-cg.inst-wall_clock.json] Found metric: wall_clock
-   [openmp-cg.inst-wall_clock.json] Maximum value: 'omp_work' at depth 2 was called 6891x :: 12.603 s (mean = 1.829e-03 s)
+   [openmp-cg.inst-wall_clock.json] Maximum value: 'omp_work' at depth 2 was called 6891x :: 12.603 sec (mean = 1.829e-03 sec)

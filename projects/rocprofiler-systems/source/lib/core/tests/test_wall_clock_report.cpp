@@ -32,7 +32,7 @@ namespace
 constexpr std::uint64_t   k_main_thread  = 1;
 constexpr std::uint64_t   k_other_thread = 2;
 constexpr std::uint64_t   k_launch_id    = 7;
-constexpr wall_clock_unit k_milliseconds{ .name   = "ms",
+constexpr wall_clock_unit k_milliseconds{ .name   = "msec",
                                           .length = std::chrono::milliseconds{ 1 } };
 
 constexpr wall_clock_nanoseconds k_start        = {};
@@ -474,7 +474,7 @@ TEST(wall_clock_report, json_graph_has_the_rows_the_timemory_validator_reads)
     add_launch_with_kernel(input);
 
     auto const wall = wall_clock_json(make_report(input));
-    EXPECT_EQ(wall.at("unit_repr"), "s");
+    EXPECT_EQ(wall.at("unit_repr"), "sec");
     EXPECT_EQ(wall.at("unit_value"), 1'000'000'000);
     auto const& graph = wall.at("ranks").at(0).at("graph");
     ASSERT_EQ(graph.size(), 2U);
@@ -583,7 +583,7 @@ TEST(wall_clock_report, timing_units_scale_text_columns_and_square_the_variance)
 {
     auto const rows = parse_rows(make_report(merged_calls(), { .unit = k_milliseconds }));
     ASSERT_EQ(rows.size(), 1U);
-    EXPECT_EQ(rows[0].units, "ms");
+    EXPECT_EQ(rows[0].units, "msec");
     EXPECT_EQ(rows[0].sum, "6.000000");
     EXPECT_EQ(rows[0].min, "1.000000");
     EXPECT_EQ(rows[0].var, "1.000000");
@@ -600,7 +600,7 @@ TEST(wall_clock_report, timing_units_scale_json_display_and_stats_but_not_raw_va
 
     auto const wall =
         wall_clock_json(make_report(merged_calls(), { .unit = k_milliseconds }));
-    EXPECT_EQ(wall.at("unit_repr"), "ms");
+    EXPECT_EQ(wall.at("unit_repr"), "msec");
     EXPECT_EQ(wall.at("unit_value"), 1'000'000);
 }
 
@@ -622,24 +622,28 @@ TEST(wall_clock_report, timing_unit_lookup_accepts_the_timemory_names_in_any_cas
         std::chrono::nanoseconds length;
     };
     constexpr std::array k_cases{
-        unit_case{ .setting = "nsec", .name = "ns", .length = 1ns },
-        unit_case{ .setting = "microseconds", .name = "us", .length = 1us },
-        unit_case{ .setting = "MSEC", .name = "ms", .length = 1ms },
-        unit_case{ .setting = "csec", .name = "cs", .length = 10ms },
-        unit_case{ .setting = "ds", .name = "ds", .length = 100ms },
-        unit_case{ .setting = "", .name = "s", .length = 1s },
-        unit_case{ .setting = "sec", .name = "s", .length = 1s },
-        unit_case{ .setting = "Seconds", .name = "s", .length = 1s },
+        unit_case{ .setting = "nsec", .name = "nsec", .length = 1ns },
+        unit_case{ .setting = "microseconds", .name = "usec", .length = 1us },
+        unit_case{ .setting = "MSEC", .name = "msec", .length = 1ms },
+        unit_case{ .setting = "csec", .name = "csec", .length = 10ms },
+        unit_case{ .setting = "ds", .name = "dsec", .length = 100ms },
+        unit_case{ .setting = "", .name = "sec", .length = 1s },
+        unit_case{ .setting = "sec", .name = "sec", .length = 1s },
+        unit_case{ .setting = "Seconds", .name = "sec", .length = 1s },
         unit_case{ .setting = "minute", .name = "min", .length = 1min },
-        unit_case{ .setting = "hr", .name = "h", .length = 1h },
+        unit_case{ .setting = "hr", .name = "hr", .length = 1h },
     };
     for(const auto& [setting, name, length] : k_cases)
     {
         SCOPED_TRACE(setting);
         auto const unit = find_wall_clock_unit(setting);
         ASSERT_TRUE(unit.has_value());
+
+        // the ASSERT above ensures the optional is not empty
+        // NOLINTBEGIN(bugprone-unchecked-optional-access)
         EXPECT_EQ(unit->name, name);
         EXPECT_EQ(unit->length, length);
+        // NOLINTEND(bugprone-unchecked-optional-access)
     }
 }
 

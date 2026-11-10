@@ -5,6 +5,7 @@
 #include "common/delimit.hpp"
 #include "common/string_utility.hpp"
 
+#include <fmt/base.h>
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
@@ -227,10 +228,11 @@ build_thread_trees(const wall_clock_settings&              settings,
         std::erase_if(open_regions,
                       [&](const auto& open) { return region->begin >= open.second; });
 
-        auto const enclosing =
-            std::find_if(open_regions.rbegin(), open_regions.rend(),
-                         [&](const auto& open) { return open.second >= region->end; });
-        auto& parent = (settings.flat || enclosing == open_regions.rend())
+        auto const enclosing = std::ranges::find_if(
+            open_regions | std::views::reverse,
+            [&](const auto& open) { return open.second >= region->end; });
+        auto& parent = (settings.flat ||
+                        enclosing == std::ranges::end(open_regions | std::views::reverse))
                            ? tree_of(region->thread_id)
                            : *enclosing->first;
         auto& entry  = parent.child(region->name, call_kind::cpu, merge);
@@ -267,25 +269,25 @@ find_wall_clock_unit(std::string_view name)
         std::string_view spellings;
     };
     constexpr std::array k_units{
-        unit_spellings{ .unit      = { .name = "ns", .length = 1ns },
+        unit_spellings{ .unit      = { .name = "nsec", .length = 1ns },
                         .spellings = "nsec ns nanosecond nanoseconds" },
-        unit_spellings{ .unit      = { .name = "us", .length = 1us },
+        unit_spellings{ .unit      = { .name = "usec", .length = 1us },
                         .spellings = "usec us microsecond microseconds" },
-        unit_spellings{ .unit      = { .name = "ms", .length = 1ms },
+        unit_spellings{ .unit      = { .name = "msec", .length = 1ms },
                         .spellings = "msec ms millisecond milliseconds" },
         unit_spellings{
-            .unit      = { .name   = "cs",
+            .unit      = { .name   = "csec",
                            .length = std::chrono::duration<std::int64_t, std::centi>{ 1 } },
             .spellings = "csec cs centisecond centiseconds" },
         unit_spellings{
-            .unit      = { .name   = "ds",
+            .unit      = { .name   = "dsec",
                            .length = std::chrono::duration<std::int64_t, std::deci>{ 1 } },
             .spellings = "dsec ds decisecond deciseconds" },
         unit_spellings{ .unit      = k_wall_clock_seconds,
                         .spellings = "sec s second seconds" },
         unit_spellings{ .unit      = { .name = "min", .length = 1min },
                         .spellings = "min minute minutes" },
-        unit_spellings{ .unit      = { .name = "h", .length = 1h },
+        unit_spellings{ .unit      = { .name = "hr", .length = 1h },
                         .spellings = "hr hour hours" },
     };
     if(name.empty())
