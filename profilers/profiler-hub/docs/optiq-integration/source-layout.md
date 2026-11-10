@@ -161,7 +161,13 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. Maps a probed schema and major version to a reader factory and a trim-rule factory. Entries are compiled in by the format switches. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
+
+### source/formats/rocpd
+
+| File | Role | Purpose |
+|---|---|---|
+| `rocpd_probe.hpp`, `rocpd_probe.cpp` | Reader | Recognises a rocpd file by the SQLite header and probes its metadata tables for the schema version and GUIDs. |
 
 ### source/formats/rocpd_v2 (legacy .rpd)
 
