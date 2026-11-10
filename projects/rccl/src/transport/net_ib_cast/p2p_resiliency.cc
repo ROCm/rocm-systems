@@ -733,14 +733,16 @@ ncclResult_t IbCastResiliencyDataCqSizeGet(struct ncclIbResiliency* resCtx, uint
   assert(cqSize != NULL);
   *cqSize = 0;
   struct ncclIbNetCommBase* baseComm = resCtx->baseComm;
+  // Resiliency forces the CAST scheduler off (see IbCastInit), so requests are posted over the
+  // default QP set; size for that same set.
   if (baseComm->isSend) {
     // Every send request generates one completion on every QP it uses.
-    *cqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetNqpsPerRequest(baseComm);
+    *cqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   } else {
     // In the worst case, a receive is not a multi-receive request, so every
     // request generates two completions (one for the CTS messages and one for
     // the receive request).
-    *cqSize = NET_IB_MAX_REQUESTS * 2 * IbCastCommBaseGetNqpsPerRequest(baseComm);
+    *cqSize = NET_IB_MAX_REQUESTS * 2 * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   }
   // In the worst case, all devices failed except for one device, so the single
   // device remaining must bear all be able to accommodate for all the
@@ -762,7 +764,9 @@ ncclResult_t IbCastResiliencyDataRqSizeGet(struct ncclIbResiliency* resCtx, uint
   // When resiliency is enabled, the RQ size should accommodate receive requests
   // assuming all other devices have failed so instead of transferring every
   // request on all QPs, a single QP is used and this QP should bear the load.
-  *rqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetNqpsPerRequest(baseComm);
+  // Resiliency forces the CAST scheduler off (see IbCastInit), so the default QP set is the one
+  // IbCastRecvCommGetNqps arms and the one a survivor would have to absorb.
+  *rqSize = NET_IB_MAX_REQUESTS * IbCastCommBaseGetDefaultNqpsPerRequest(baseComm);
   assert(*rqSize > 0);
   return ncclSuccess;
 }

@@ -211,21 +211,6 @@ TEST_F(NetIbCastCommonMicrotest, CommBaseQpHelpers_IndexStripeAndLookUpQps) {
   EXPECT_EQ(qp, nullptr);
 }
 
-// The resiliency CQ/RQ sizing is the only caller and runs at connect, with schedParms still zeroed.
-// One QP per request is what keeps the RQ at NET_IB_MAX_REQUESTS; a larger count fails the
-// connection once it passes ibDev->oooRqSize. The splitData/doWrr arms are the helper's contract,
-// not a path connect can reach.
-TEST_F(NetIbCastCommonMicrotest, NqpsPerRequest_IsOneUntilTheSchedulerSetsParms) {
-  ZeroedPtr<ncclIbSendComm> send;
-  send->base.nqps = 4;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 1);
-  send->base.schedParms.splitData = true;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 4);
-  send->base.schedParms.splitData = false;
-  send->base.schedParms.doWrr = true;
-  EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&send->base), 4);
-}
-
 TEST_F(NetIbCastCommonMicrotest, DefaultNqpsPerRequest_IsDataQpsUnlessSplittingOnQps) {
   ZeroedPtr<ncclIbSendComm> send;
   send->base.nqps = 4;
