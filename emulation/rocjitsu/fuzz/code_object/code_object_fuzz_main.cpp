@@ -86,7 +86,7 @@ util::FailureOr<std::vector<uint8_t>> read_input(const std::filesystem::path &pa
                                                  util::DiagnosticEmitter diagnostic) {
   std::ifstream stream(path, std::ios::binary | std::ios::ate);
   if (!stream)
-    return diagnostic.emit() << "input has an invalid size";
+    return diagnostic.emit() << "cannot open input: " << path.string();
   const std::streamoff size = stream.tellg();
   if (size < 0 || size > static_cast<std::streamoff>(kMaxInputSize))
     return diagnostic.emit() << "input has an invalid size";

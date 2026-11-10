@@ -45,7 +45,9 @@ inputs are deterministic, so a sanitizer or fatal signal leaves a small set of
 exactly reproducible candidates without putting full-input writes in the hot
 path. An operational worker failure is saved as `failure.bin` with its seed.
 Loader invariant failures terminate the process and leave `current.seed` for
-replay. Replay a saved worker failure with:
+replay. Standard-library failures, including worker thread creation failures,
+are fatal; checked input and setup errors return exit status 2, and recorded
+worker failures return exit status 1. Replay a saved worker failure with:
 
 ```sh
 rj_code_object_fuzz --input code-object-results/failure.bin
