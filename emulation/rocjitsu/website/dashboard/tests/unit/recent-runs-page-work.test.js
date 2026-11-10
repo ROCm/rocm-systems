@@ -73,7 +73,8 @@ test('Recent Runs takes navigation and subtitle from the pagination model', () =
   const probe = mountRecentRuns(createRecentRunsHistory().data);
   expect(probe.page().props.count).toBe(7);
   expect(probe.page().props.page).toBe(7);
-  expect(probe.subtitle()).toContain('10 per page');
+  expect(probe.subtitle()).toContain('local time');
+  expect(probe.subtitle()).not.toContain('per page');
   expect(probe.rows()).toEqual(Array.from({ length: 5 }, (_, index) => `fictional-pagination-00${4 - index}`));
 });
 

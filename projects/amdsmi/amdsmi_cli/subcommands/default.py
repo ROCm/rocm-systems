@@ -6,6 +6,7 @@ import logging
 import os
 
 from _version import __version__
+from amdsmi_cli_exceptions import AmdSmiDriverNotLoadedException
 from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -33,6 +34,8 @@ class DefaultCommands:
 
         if not self.helpers.is_amdgpu_initialized():
             # everything below requires amdgpu to be initialized, so if it's not, skip the rest of the default info and just return what we have so far
+            if self.helpers.get_devices_without_driver("amdgpu"):
+                raise AmdSmiDriverNotLoadedException("amd-smi", ["amdgpu"], self.logger.format)
             return
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()

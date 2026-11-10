@@ -14,12 +14,17 @@
 /// CDNA5 integer minmax instructions also have scalar and SIMD golden-result
 /// coverage for signed and unsigned inputs.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -132,7 +137,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, width);
   }
@@ -175,6 +182,8 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -221,6 +230,113 @@ TEST(Vop3TernaryIntSimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3TernaryIntSimdCorrectness, AlignSelectsTheCountFromSrc2) {
+  ForceScalarGuard guard;
+  constexpr uint64_t source = 0x76543210fedcba98ull;
+  // Each byte has a different low-five-bit count and a different low-two-bit count.
+  constexpr uint32_t counts = 0x03121108u;
+  constexpr std::array<unsigned, 4> byte_counts{8, 17, 18, 3};
+  // GFX11 and GFX12 share the CDNA5 encoding. Only S2 changes with OPSEL[2].
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    const uint32_t base = fx.wf->vgpr_alloc().base;
+    fx.wf->set_exec(1);
+    fx.cu->write_vgpr(base, 0, static_cast<uint32_t>(source >> 32));
+    fx.cu->write_vgpr(base + 1, 0, static_cast<uint32_t>(source));
+    fx.cu->write_vgpr(base + 2, 0, counts);
+    fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
+    for (uint8_t opsel = 0; opsel < 8; ++opsel) {
+      const unsigned count =
+          arch == ROCJITSU_CODE_ARCH_CDNA4 ? byte_counts[opsel & 3u] : (opsel & 4u ? 18u : 8u);
+      for (bool bytes : {false, true}) {
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA4
+                ? cdna4::build_vop3(
+                      bytes ? cdna4::kVAlignbyteB32Vop3 : cdna4::kVAlignbitB32Vop3,
+                      {.vdst = kDstVgpr, .op_sel = opsel, .src0 = 256, .src1 = 257, .src2 = 258})
+                : cdna5::build_vop3(
+                      bytes ? cdna5::kVAlignbyteB32Vop3 : cdna5::kVAlignbitB32Vop3,
+                      {.vdst = kDstVgpr, .opsel = opsel, .src0 = 256, .src1 = 257, .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (bool force_scalar : {true, false}) {
+          util::set_force_scalar_for_testing(force_scalar);
+          fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
+          ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+          const unsigned shift = bytes ? 8u * (count & 3u) : count;
+          EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), static_cast<uint32_t>(source >> shift))
+              << inst->mnemonic() << " OPSEL=" << +opsel << " scalar=" << force_scalar;
+          EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);
+        }
+      }
+    }
+  }
+}
+
+TEST(Vop3TernaryIntSimdCorrectness, CdnaMadI16AndU16PreserveUnselectedDestination) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(fx.wf, nullptr);
+  const uint32_t base = fx.wf->vgpr_alloc().base;
+  fx.wf->set_exec(1);
+  fx.cu->write_vgpr(base, 0, 3);
+  fx.cu->write_vgpr(base + 1, 0, 4);
+  fx.cu->write_vgpr(base + 2, 0, 3);
+  constexpr uint32_t seed = 0x9abcdeffu;
+  for (const auto op : {cdna4::kVMadI16Vop3, cdna4::kVMadU16Vop3, cdna4::kVMadLegacyI16Vop3,
+                        cdna4::kVMadLegacyU16Vop3}) {
+    const bool legacy = op == cdna4::kVMadLegacyI16Vop3 || op == cdna4::kVMadLegacyU16Vop3;
+    for (bool high : {false, true}) {
+      const auto words = cdna4::build_vop3(op, {.vdst = kDstVgpr,
+                                                .op_sel = static_cast<uint8_t>(high ? 8 : 0),
+                                                .src0 = 256,
+                                                .src1 = 257,
+                                                .src2 = 258});
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      fx.cu->write_vgpr(base + kDstVgpr, 0, seed);
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+      EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0),
+                high ? 0x000fdeffu : (legacy ? 15u : 0x9abc000fu))
+          << inst->mnemonic() << " high=" << high;
+    }
+  }
+}
+
+TEST(Vop3TernaryIntSimdCorrectness, Gfx10MadSelectsSourceAndDestinationHalves) {
+  constexpr uint32_t seed = 0x9abcdeffu;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    const uint32_t base = fx.wf->vgpr_alloc().base;
+    fx.wf->set_exec(1);
+    fx.cu->write_vgpr(base, 0, 0x80000003u);
+    fx.cu->write_vgpr(base + 1, 0, 0x00040004u);
+    fx.cu->write_vgpr(base + 2, 0, 0x00030003u);
+    // GFX10.1 and GFX10.3 use the same VOP3 encoding for both MAD operations.
+    for (const auto op : {rdna2::kVMadI16Vop3, rdna2::kVMadU16Vop3}) {
+      for (uint8_t opsel : {0, 7, 8, 15}) {
+        const auto words = rdna2::build_vop3(
+            op,
+            {.vdst = kDstVgpr, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        EXPECT_EQ(inst->dst_operand(0)->register_byte_mask(), opsel & 8u ? 0xcu : 0x3u);
+        fx.cu->write_vgpr(base + kDstVgpr, 0, seed);
+        ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+        const uint32_t product =
+            (opsel & 7u) ? (op == rdna2::kVMadI16Vop3 ? 0x8000u : 0xffffu) : 15u;
+        const uint32_t expected =
+            opsel & 8u ? (product << 16) | (seed & 0xffffu) : (seed & 0xffff0000u) | product;
+        EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), expected)
+            << inst->mnemonic() << " OPSEL=" << +opsel;
+      }
+    }
+  }
 }
 
 TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {

@@ -59,6 +59,30 @@
       "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
     },
     {
+      "_comment": "rocSHMEM-GDA (NCCL_GIN_TYPE=6) alltoall on an ionic runner: exercises the gin_ibv_* shim, QueuePairMux::provider_ dispatch and the ionic provider leaf. NCCL_GIN_IB_TC=104 is the traffic class GDA needs on ionic. No LSA tier in alltoall, so no threshold override needed.",
+      "name": "rccl-gin-rocshmem-gda-d3",
+      "kind": "rccl-tests",
+      "bin": "alltoall_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6", "NCCL_GIN_IB_TC=104"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    },
+    {
+      "_comment": "GDA all_gather: SDMA_THRESHOLD_ALLGATHER=0 forces every chunk onto the GIN-put tier, disabling the LSA-direct tier, which is invalid for GIN-GDA.",
+      "name": "rccl-gin-rocshmem-gda-ag-d3",
+      "kind": "rccl-tests",
+      "bin": "all_gather_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6", "NCCL_GIN_IB_TC=104", "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLGATHER=0"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    },
+    {
+      "_comment": "GDA broadcast: SAG + flat-GIN DIRECT only. SDMA_THRESHOLD_BROADCAST=0 disables the LSA tier and BCAST_LL_MAX_BYTES=0 disables the LL tier, both invalid for GIN-GDA.",
+      "name": "rccl-gin-rocshmem-gda-bcast-d3",
+      "kind": "rccl-tests",
+      "bin": "broadcast_perf",
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=6", "NCCL_GIN_IB_TC=104", "NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST=0", "NCCL_GIN_ANVIL_BCAST_LL_MAX_BYTES=0"],
+      "args": "-b 128 -e {E} -f 2 -g 1 -R 2 -D 3 -A 1"
+    },
+    {
       "name": "rccl-gin-bcast-pytest",
       "kind": "pytest",
       "bin": "test_Broadcast.py",
