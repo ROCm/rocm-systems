@@ -6874,8 +6874,11 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersion_FiltersRequirementsWithCompileTim
 // Branch: useRuntimeVersion does not bypass the compatibility check on the
 // caller's own version; a compile-time version no record serves is refused.
 TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_ReturnsErrorWithoutQueueing) {
-  SplitCompatAtJitFieldVersion();
-  ncclDevCommCompat_v22902 = ncclDevCommCompat{};  // nothing serves kJitFieldVersion
+  // Only the runtime version has a record; nothing serves the caller's compile-time version.
+  ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+  ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+  ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
   reqs.version = kJitFieldVersion;
   reqs.useRuntimeVersion = true;
 
