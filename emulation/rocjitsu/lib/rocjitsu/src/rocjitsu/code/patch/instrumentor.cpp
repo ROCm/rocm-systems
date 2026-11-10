@@ -23,6 +23,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -64,14 +65,192 @@ bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
       arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
     return false;
-  if (instruction.mnemonic() != "s_sendmsg")
+  if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt")
     return false;
   const Operand *message = instruction.src_operand(0);
   constexpr uint32_t kDeallocVgprsMessage = 3;
+  // In-tree OPR_SENDMSG.MSG is 9/4/7/7 bits for RDNA3/3.5/4/CDNA5.
+  // LLVM SendMsg::ID_MASK_GFX11Plus_ (SIDefines.h) uses the low byte. Until these descriptions
+  // agree, reject deallocation under either interpretation (including 0x103).
   const uint32_t message_mask = arch == ROCJITSU_CODE_ARCH_RDNA3     ? 0x1ffu
                                 : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0xfu
                                                                      : 0x7fu;
-  return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage;
+  return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage ||
+         (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
+}
+
+enum class VectorMode { GprIndexing, Vskip };
+
+enum class ModeWrite { Unchanged, Clear, MayEnable };
+
+ModeWrite
+vector_mode_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+                  VectorMode mode,
+                  const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
+  if (mode == VectorMode::GprIndexing ? !isa_properties(arch).mode_has_gpr_idx_en
+                                      : !arch_is_cdna_4_or_lower(arch))
+    return ModeWrite::Unchanged;
+  if (inst.flags() & INDIRECT_CALL)
+    return preserving_calls != nullptr && preserving_calls->contains(&inst) ? ModeWrite::Unchanged
+                                                                            : ModeWrite::MayEnable;
+  const bool enables = mode == VectorMode::GprIndexing ? may_enable_gpr_indexing(inst, text, arch)
+                                                       : may_enable_vskip(inst, text, arch);
+  if (enables)
+    return ModeWrite::MayEnable;
+  if ((mode == VectorMode::GprIndexing && inst.mnemonic() == "s_set_gpr_idx_off") ||
+      (mode == VectorMode::Vskip && inst.mnemonic() == "s_setvskip"))
+    return ModeWrite::Clear;
+  if (inst.mnemonic() == "s_setreg_b32" || inst.mnemonic() == "s_setreg_imm32_b32") {
+    const Operand *hwreg = inst.dst_operand(0);
+    if (hwreg != nullptr &&
+        amdgpu::hwreg_slice_overlaps_mode_bit(static_cast<uint16_t>(hwreg->encoding_value()),
+                                              mode == VectorMode::GprIndexing ? 27 : 28))
+      return ModeWrite::Clear;
+  }
+  return ModeWrite::Unchanged;
+}
+
+// A resolved straight-line helper can preserve MODE without relying on an ABI
+// assumption. More complex or unresolved callees remain unknown to this proof.
+bool callee_preserves_vector_mode(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
+                                  rj_code_arch_t arch, VectorMode mode) {
+  if (edge.callee == nullptr || !edge.callee->successors().empty() ||
+      !edge.callee->predecessors().empty())
+    return false;
+  const Instruction *ret = edge.callee->terminator();
+  if (ret == nullptr || (ret->mnemonic() != "s_setpc_b64" && ret->mnemonic() != "s_set_pc_i64"))
+    return false;
+  const Operand *link = ret->src_operand(0);
+  if (link == nullptr || link->encoding_value() != edge.return_sreg)
+    return false;
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (&inst == ret)
+      break;
+    if (inst.mnemonic().starts_with("s_movrel") ||
+        vector_mode_write(inst, text, arch, mode) != ModeWrite::Unchanged)
+      return false;
+    const InstDefUse effects(inst, 64);
+    if (effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
+        effects.defs.contains({RegClass::SGPR, static_cast<uint16_t>(edge.return_sreg + 1), 1}))
+      return false;
+  }
+  return true;
+}
+
+bool vector_mode_may_be_enabled(const Instruction &anchor, bool after,
+                                std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                std::span<const KernelDescriptorInfo> kernels,
+                                std::span<const uint8_t> text, rj_code_arch_t arch,
+                                VectorMode mode) {
+  if (mode == VectorMode::GprIndexing ? !isa_properties(arch).mode_has_gpr_idx_en
+                                      : !arch_is_cdna_4_or_lower(arch))
+    return false;
+  std::unordered_set<const Instruction *> preserving_calls;
+  std::unordered_set<const Instruction *> known_returns;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None || block->call_edges().empty())
+      continue;
+    if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
+          return callee_preserves_vector_mode(edge, text, arch, mode);
+        })) {
+      preserving_calls.insert(block->terminator());
+    }
+  }
+  std::unordered_set<const BasicBlock *> reachable;
+  std::vector<const BasicBlock *> work;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    if (std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
+          return kernel.entry_text_offset == block->start_offset();
+        }))
+      work.push_back(block.get());
+  }
+  while (!work.empty()) {
+    const BasicBlock *block = work.back();
+    work.pop_back();
+    if (!reachable.insert(block).second)
+      continue;
+    work.insert(work.end(), block->successors().begin(), block->successors().end());
+    for (const BasicBlock::CallEdge &edge : block->call_edges())
+      if (edge.callee != nullptr)
+        work.push_back(edge.callee);
+  }
+  for (const BasicBlock *block : reachable) {
+    if (preserving_calls.contains(block->terminator()))
+      for (const BasicBlock::CallEdge &edge : block->call_edges())
+        known_returns.insert(edge.callee->terminator());
+  }
+  // An unresolved transfer can bypass a local MODE clear or add an incoming
+  // path absent from predecessors(). AfterInst must not treat that CFG as complete.
+  if (after) {
+    for (const BasicBlock *block : reachable) {
+      if (block->successor_issue() != BasicBlock::SuccessorIssue::None &&
+          !known_returns.contains(block->terminator()))
+        return true;
+    }
+  }
+  const BasicBlock *owner = nullptr;
+  ModeWrite last_write = ModeWrite::Unchanged;
+  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+    last_write = ModeWrite::Unchanged;
+    for (const Instruction &inst : block->instructions()) {
+      if (&inst == &anchor) {
+        if (after) {
+          const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
+          if (write != ModeWrite::Unchanged)
+            last_write = write;
+        }
+        owner = block.get();
+        break;
+      }
+      const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
+      if (write != ModeWrite::Unchanged)
+        last_write = write;
+    }
+    if (owner != nullptr)
+      break;
+  }
+  if (owner == nullptr || !reachable.contains(owner))
+    return true;
+  if (last_write != ModeWrite::Unchanged)
+    return last_write == ModeWrite::MayEnable;
+
+  // Kernel entries start with both modes disabled. Other roots (including
+  // unmodelled indirect entries) are unknown. Backedges into an entry still
+  // participate; the partial anchor block is not marked visited as a full block.
+  const auto is_entry = [&](const BasicBlock *block) {
+    return std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &kernel) {
+      return kernel.entry_text_offset == block->start_offset();
+    });
+  };
+  std::vector<const BasicBlock *> pending(owner->predecessors().begin(),
+                                          owner->predecessors().end());
+  if (pending.empty())
+    return !is_entry(owner);
+  bool found_disabled_source = is_entry(owner);
+  std::unordered_set<const BasicBlock *> visited;
+  while (!pending.empty()) {
+    const BasicBlock *block = pending.back();
+    pending.pop_back();
+    if (!reachable.contains(block) || !visited.insert(block).second)
+      continue;
+    found_disabled_source |= is_entry(block);
+    last_write = ModeWrite::Unchanged;
+    for (const Instruction &inst : block->instructions()) {
+      const ModeWrite write = vector_mode_write(inst, text, arch, mode, &preserving_calls);
+      if (write != ModeWrite::Unchanged)
+        last_write = write;
+    }
+    if (last_write != ModeWrite::Unchanged) {
+      if (last_write == ModeWrite::MayEnable)
+        return true;
+      found_disabled_source = true;
+      continue;
+    }
+    if (block->predecessors().empty() && !is_entry(block))
+      return true;
+    pending.insert(pending.end(), block->predecessors().begin(), block->predecessors().end());
+  }
+  return !found_disabled_source;
 }
 
 // PC-reading / PC-relative instructions to reject as anchors: relocating any of
@@ -411,8 +590,19 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::AfterInst &&
-      may_enable_gpr_indexing(anchor, text_bytes, arch)) {
+      may_enable_gpr_indexing(anchor, text_bytes, arch, anchor_offset)) {
     fail("AfterInst anchor may enable GPR indexing");
+    return std::nullopt;
+  }
+  if (pt.kind == InstrumentationKind::AfterInst &&
+      may_enable_vskip(anchor, text_bytes, arch, anchor_offset)) {
+    fail("AfterInst anchor may enable VSKIP");
+    return std::nullopt;
+  }
+  // No allocation analysis proves that the post-anchor register file can hold
+  // the envelope and callback, including SGPR-supplied shrinking allocations.
+  if (pt.kind == InstrumentationKind::AfterInst && anchor.mnemonic() == "s_alloc_vgpr") {
+    fail("AfterInst cannot prove the VGPR allocation after s_alloc_vgpr");
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::AfterInst && deallocates_vgprs(anchor, arch)) {
@@ -972,7 +1162,17 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   decoder_ = std::move(decoder);
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  std::vector<uint64_t> kernel_entries;
+  if (obj_.text_sections().size() == 1) {
+    const Section *text = obj_.text_sections().front();
+    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                         obj_.image_size());
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    for (const KernelDescriptorInfo &kernel : kernels)
+      kernel_entries.push_back(kernel.entry_text_offset);
+  }
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(), kernel_entries);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
@@ -1285,6 +1485,19 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
+      bool unsafe_mode = false;
+      for (const VectorMode mode : {VectorMode::GprIndexing, VectorMode::Vskip}) {
+        if (vector_mode_may_be_enabled(*anchor, pt.kind == InstrumentationKind::AfterInst, blocks_,
+                                       out.kernels, text_bytes, arch_, mode)) {
+          out.errors.emplace_back(std::string("probe observation may inherit enabled ") +
+                                  (mode == VectorMode::GprIndexing ? "GPR indexing" : "VSKIP") +
+                                  ", anchor_offset = " + std::to_string(pt.anchor_offset));
+          unsafe_mode = true;
+          break;
+        }
+      }
+      if (unsafe_mode)
+        continue;
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));

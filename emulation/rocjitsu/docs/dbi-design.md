@@ -16,7 +16,7 @@ insert an inline nop or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement,
 callable `AfterInst`, and callable kernel entry/exit observations are supported.
 `AfterInst` requires a callable probe and rejects anchors that change VGPR bank
-selection, may enable GPR indexing, or deallocate VGPRs and scratch. The
+selection, may enable GPR indexing or VSKIP, change the VGPR allocation, or deallocate VGPRs and scratch. The
 pre-anchor addressing proof does not establish the post-anchor state, and the
 callback envelope requires allocated VGPRs and scratch. Block boundaries remain
 reserved. Existing scratch spills coexist with an
@@ -99,7 +99,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; it rejects anchors that change VGPR bank selection, may enable GPR indexing, or deallocate VGPRs and scratch, because the envelope requires proven VGPR addressing state and allocated storage. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; it rejects anchors that change VGPR bank selection, may enable GPR indexing or VSKIP, change the VGPR allocation, or deallocate VGPRs and scratch, because the envelope requires proven VGPR addressing state and allocated storage. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
@@ -110,6 +110,24 @@ current limits.
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
 ### Key design constraint
+
+AfterInst requires GPR indexing and VSKIP to be proven disabled at the
+observation point; ordinary callable sites also reject known-enabled states. Validation follows each CFG predecessor back to its last
+MODE write, including loop backedges; an explicit disabling write cuts off that
+path. Unknown writes, unmodelled call effects, and non-kernel roots fail closed.
+Resolved straight-line callees are proven preserving only if they leave MODE and
+the return-link pair untouched. AfterInst rejects incomplete control flow; a
+validated callee return is distinguished from an unresolved indirect transfer.
+AfterInst also rejects `s_alloc_vgpr` conservatively: without an allocation proof,
+its immediate or SGPR-supplied count may leave too few VGPRs for the envelope.
+This restriction does not depend on a static descriptor count proving the old
+allocation was large enough.
+
+Both `s_sendmsg` and `s_sendmsghalt` are checked for `MSG_DEALLOC_VGPRS`.
+The checked-in XML gives MSG widths of 9/4/7/7 bits for RDNA3/RDNA3.5/RDNA4/CDNA5,
+while [LLVM's GFX11+ message-ID mask](https://github.com/llvm/llvm-project/blob/release/20.x/llvm/lib/Target/AMDGPU/SIDefines.h#L440)
+uses the low byte. Validation rejects deallocation
+under either interpretation, so the ambiguous RDNA3 encoding `0x103` is rejected.
 
 The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), the mixed-wave-size refusal of probe calls, the probe live-in gate in `resolve_points()`, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
@@ -487,8 +505,8 @@ it for `BeforeInst`:
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
-The diagram shows the default placement (`probe_after_original=false`). With
-`probe_after_original=true`, the relocated original moves to the trampoline
+The diagram labels both placements. With `probe_after_original=true`, the
+relocated original executes at the trampoline
 start, before the first in-flight-load drain; the envelope's internal order stays
 the same, and the return branch still follows it. With `emit_original=false`,
 both placements omit the original and start with the envelope. Post placement
