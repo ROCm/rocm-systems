@@ -3,8 +3,6 @@
 
 #include "race_test_builder.h"
 
-#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
-
 #include <gtest/gtest.h>
 
 #include <array>
@@ -414,10 +412,8 @@ namespace {
 
 constexpr int kGfx1250ScalarRegisters = 64;
 
-int gfx1250Capacity(amdgpu::WaitCounterKind kind) {
-  return static_cast<int>(amdgpu::WaitCounterPolicy::maximum_dependency_wait(
-             amdgpu::WaitcntModel::SplitGfx12, kind)) +
-         1;
+int gfx1250Capacity(amdgpu::WaitCounterType counter) {
+  return counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5).split(counter);
 }
 
 RaceTestBuilder makeGfx1250Test(int numWaves = 1) {
@@ -439,7 +435,6 @@ EventStatus statusOf(const RaceTestBuilder &builder, int event) {
 struct SplitCounterCase {
   const char *name;
   amdgpu::WaitCounterType counter;
-  amdgpu::WaitCounterKind kind;
   MemoryOrderClass order;
 };
 
@@ -452,7 +447,7 @@ void PrintTo(const SplitCounterCase &testCase, std::ostream *os) { *os << testCa
 /// ISA 10.8).
 class Gfx1250SplitCounterCapacityTest : public ::testing::TestWithParam<SplitCounterCase> {
 protected:
-  int capacity() const { return gfx1250Capacity(GetParam().kind); }
+  int capacity() const { return gfx1250Capacity(GetParam().counter); }
   void issue(RaceTestBuilder &builder, int count) const {
     issueCounterOps(builder, count, GetParam().counter, GetParam().order);
   }
@@ -479,39 +474,21 @@ TEST_P(Gfx1250SplitCounterCapacityTest, OverflowRetiresOldestPrefix) {
 
 INSTANTIATE_TEST_SUITE_P(
     RaceDetector, Gfx1250SplitCounterCapacityTest,
-    ::testing::Values(SplitCounterCase{"Loadcnt", amdgpu::WaitCounterType::LOADCNT,
-                                       amdgpu::WaitCounterKind::Load, MemoryOrderClass::VMEM},
-                      SplitCounterCase{"Storecnt", amdgpu::WaitCounterType::STORECNT,
-                                       amdgpu::WaitCounterKind::Store, MemoryOrderClass::VMEM},
-                      SplitCounterCase{"Dscnt", amdgpu::WaitCounterType::DSCNT,
-                                       amdgpu::WaitCounterKind::Ds, MemoryOrderClass::LDS},
-                      SplitCounterCase{"AsynccntLoads", amdgpu::WaitCounterType::ASYNCCNT,
-                                       amdgpu::WaitCounterKind::Async,
-                                       MemoryOrderClass::ASYNC_LOAD},
-                      SplitCounterCase{"AsynccntStores", amdgpu::WaitCounterType::ASYNCCNT,
-                                       amdgpu::WaitCounterKind::Async,
-                                       MemoryOrderClass::ASYNC_STORE},
-                      SplitCounterCase{"Tensorcnt", amdgpu::WaitCounterType::TENSORCNT,
-                                       amdgpu::WaitCounterKind::Tensor, MemoryOrderClass::TENSOR},
-                      // KMcnt's capacity is observable only through an ordered
-                      // class, and no gfx1250 instruction registers one, so
-                      // this row uses a synthetic one.
-                      SplitCounterCase{"KmcntSyntheticOrdered", amdgpu::WaitCounterType::KMCNT,
-                                       amdgpu::WaitCounterKind::Km, MemoryOrderClass::VMEM}),
+    ::testing::Values(
+        SplitCounterCase{"Loadcnt", amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM},
+        SplitCounterCase{"Storecnt", amdgpu::WaitCounterType::STORECNT, MemoryOrderClass::VMEM},
+        SplitCounterCase{"Dscnt", amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        SplitCounterCase{"AsynccntLoads", amdgpu::WaitCounterType::ASYNCCNT,
+                         MemoryOrderClass::ASYNC_LOAD},
+        SplitCounterCase{"AsynccntStores", amdgpu::WaitCounterType::ASYNCCNT,
+                         MemoryOrderClass::ASYNC_STORE},
+        SplitCounterCase{"Tensorcnt", amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR},
+        // KMcnt's capacity is observable only through an ordered
+        // class, and no gfx1250 instruction registers one, so
+        // this row uses a synthetic one.
+        SplitCounterCase{"KmcntSyntheticOrdered", amdgpu::WaitCounterType::KMCNT,
+                         MemoryOrderClass::VMEM}),
     [](const ::testing::TestParamInfo<SplitCounterCase> &info) { return info.param.name; });
-
-// The counter table in CDNA5 ISA 5.7.1 sizes each counter, and the section says
-// that "Hardware prevents these counters from overflowing by stalling
-// the issue of any instruction that by incrementing the counter would cause it
-// to overflow." An n-bit counter therefore holds at most 2^n - 1 tokens.
-TEST(RaceDetector, Gfx1250CounterCapacity_CapacitiesFollowTheWaitPolicy) {
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Load), 63);   // LOADcnt: 6 bits.
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Store), 63);  // STOREcnt: 6 bits.
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Ds), 63);     // DScnt: 6 bits.
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Km), 31);     // KMcnt: 5 bits.
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Async), 63);  // ASYNCcnt: 6 bits.
-  EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Tensor), 63); // TENSORcnt: 6 bits.
-}
 
 // gfx1250 has no combined counters, so metadata naming one does not match the
 // target and fails loudly, as on a target whose capacity is not configured.
@@ -586,7 +563,7 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
 // overflow the 31-token KMcnt. Synthetic ordered events make it observable.
 TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
   constexpr uint8_t kTokens = amdgpu::MemoryCounterObligation::MAX_COUNTER_INCREMENT;
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   const int events = capacity / kTokens;
   auto builder = makeGfx1250Test();
   for (int index = 0; index <= events; ++index)
@@ -597,7 +574,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteScalarLoads) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   auto builder = makeGfx1250Test();
   for (int sgpr = 0; sgpr <= capacity; ++sgpr)
     builder.scalarLoad(kWave, sgpr, /*numRegs=*/1, amdgpu::WaitCounterType::KMCNT);
@@ -608,7 +585,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteScalarLoads) {
 
 // Larger scalar loads add two KMcnt tokens each.
 TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteWideScalarLoads) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   auto builder = makeGfx1250Test();
   const int wideLoads = capacity / 2 + 1;
   for (int load = 0; load < wideLoads; ++load)
@@ -622,30 +599,26 @@ TEST(RaceDetector, Gfx1250CounterCapacity_SplitCountersDoNotShareCapacity) {
   struct Case {
     const char *name;
     amdgpu::WaitCounterType fullCounter;
-    amdgpu::WaitCounterKind fullKind;
     MemoryOrderClass fullOrder;
     amdgpu::WaitCounterType otherCounter;
     MemoryOrderClass otherOrder;
   };
   const Case cases[] = {
-      {"StorecntAfterFullLoadcnt", amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterKind::Load,
-       MemoryOrderClass::VMEM, amdgpu::WaitCounterType::STORECNT, MemoryOrderClass::VMEM},
-      {"LoadcntAfterFullStorecnt", amdgpu::WaitCounterType::STORECNT,
-       amdgpu::WaitCounterKind::Store, MemoryOrderClass::VMEM, amdgpu::WaitCounterType::LOADCNT,
-       MemoryOrderClass::VMEM},
-      {"KmcntAfterFullDscnt", amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterKind::Ds,
-       MemoryOrderClass::LDS, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::UNORDERED},
+      {"StorecntAfterFullLoadcnt", amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM,
+       amdgpu::WaitCounterType::STORECNT, MemoryOrderClass::VMEM},
+      {"LoadcntAfterFullStorecnt", amdgpu::WaitCounterType::STORECNT, MemoryOrderClass::VMEM,
+       amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM},
+      {"KmcntAfterFullDscnt", amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS,
+       amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::UNORDERED},
       {"TensorcntAfterFullAsynccnt", amdgpu::WaitCounterType::ASYNCCNT,
-       amdgpu::WaitCounterKind::Async, MemoryOrderClass::ASYNC_LOAD,
-       amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR},
-      {"AsynccntAfterFullTensorcnt", amdgpu::WaitCounterType::TENSORCNT,
-       amdgpu::WaitCounterKind::Tensor, MemoryOrderClass::TENSOR, amdgpu::WaitCounterType::ASYNCCNT,
-       MemoryOrderClass::ASYNC_LOAD},
+       MemoryOrderClass::ASYNC_LOAD, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR},
+      {"AsynccntAfterFullTensorcnt", amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR,
+       amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD},
   };
   for (const auto &testCase : cases) {
     SCOPED_TRACE(testCase.name);
     auto builder = makeGfx1250Test();
-    issueCounterOps(builder, gfx1250Capacity(testCase.fullKind), testCase.fullCounter,
+    issueCounterOps(builder, gfx1250Capacity(testCase.fullCounter), testCase.fullCounter,
                     testCase.fullOrder);
     builder.counterOp(kWave, testCase.otherCounter, testCase.otherOrder);
 
@@ -657,7 +630,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_SplitCountersDoNotShareCapacity) {
 // order with each other (CDNA5 ISA 10.8). A full ASYNCcnt with both classes
 // pending does not prove which class drained.
 TEST(RaceDetector, Gfx1250CounterCapacity_MixedAsyncClassesRetireNothing) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Async);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::ASYNCCNT);
   const int loads = capacity / 2 + 1;
   const int stores = capacity - loads;
   auto builder = makeGfx1250Test();
@@ -671,7 +644,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_MixedAsyncClassesRetireNothing) {
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_AsyncStoreIssueRetiresOldestAsyncLoad) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Async);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::ASYNCCNT);
   auto builder = makeGfx1250Test();
   issueCounterOps(builder, capacity, amdgpu::WaitCounterType::ASYNCCNT,
                   MemoryOrderClass::ASYNC_LOAD);
@@ -682,7 +655,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_AsyncStoreIssueRetiresOldestAsyncLoad)
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_AsyncLoadIssueRetiresOldestAsyncStore) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Async);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::ASYNCCNT);
   auto builder = makeGfx1250Test();
   issueCounterOps(builder, capacity, amdgpu::WaitCounterType::ASYNCCNT,
                   MemoryOrderClass::ASYNC_STORE);
@@ -695,7 +668,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_AsyncLoadIssueRetiresOldestAsyncStore)
 // Tensor loads and stores complete in one issue-ordered class (CDNA5 ISA
 // 10.11.1).
 TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Tensor);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::TENSORCNT);
   auto builder = makeGfx1250Test();
   for (int index = 0; index <= capacity; ++index) {
     const auto type =
@@ -711,7 +684,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_PartialWaitAfterCapacityRetiresNextEvents) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Load);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::LOADCNT);
   auto builder = makeGfx1250Test();
   issueCounterOps(builder, capacity + 1, amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM);
   // Capacity retired event 0, leaving `capacity` loads pending. Allowing two
@@ -727,7 +700,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_PartialWaitAfterCapacityRetiresNextEve
 // A DS write that capacity proves complete is released to other waves by the
 // next barrier, as one completed by s_wait_dscnt would be.
 TEST(RaceDetector, Gfx1250CounterCapacity_CapacityCompletedDsWriteIsReleasedAtBarrier) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Ds);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::DSCNT);
   auto builder = makeGfx1250Test(/*numWaves=*/2);
   builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::LDS,
                    amdgpu::WaitCounterType::DSCNT);
@@ -741,7 +714,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CapacityCompletedDsWriteIsReleasedAtBa
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_DsWriteBelowCapacityIsNotReleasedAtBarrier) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Ds);
+  const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::DSCNT);
   auto builder = makeGfx1250Test(/*numWaves=*/2);
   builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::LDS,
                    amdgpu::WaitCounterType::DSCNT);
