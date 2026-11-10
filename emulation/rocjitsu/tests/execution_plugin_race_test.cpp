@@ -5238,9 +5238,9 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
         << report;
     EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
     if (complete) {
-      EXPECT_NE(
-          report.find("Completed for wave 0.\n  Waves 0 and 1 have not synchronized this access."),
-          std::string::npos)
+      EXPECT_NE(report.find("Wait requirements satisfied for this operation in wave 0.\n  Waves 0 "
+                            "and 1 have not synchronized this access."),
+                std::string::npos)
           << report;
       EXPECT_EQ(report.find("pending counters"), std::string::npos);
     } else {

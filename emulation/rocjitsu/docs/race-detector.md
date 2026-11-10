@@ -96,7 +96,7 @@ RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS acce
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
   Current access: read at PC 0x1018.
   Conflict: transfer from VGPRs into LDS at PC 0x1010, wave 1.
-  Completed for wave 1.
+  Wait requirements satisfied for this operation in wave 1.
   Waves 1 and 0 have not synchronized this access.
        PC      Instruction
   ==>  0x1010  ds_write_b32 v0, v1  ; <-- wave 1
@@ -112,6 +112,11 @@ without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
+
+The wait-requirements line refers to the conflicting memory operation, not to
+wave 1 finishing execution. Its completion requirements were satisfied within
+wave 1, for example by an `s_waitcnt`. That does not order wave 0's read after
+wave 1's write; the waves still need a barrier.
 
 ### Running your own application
 

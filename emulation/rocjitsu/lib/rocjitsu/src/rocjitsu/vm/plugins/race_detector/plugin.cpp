@@ -391,7 +391,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     }
     oss << ".\n";
   } else if (events.status(event) == EventStatus::WAVE_COMPLETE) {
-    oss << "  Completed for wave " << owner << ".\n";
+    oss << "  Wait requirements satisfied for this operation in wave " << owner << ".\n";
   } else {
     throw std::logic_error("race violation references a retired memory event");
   }
