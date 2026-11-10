@@ -155,6 +155,15 @@ def test_rows_have_one_width(gpu_arch):
 
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
+def test_render_does_not_depend_on_term(gpu_arch, monkeypatch):
+    # A dumb TERM must not shrink the chart to 80 columns
+    monkeypatch.setenv("TERM", "dumb")
+    dumb = render(gpu_arch)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert render(gpu_arch) == dumb
+
+
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_panel_blocks_in_the_columns_share_one_width(gpu_arch):
     assert len(panel_widths(make_chart(gpu_arch, sample_values(gpu_arch)))) == 1
 
