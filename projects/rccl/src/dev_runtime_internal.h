@@ -90,6 +90,9 @@ struct ncclDevrMemory {
   // GIN registration state.
   int numGinSegments;                              // 1 unless GIN needs multiple per-segment windows
   struct ncclDevrGinSegmentInfo* ginSegmentInfos;  // per-GIN-segment info
+  // allocTracker bytes owned by this registration: nonzero only for the devComm resource
+  // window, whose handle RCCL creates. User windows retain an existing allocation.
+  size_t allocTrackedBytes;
 };
 
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments);

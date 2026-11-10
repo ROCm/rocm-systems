@@ -86,6 +86,7 @@ class AllocatorMicrotest : public ::testing::Test {
     ResetNcclFakes();
     ResetRocmWrapFakes();
     g_hashToZero = false;
+    std::memset(allocTracker, 0, sizeof(allocTracker));
     params_.clear();
     g_loadParam = [this](const char* env, int64_t deftVal) {
       auto it = params_.find(env);
@@ -263,13 +264,31 @@ TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
   EXPECT_NE(p, nullptr);
   EXPECT_EQ(mallocs_, std::vector<size_t>{100});
   EXPECT_EQ(g_rocmLibraryInitCalls, 1);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 100u);
+
+  ScopedHook range(g_hipMemGetAddressRange, [](hipDeviceptr_t* base, size_t* bytes, hipDeviceptr_t ptr) {
+    *base = ptr;
+    *bytes = 100;
+    return hipSuccess;
+  });
+  ScopedHook ordinal(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
+    *static_cast<int*>(data) = kDev;
+    return hipSuccess;
+  });
+  ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
+  EXPECT_EQ(g_rocmLibraryInitCalls, 2);
+  p = nullptr;
 
   // A null out-pointer or a zero size goes straight to hipMalloc, whose error is the caller's.
   mallocResult_ = hipErrorInvalidValue;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   EXPECT_EQ(ncclMemAlloc_impl(nullptr, 100), ncclUnhandledCudaError);
   EXPECT_EQ(ncclMemAlloc_impl(&p, 0), ncclUnhandledCudaError);
-  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
+  EXPECT_EQ(g_rocmLibraryInitCalls, 2);
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
   Release(p);
 }
 
@@ -305,6 +324,8 @@ TEST_F(AllocatorMicrotest, MemAlloc_MapsAlignedVmmMemoryForEveryPeerThatCanReach
   EXPECT_EQ(calls_, (std::vector<std::string>{"create", "reserve", "map", "access0", "access3"}));
   EXPECT_TRUE(attrs_.empty());
   EXPECT_TRUE(mallocs_.empty());
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 1u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, createSize_);
 }
 
 TEST_F(AllocatorMicrotest, MemAlloc_FabricHandlesOnlyWhenTheDeviceSupportsThem) {
@@ -349,6 +370,8 @@ TEST_F(AllocatorMicrotest, MemAlloc_VmmFailuresUnwindWhatWasDone) {
     if (c.first != "granularity" && c.first != "count") EXPECT_EQ(p, nullptr);
   }
   EXPECT_TRUE(mallocs_.empty());
+  EXPECT_EQ(allocTracker[kDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[kDev].totalAllocSize, 0u);
 }
 
 TEST_F(AllocatorMicrotest, MemFree_FreesThroughHipWithoutCuMemAndRestoresTheDevice) {

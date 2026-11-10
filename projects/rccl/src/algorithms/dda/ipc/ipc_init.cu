@@ -31,6 +31,13 @@ using nccl_dda_detail::kDdaNranks;
 
 namespace {
 
+// The scratch comes from hipExtMallocWithFlags, so allocTracker is updated here, not by an allocator helper.
+void freeDdaIpcScratch(ncclComm* comm, void* scratch, size_t bytes) {
+  if (scratch == nullptr || comm == nullptr) return;
+  ncclAllocUntrack(comm->cudaDev, bytes, "ncclDdaIpcCommInit");
+  CUDACHECKIGNORE(cudaFree(scratch));
+}
+
 bool ddaIpcCommEligible(const ncclComm* comm) {
   if (comm == nullptr) {
     return false;
@@ -87,6 +94,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 #else
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
 #endif
+  if (scratch != nullptr) ncclAllocTrack(comm->cudaDev, bytes, "ncclDdaIpcCommInit");
 
   // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
   // false-matches leftover flag words (mirrors the fabric path). Harmless for
@@ -97,7 +105,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 
   auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
     return ncclSuccess;
   }
@@ -105,14 +113,14 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   ncclResult_t res = handler->addSelfDeviceMemPtr(scratch);
   if (res != ncclSuccess) {
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: addSelfDeviceMemPtr failed");
     return ncclSuccess;
   }
   res = handler->exchangeMemPtrs();
   if (res != ncclSuccess) {
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: exchangeMemPtrs failed");
     return ncclSuccess;
   }
@@ -121,7 +129,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
   if (ce != cudaSuccess) {
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
@@ -133,7 +141,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     if (res != ncclSuccess) {
       CUDACHECKIGNORE(cudaFree(peerDev));
       delete handler;
-      CUDACHECKIGNORE(cudaFree(scratch));
+      freeDdaIpcScratch(comm, scratch, bytes);
       WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
       return ncclSuccess;
     }
@@ -144,7 +152,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
@@ -152,7 +160,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: OOM allocating host peer table");
     return ncclSuccess;
   }
@@ -163,7 +171,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: cudaMemcpy(host peer table) failed (%s)", cudaGetErrorString(ddaCe));
     return ncclSuccess;
   }
@@ -176,7 +184,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
     return ncclSuccess;
   }
@@ -188,7 +196,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     comm->ddaPeerPtrsHost = nullptr;
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     WARN("ncclDdaIpcCommInit: OOM allocating DdaIpcBarrierState");
     return ncclSuccess;
   }
@@ -265,7 +273,7 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
+  freeDdaIpcScratch(comm, comm->ddaScratch, comm->ddaScratchBytes);
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
   return ncclSuccess;
