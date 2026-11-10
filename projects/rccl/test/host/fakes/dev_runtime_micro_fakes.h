@@ -56,6 +56,12 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
                                   uint32_t)>
     g_devrGinDevCommSetup;
+// ncclDevCommCreate's enqueue-rearch path hands its job here. The default
+// accepts and drops it; a test that needs the job installs a hook that runs and
+// frees it.
+extern std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
+                                  ncclComm_t)>
+    g_devrMgmtTaskEnqueue;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
