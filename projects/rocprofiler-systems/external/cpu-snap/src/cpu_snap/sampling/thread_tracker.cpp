@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "cpu_snap/sampling/thread_tracker.hpp"
 
 #include <algorithm>
@@ -30,11 +33,13 @@ proc_thread_source()
 }
 
 thread_tracker::thread_tracker(thread_source source, log_sink logger, clock_kind clock,
-                               bool include_main_thread)
+                               bool                       include_main_thread,
+                               std::function<bool(pid_t)> is_excluded)
 : m_source{ std::move(source) }
 , m_logger{ std::move(logger) }
 , m_clock{ clock }
 , m_include_main_thread{ include_main_thread }
+, m_is_excluded{ std::move(is_excluded) }
 {}
 
 void
@@ -95,7 +100,7 @@ thread_tracker::rescan(triggers::i_trigger& trigger, streaming_pipeline* pipelin
     trigger.collect_tids(tracked);
     for(const pid_t tid : tracked)
     {
-        if(live.contains(tid) && !recycled(tid))
+        if(live.contains(tid) && !recycled(tid) && !is_excluded(tid))
         {
             continue;
         }
@@ -139,7 +144,8 @@ void
 thread_tracker::try_attach(triggers::i_trigger& trigger, const thread_entry& entry,
                            pid_t exclude_tid)
 {
-    if(entry.tid == exclude_tid || trigger.is_tracked(entry.tid))
+    if(entry.tid == exclude_tid || is_excluded(entry.tid) ||
+       trigger.is_tracked(entry.tid))
     {
         return;
     }
@@ -150,13 +156,20 @@ thread_tracker::try_attach(triggers::i_trigger& trigger, const thread_entry& ent
     }
 }
 
+bool
+thread_tracker::is_excluded(pid_t tid) const
+{
+    return m_is_excluded && m_is_excluded(tid);
+}
+
 void
 thread_tracker::log_attach_failure(pid_t tid, std::string_view what)
 {
     if(m_logged_attach_failures.insert(tid).second)
     {
         emit(m_logger, m_clock, log_level::warn, [&] {
-            return "cannot attach to tid " + std::to_string(tid) + ": " + std::string(what);
+            return "cannot attach to tid " + std::to_string(tid) + ": " +
+                   std::string(what);
         });
     }
 }

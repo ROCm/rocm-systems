@@ -6,6 +6,7 @@
 #include "core/config.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
@@ -28,8 +29,13 @@
 
 #include <csignal>
 #include <dlfcn.h>
+#include <fmt/format.h>
+#include <future>
+#include <memory>
+#include <optional>
 #include <ostream>
 #include <pthread.h>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -151,6 +157,29 @@ pthread_create_gotcha::wrapper::wrapper(routine_t _routine, void* _arg,
 void*
 pthread_create_gotcha::wrapper::operator()() const
 {
+    // First thing in the child: the creator holds the thread list's creation gate until
+    // this signal, so it must come before any setup that can take long.
+    auto internal_thread = std::optional<thread_list::scoped_internal_thread>{};
+    if(m_config.exclude)
+    {
+        internal_thread.emplace(thread_list::get_internal_thread_list());
+    }
+    if(m_config.registered)
+    {
+        m_config.registered->set_value();
+    }
+
+    const auto own_tid = thread_list::current_tid();
+    if(m_config.exclude)
+    {
+        LOG_DEBUG("Thread {} '{}' excluded: {}", own_tid,
+                  thread_list::thread_name(own_tid), m_config.origin);
+    }
+    else
+    {
+        LOG_DEBUG("Thread {} eligible for sampling", own_tid);
+    }
+
     using thread_bundle_data_t = thread_data<thread_bundle_t>;
     auto _child_internal_tid   = utility::get_thread_index();
     if(static_cast<size_t>(_child_internal_tid) >= ROCPROFSYS_MAX_THREADS ||
@@ -600,6 +629,48 @@ constexpr const std::array k_rocm_internal_libraries = { "libhsa-runtime64",
                                                          "librocprofiler-sdk",
                                                          "libamdhip64" };
 
+// Start routine and arguments of a ROCm-internal thread, forwarded unchanged after the
+// new thread has registered itself in the internal thread list.
+struct rocm_thread_launch
+{
+    void* (*func)(void*);
+    void*              arg;
+    std::promise<void> registered;
+    std::string        origin;
+
+    static void* run(void* launch_ptr)
+    {
+        auto launch = std::unique_ptr<rocm_thread_launch>{
+            static_cast<rocm_thread_launch*>(launch_ptr)
+        };
+        auto const                                func = launch->func;
+        auto* const                               arg  = launch->arg;
+        const thread_list::scoped_internal_thread internal_thread{
+            thread_list::get_internal_thread_list()
+        };
+        launch->registered.set_value();
+        const auto tid = thread_list::current_tid();
+        LOG_DEBUG("Thread {} '{}' excluded: {}", tid, thread_list::thread_name(tid),
+                  launch->origin);
+        launch.reset();
+        return func(arg);
+    }
+};
+
+// "symbol in library" of a start routine, for diagnostics.
+std::string
+describe_start_routine(const void* func_ptr)
+{
+    Dl_info info;
+    if(func_ptr == nullptr || dladdr(func_ptr, &info) == 0)
+    {
+        return "unknown start routine";
+    }
+    return fmt::format("start routine {} in {}",
+                       info.dli_sname != nullptr ? info.dli_sname : "?",
+                       info.dli_fname != nullptr ? info.dli_fname : "?");
+}
+
 bool
 is_rocm_internal_thread(void* func_ptr)
 {
@@ -632,7 +703,19 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // loops
     if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
     {
-        return (*m_wrappee)(thread, attr, func, arg);
+        auto launch    = std::make_unique<rocm_thread_launch>(func, arg);
+        launch->origin = "ROCm runtime thread, " +
+                         describe_start_routine(reinterpret_cast<void*>(func));
+        auto registered = launch->registered.get_future();
+        auto creation   = thread_list::get_internal_thread_list().begin_creation();
+        auto ret = (*m_wrappee)(thread, attr, &rocm_thread_launch::run, launch.get());
+        if(ret == 0)
+        {
+            // ownership moved to the child
+            launch.release();
+            registered.wait_for(500ms);
+        }
+        return ret;
     }
 
     auto tid = utility::get_thread_index();
@@ -667,6 +750,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         (use_sampling && sample_child && active && !coverage && !offset);
     auto const enable_causal =
         (use_causal && sample_child && active && !coverage && !offset);
+    // Threads rocprof-sys itself starts, or starts with child sampling disabled, must
+    // be in the internal thread list before the sampler can see them.
+    auto const exclude = (offset || (use_sampling && !enable_sampling));
 
     static const bool k_debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
@@ -710,12 +796,23 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     state::thread::set(state::thread::Disabled);
     auto const blocked = get_sampling_signals();
     auto const promise = active ? std::make_shared<std::promise<void>>() : promise_t{};
-    auto const config  = wrapper_config{ .enable_causal   = enable_causal,
-                                         .enable_sampling = enable_sampling,
-                                         .offset          = offset,
-                                         .parent_tid      = tid,
-                                         .promise         = promise };
-    auto*      wrap    = new wrapper{ func, arg, config };
+    auto const registered =
+        exclude ? std::make_shared<std::promise<void>>() : promise_t{};
+    auto origin = std::string{};
+    if(exclude)
+    {
+        origin = std::string{ offset ? "started by rocprof-sys" : "child sampling off" } +
+                 ", " + describe_start_routine(reinterpret_cast<void*>(func));
+    }
+    auto const config = wrapper_config{ .enable_causal   = enable_causal,
+                                        .enable_sampling = enable_sampling,
+                                        .offset          = offset,
+                                        .exclude         = exclude,
+                                        .parent_tid      = tid,
+                                        .promise         = promise,
+                                        .registered      = registered,
+                                        .origin          = std::move(origin) };
+    auto*      wrap   = new wrapper{ func, arg, config };
     state::thread::set(state::thread::Internal);
 
     // block the signals in entire process
@@ -735,8 +832,21 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // threads must process their delays before creating a new thread
     causal::delay::process();
 
+    // hold the creation gate until the child is in the internal thread list
+    auto creation = std::optional<thread_list::internal_thread_list::creation_scope>{};
+    if(exclude)
+    {
+        creation.emplace(thread_list::get_internal_thread_list().begin_creation());
+    }
+
     // create the thread
     auto ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(wrap));
+
+    if(registered && ret == 0)
+    {
+        registered->get_future().wait_for(500ms);
+    }
+    creation.reset();
 
     // wait for thread to set promise
     if(promise)

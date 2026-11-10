@@ -7,6 +7,7 @@
 #include "core/config.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -226,6 +227,9 @@ post_processor::run_multithreaded(
          &_progress_cb](const std::shared_ptr<data::processor_config_t>& cfg) {
             LOG_TRACE("Spawning processing thread for pid={}", cfg->_pid);
             return std::thread{ [this, cfg, &formats, _progress_cb] {
+                const thread_list::scoped_internal_thread internal_thread{
+                    thread_list::get_internal_thread_list()
+                };
                 const auto _filename =
                     utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
                 process_buffered_storage(cfg, _filename, formats, _progress_cb, m_engine,

@@ -7,6 +7,7 @@
 #include "core/categories.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
@@ -142,6 +143,9 @@ ensure_ci_timeout_backtrace(double             ci_timeout_seconds,
 {
     ci_timeout_ready.set_value();
 
+    const thread_list::scoped_internal_thread internal_thread{
+        thread_list::get_internal_thread_list()
+    };
     thread_info::init(true);
     const auto thread_state_guard = state::thread::scoped(state::thread::Disabled);
 

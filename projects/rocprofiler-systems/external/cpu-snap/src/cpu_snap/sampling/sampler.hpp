@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 /**
@@ -37,6 +40,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -48,6 +52,7 @@
 
 #include "cpu_snap/core/frame_limits.hpp"
 #include "cpu_snap/core/raw_sample.hpp"
+#include "cpu_snap/core/types.hpp"
 #include "cpu_snap/sampling/backend_selection.hpp"
 #include "cpu_snap/sampling/clock_kind.hpp"
 #include "cpu_snap/sampling/logger.hpp"
@@ -57,7 +62,6 @@
 #include "cpu_snap/sampling/triggers/i_trigger.hpp"
 #include "cpu_snap/sampling/unwind/unwinder.hpp"
 #include "cpu_snap/sampling/unwind_mode.hpp"
-#include "cpu_snap/core/types.hpp"
 
 namespace cpu_snap::sampling
 {
@@ -133,8 +137,8 @@ public:
      * @brief Signal/timer-backend attribute options.
      *
      * Used when @ref config::backend resolves to backend_kind::signal. The backend
-     * arms one per-thread wall-time (CLOCK_MONOTONIC) timer (SIGEV_THREAD_ID) delivering a
-     * realtime signal; the handler snapshots regs + a bounded stack copy into a
+     * arms one per-thread wall-time (CLOCK_MONOTONIC) timer (SIGEV_THREAD_ID) delivering
+     * a realtime signal; the handler snapshots regs + a bounded stack copy into a
      * preallocated per-thread ring, and the worker runs an off-handler unwind
      * (DWARF or frame-pointer, per @ref perf_attr_options::unwind) to emit the
      * full frame chain. Sampling is wall-time per thread (see signal/backend.hpp
@@ -189,6 +193,21 @@ public:
          * stacks like `worker_loop` / `drain_ring`.
          */
         bool exclude_sampler_worker = true;
+
+        /**
+         * Tids for which this returns true are never attached, and are detached
+         * if already tracked. Called from the sampler's worker thread (and from
+         * start()); may be empty.
+         */
+        std::function<bool(pid_t)> is_excluded;
+
+        /**
+         * Called before every thread listing + attach pass (start() and each
+         * rescan); the returned object is held until the pass ends. Lets the
+         * embedder block thread registration while the sampler decides which
+         * tids to attach. May be empty.
+         */
+        std::function<std::shared_ptr<void>()> rescan_guard;
     };
 
     /**
@@ -428,7 +447,7 @@ public:
     [[nodiscard]] std::size_t tracked_threads() const noexcept
     {
         const std::lock_guard<std::mutex> lk(m_state_mutex);
-        const auto live = m_backend->tracked_tids();
+        const auto                        live = m_backend->tracked_tids();
         return live != 0 ? live : m_peak_tracked.load(std::memory_order_relaxed);
     }
 
@@ -527,34 +546,35 @@ private:
 
     internal::streaming_pipeline::config build_streaming_config();
 
-    void rescan_threads();
-    [[nodiscard]] pid_t excluded_tid() const noexcept;
-    void rollback_start() noexcept;
+    void                                rescan_threads();
+    [[nodiscard]] pid_t                 excluded_tid() const noexcept;
+    [[nodiscard]] std::shared_ptr<void> hold_rescan_guard() const;
+    void                                rollback_start() noexcept;
 
     // ----- worker thread (hot path; no allocations per sample) -------------
     void worker_loop() noexcept;
 
-    config                                             m_cfg;
-    sampler_capabilities                               m_caps;
-    backend_choice                                     m_choice;
-    unwind::unwinder                                m_unwinder{};
-    std::unique_ptr<triggers::i_trigger>                m_backend;
-    std::optional<internal::streaming_pipeline>        m_streaming;
-    internal::streaming_pipeline::stats                m_final_stream_stats{};
-    std::thread                                        m_worker;
-    std::atomic<bool>                                  m_running{ false };
-    std::atomic<bool>                                  m_paused{ false };
-    std::atomic<bool>                                  m_shutdown{ false };
-    std::atomic<std::size_t>                           m_total{ 0 };
-    std::atomic<std::size_t>                           m_lost{ 0 };
-    std::atomic<std::size_t>                           m_peak_tracked{ 0 };
-    std::atomic<pid_t>                                 m_worker_tid{ -1 };
-    std::atomic<std::uint64_t>                         m_rescan_failures{ 0 };
-    std::atomic<bool>                                  m_worker_failed{ false };
+    config                                      m_cfg;
+    sampler_capabilities                        m_caps;
+    backend_choice                              m_choice;
+    unwind::unwinder                            m_unwinder{};
+    std::unique_ptr<triggers::i_trigger>        m_backend;
+    std::optional<internal::streaming_pipeline> m_streaming;
+    internal::streaming_pipeline::stats         m_final_stream_stats{};
+    std::thread                                 m_worker;
+    std::atomic<bool>                           m_running{ false };
+    std::atomic<bool>                           m_paused{ false };
+    std::atomic<bool>                           m_shutdown{ false };
+    std::atomic<std::size_t>                    m_total{ 0 };
+    std::atomic<std::size_t>                    m_lost{ 0 };
+    std::atomic<std::size_t>                    m_peak_tracked{ 0 };
+    std::atomic<pid_t>                          m_worker_tid{ -1 };
+    std::atomic<std::uint64_t>                  m_rescan_failures{ 0 };
+    std::atomic<bool>                           m_worker_failed{ false };
     // Guards m_backend topology, m_streaming lifetime and m_threads
     // between the worker's rescan and caller-thread pause/resume/stats/stop.
-    mutable std::mutex                                 m_state_mutex;
-    std::optional<internal::thread_tracker>            m_threads;
+    mutable std::mutex                      m_state_mutex;
+    std::optional<internal::thread_tracker> m_threads;
 };
 
 }  // namespace cpu_snap::sampling

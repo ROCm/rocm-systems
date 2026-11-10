@@ -14,6 +14,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:control-waitable-steady-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
+    $<TARGET_OBJECTS:thread-list-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
     $<TARGET_OBJECTS:perfetto-sinks-tests>
