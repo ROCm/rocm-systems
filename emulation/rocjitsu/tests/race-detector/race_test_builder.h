@@ -190,7 +190,7 @@ public:
   /// store to global memory.
   void counterOp(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order,
                  uint8_t increment = 1) {
-    waves_[wave]->prepareForCounterIncrement(counter, increment);
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter, increment).succeeded());
     const std::array obligations{amdgpu::MemoryCounterObligation{counter, order, increment}};
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_GLOBAL,
                                 /*registers=*/{}, defaultExec_, /*byteMask=*/0xF, obligations,
@@ -199,7 +199,7 @@ public:
 
   /// A load into one VGPR.
   void counterLoad(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order, int vgprDst) {
-    waves_[wave]->prepareForCounterIncrement(counter);
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
     waves_[wave]->checkVgprWrite(vgprDst, defaultExec_, /*byteMask=*/0xF, order);
     const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR,
@@ -212,7 +212,7 @@ public:
   /// as unordered, as the plugin checks async and tensor transfers.
   void counterLdsTransfer(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order,
                           MemoryEventType type, std::vector<LdsByteRange> ranges) {
-    waves_[wave]->prepareForCounterIncrement(counter);
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
     for (const auto &range : ranges) {
       const auto bytes = static_cast<int>(
           detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));

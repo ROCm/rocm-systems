@@ -1408,11 +1408,11 @@ protected:
   static constexpr int kCapacity = 63;
   static constexpr uint32_t kOldestAddress = 0;
   static constexpr uint32_t kYoungerAddress = 64;
+  static constexpr uint32_t kFlatLdsAddress = 128;
 
   /// Issue a one-lane, one-dword vector memory operation on the global route,
   /// as execution does: the issue hook, then the routed-memory hook.
-  void vmem(int wave, bool is_load, uint32_t vgpr, uint64_t exec = 1,
-            std::string_view mnemonic = {}) {
+  void vmem(int wave, bool is_load, uint32_t vgpr, uint64_t exec = 1) {
     waves[wave]->pc += 16;
     auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
     state->elem_size = sizeof(uint32_t);
@@ -1423,33 +1423,62 @@ protected:
     state->lane_mask = exec;
     state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
     const auto counter = is_load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
-    std::unique_ptr<TestMemoryInstruction> inst;
-    MemoryAccessObservation access{};
-    if (mnemonic.empty()) {
-      inst = std::make_unique<TestMemoryInstruction>(
-          std::move(state),
-          std::initializer_list<MemoryCounterObligation>{{counter, MemoryCompletionClass::VMEM}});
-    } else {
-      // A generic FLAT access that resolved to global memory. FLAT carries
-      // both counter domains until routing selects the one it used.
-      state->wait_counter_type = counter;
-      inst = std::make_unique<TestMemoryInstruction>(std::move(state), mnemonic,
-                                                     WaitCounterType::DSCNT);
-      access.route = MemoryRoute::GLOBAL;
-      access.decoded_space = DecodedMemorySpace::FLAT;
-      access.request_lane_mask = exec;
-    }
-    const uint64_t wave_exec = waves[wave]->exec();
-    waves[wave]->set_exec(exec);
-    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
-    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(access, *inst, *waves[wave]);
-    waves[wave]->set_exec(wave_exec);
+    TestMemoryInstruction inst(std::move(state), {{counter, MemoryCompletionClass::VMEM}});
+    issue(wave, inst, {}, exec);
   }
 
   void vmem_load(int wave, uint32_t vgpr, uint64_t exec = 1) { vmem(wave, true, vgpr, exec); }
   void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
-  void flat_global_load(int wave, uint32_t vgpr) {
-    vmem(wave, true, vgpr, /*exec=*/1, "flat_load_b32");
+
+  enum class FlatRoute { Global, Lds, NoActiveLanes };
+
+  /// Issue a one-lane, one-dword generic FLAT load whose addresses resolved as
+  /// `route` says. It carries both decoded counter obligations, as gfx1250
+  /// FLAT metadata does: LOADcnt in the VMEM class and DScnt in the LDS class.
+  void flat_load(int wave, uint32_t vgpr, FlatRoute route) {
+    waves[wave]->pc += 16;
+    const bool lds = route == FlatRoute::Lds;
+    const uint64_t exec = route == FlatRoute::NoActiveLanes ? 0 : 1;
+    auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    state->per_lane_addr[0] = kFlatLdsAddress;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
+                                {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                               /*exec_masked=*/true, "flat_load_b32");
+    MemoryAccessObservation access{};
+    access.route = lds ? MemoryRoute::LOCAL : MemoryRoute::GLOBAL;
+    access.decoded_space = DecodedMemorySpace::FLAT;
+    access.request_lane_mask = exec;
+    access.normalized_to_local = lds;
+    access.flat_local_lane_mask = lds ? exec : 0;
+    issue(wave, inst, access, exec);
+  }
+
+  /// Deliver a memory instruction to the issue hook, then the routed-memory
+  /// hook, with the wave's EXEC set to `exec` for the issue.
+  void issue(int wave, TestMemoryInstruction &inst, const MemoryAccessObservation &access,
+             uint64_t exec) {
+    const uint64_t wave_exec = waves[wave]->exec();
+    waves[wave]->set_exec(exec);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(access, inst, *waves[wave]);
+    waves[wave]->set_exec(wave_exec);
+  }
+
+  void wait_loadcnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc00000u | count);
+  }
+
+  using TensorDmaRaceTest::wait_dscnt;
+  void wait_dscnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u | count);
   }
 
   /// Issue an instruction decoded from `word` through the issue hook only, as
@@ -1515,21 +1544,111 @@ TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadBelowCapacityKeepsOldestLoadP
   EXPECT_TRUE(vgpr_read(0, 0));
 }
 
-// FLAT applies capacity to the counter domains its addresses resolved to.
+// Every FLAT instruction increments both DScnt and LOADcnt or STOREcnt when it
+// issues, whichever memory its addresses resolve to (CDNA5 ISA 5.7.1.3), so it
+// applies backpressure to both counters.
 TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalAdvancesLoadcnt) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
-  flat_global_load(0, /*vgpr=*/2);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
-TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalDoesNotAdvanceDscnt) {
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalAdvancesDscnt) {
   ds_read(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 1; ++index)
     ds_read(0, kYoungerAddress);
-  flat_global_load(0, /*vgpr=*/2);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToLdsAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToLdsAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// A FLAT with EXEC zero still counts on both counters unless they are all zero
+// (CDNA5 ISA 3.2.2.1).
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatAtCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
   EXPECT_TRUE(tensor_load_oldest());
+}
+
+// A FLAT keeps its slot in the counter of the domain it did not use, in order
+// with that domain's other operations (CDNA5 ISA 5.7.1.3), so partial waits
+// count it. A DS read, then a FLAT to global memory: DScnt holds two, and
+// waiting for one to remain completes the DS read.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsGlobalFlatSlot) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_dscnt(0, 1);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitAllowingBothKeepsDsReadPending) {
+  ds_read(0, kOldestAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_dscnt(0, 2);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitAllowingBothKeepsLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_loadcnt(0, 2);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// The slot in the unused domain does not delay the FLAT's own result, which
+// depends only on the domain its addresses used.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalFlatResultIsReadyAfterLoadcntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Global);
+  wait_loadcnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LdsFlatResultIsReadyAfterDscntWait) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
 }
 
 TEST_F(Gfx1250CounterCapacityRaceTest, FullDscntCompletesOldestDsRead) {
@@ -2008,6 +2127,8 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
     state->d16_lo = !formatted;
     state->buffer_d16 = formatted;
     state->buffer_components = formatted ? 3 : 0;
+    if (arch == "cdna5")
+      state->wait_counter_type = WaitCounterType::LOADCNT; // gfx1250 global loads.
     TestMemoryInstruction load(std::move(state));
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, load, *wf);
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wf);
@@ -2962,6 +3083,7 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
             state->wf_size = 32;
             state->dst_reg_base = ds_wave->vgpr_alloc().base;
             state->per_lane_addr[0] = probe_addresses[probe];
+            state->wait_counter_type = WaitCounterType::DSCNT;
             TestMemoryInstruction inst(std::move(state));
             f.plugin_group_->onAmdgpuBeforeExecuteInstruction(ds_wave->pc, inst, *ds_wave);
             f.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *ds_wave);
@@ -3153,6 +3275,7 @@ TEST(RaceDetectorPluginTest, MixedFlatAtLdsBackingEndTracksExecutedElements) {
     probe->wf_size = 32;
     probe->dst_reg_base = probe_wave->vgpr_alloc().base;
     probe->per_lane_addr[0] = capacity - 4;
+    probe->wait_counter_type = WaitCounterType::DSCNT;
     TestMemoryInstruction probe_inst(std::move(probe));
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(probe_wave->pc, probe_inst, *probe_wave);
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, probe_inst, *probe_wave);
@@ -3227,8 +3350,12 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
         EXPECT_EQ(events.totalAllocated(), 0);
         continue;
       }
-      const EventId event{0};
-      ASSERT_EQ(events.totalAllocated(), 1);
+      // A gfx1250 FLAT takes a slot in both counters (CDNA5 ISA 5.7.1.3). When
+      // its addresses use no global memory, that counter's slot is recorded
+      // first, as an event with no registers or LDS bytes.
+      const bool slot_event = !test.has_global;
+      const EventId event{slot_event ? 1 : 0};
+      ASSERT_EQ(events.totalAllocated(), slot_event ? 2 : 1);
       EXPECT_EQ(events.execMask(event), test.exec);
       EXPECT_EQ(events.ldsIntervals(event).getTotalBytes(), test.has_lds ? 4 : 0);
       EXPECT_EQ(events.ldsIntervals(event).contains(lds_base + 64), test.has_lds);
@@ -3236,10 +3363,20 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       const auto global_counter = load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
       EXPECT_EQ(events.pendingCounterIncrement(event, global_counter), test.has_global ? 1 : 0);
       EXPECT_EQ(events.pendingCounterIncrement(event, WaitCounterType::DSCNT), 1);
+      const EventId slot{0};
+      if (slot_event) {
+        EXPECT_EQ(events.registers(slot).size(), 0u);
+        EXPECT_EQ(events.ldsIntervals(slot).getTotalBytes(), 0);
+        EXPECT_EQ(events.pendingCounterIncrement(slot, global_counter), 1);
+        EXPECT_EQ(events.pendingCounterIncrement(slot, WaitCounterType::DSCNT), 0);
+      }
       EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
       PendingWaitCount wait;
       wait.add(global_counter, 0);
       race.dispatch(wait);
+      if (slot_event) {
+        EXPECT_EQ(events.status(slot), EventStatus::WAVE_COMPLETE);
+      }
       EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
       wait.updates.clear();
       wait.add(WaitCounterType::DSCNT, 0);
@@ -5420,7 +5557,9 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0x1u;
   dropped->per_lane_lds_addr[0] = amdgpu::kInvalidLdsAddress;
-  TestMemoryInstruction dropped_inst(std::move(dropped));
+  // A global load into LDS is an async load on gfx1250.
+  TestMemoryInstruction dropped_inst(
+      std::move(dropped), {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, dropped_inst, *writer);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
 
@@ -5433,6 +5572,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
+  read->wait_counter_type = WaitCounterType::DSCNT;
   TestMemoryInstruction read_inst(std::move(read));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, read_inst, *reader);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
@@ -5473,7 +5613,9 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   dropped->exec_mask = 0x1u;
   dropped->lane_mask = 0;
   dropped->per_lane_lds_addr[0] = 0;
-  TestMemoryInstruction dropped_inst(std::move(dropped));
+  // A global load into LDS is an async load on gfx1250.
+  TestMemoryInstruction dropped_inst(
+      std::move(dropped), {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, dropped_inst, *writer);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
 
@@ -5486,6 +5628,7 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
+  read->wait_counter_type = WaitCounterType::DSCNT;
   TestMemoryInstruction read_inst(std::move(read));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, read_inst, *reader);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
@@ -5524,6 +5667,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   ignored->lane_mask = 0;
   ignored->wf_size = wf->wf_size();
   ignored->dst_reg_base = wf->vgpr_alloc().base + kDestinationVgpr;
+  ignored->wait_counter_type = WaitCounterType::LOADCNT;
   TestMemoryInstruction ignored_inst(std::move(ignored));
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, ignored_inst, *wf);
   f.plugin_group_->onAmdgpuMemoryAccessRouted({}, ignored_inst, *wf);

@@ -514,6 +514,38 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CapacitiesFollowTheWaitPolicy) {
   EXPECT_EQ(gfx1250Capacity(amdgpu::WaitCounterKind::Tensor), 63); // TENSORcnt: 6 bits.
 }
 
+TEST(RaceDetector, Gfx1250CounterCapacity_ArchCapacitiesConfigureSplitCountersOnly) {
+  constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(capacities.loadcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Load));
+  EXPECT_EQ(capacities.storecnt, gfx1250Capacity(amdgpu::WaitCounterKind::Store));
+  EXPECT_EQ(capacities.dscnt, gfx1250Capacity(amdgpu::WaitCounterKind::Ds));
+  EXPECT_EQ(capacities.kmcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Km));
+  EXPECT_EQ(capacities.asynccnt, gfx1250Capacity(amdgpu::WaitCounterKind::Async));
+  EXPECT_EQ(capacities.tensorcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Tensor));
+  // gfx1250 has no combined VMCNT or LGKMCNT.
+  EXPECT_EQ(capacities.vmcnt, 0);
+  EXPECT_EQ(capacities.lgkmcnt, 0);
+}
+
+// Pre-GFX12 targets keep their combined capacities; their split counter names
+// alias the combined counters, so they have no split capacities.
+TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    const auto capacities = counterCapacitiesForArch(arch);
+    const auto properties = rocjitsu::isa_properties(arch);
+    EXPECT_EQ(capacities.vmcnt, properties.vmcnt_capacity);
+    EXPECT_EQ(capacities.lgkmcnt, properties.lgkmcnt_capacity);
+    for (const auto counter :
+         {amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
+          amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
+          amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT})
+      EXPECT_EQ(capacities.split(counter), 0);
+  }
+}
+
 TEST(RaceDetector, Gfx1250CounterCapacity_FullLoadcntMakesOldestDestinationReadable) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Load);
   auto builder = makeGfx1250Test();
