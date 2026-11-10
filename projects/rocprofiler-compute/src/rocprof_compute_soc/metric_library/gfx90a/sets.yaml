@@ -1,4 +1,3 @@
-inherit: ../gfx908/sets.yaml
 compute_thruput_flops:
   title: Compute Throughput FLOPS
   metrics:

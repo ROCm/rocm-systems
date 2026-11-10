@@ -1,4 +1,3 @@
-inherit: ../gfx942/sets.yaml
 compute_thruput_flops:
   metrics:
   - compute.mfma_flops_f8
