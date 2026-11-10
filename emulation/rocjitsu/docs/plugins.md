@@ -520,6 +520,10 @@ range intersected with the backing. For FLAT, start with
 lane and address set to recover the transferred byte intervals. Equal-offset
 CDNA2 DS pairs report a single access.
 
+BUFFER_STORE_LDS_DWORD reports the issue-time LDS source addresses in
+`lds_source_addresses` and the global destinations in `addresses`. The same
+request mask and allocation checks select which source DWORDs were read.
+
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.

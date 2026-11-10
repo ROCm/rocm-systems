@@ -615,8 +615,12 @@ class BufferStoreLdsDwordMubuf : public Mubuf {
 public:
   BufferStoreLdsDwordMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand srsrc;
   Operand soffset;
+  Operand lds_m0;
 };
 
 class BufferWbinvl1Mubuf : public Mubuf {
