@@ -30,7 +30,8 @@ Roofline
 
 The roofline peaks are measured on the GPU by the gfx1201 micro-benchmarks. The
 bandwidth roofs are DRAM, MALL (the 64 MB Infinity Cache), GL2, the GL1 write-combining cache, GL0, and LDS.
-The matrix roofs are FP8, FP16, and BF16.
+The matrix roofs are FP8, BF8, FP16, and BF16. BF8 is ``V_WMMA_F32_16X16X16_BF8_BF8``,
+the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
 No counter separates MALL hits from DRAM traffic, so the DRAM-destined traffic is drawn
 against both the DRAM roof and the MALL roof.
 

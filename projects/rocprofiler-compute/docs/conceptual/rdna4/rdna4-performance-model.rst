@@ -78,7 +78,7 @@ GLARB, Central Hub, and UTCL1 panels. Those five panels have no metrics. The
 texture addresser stays TA and the texture data return stays TD, the same block
 names as RDNA3.5. TA Busy is a GRBM metric.
 
-What gfx1201 adds on top of that layout is the MALL roof, FP8, FP16, and BF16
+What gfx1201 adds on top of that layout is the MALL roof, FP8, BF8, FP16, and BF16
 WMMA roofs, and DRAM in place of the RDNA3.5 system-memory path.
 
 Workgroups and execution

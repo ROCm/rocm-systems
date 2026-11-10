@@ -72,7 +72,7 @@ interpret it as elapsed GPU time, a FLOP count or a utilization percentage.
 
 ``WMMA FLOPs (F16->F32 16x16x16)`` assumes FP16 inputs and FP32 accumulation for
 that matrix shape. The raw WMMA counter counts issues per vec32 and does not
-distinguish FP16, BF16, or FP8. Its FLOP conversion and peak comparison are
+distinguish FP16, BF16, FP8, or BF8. Its FLOP conversion and peak comparison are
 approximate and require validation for the kernel's precision and wave size.
 Do not treat a percentage from a mixed-precision workload as a validated FP16
 utilization figure. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports
@@ -330,7 +330,7 @@ intensity built from them are therefore estimates and not precision-specific
 FLOP counts. They can read low for FMA-only loops and high when index and loop
 arithmetic dominate. In a deterministic tiled FP32 matrix-multiply test, the
 VALU row was about twice the true FLOP rate. One WMMA counter covers FP16,
-BF16, and FP8 and counts per vec32, so the WMMA row assumes 16x16x16 FP16
+BF16, FP8, and BF8 and counts per vec32, so the WMMA row assumes 16x16x16 FP16
 inputs with FP32 accumulation and compares with the FP16 WMMA peak. Its
 interpretation needs validation for other shapes and types.
 

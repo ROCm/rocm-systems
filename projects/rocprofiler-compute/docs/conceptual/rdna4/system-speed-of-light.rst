@@ -33,7 +33,7 @@ percentage spent waiting for any instruction to issue
 
 The ``WMMA FLOPs`` row counts 8192 FLOPs per WMMA instruction, the work of one
 16x16x16 multiply-accumulate. The counter increments once per vec32, so a wave64
-WMMA counts twice. The counter does not separate FP16, BF16, and FP8 WMMA.
+WMMA counts twice. The counter does not separate FP16, BF16, FP8, and BF8 WMMA.
 The row compares with 1024 FLOPs/CU/cycle. Treat that conversion and the
 percentage of peak as approximations.
 
