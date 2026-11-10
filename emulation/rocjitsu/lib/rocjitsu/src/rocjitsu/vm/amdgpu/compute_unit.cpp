@@ -604,9 +604,10 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
 }
 
 void ComputeUnitCore::fail_gws_wait(Wavefront &wf, const char *reason) {
+  const uint64_t failure_pc = wf.state() == WfState::GWS_WAIT ? wf.gws_wait_pc_ : wf.pc;
   util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
                      " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
-                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
+                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", failure_pc),
                      " gws_wait_limit=", config_.gws_wait_limit);
   const uint32_t dispatch_id = wf.dispatch_id();
   const bool pm4_failed = wf.fail_pm4_submission();
@@ -618,7 +619,6 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, const char *reason) {
   }
   if (cp_ && engine())
     pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
-  const uint64_t failure_pc = wf.pc;
   const InstructionExecutionError prior_error = wf.instruction_execution_error();
   const char *prior_detail = wf.instruction_execution_error_detail();
   abort_dispatch(dispatch_id);

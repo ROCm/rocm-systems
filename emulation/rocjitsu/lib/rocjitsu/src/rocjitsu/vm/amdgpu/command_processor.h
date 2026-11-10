@@ -1069,7 +1069,9 @@ private:
   /// @details Serialized by doorbell_thread_mutex_. Caller MUST NOT hold
   /// hw_queue_mutex_ so lifecycle operations consistently acquire
   /// doorbell_thread_mutex_ before hw_queue_mutex_.
-  void ensure_doorbell_monitor();
+  /// Startup failures are fatal: registrations are already visible, and KFD
+  /// must not recover with a live queue whose registration handle was lost.
+  void ensure_doorbell_monitor() noexcept;
   bool scan_doorbells();
   bool schedule_retry_event();
 

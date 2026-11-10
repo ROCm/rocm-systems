@@ -1767,7 +1767,7 @@ void CommandProcessor::set_doorbell_base(uint32_t process_id, void *base) {
   }
 }
 
-void CommandProcessor::ensure_doorbell_monitor() {
+void CommandProcessor::ensure_doorbell_monitor() noexcept {
   std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
   // A monitor is already servicing this CP's queues — nothing to do. (The
   // register→ring window is fine: the live monitor scans every registered queue

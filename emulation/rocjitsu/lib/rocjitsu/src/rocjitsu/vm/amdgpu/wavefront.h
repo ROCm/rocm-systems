@@ -1132,6 +1132,7 @@ public:
     gws_wait_rid_ = kNoGwsWait;
     gws_wait_is_barrier_ = false;
     gws_wait_generation_ = 0;
+    gws_wait_pc_ = 0;
     gws_wait_seq_ = 0;
     gws_wait_steps_ = 0;
     gws_wait_progress_ = 0;
@@ -1261,6 +1262,7 @@ private:
   static constexpr uint32_t kNoGwsWait = 0xffffffff;
   uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
   bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
+  uint64_t gws_wait_pc_ = 0;           ///< Issuing PC retained while the issue loop advances pc.
   uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
   /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
   /// store releases a V/BR credit to the oldest queued waiter first (across all
