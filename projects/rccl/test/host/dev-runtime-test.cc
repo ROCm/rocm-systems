@@ -6886,24 +6886,29 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersion_UnservedCompileTimeVersion_Return
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
 }
 
-// The enqueue-rearch path carries the version in its job, not the task queue.
-TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_RecordsRuntimeVersion) {
+// The enqueue-rearch path carries the version in its job, not the task queue,
+// and the job builds the devComm for that version. The hook runs the job and
+// then destroys it, as the management-task queue does: the job releases its
+// requirements copy on every exit, so the destructor only deletes the job.
+TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_BuildsForRuntimeVersion) {
   ScopedHook rearch(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "ENQUEUE_REARCH_ENABLE" ? 1 : deftVal;
   });
   uint32_t jobVersion = 0;
-  ScopedHook enqueue(g_ncclMgmtTaskEnqueue,
-                     [&](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm_t) {
-                       jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
-                       destructor(job);
-                       return ncclSuccess;
-                     });
+  ScopedHook enqueue(g_ncclMgmtTaskEnqueue, [&](ncclAsyncJob* job, ncclResult_t (*func)(ncclAsyncJob*),
+                                                void (*destructor)(void*), ncclComm_t) {
+    jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
+    ncclResult_t ret = func(job);
+    destructor(job);
+    return ret;
+  });
   reqs.version = kJitFieldVersion;
   reqs.useRuntimeVersion = true;
 
   ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
   EXPECT_EQ(enqueue.calls, 1);
   EXPECT_EQ(jobVersion, static_cast<uint32_t>(NCCL_VERSION_CODE));
+  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
 }
 
@@ -7459,23 +7464,6 @@ TEST_F(DevrCommCreateInternalJitTest, DeviceCodeVersion_ReachesGinDevCommSetup) 
   EXPECT_EQ(CreateFor(kJitFieldVersion), ncclInternalError);
 
   EXPECT_EQ(seen, (std::vector<uint32_t>{static_cast<uint32_t>(NCCL_VERSION_CODE), kJitFieldVersion}));
-}
-
-// The enqueue-rearch job builds the devComm for the version it was queued
-// with, not the version recorded in its (compile-time) requirements.
-TEST_F(DevrCommCreateInternalJitTest, CreateJob_BuildsForQueuedDeviceCodeVersion) {
-  auto* job = new ncclDevrCommCreateAsyncJob();
-  job->comm = comm;
-  job->outDevComm = &outDevComm;
-  job->deviceCodeVersion = NCCL_VERSION_CODE;
-  ASSERT_EQ(deepCopyDevCommRequirements(&reqs, &job->reqs), ncclSuccess);
-
-  EXPECT_EQ(ncclDevrCommCreateJob(&job->base), ncclSuccess);
-
-  EXPECT_TRUE(NewToOldCalls().empty());
-  EXPECT_EQ(outDevComm.version, static_cast<uint32_t>(NCCL_VERSION_CODE));
-  EXPECT_EQ(job->reqs, nullptr);  // the job releases its copy once it has run
-  ncclDevrCommCreateAsyncJobFree(job);
 }
 
 
