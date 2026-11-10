@@ -103,8 +103,10 @@ DISPLAY_VARIANTS = {
         "16.3.5": (
             "Cache Hit Rate",
             "vl1d.hit_rate",
-            "NOISE_CLAMP(COLLECT_SUM(_collect.vl1d_chr_non_rw, _collect.vl1d_hit_atom)"
-            ", 100)",
+            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - "
+            "(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + "
+            "TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), "
+            "TCP_TOTAL_CACHE_ACCESSES_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
         ),
     },
     "gfx950": {
