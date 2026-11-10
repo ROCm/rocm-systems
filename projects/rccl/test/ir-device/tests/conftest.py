@@ -71,6 +71,12 @@ NRANKS = int(os.environ.get("IR_GIN_NRANKS", "2"))
 # GPU. Override with IR_GIN_GPUS="2,3" to target specific devices.
 IR_GIN_GPUS = os.environ.get("IR_GIN_GPUS", ",".join(str(i) for i in range(NRANKS)))
 
+# --- Multi-rank typed LSA ReduceCopy functional test (separate MPI binary) ---
+RC_MPI_TEST_SRC = os.path.join(IR_DIR, "test", "IR_reducecopy_mpi_test.cpp")
+RC_MPI_TEST_EXE = os.path.join(IR_OUTDIR, "IR_reducecopy_mpi_test.exe")
+RC_NRANKS = int(os.environ.get("IR_RC_NRANKS", "2"))
+IR_RC_GPUS = os.environ.get("IR_RC_GPUS", ",".join(str(i) for i in range(RC_NRANKS)))
+
 LOGDIR = os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
 
@@ -221,7 +227,7 @@ def _find_rccl_libdir():
     return None
 
 
-def _missing_mpi_prerequisite():
+def _missing_mpi_prerequisite(src=None):
     """Reason string if the MPI GIN functional test cannot be built/run.
 
     Builds on _missing_prerequisite() (hipcc / hipify / gtest / GPU nodes) and
@@ -233,8 +239,9 @@ def _missing_mpi_prerequisite():
     base = _missing_prerequisite()
     if base:
         return base
-    if not os.path.isfile(GIN_MPI_TEST_SRC):
-        return f"IR_gin_mpi_test.cpp not found at {GIN_MPI_TEST_SRC}"
+    src = src or GIN_MPI_TEST_SRC
+    if not os.path.isfile(src):
+        return f"{os.path.basename(src)} not found at {src}"
     if shutil.which("mpirun") is None or shutil.which("mpicxx") is None:
         return "MPI not found (mpirun/mpicxx not in PATH)"
     if _find_rccl_libdir() is None:
@@ -246,7 +253,13 @@ def _missing_mpi_prerequisite():
 
 
 def _build_gin_mpi_binary():
-    """Compile IR_gin_mpi_test.cpp into an MPI GoogleTest binary.
+    """Compile IR_gin_mpi_test.cpp (see _build_mpi_binary)."""
+    return _build_mpi_binary(GIN_MPI_TEST_SRC, GIN_MPI_TEST_EXE,
+                             "ir_gin_mpi_build.log")
+
+
+def _build_mpi_binary(src, exe, log_name):
+    """Compile an MPI GoogleTest source against the bitcode.
 
     Same device-side bitcode link as IR_test (-Xoffload-linker librccl_device.bc
     + amdgpu-internalize-symbols=false), plus the host RCCL library and MPI.
@@ -272,17 +285,17 @@ def _build_gin_mpi_binary():
         f"-I{GENERATED_INC}",
         f"-I{gtest_inc}",
         f"-I{os.path.join(ROCM_PATH, 'include')}",
-        GIN_MPI_TEST_SRC,
+        src,
         "-Xoffload-linker", BITCODE,
         "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
         f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
         f"-L{rccl_libdir}", f"-Wl,-rpath,{rccl_libdir}", "-lrccl",
         f"-L{os.path.join(ROCM_PATH, 'lib')}", "-lamdhip64",
-        "-o", GIN_MPI_TEST_EXE,
+        "-o", exe,
     ]
     env = os.environ.copy()
     env.update({"OMPI_CXX": AMDCLANGPP, "MPICH_CXX": AMDCLANGPP})
-    build_log = os.path.join(LOGDIR, "ir_gin_mpi_build.log")
+    build_log = os.path.join(LOGDIR, log_name)
     with open(build_log, "w") as log:
         log.write("$ " + " ".join(args) + "\n\n")
         log.flush()
@@ -291,11 +304,9 @@ def _build_gin_mpi_binary():
             stderr=subprocess.STDOUT, universal_newlines=True,
         )
     assert proc.returncode == 0, (
-        f"Failed to compile IR_gin_mpi_test (see {build_log})"
+        f"Failed to compile {os.path.basename(src)} (see {build_log})"
     )
-    assert os.path.isfile(GIN_MPI_TEST_EXE), (
-        f"MPI test binary not produced at {GIN_MPI_TEST_EXE}"
-    )
+    assert os.path.isfile(exe), f"MPI test binary not produced at {exe}"
     return build_log
 
 
@@ -354,6 +365,56 @@ def run_gin_mpi_gtest(ir_gin_mpi_binary):
             proc = subprocess.run(
                 args, env=env, stdout=log, stderr=subprocess.STDOUT,
                 universal_newlines=True, timeout=300,
+            )
+        return proc, log_file
+
+    return _run
+
+
+@pytest.fixture(scope="session")
+def ir_reducecopy_mpi_binary():
+    """Update the bitcode, then compile IR_reducecopy_mpi_test.cpp once.
+
+    Skips when build/launch prerequisites (host librccl.so, MPI, hipify
+    staging, GoogleTest, GPU nodes) are missing. Runtime gates (cuMem, GPU
+    count, single node) are enforced inside the binary via GTEST_SKIP.
+    """
+    reason = _missing_mpi_prerequisite(RC_MPI_TEST_SRC)
+    if reason:
+        pytest.skip(f"IR ReduceCopy multi-rank tests skipped: {reason}")
+    _build_bitcode()  # make decides whether the artifact is stale
+    logger.info("Compiling IR_reducecopy_mpi_test.cpp -> %s ...", RC_MPI_TEST_EXE)
+    _build_mpi_binary(RC_MPI_TEST_SRC, RC_MPI_TEST_EXE,
+                      "ir_reducecopy_mpi_build.log")
+    return RC_MPI_TEST_EXE
+
+
+@pytest.fixture(scope="session")
+def run_reducecopy_mpi_gtest(ir_reducecopy_mpi_binary):
+    """Launch the ReduceCopy MPI test under `mpirun -np IR_RC_NRANKS`.
+
+    NCCL_CUMEM_ENABLE=1 is seeded if unset (symmetric windows need cuMem);
+    HIP_VISIBLE_DEVICES is pinned to IR_RC_GPUS so each rank gets its own GPU.
+    Returns (subprocess.CompletedProcess, log_file_path).
+    """
+
+    def _run(gtest_filter, log_name):
+        env = os.environ.copy()
+        env.setdefault("NCCL_CUMEM_ENABLE", "1")
+        env.setdefault("HSA_NO_SCRATCH_RECLAIM", "1")
+        env["HIP_VISIBLE_DEVICES"] = IR_RC_GPUS
+        args = [
+            "mpirun", "-np", str(RC_NRANKS),
+            ir_reducecopy_mpi_binary,
+            f"--gtest_filter={gtest_filter}", "--gtest_color=no",
+        ]
+        log_file = os.path.join(LOGDIR, log_name)
+        with open(log_file, "w") as log:
+            log.write("$ " + " ".join(args) + "\n\n")
+            log.flush()
+            proc = subprocess.run(
+                args, env=env, stdout=log, stderr=subprocess.STDOUT,
+                universal_newlines=True, timeout=600,
             )
         return proc, log_file
 

@@ -30,6 +30,14 @@
  *   [C2] ncclBarrierSession{Init,Sync}  (composite inner-LSA + outer-GIN)
  *          — sizeof / alignment structural check: PASS
  *          — runtime invocations: SKIP (require a live ncclDevComm + GIN net)
+ *   [D0] ReduceCopy typed thunks — link coverage for all 64 exports
+ *          (ncclLsa{ReduceSum,Copy,ReduceSumCopy}_<T>, ncclLocalReduceSumCopy_<T>
+ *          x 10 types; ncclMultimem{ReduceSum,Copy,ReduceSumCopy}_<T> x 8 types)
+ *   [D1] ncclLocalReduceSumCopy_<T> — functional, typed over all 10 types:
+ *          count sweep, misaligned bases, fan-in/fan-out shapes,
+ *          cta/warp/thread coop, out-of-bounds guard checks.
+ *          The Lsa* thunks are exercised functionally by the multi-rank
+ *          IR_reducecopy_mpi_test.cpp.
  *
  * Build is NOT a normal CMake/GTest build: librccl_device.bc must already
  * exist (cmake -DEMIT_LLVM_IR=ON) and the translation unit must be compiled
@@ -43,8 +51,13 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+#include <hip/hip_bf16.h>
+#include <hip/hip_fp16.h>
 
 #include <nccl.h>
 #include <nccl_device_wrapper.h>
@@ -585,4 +598,322 @@ TEST_F(IRDeviceTest, C2b_BarrierSessionRuntime) {
    * C1b need at once: a live ncclDevComm plus GIN network resources. */
   GTEST_SKIP() << "ncclBarrierSession{Init,Sync} require a live ncclDevComm "
                   "+ GIN network resources (not set up here)";
+}
+
+/* =====================================================================
+ * [D] ReduceCopy typed C-ABI thunks (upstream NCCL bbb1375fa382,
+ *     "bindings/ir: expose typed ReduceCopy APIs").
+ *
+ * The expected thunk inventory is spelled out HERE, independently of
+ * bindings/ir/util.h, so that dropping a type from util.h, a declaration
+ * from nccl_device_wrapper.h, or a name from the opt internalize list in
+ * CMakeLists.txt / Makefile all surface as a failure instead of silently
+ * shrinking what is tested.
+ *
+ * FP8 (F8E4M3/F8E5M2) is intentionally absent: RCCL's device ReduceSum/Copy
+ * has no fp8 support, so the HIP bitcode exports no FP8 thunks (test/ir-device
+ * checks that absence at the symbol level).
+ * ==================================================================== */
+#define IR_RC_ALL_TYPES(X) \
+  X(I8, int8_t) X(U8, uint8_t) X(I32, int32_t) X(U32, uint32_t) \
+  X(I64, int64_t) X(U64, uint64_t) X(F16, half) X(F32, float) \
+  X(F64, double) X(BF16, __hip_bfloat16)
+
+#define IR_RC_MULTIMEM_TYPES(X) \
+  X(I32, int32_t) X(U32, uint32_t) X(I64, int64_t) X(U64, uint64_t) \
+  X(F16, half) X(F32, float) X(F64, double) X(BF16, __hip_bfloat16)
+
+/* ---------------------------------------------------------------------
+ * [D0] Link coverage for every ReduceCopy thunk (64 symbols).
+ *
+ * Same technique as C0: store each thunk's device address so the consumer
+ * -> bitcode relocation is forced for every symbol. A missing, renamed or
+ * internalized export fails the device link or yields a null address. The
+ * Multimem* thunks cannot run on AMD (no multimem hardware; they assert at
+ * runtime), so link coverage is the only coverage they get.
+ * ------------------------------------------------------------------- */
+#define IR_RC_ADDR(op, S) (uint64_t)(uintptr_t)(void*)&op##_##S
+#define IR_RC_NAME(op, S) #op "_" #S
+
+#define IR_RC_ALL_ADDRS(S, T)                       \
+  IR_RC_ADDR(ncclLsaReduceSum, S),                  \
+  IR_RC_ADDR(ncclLsaCopy, S),                       \
+  IR_RC_ADDR(ncclLsaReduceSumCopy, S),              \
+  IR_RC_ADDR(ncclLocalReduceSumCopy, S),
+#define IR_RC_MM_ADDRS(S, T)                        \
+  IR_RC_ADDR(ncclMultimemReduceSum, S),             \
+  IR_RC_ADDR(ncclMultimemCopy, S),                  \
+  IR_RC_ADDR(ncclMultimemReduceSumCopy, S),
+#define IR_RC_ALL_NAMES(S, T)                       \
+  IR_RC_NAME(ncclLsaReduceSum, S),                  \
+  IR_RC_NAME(ncclLsaCopy, S),                       \
+  IR_RC_NAME(ncclLsaReduceSumCopy, S),              \
+  IR_RC_NAME(ncclLocalReduceSumCopy, S),
+#define IR_RC_MM_NAMES(S, T)                        \
+  IR_RC_NAME(ncclMultimemReduceSum, S),             \
+  IR_RC_NAME(ncclMultimemCopy, S),                  \
+  IR_RC_NAME(ncclMultimemReduceSumCopy, S),
+
+static const char* const kReduceCopyThunkNames[] = {
+  IR_RC_ALL_TYPES(IR_RC_ALL_NAMES)
+  IR_RC_MULTIMEM_TYPES(IR_RC_MM_NAMES)
+};
+static constexpr int kNumReduceCopyThunks =
+    (int)(sizeof(kReduceCopyThunkNames) / sizeof(kReduceCopyThunkNames[0]));
+static_assert(kNumReduceCopyThunks == 4 * 10 + 3 * 8,
+              "ReduceCopy thunk inventory: 4 ops x 10 types + 3 multimem ops x 8 types");
+
+__global__ void k_reducecopy_symbol_addrs(uint64_t* out) {
+  const uint64_t addrs[] = {
+    IR_RC_ALL_TYPES(IR_RC_ALL_ADDRS)
+    IR_RC_MULTIMEM_TYPES(IR_RC_MM_ADDRS)
+  };
+  for (int i = 0; i < kNumReduceCopyThunks; ++i) out[i] = addrs[i];
+}
+
+TEST_F(IRDeviceTest, D0_ReduceCopySymbolsLinkable) {
+  const int N = kNumReduceCopyThunks;
+  uint64_t* d = nullptr;
+  HIP_ASSERT(hipMalloc(&d, sizeof(uint64_t) * N));
+  HIP_ASSERT(hipMemset(d, 0, sizeof(uint64_t) * N));
+  k_reducecopy_symbol_addrs<<<1, 1>>>(d);
+  HIP_ASSERT(hipGetLastError());
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  std::vector<uint64_t> got(N);
+  HIP_ASSERT(hipMemcpy(got.data(), d, sizeof(uint64_t) * N, hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipFree(d));
+
+  for (int i = 0; i < N; ++i) {
+    SCOPED_TRACE(kReduceCopyThunkNames[i]);
+    EXPECT_NE(got[i], 0ull) << kReduceCopyThunkNames[i]
+                            << " did not resolve from the bitcode";
+    for (int j = 0; j < i; ++j)
+      EXPECT_NE(got[i], got[j]) << kReduceCopyThunkNames[i] << " aliases "
+                                << kReduceCopyThunkNames[j];
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * [D1] ncclLocalReduceSumCopy_<T> — functional, all 10 types.
+ *
+ * The Local variant takes plain device pointers (nSrc strided sources ->
+ * nDst strided destinations, each destination receiving the full sum), so
+ * it runs in this single-process binary with no communicator. Exercises:
+ *   - per-type dispatch: each _<T> thunk must instantiate the template for
+ *     exactly that element type (a width/float-vs-int mixup corrupts values
+ *     or the guard bytes);
+ *   - the 16B / 4B / scalar vectorization tiers and scalar tail
+ *     (count sweep), plus a misaligned base pointer;
+ *   - nSrc/nDst fan-in/fan-out shapes, including pure copy (1 -> 1);
+ *   - cta / warp / thread ncclCoopAny flavors passed by value through the
+ *     C ABI;
+ *   - no out-of-bounds writes (sentinel-filled gaps between and after the
+ *     destination slices must be untouched).
+ * Values are small integers so every type, including F16/BF16, sums exactly.
+ * ------------------------------------------------------------------- */
+namespace {
+
+template <typename T> struct RcHost {
+  static T from(int v) { return static_cast<T>(v); }
+  static double to(T v) { return static_cast<double>(v); }
+};
+template <> struct RcHost<half> {
+  static half from(int v) { return __float2half(static_cast<float>(v)); }
+  static double to(half v) { return static_cast<double>(__half2float(v)); }
+};
+template <> struct RcHost<__hip_bfloat16> {
+  static __hip_bfloat16 from(int v) { return __float2bfloat16(static_cast<float>(v)); }
+  static double to(__hip_bfloat16 v) { return static_cast<double>(__bfloat162float(v)); }
+};
+
+/* Seed value for source s, element i. Signed types get negative values too
+ * so sign handling is exercised; magnitudes stay small enough that an 8-way
+ * sum is exact in int8 and in bf16 (8-bit mantissa). */
+template <typename T> int rcSeed(int s, size_t i) {
+  int v = (s + 1) + static_cast<int>(i % 7);
+  return std::is_signed<T>::value || !std::is_integral<T>::value ? v - 8 : v;
+}
+
+enum RcCoopKind { kRcCta = 0, kRcWarp = 1, kRcThread = 2 };
+
+constexpr unsigned char kRcSentinel = 0xA5;
+
+/* Measured on gfx950 (ROCm 7.2): integer thunks fit in 16 KiB, F16 needs
+ * 16-20 KiB. 32 KiB leaves ~1.6x headroom, so a large stack-usage regression
+ * in the thunks still fails this suite. */
+constexpr size_t kRcDefaultStackBytes = 32768;
+
+}  // namespace
+
+#define IR_RC_DEFINE_LOCAL_TRAITS(S, TY)                                      \
+  struct RcLocal_##S {                                                        \
+    using T = TY;                                                             \
+    static constexpr const char* name = #S;                                   \
+    static __device__ void call(ncclCoopAny c, int nSrc, T* src, size_t sd,   \
+                                int nDst, T* dst, size_t dd, size_t n) {      \
+      ncclLocalReduceSumCopy_##S(c, nSrc, src, sd, nDst, dst, dd, n);         \
+    }                                                                         \
+  };
+IR_RC_ALL_TYPES(IR_RC_DEFINE_LOCAL_TRAITS)
+
+template <typename Traits>
+__global__ void k_local_reduce_sum_copy(int coopKind, int nSrc,
+                                        typename Traits::T* src, size_t srcDispl,
+                                        int nDst, typename Traits::T* dst,
+                                        size_t dstDispl, size_t count) {
+  ncclCoopAny coop;
+  if (coopKind == kRcCta)       ncclCoopAnyInitCta(&coop);
+  else if (coopKind == kRcWarp) ncclCoopAnyInitWarp(&coop);
+  else                          ncclCoopAnyInitThread(&coop);
+  Traits::call(coop, nSrc, src, srcDispl, nDst, dst, dstDispl, count);
+}
+
+/* Per-thread stack the ReduceCopy thunks need.
+ *
+ * Kernels that call these bitcode thunks are compiled with a *dynamic* stack:
+ * the thunks dispatch through ncclCoopAny's function-pointer table, so the
+ * backend cannot bound the call-graph stack statically. HIP then caps the
+ * per-thread stack at hipLimitStackSize, whose default (1 KiB) is too small
+ * for the ReduceCopy thunks — at the default they fault with
+ * HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION even for count == 0. Callers of
+ * the thunks (Triton/MLIR consumers of librccl_device.bc included) must raise
+ * the limit; the tests do the same. Override with IR_RC_STACK_BYTES. */
+static size_t rcStackBytes() {
+  if (const char* e = std::getenv("IR_RC_STACK_BYTES")) return std::strtoull(e, nullptr, 0);
+  return kRcDefaultStackBytes;
+}
+
+template <typename Traits>
+class IRReduceCopyLocalTest : public IRDeviceTest {
+ protected:
+  using T = typename Traits::T;
+
+  static void SetUpTestSuite() {
+    IRDeviceTest::SetUpTestSuite();
+    ASSERT_EQ(hipDeviceSetLimit(hipLimitStackSize, rcStackBytes()), hipSuccess);
+  }
+
+  /* One launch + full verification. `misalign` shifts both base pointers by
+   * one element so the 16B fast path cannot be taken from element 0. */
+  void runCase(int coopKind, int nThreads, int nSrc, int nDst, size_t count,
+               bool misalign) {
+    SCOPED_TRACE(std::string(Traits::name) + " coop=" + std::to_string(coopKind) +
+                 " nSrc=" + std::to_string(nSrc) + " nDst=" + std::to_string(nDst) +
+                 " count=" + std::to_string(count) +
+                 " misalign=" + std::to_string(misalign));
+    const size_t shift = misalign ? 1 : 0;
+    /* Odd padding so consecutive slices start at different alignments. */
+    const size_t srcDispl = count + 5;
+    const size_t dstDispl = count + 3;
+    const size_t srcElts = shift + nSrc * srcDispl;
+    const size_t dstElts = shift + nDst * dstDispl + 16;  // trailing guard
+
+    std::vector<T> hSrc(srcElts, RcHost<T>::from(0));
+    for (int s = 0; s < nSrc; ++s)
+      for (size_t i = 0; i < count; ++i)
+        hSrc[shift + s * srcDispl + i] = RcHost<T>::from(rcSeed<T>(s, i));
+
+    T* dSrc = nullptr;
+    T* dDst = nullptr;
+    HIP_ASSERT(hipMalloc(&dSrc, srcElts * sizeof(T)));
+    HIP_ASSERT(hipMalloc(&dDst, dstElts * sizeof(T)));
+    HIP_ASSERT(hipMemcpy(dSrc, hSrc.data(), srcElts * sizeof(T), hipMemcpyHostToDevice));
+    HIP_ASSERT(hipMemset(dDst, kRcSentinel, dstElts * sizeof(T)));
+
+    k_local_reduce_sum_copy<Traits><<<1, nThreads>>>(
+        coopKind, nSrc, dSrc + shift, srcDispl, nDst, dDst + shift, dstDispl, count);
+    HIP_ASSERT(hipGetLastError());
+    HIP_ASSERT(hipDeviceSynchronize());
+
+    std::vector<T> hDst(dstElts);
+    HIP_ASSERT(hipMemcpy(hDst.data(), dDst, dstElts * sizeof(T), hipMemcpyDeviceToHost));
+    HIP_ASSERT(hipFree(dSrc));
+    HIP_ASSERT(hipFree(dDst));
+
+    /* Payload: every destination holds the full sum. */
+    size_t bad = 0;
+    for (int d = 0; d < nDst && bad < 8; ++d) {
+      for (size_t i = 0; i < count && bad < 8; ++i) {
+        int sum = 0;
+        for (int s = 0; s < nSrc; ++s) sum += rcSeed<T>(s, i);
+        const double want = RcHost<T>::to(RcHost<T>::from(sum));
+        const double got = RcHost<T>::to(hDst[shift + d * dstDispl + i]);
+        if (got != want) {
+          ADD_FAILURE() << "dst=" << d << " elt=" << i << " got=" << got
+                        << " want=" << want;
+          ++bad;
+        }
+      }
+    }
+    /* Guards: every byte outside the written slices keeps the sentinel. */
+    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(hDst.data());
+    for (size_t e = 0; e < dstElts && bad < 8; ++e) {
+      bool written = false;
+      if (e >= shift) {
+        const size_t rel = e - shift;
+        written = rel / dstDispl < (size_t)nDst && rel % dstDispl < count;
+      }
+      if (written) continue;
+      for (size_t b = 0; b < sizeof(T); ++b) {
+        if (bytes[e * sizeof(T) + b] != kRcSentinel) {
+          ADD_FAILURE() << "out-of-bounds write at element " << e;
+          ++bad;
+          break;
+        }
+      }
+    }
+  }
+};
+
+/* Spelled out (not generated) so the list is an independent oracle. */
+using IRReduceCopyLocalTypes =
+    ::testing::Types<RcLocal_I8, RcLocal_U8, RcLocal_I32, RcLocal_U32,
+                     RcLocal_I64, RcLocal_U64, RcLocal_F16, RcLocal_F32,
+                     RcLocal_F64, RcLocal_BF16>;
+
+struct IRReduceCopyLocalNames {
+  template <typename Traits> static std::string GetName(int) { return Traits::name; }
+};
+TYPED_TEST_SUITE(IRReduceCopyLocalTest, IRReduceCopyLocalTypes, IRReduceCopyLocalNames);
+
+/* Counts straddling the 16B / 4B / scalar tiers and unroll boundaries for
+ * 1..8-byte elements, plus a multi-MB case for the bulk loop. */
+static const size_t kRcCounts[] = {0, 1, 3, 15, 16, 17, 63, 64, 65, 1023,
+                                   1024, 1025, 4099, 65543, (1u << 20) + 3};
+
+TYPED_TEST(IRReduceCopyLocalTest, D1a_Cta_CountSweep) {
+  for (size_t count : kRcCounts) {
+    this->runCase(kRcCta, 256, /*nSrc=*/4, /*nDst=*/3, count, /*misalign=*/false);
+    if (::testing::Test::HasFailure()) return;
+  }
+}
+
+TYPED_TEST(IRReduceCopyLocalTest, D1b_Cta_Misaligned) {
+  for (size_t count : {size_t{1}, size_t{17}, size_t{1025}, size_t{65543}}) {
+    this->runCase(kRcCta, 256, /*nSrc=*/3, /*nDst=*/2, count, /*misalign=*/true);
+    if (::testing::Test::HasFailure()) return;
+  }
+}
+
+TYPED_TEST(IRReduceCopyLocalTest, D1c_Cta_FanInFanOutShapes) {
+  /* 1->1 is a pure copy; 8->1 a pure reduce; 1->4 a pure broadcast. */
+  const int shapes[][2] = {{1, 1}, {2, 1}, {8, 1}, {1, 4}, {5, 5}};
+  for (auto& sh : shapes) {
+    this->runCase(kRcCta, 256, sh[0], sh[1], /*count=*/4099, /*misalign=*/false);
+    if (::testing::Test::HasFailure()) return;
+  }
+}
+
+TYPED_TEST(IRReduceCopyLocalTest, D1d_WarpAndThreadCoop) {
+  /* Launch exactly one warp: with warp coop the single warp owns the whole
+   * range; with thread coop every lane redundantly writes identical values,
+   * which must still produce the exact result. */
+  const int nThreads = IRDeviceTest::warpSize_;
+  for (size_t count : {size_t{1}, size_t{65}, size_t{1025}}) {
+    this->runCase(kRcWarp, nThreads, /*nSrc=*/4, /*nDst=*/2, count, /*misalign=*/false);
+    if (::testing::Test::HasFailure()) return;
+    this->runCase(kRcThread, nThreads, /*nSrc=*/4, /*nDst=*/2, count, /*misalign=*/false);
+    if (::testing::Test::HasFailure()) return;
+  }
 }

@@ -21,7 +21,9 @@ symmetric-memory support), GoogleTest SKIPs and exits 0 — without this mapping
 those would misleadingly show as PASSED.
 """
 
+import os
 import re
+import subprocess
 
 import pytest
 
@@ -153,3 +155,110 @@ def test_composite_barrier_session_functional_mpi(run_gin_mpi_gtest):
         "ir_composite_barrier_mpi.log",
     )
     _summarize_gtest(proc, log, "composite barrier functional (2-rank)")
+
+
+# ---------------------------------------------------------------------------
+# [D] ReduceCopy typed C-ABI thunks (upstream NCCL bbb1375fa382)
+# ---------------------------------------------------------------------------
+
+# Independent oracle for the exported ReduceCopy surface. Deliberately NOT
+# derived from bindings/ir/util.h, CMakeLists.txt or the Makefile, so a type
+# or op silently dropped from any of them fails here.
+_RC_ALL_TYPES = ["I8", "U8", "I32", "U32", "I64", "U64",
+                 "F16", "F32", "F64", "BF16"]
+_RC_MULTIMEM_TYPES = ["I32", "U32", "I64", "U64", "F16", "F32", "F64", "BF16"]
+_RC_ALL_OPS = ["ncclLsaReduceSum", "ncclLsaCopy", "ncclLsaReduceSumCopy",
+               "ncclLocalReduceSumCopy"]
+_RC_MULTIMEM_OPS = ["ncclMultimemReduceSum", "ncclMultimemCopy",
+                    "ncclMultimemReduceSumCopy"]
+# RCCL's device ReduceSum/Copy has no fp8 support: the HIP bitcode must not
+# advertise FP8 entry points that upstream (CUDA) exposes.
+_RC_FP8_TYPES = ["F8E4M3", "F8E5M2"]
+
+_RC_EXPECTED = (
+    {f"{op}_{t}" for op in _RC_ALL_OPS for t in _RC_ALL_TYPES}
+    | {f"{op}_{t}" for op in _RC_MULTIMEM_OPS for t in _RC_MULTIMEM_TYPES}
+)
+_RC_SYMBOL_RE = re.compile(
+    r"^nccl(Lsa|Local|Multimem)(ReduceSum|Copy|ReduceSumCopy)_[A-Z0-9]+$")
+
+
+def _llvm_nm(paths):
+    for cand in (os.path.join(paths.ROCM_PATH, "lib", "llvm", "bin", "llvm-nm"),
+                 os.path.join(paths.ROCM_PATH, "llvm", "bin", "llvm-nm")):
+        if os.path.isfile(cand):
+            return cand
+    pytest.skip(f"llvm-nm not found under {paths.ROCM_PATH}")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_symbol_inventory(ir_test_binary, paths):
+    """[D-sym] librccl_device.bc exports exactly the 64 ReduceCopy thunks.
+
+    Checks, at the symbol level of the shipped artifact:
+      * every expected thunk is a defined, externally visible (T) function —
+        catches a name missing from the opt internalize allow-list;
+      * the names are unmangled (C linkage) — catches a lost extern "C";
+      * no unexpected ReduceCopy-shaped symbols, in particular no FP8 ones.
+    """
+    nm = _llvm_nm(paths)
+    proc = subprocess.run([nm, "--defined-only", paths.BITCODE],
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          universal_newlines=True)
+    assert proc.returncode == 0, f"llvm-nm failed:\n{proc.stdout}"
+
+    exported, internal = set(), set()
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        kind, name = parts[-2], parts[-1]
+        if not _RC_SYMBOL_RE.match(name):
+            continue
+        (exported if kind == "T" else internal).add(name)
+
+    missing = sorted(_RC_EXPECTED - exported)
+    unexpected = sorted(exported - _RC_EXPECTED)
+    assert not missing, (
+        f"{len(missing)} ReduceCopy thunks not exported (internalized or "
+        f"dropped): {missing}; non-exported definitions seen: {sorted(internal)}")
+    assert not unexpected, f"unexpected ReduceCopy exports: {unexpected}"
+    fp8 = sorted(s for s in exported | internal
+                 if any(s.endswith("_" + t) for t in _RC_FP8_TYPES))
+    assert not fp8, f"FP8 ReduceCopy thunks must not exist on HIP: {fp8}"
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_reduce_copy_symbols_linkable(run_gtest):
+    """[D0] Every ReduceCopy thunk resolves through the device-side LTO link."""
+    proc, log = run_gtest("IRDeviceTest.D0_ReduceCopySymbolsLinkable",
+                          "ir_reduce_copy_symbols.log")
+    _summarize_gtest(proc, log, "ReduceCopy symbol link coverage")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+def test_local_reduce_sum_copy_typed(run_gtest):
+    """[D1] ncclLocalReduceSumCopy_<T> functional across all 10 types."""
+    proc, log = run_gtest("IRReduceCopyLocalTest/*",
+                          "ir_local_reduce_sum_copy.log")
+    _summarize_gtest(proc, log, "ncclLocalReduceSumCopy_<T>")
+
+
+@pytest.mark.ir_device
+@pytest.mark.reduce_copy
+@pytest.mark.mpi
+@pytest.mark.parametrize("case", ["E1_LsaReduceSum", "E2_LsaCopy",
+                                  "E3_LsaReduceSumCopy"])
+def test_lsa_reduce_copy_typed_mpi(run_reducecopy_mpi_gtest, case):
+    """[E1-E3] ncclLsa{ReduceSum,Copy,ReduceSumCopy}_<T> over a live LSA team,
+    all 10 types, under `mpirun -np IR_RC_NRANKS` (default 2).
+
+    SKIPPED (not PASSED) when the host cannot run it, e.g. no cuMem or fewer
+    GPUs than ranks.
+    """
+    proc, log = run_reducecopy_mpi_gtest(f"IRReduceCopyMPITest/*.{case}",
+                                         f"ir_rc_mpi_{case}.log")
+    _summarize_gtest(proc, log, f"{case} (multi-rank)")

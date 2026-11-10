@@ -28,6 +28,27 @@ LTO link) and the run are driven by the pytest harness in `test/ir-device/`.
 | `B6_CoopSync` | `ncclCoopSync` — all five coop types |
 | `B7a_LsaBarrierSessionStructural` | `ncclLsaBarrierSession_C` sizeof / alignment |
 | `B7b_LsaBarrierSessionRuntime` | `ncclLsaBarrierSession{Init,Arrive,Wait,Sync}` — **SKIP** (require a live `ncclDevComm`) |
+| `D0_ReduceCopySymbolsLinkable` | All 64 typed ReduceCopy thunks resolve from the bitcode (`ncclLsa{ReduceSum,Copy,ReduceSumCopy}_<T>`, `ncclLocalReduceSumCopy_<T>` × 10 types; `ncclMultimem{ReduceSum,Copy,ReduceSumCopy}_<T>` × 8 types) |
+| `IRReduceCopyLocalTest/<T>.D1a…D1d` | `ncclLocalReduceSumCopy_<T>` functional for I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16 — count sweep, misaligned bases, fan-in/fan-out shapes, cta/warp/thread coop, out-of-bounds guards |
+
+The `ncclLsa*_<T>` thunks need a live LSA team and symmetric windows, so they
+are tested functionally by the separate MPI binary `IR_reducecopy_mpi_test.cpp`
+(`IRReduceCopyMPITest/<T>.E1_LsaReduceSum`, `E2_LsaCopy`, `E3_LsaReduceSumCopy`;
+`NCCL_CUMEM_ENABLE=1 mpirun -np N ./IR_reducecopy_mpi_test.exe`). The
+`ncclMultimem*` thunks get link coverage only: AMD has no multimem hardware
+and they assert at runtime.
+
+### Stack size requirement for the ReduceCopy thunks
+
+Kernels that call the ReduceCopy thunks are compiled with a **dynamic stack**
+(the thunks dispatch through `ncclCoopAny`'s function-pointer table, so the
+backend cannot bound stack usage statically). HIP then limits each thread's
+stack to `hipLimitStackSize`, whose 1 KiB default is too small: the thunks
+fault with `HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION` even for `count == 0`.
+Measured on gfx950 / ROCm 7.2, integer types need up to 16 KiB and F16 needs
+16–20 KiB. The tests call `hipDeviceSetLimit(hipLimitStackSize, 32768)`
+(override with `IR_RC_STACK_BYTES`); any consumer of these thunks must raise the
+limit the same way.
 
 ## Prerequisites
 

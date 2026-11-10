@@ -12,6 +12,10 @@ active API exported by `nccl_device_wrapper__impl.h` on real GPU hardware:
 | B1–B5 | `ncclCoopAnyInit{Thread,Warp,Lanes,WarpSpan,Cta}` + `ncclCoopSize/ThreadRank/NumThreads` |
 | B6 | `ncclCoopSync` (all five coop types) |
 | B7 | `ncclLsaBarrierSession_C` structural check (runtime calls skipped) |
+| D-sym | `librccl_device.bc` exports exactly the 64 typed ReduceCopy thunks, unmangled, and no FP8 variants (`llvm-nm`) |
+| D0 | Every ReduceCopy thunk resolves through the device-side LTO link |
+| D1 | `ncclLocalReduceSumCopy_<T>` functional, all 10 types |
+| E1–E3 (MPI) | `ncclLsa{ReduceSum,Copy,ReduceSumCopy}_<T>` over a live LSA team, all 10 types (`IR_reducecopy_mpi_test.cpp`) |
 
 Unlike the rest of `rccl-UnitTests`, this test cannot be built by the default
 RCCL CMake invocation: it links `librccl_device.bc` into the AMDGPU device-side
@@ -56,6 +60,18 @@ it under `build/release/gtest`, or point at a system install such as `/usr`).
 | `ARCH` | `gfx942` | offload / bitcode architecture |
 | `GTEST_ROOT` | `$RCCL_BUILD/gtest` | GoogleTest install prefix |
 | `IR_OUTDIR` | `<cwd>/ir_test_build` | output dir for the compiled binary |
+| `IR_RC_NRANKS` | `2` | ranks for the ReduceCopy MPI test (E1–E3) |
+| `IR_RC_GPUS` | `0,…,IR_RC_NRANKS-1` | `HIP_VISIBLE_DEVICES` for the ReduceCopy MPI test |
+| `IR_RC_STACK_BYTES` | `32768` | per-thread stack (`hipLimitStackSize`) for ReduceCopy kernels |
+
+The E1–E3 ReduceCopy MPI cases need symmetric memory (cuMem): a HIP runtime of
+ROCm >= 7.12 or the 7.0.2.x backport, *and* an RCCL built against it. Elsewhere
+they report SKIPPED with the reason.
+
+If `/opt/rocm/llvm` points at a toolchain that does not match the ROCm HIP
+headers (symptom: `use of undeclared identifier '__ocml_*'` in the bitcode
+build log), point the Makefile at ROCm's own LLVM:
+`export CLANG=$ROCM_PATH/lib/llvm/bin/clang++ OPT=$ROCM_PATH/lib/llvm/bin/opt LLVM_DIS=$ROCM_PATH/lib/llvm/bin/llvm-dis LLVM_AS=$ROCM_PATH/lib/llvm/bin/llvm-as`.
 
 ## Running
 
@@ -71,6 +87,8 @@ pytest -v --cache-clear
 pytest -v -m peer_pointer
 pytest -v -m coop
 pytest -v -m lsa_barrier
+pytest -v -m reduce_copy            # D-sym, D0, D1 and (if runnable) E1-E3
+IR_RC_NRANKS=8 pytest -v -m "reduce_copy and mpi"
 ```
 
 Build and per-test logs are written to `logs/`.
