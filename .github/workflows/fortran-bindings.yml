@@ -1,0 +1,131 @@
+# Regenerates one library's Fortran binding (bindings/fortran/<lib>.F90) with
+# ROCm/rocm-fortran-generator, straight from the source headers: no build, no
+# ROCm install, no GPU. Called by the per-library fortran-bindings-<lib>.yml.
+#   pull_request: fail if the PR's headers no longer generate a binding that
+#     compiles; the drift against the committed binding is only reported.
+#   schedule / workflow_dispatch: regenerate from develop and open (or update)
+#     one PR per library when the binding changed.
+name: Fortran bindings
+
+on:
+  workflow_call:
+    inputs:
+      lib:
+        description: Generator library name (hip, roctx); the binding is bindings/fortran/<lib>.F90
+        required: true
+        type: string
+    secrets:
+      # Only the schedule/workflow_dispatch path uses them, to open the PR.
+      APP_ID:
+        required: false
+      APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # Bump on purpose: a generator change must not fail unrelated header PRs.
+  GENERATOR_REF: 2839e03f51b7d4de7e2762f37634c0bf7cdbda3a
+
+jobs:
+  generate:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout rocm-systems headers
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-systems
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          # The generator reads the public headers, and the VERSION/CMakeLists.txt
+          # the version headers (hip_version.h, roctx version.h.in) expand from.
+          sparse-checkout: |
+            /projects/hip/include/
+            /projects/hip/VERSION
+            /projects/clr/hipamd/include/
+            /projects/rocprofiler-sdk/source/include/
+            /projects/rocprofiler-sdk/CMakeLists.txt
+            /projects/rocprofiler-sdk/VERSION
+            /bindings/fortran/
+
+      - name: Checkout rocm-fortran-generator
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-fortran-generator
+          ref: ${{ env.GENERATOR_REF }}
+          path: generator
+          persist-credentials: false
+
+      - uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687 # v3.0.3
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@9353db09a0f2bbbdec6f41791918c75d37391b36 # v3.5.0
+
+      - name: Install gfortran
+        run: sudo apt-get update && sudo apt-get install -y gfortran
+
+      - name: Generate the binding
+        env:
+          ROCM_SYSTEMS: ${{ github.workspace }}/rocm-systems
+          ROCM_FORTRAN_OUT: ${{ runner.temp }}/fortran
+          ROCM_FORTRAN_STRICT: 1
+          LIB: ${{ inputs.lib }}
+        run: |
+          # --overwrite copies the module into bindings/fortran/, which must
+          # exist; without it this is a pure header check.
+          overwrite=()
+          if [ -d rocm-systems/bindings/fortran ]; then
+            overwrite=(--overwrite)
+          else
+            echo "::notice::No committed bindings in bindings/fortran/ yet: header check only."
+          fi
+          generator/gen.sh "${overwrite[@]}" "${LIB}"
+
+      - name: Compile the binding with gfortran
+        env:
+          ROCM_FORTRAN_DIR: ${{ runner.temp }}/fortran/rocm-systems
+        run: bash generator/check_mods.sh
+
+      - name: Report drift against the committed binding
+        if: github.event_name == 'pull_request'
+        working-directory: rocm-systems
+        env:
+          LIB: ${{ inputs.lib }}
+        run: |
+          drift="$(git status --porcelain -- "bindings/fortran/${LIB}.F90")"
+          if [ ! -d bindings/fortran ]; then
+            echo "No committed binding to compare against."
+          elif [ -z "${drift}" ]; then
+            echo "Committed binding is up to date."
+          else
+            echo "${drift}"
+            echo "::notice::The binding changes with these headers; the daily fortran-bindings run will open a PR to regenerate it."
+          fi
+
+      - name: Get the bot token
+        id: app-token
+        if: github.event_name != 'pull_request' && github.repository == 'ROCm/rocm-systems'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          # client-id also takes the numeric App ID stored in APP_ID.
+          client-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Open or update the regeneration PR
+        if: steps.app-token.outcome == 'success'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          path: rocm-systems
+          token: ${{ steps.app-token.outputs.token }}
+          branch: fortran-bindings/regenerate-${{ inputs.lib }}
+          base: develop
+          add-paths: bindings/fortran/${{ inputs.lib }}.F90
+          commit-message: 'chore(${{ inputs.lib }}): regenerate the Fortran binding'
+          title: 'chore(${{ inputs.lib }}): regenerate the Fortran binding'
+          body: |
+            Regenerated `bindings/fortran/${{ inputs.lib }}.F90` from the `develop` headers with
+            [rocm-fortran-generator@${{ env.GENERATOR_REF }}](https://github.com/ROCm/rocm-fortran-generator/tree/${{ env.GENERATOR_REF }}).
+
+            Opened by the [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) workflow; it updates this PR until it is merged.
+          delete-branch: true
