@@ -30,7 +30,7 @@ from format_yaml import normalize_equation
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable to reuse the library loader and the expression parser.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from rocprof_compute_soc import metric_library  # noqa: E402
+from rocprof_compute_soc.metric_library import loader  # noqa: E402
 from utils.metrics.expression import build_eval_string  # noqa: E402
 from utils.mi_gpu_spec import mi_gpu_specs  # noqa: E402
 from utils.utils_common import canonical_config_arch  # noqa: E402
@@ -87,11 +87,11 @@ def validate(metric_dir: Path) -> List[str]:
     if errors:
         return errors
     libraries = {}
-    for arch in metric_library.METRIC_LIBRARY_PARENT_ARCH:
+    for arch in loader.METRIC_LIBRARY_PARENT_ARCH:
         arch_errors = validate_arch(metric_dir, arch)
         errors.extend(arch_errors)
         if not arch_errors:
-            libraries[arch] = metric_library.MetricLibrary.load(metric_dir, arch)
+            libraries[arch] = loader.MetricLibrary.load(metric_dir, arch)
     errors.extend(_formula_id_errors(libraries))
     errors.extend(_name_unit_errors(libraries))
     return errors
@@ -99,17 +99,17 @@ def validate(metric_dir: Path) -> List[str]:
 
 def validate_arch(metric_dir: Path, arch: str) -> List[str]:
     """Return the errors of one arch's library files."""
-    files = metric_library.arch_files(metric_dir, arch)
+    files = loader.arch_files(metric_dir, arch)
     load_errors = _load_errors(files)
     if load_errors:
         return load_errors
     documents = {
-        file_name: metric_library.load_file(paths) for file_name, paths in files.items()
+        file_name: loader.load_file(paths) for file_name, paths in files.items()
     }
-    variables = documents.pop(metric_library.VARIABLES_FILENAME, {})
+    variables = documents.pop(loader.VARIABLES_FILENAME, {})
     return [
         *_key_order_errors(arch, files),
-        *_variables_errors(variables, f"{arch}/{metric_library.VARIABLES_FILENAME}"),
+        *_variables_errors(variables, f"{arch}/{loader.VARIABLES_FILENAME}"),
         *(
             error
             for file_name, document in documents.items()
@@ -144,7 +144,7 @@ def arch_ceilings(arch: str) -> Set[str]:
 
 def main() -> int:
     """Entry point. Returns 0 on success, 1 on validation failure."""
-    errors = validate(metric_library.default_metric_library_dir())
+    errors = validate(loader.default_metric_library_dir())
     if errors:
         print("Metric library validation failed:\n")
         for error in errors:
@@ -158,7 +158,7 @@ def main() -> int:
 def _directory_errors(metric_dir: Path) -> List[str]:
     """Report mapped archs without a directory and arch directories that are not
     mapped."""
-    mapped_archs = metric_library.METRIC_LIBRARY_PARENT_ARCH
+    mapped_archs = loader.METRIC_LIBRARY_PARENT_ARCH
     return [
         *(
             f"[{arch}] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
@@ -178,8 +178,8 @@ def _load_errors(files: Dict[str, List[Path]]) -> List[str]:
     errors = []
     for paths in files.values():
         try:
-            metric_library.load_file(paths)
-        except metric_library.MetricLibraryError as error:
+            loader.load_file(paths)
+        except loader.MetricLibraryError as error:
             errors.append(str(error))
     return errors
 
@@ -190,13 +190,13 @@ def _key_order_errors(arch: str, files: Dict[str, List[Path]]) -> List[str]:
     return [
         f"[{arch}/{path.name}] top-level keys are not sorted"
         for path in own_paths
-        if not _keys_sorted(metric_library.read_file(path))
+        if not _keys_sorted(loader.read_file(path))
     ]
 
 
 def _keys_sorted(document: Dict[str, Any]) -> bool:
     """Return whether the keys of document, apart from the remove list, are sorted."""
-    keys = [key for key in document if key != metric_library.REMOVE_KEY]
+    keys = [key for key in document if key != loader.REMOVE_KEY]
     return keys == sorted(keys)
 
 
@@ -301,8 +301,8 @@ def _peak_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str
 def _arch_metrics_errors(arch: str, documents: Dict[str, Dict[str, Any]]) -> List[str]:
     """Report problems across all metrics of arch."""
     try:
-        combined = metric_library.combine_metric_documents(documents)
-    except metric_library.MetricLibraryError as error:
+        combined = loader.combine_metric_documents(documents)
+    except loader.MetricLibraryError as error:
         return [f"[{arch}] {error}"]
     metrics = {
         metric_id: entry
@@ -439,7 +439,7 @@ def _shared_value_errors(
     ]
 
 
-def _formula_id_errors(libraries: Dict[str, metric_library.MetricLibrary]) -> List[str]:
+def _formula_id_errors(libraries: Dict[str, loader.MetricLibrary]) -> List[str]:
     """Report a formula with a different id on another arch.
 
     The per-arch checks leave only ids that share a formula on different archs: a
@@ -465,7 +465,7 @@ def _formula_id_errors(libraries: Dict[str, metric_library.MetricLibrary]) -> Li
     ]
 
 
-def _name_unit_errors(libraries: Dict[str, metric_library.MetricLibrary]) -> List[str]:
+def _name_unit_errors(libraries: Dict[str, loader.MetricLibrary]) -> List[str]:
     """Report an id with another name or unit on another arch."""
     archs_by_id = _archs_by_value(
         libraries,
@@ -483,7 +483,7 @@ def _name_unit_errors(libraries: Dict[str, metric_library.MetricLibrary]) -> Lis
 
 
 def _archs_by_value(
-    libraries: Dict[str, metric_library.MetricLibrary],
+    libraries: Dict[str, loader.MetricLibrary],
     key: Callable[[str, Dict[str, Any]], Tuple[Hashable, Hashable]],
 ) -> Dict[Hashable, Dict[Hashable, List[str]]]:
     """Return group -> value -> the archs whose metrics key() maps to (group, value)."""

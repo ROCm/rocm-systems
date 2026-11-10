@@ -136,8 +136,7 @@ and its [grouping algorithm](../../single-pass_and_multi-pass_metrics/lld-metric
 
 ### Inheritance loader
 
-The loader is part of the metric library package, `src/rocprof_compute_soc/metric_library/`
-(Stage 2). A child arch's file inherits the file of the same name from its parent arch in
+The loader is `src/rocprof_compute_soc/metric_library/loader.py` (Stage 2). A child arch's file inherits the file of the same name from its parent arch in
 `METRIC_LIBRARY_PARENT_ARCH`. The parent is named once, in that map, and no key in the
 file repeats it.
 
@@ -236,8 +235,9 @@ The risk is covered instead by:
 
 ### MetricLibrary
 
-New package `src/rocprof_compute_soc/metric_library/`, next to its YAML files and
-README. `MetricLibrary.load(metric_dir: Path, arch: str) -> MetricLibrary`:
+New module `src/rocprof_compute_soc/metric_library/loader.py`, next to its YAML files
+and README, as `src/memory_chart/loader.py` sits next to its layouts.
+`MetricLibrary.load(metric_dir: Path, arch: str) -> MetricLibrary`:
 
 1. Resolve the architecture's base arch and inheritance chain:
    ```python
@@ -371,10 +371,10 @@ At the cutover, counters come from the metrics that the selected views place
 
 ### Validation
 
-The unit test `tests/unit/rocprof_compute_soc/test_metric_library_sync.py` compares each
-arch's library with today's analysis configs. An arch without a roofline benchmark
-(gfx908) never shows its roofline panel, so the test leaves that panel out and the
-arch's library holds none of the metrics only that panel lists:
+The unit test `tests/unit/rocprof_compute_soc/metric_library/test_metric_library_sync.py`
+compares each arch's library with today's analysis configs. An arch without a roofline
+benchmark (gfx908) never shows its roofline panel, so the test leaves that panel out and
+the arch's library holds none of the metrics only that panel lists:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form; for a row
   with none of these, each of its table's value columns; without display-only `ROUND()`)

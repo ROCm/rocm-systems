@@ -29,7 +29,7 @@ from validate_metric_library import (
 )
 
 import config
-from rocprof_compute_soc import metric_library
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
@@ -205,9 +205,7 @@ def row_peak(row: Row, peak: str) -> str:
     return f"{peak}*1e9"
 
 
-def row_metric_id(
-    row: Row, library: metric_library.MetricLibrary, arch: str
-) -> Optional[str]:
+def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optional[str]:
     """Return the id of the metric a row shows, or None if it shows none.
 
     A row whose label names an id of SHARED_FORMULA_IDS shows that id.
@@ -265,13 +263,11 @@ def shown_blocks(arch: str) -> List[str]:
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
 
 
-@pytest.fixture(scope="module", params=list(metric_library.METRIC_LIBRARY_PARENT_ARCH))
+@pytest.fixture(scope="module", params=list(loader.METRIC_LIBRARY_PARENT_ARCH))
 def arch_view(request) -> SimpleNamespace:
     """One arch's library, its analysis config rows and the metric id of each row."""
     arch = request.param
-    library = metric_library.MetricLibrary.load(
-        metric_library.default_metric_library_dir(), arch
-    )
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
     rows = read_rows(arch)
     return SimpleNamespace(
         arch=arch,
