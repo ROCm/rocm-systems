@@ -4,13 +4,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+import json
+import re
+from dataclasses import dataclass, replace
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import __version__
 from .config import RESULT, ApiConfig, Config
-from .fields import Field, Unmappable, string, value
-from .model import Kind, Param, Slot, Table
+from .fields import STRING_CAP, Field, Unmappable, string, value
+from .model import CType, Kind, Param, Slot, Table
 
 _RESULT_VAR = "rocm_trace_result"
 _EXCEPTION_VAR = "rocm_trace_exception"
@@ -38,6 +40,28 @@ def field_name(p: Param) -> str:
     if p.declared and (p.name in RESERVED or p.name.startswith("arg_")):
         return f"arg_{p.name}"
     return p.name
+
+
+def _tag(
+    fields: Iterable[Field],
+    param: str,
+    param_type: str,
+    role: str,
+    capture: str,
+    on_success: bool = False,
+) -> List[Field]:
+    """The fields with what the probe schema says about them."""
+    return [
+        replace(
+            f,
+            param=param,
+            param_type=param_type,
+            role=role,
+            capture=capture,
+            on_success=on_success,
+        )
+        for f in fields
+    ]
 
 
 def _all(*conditions: Optional[str]) -> Optional[str]:
@@ -130,6 +154,9 @@ def _plan(
     cap = config.capture_level
     scalars = f"{cap} >= ROCM_TRACE_CAPTURE_SCALARS" if cap else None
     full = f"{cap} >= ROCM_TRACE_CAPTURE_FULL" if cap else None
+    # The lowest capture level that records a field guarded by scalars or full.
+    at_scalars = "scalars" if cap else "none"
+    at_full = "full" if cap else "none"
 
     aliases: List[Tuple[str, str]] = []
 
@@ -155,10 +182,13 @@ def _plan(
             # const char* inputs are strings; a char* input only when listed in strings (an
             # API that is not const-correct), since a char* is usually a buffer.
             is_string = p.ctype.is_const_char_pointer or name in api.strings
+            spelling = p.ctype.spelling
             if is_string and name not in api.out:
-                enter.append(string(p.name, name, name not in api.uncapped, full))
+                text = string(p.name, name, name not in api.uncapped, full, p.ctype)
+                enter += _tag([text], p.name, spelling, "argument", at_full)
             else:
-                enter.extend(value(p.ctype, p.name, name, scalars))
+                fields = value(p.ctype, p.name, name, scalars)
+                enter += _tag(fields, p.name, spelling, "argument", at_scalars)
         except Unmappable as err:
             errors.append(
                 f"{where}: parameter '{name}' has no field mapping: {err}; add it to omit"
@@ -168,12 +198,15 @@ def _plan(
     exit_fields: List[Field] = []
     if has_result:
         try:
+            spelling = slot.result.spelling
             if RESULT in api.strings:
-                exit_fields.append(
-                    string(_RESULT_VAR, RESULT, RESULT not in api.uncapped, full)
+                text = string(
+                    _RESULT_VAR, RESULT, RESULT not in api.uncapped, full, slot.result
                 )
+                exit_fields += _tag([text], RESULT, spelling, "result", at_full)
             else:
-                exit_fields.extend(value(slot.result, _RESULT_VAR, RESULT))
+                fields = value(slot.result, _RESULT_VAR, RESULT)
+                exit_fields += _tag(fields, RESULT, spelling, "result", "none")
         except Unmappable as err:
             errors.append(
                 f"{where}: the result has no field mapping: {err}; add result to omit"
@@ -191,10 +224,12 @@ def _plan(
         exit_params.append(decl)
         cond = _all(full, f"!{_EXCEPTION_VAR}", success_cond, f"{p.name} != nullptr")
         try:
+            spelling = p.ctype.spelling
             if name in api.strings:
-                exit_fields.append(string(p.name, name, name not in api.uncapped, cond))
+                fields = [string(p.name, name, name not in api.uncapped, cond, p.ctype)]
             else:
-                exit_fields.extend(value(p.ctype.pointee, f"(*{p.name})", name, cond))
+                fields = value(p.ctype.pointee, f"(*{p.name})", name, cond)
+            exit_fields += _tag(fields, p.name, spelling, "output", at_full, True)
         except Unmappable as err:
             errors.append(
                 f"{where}: out parameter '{name}' points to a type with no field "
@@ -205,6 +240,9 @@ def _plan(
             "TraceLoggingBoolean",
             (f"static_cast<uint8_t>({_EXCEPTION_VAR})",),
             "exception",
+            param="exception",
+            param_type="bool",
+            role="exception",
         )
     )
 
@@ -419,8 +457,126 @@ def _source(
     return "\n".join(lines) + "\n"
 
 
+SCHEMA_VERSION = 1
+
+# clang spells an unnamed struct, union or enum with its source location, which
+# differs between machines: "(anonymous union at /path/x.h:64:3)".
+_UNNAMED = re.compile(r"\((?:anonymous|unnamed) (struct|union|enum) at [^)]*\)")
+
+
+def _type_name(spelling: str) -> str:
+    return _UNNAMED.sub(r"(unnamed \1)", spelling)
+
+
+def _field_schema(f: Field, enums: Dict[str, CType]) -> Dict[str, object]:
+    """One field of the probe schema; enum types it uses are added to enums."""
+    out: Dict[str, object] = {"name": f.name, "role": f.role, "param": f.param}
+    if f.path:
+        out["path"] = list(f.path)
+    ctype = f.ctype
+    out["type"] = _type_name(ctype.spelling if ctype is not None else f.param_type)
+    if f.param_type and _type_name(f.param_type) != out["type"]:
+        out["param_type"] = _type_name(f.param_type)
+    encoding = f.macro[len("TraceLogging") :]
+    out["encoding"] = encoding
+    if encoding.endswith("FixedArray"):
+        out["count"] = int(f.args[-1])
+    if encoding == "CountedString":
+        out["capped"] = True
+    enum = ctype
+    if enum is not None and enum.kind == Kind.ARRAY:
+        enum = enum.element
+    if enum is not None and enum.kind == Kind.ENUM:
+        out["enum"] = _type_name(enum.spelling)
+        enums.setdefault(_type_name(enum.spelling), enum)
+    out["capture"] = f.capture
+    if f.on_success:
+        out["on_success"] = True
+    return out
+
+
+def _schema(
+    config: Config,
+    probes: Dict[str, List[_Probe]],
+    skipped: Dict[str, List[Tuple[Slot, str]]],
+) -> str:
+    """The probe schema: every event's fields, with what a reader needs to turn
+    them back into the call's arguments (C types, enumerator names, the
+    members a struct was flattened into, what each capture level records).
+    One field per line, so a changed API shows as a small diff."""
+    enums: Dict[str, CType] = {}
+    events: List[str] = []
+    for probes_of_table in probes.values():
+        for probe in probes_of_table:
+            slot = probe.slot
+            for phase, opcode, fields in (
+                ("enter", "start", probe.enter),
+                ("exit", "stop", probe.exit),
+            ):
+                head = {
+                    "name": f"{slot.api}_{phase}",
+                    "api": slot.api,
+                    "table": slot.table,
+                    "phase": phase,
+                    "opcode": opcode,
+                    "level": probe.level,
+                    "keywords": list(probe.keywords),
+                }
+                rows = [json.dumps(_field_schema(f, enums)) for f in fields]
+                body = ",\n".join(f"        {r}" for r in rows)
+                events.append(
+                    f"    {json.dumps(head)[:-1]},\n"
+                    + (
+                        f'      "fields": [\n{body}\n      ]}}'
+                        if rows
+                        else '      "fields": []}'
+                    )
+                )
+    enum_rows = [
+        f"    {json.dumps(name)}: "
+        + json.dumps(
+            {
+                "signed": e.enum_signed,
+                "size": e.size,
+                "enumerators": {n: v for n, v in e.enumerators},
+            }
+        )
+        for name, e in sorted(enums.items())
+    ]
+    skip_rows = [
+        f"    {json.dumps({'api': slot.api, 'table': slot.table, 'reason': reason})}"
+        for table_skips in skipped.values()
+        for slot, reason in table_skips
+    ]
+    head = {
+        "schema": "rocm-trace-probe-schema",
+        "version": SCHEMA_VERSION,
+        "generator": f"rocm_trace_gen {__version__}",
+        "config": config.path.name,
+        "provider": config.provider,
+        "string_cap": STRING_CAP,
+        "capture_levels": ["none", "scalars", "full"],
+    }
+    parts = [f"  {json.dumps(k)}: {json.dumps(v)}" for k, v in head.items()]
+    parts.append(
+        '  "enums": {\n' + ",\n".join(enum_rows) + "\n  }"
+        if enum_rows
+        else '  "enums": {}'
+    )
+    parts.append(
+        '  "skipped": [\n' + ",\n".join(skip_rows) + "\n  ]"
+        if skip_rows
+        else '  "skipped": []'
+    )
+    parts.append(
+        '  "events": [\n' + ",\n".join(events) + "\n  ]" if events else '  "events": []'
+    )
+    return "{\n" + ",\n".join(parts) + "\n}\n"
+
+
 def generate(config: Config, tables: Sequence[Table]) -> Dict[str, str]:
-    """Return ``{file name: contents}`` for the header and the source.
+    """Return ``{file name: contents}`` for the header, the source and the
+    probe schema (``<output_name>.json``).
 
     Raises GenerateError listing every problem found.
     """
@@ -447,4 +603,5 @@ def generate(config: Config, tables: Sequence[Table]) -> Dict[str, str]:
     return {
         f"{config.output_name}.h": _header(config, tables),
         f"{config.output_name}.cpp": _source(config, tables, probes, skipped),
+        f"{config.output_name}.json": _schema(config, probes, skipped),
     }

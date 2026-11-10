@@ -49,7 +49,7 @@ cannot say.
 ```yaml
 version: 1
 provider: rocm_hip                  # the TraceLogging provider symbol
-output_name: hip_trace_probes       # hip_trace_probes.h and .cpp
+output_name: hip_trace_probes       # hip_trace_probes.h, .cpp and .json
 includes:                           # the translation unit that is parsed, in order;
   - hip/hip_runtime.h               # also included by the generated header
   - hip/amd_detail/hip_api_trace.hpp
@@ -140,6 +140,7 @@ record, by `ROCM_TRACE_CAPTURE_*` level (`rocm/trace/values.h`):
   `void rocm_trace_install_<Table>(<Table>* table)` for each table.
 - `<output_name>.cpp` declares the provider (the runtime defines and registers it),
   holds one probe per entry, and defines the install functions.
+- `<output_name>.json`: the probe schema (below).
 
 `rocm_trace_install_<Table>` saves each non-null entry and replaces it with its probe.
 It touches only entries inside the table's size, so a table from an older runtime is
@@ -158,13 +159,57 @@ into a separate library the runtime loads.
 The generated files are wrapped in `// clang-format off` so that formatting tools
 leave them byte-identical to the generator's output.
 
+## Probe schema
+
+`<output_name>.json` describes every event the probes write, field by field, with what
+a reader of the trace needs to turn the fields back into the call's arguments and that
+the trace itself does not carry: the C types, the enumerators of enum types, the
+members a struct was flattened into, and what each capture level records. The runtime
+installs it with the library (for HIP, `share/rocm-trace/rocm_hip.json`), and tools such
+as the out-of-process collector read it to format arguments as rocprofiler-sdk does in
+process (`kind = 1` is `hipMemcpyHostToDevice`).
+
+```json
+{
+  "schema": "rocm-trace-probe-schema", "version": 1, "provider": "rocm_hip", ...
+  "enums": {"hipMemcpyKind": {"signed": false, "size": 4,
+            "enumerators": {"hipMemcpyHostToHost": 0, "hipMemcpyHostToDevice": 1, ...}}},
+  "skipped": [{"api": "...", "table": "...", "reason": "..."}],
+  "events": [
+    {"name": "hipMemcpyAsync_enter", "api": "hipMemcpyAsync", "table": "HipDispatchTable",
+     "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+     "fields": [
+        {"name": "kind", "role": "argument", "param": "kind", "type": "hipMemcpyKind",
+         "encoding": "UInt32", "enum": "hipMemcpyKind", "capture": "scalars"}, ...]}
+  ]
+}
+```
+
+Each field has, in the order the event writes them:
+
+| Key | |
+|---|---|
+| `name` | the event field name (RC-API-1) |
+| `role` | `argument` (enter), `output`, `result` or `exception` (exit) |
+| `param`, `param_type` | the parameter it comes from and that parameter's type, when it differs from `type` |
+| `path` | for a flattened struct or array: the members and indices from the parameter (`["grid", "x"]`) |
+| `type` | the C type recorded; an unnamed type is spelled `(unnamed struct)` |
+| `encoding` | the TraceLogging field type (`UInt32`, `Pointer`, `CountedString`, `UInt8FixedArray`, ...), with `count` for arrays and `capped` for strings cut at `ROCM_TRACE_STRING_CAP` |
+| `enum` | the enum type, whose enumerators are in `enums` |
+| `capture` | the lowest `ROCM_TRACE_CAPTURE` level that records it (`none`, `scalars`, `full`); below it the field is 0 or "" |
+| `on_success` | outputs: recorded only when the call succeeded |
+
+The schema is generated, checked in and checked by `--check` like the probes. Each field
+is on one line, so a changed API shows as a small diff.
+
 ## Keeping the output current
 
 1. A table that gains an entry fails to compile: the generated source asserts the
    table's size as it was at generation.
 2. A changed signature fails to compile: the probe no longer converts to the entry's
    type.
-3. A changed configuration or generator is caught by `--check` in CI.
+3. A changed configuration or generator is caught by `--check` in CI, for the probes
+   and the schema.
 
 ## Tests
 

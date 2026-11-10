@@ -69,8 +69,20 @@ def _ctype(t: cindex.Type, follow_pointer: bool = True, depth: int = 0) -> CType
     if kind in (TK.FLOAT, TK.DOUBLE):
         return CType(spelling, Kind.FLOAT, size)
     if kind == TK.ENUM:
-        underlying = c.get_declaration().enum_type.get_canonical().kind
-        return CType(spelling, Kind.ENUM, size, enum_signed=underlying in _SIGNED)
+        decl = c.get_declaration()
+        underlying = decl.enum_type.get_canonical().kind
+        enumerators = tuple(
+            (e.spelling, e.enum_value)
+            for e in decl.get_children()
+            if e.kind == CK.ENUM_CONSTANT_DECL
+        )
+        return CType(
+            spelling,
+            Kind.ENUM,
+            size,
+            enum_signed=underlying in _SIGNED,
+            enumerators=enumerators,
+        )
     if kind == TK.POINTER:
         target = t.get_pointee()
         if target.kind == TK.INVALID:  # a typedef of a pointer, such as hipStream_t
