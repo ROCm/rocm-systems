@@ -1446,7 +1446,8 @@ protected:
     state->dst_reg_base = waves[wave]->vgpr_alloc().base;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
-                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
+                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
+                               /*exec_masked=*/true, "ds_load_b32");
     issue(wave, inst, {}, /*exec=*/0);
   }
   void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
@@ -1529,19 +1530,51 @@ protected:
   /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
   /// `address`, with the counter metadata it decodes with (see
   /// AsyncBarrierArriveDecodesAsAnAsyncLoad).
-  void async_barrier_arrive(int wave, uint32_t address) {
+  void async_barrier_arrive(int wave, uint32_t address, uint64_t exec = 1) {
     waves[wave]->pc += 16;
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
     state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
     state->is_load = false;
     state->wf_size = waves[wave]->wf_size();
-    state->exec_mask = 1;
-    state->lane_mask = 1;
+    state->exec_mask = exec;
+    state->lane_mask = exec;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
-                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
-    issue(wave, inst, {}, /*exec=*/1);
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "ds_atomic_async_barrier_arrive_b64");
+    issue(wave, inst, {}, exec);
+  }
+
+  /// Issue a one-dword async load into LDS with EXEC zero.
+  void exec_zero_async_load(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->lds_dst = true;
+    state->lds_per_lane_addr = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 0;
+    state->lane_mask = 0;
+    state->per_lane_lds_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}},
+                               /*exec_masked=*/true, "global_load_async_to_lds_b32");
+    issue(wave, inst, {}, /*exec=*/0);
+  }
+
+  /// Issue a decoded instruction through the issue hook only.
+  void issue_words(int wave, std::array<uint32_t, 3> words) {
+    waves[wave]->pc += 16;
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+  }
+
+  EventStatus event_status(int event) {
+    return race_state(0).getDetector()->events().status(EventId{event});
   }
 
   /// Issue a one-lane async store from LDS, which counts on ASYNCcnt in the
@@ -1909,6 +1942,65 @@ TEST_F(Gfx1250CounterCapacityRaceTest, AsyncStoreDoesNotFillAsynccntWithAsyncLoa
   async_store(0);
   dtl_write(0, kYoungerAddress);
   EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// An EXEC-zero instruction counts on its counters unless they are all zero, and
+// the counters are set by its encoding (CDNA5 ISA 3.2.2.1): VMEM is skipped only
+// if LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt are zero, and LDS only if DScnt is.
+// So an EXEC-zero async load takes the last ASYNCcnt slot, but an EXEC-zero
+// ds_atomic_async_barrier_arrive_b64, an LDS instruction on ASYNCcnt, may be
+// skipped with DScnt zero while async loads are pending, and proves nothing.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncLoadFillsAsynccnt) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  exec_zero_async_load(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncBarrierArriveDoesNotFillAsynccnt) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_barrier_arrive(0, kFlatLdsAddress, /*exec=*/0);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// GLOBAL_INV counts on LOADcnt and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
+// (CDNA5 ISA 5.7.1.2), and none of them is skipped for EXEC zero (CDNA5 ISA
+// 3.2.2.1), so each needs a free slot to issue.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(issue_words(0, {0xEE0AC000u, 0x00000000u, 0x00000000u})); // global_inv.
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(issue_words(0, {0xEE0AC000u, 0x00000000u, 0x00000000u})); // global_inv.
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksAdvanceStorecnt) {
+  struct WriteBack {
+    const char *name;
+    uint32_t word;
+  };
+  for (const WriteBack write_back :
+       {WriteBack{"global_wb", 0xEE0B0000u}, WriteBack{"global_wbinv", 0xEE13C000u}}) {
+    SCOPED_TRACE(write_back.name);
+    for (int index = 0; index < kCapacity; ++index)
+      vmem_store(0);
+    const int oldest = race_state(0).getDetector()->events().totalAllocated() - kCapacity;
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    execute_wait(*fixture.plugin_group_, *waves[0], 0xbfc10000u); // s_wait_storecnt 0.
+  }
 }
 
 // Transfers that move no data still take a TENSORcnt slot.
@@ -5984,11 +6076,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
-// An EXEC-zero VMEM instruction is skipped only when LOADcnt, STOREcnt,
-// ASYNCcnt and TENSORcnt are all zero (CDNA5 ISA 3.2.2.1). The pending load
-// keeps LOADcnt nonzero, so the EXEC-zero instruction holds a LOADcnt slot, and
-// waiting for one to remain completes the load.
-TEST_P(IgnoredGlobalMemoryRaceTest, HoldsLoadcntOrderingSlot) {
+TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(
       f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
@@ -6038,7 +6126,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, HoldsLoadcntOrderingSlot) {
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
-  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
 }
 
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
