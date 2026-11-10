@@ -324,6 +324,9 @@ TEST_F(HipFileIoLastError, successfulSyncIoLeavesNoHipError)
     hipFileHandleDeregister(handle);
 }
 
+// The HIP Runtime only sets the HIP error value on a failed fastpath request
+// on ROCm >= 10.3 (HIP 7.18).
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
 // A fastpath failure that is not eligible for fallback (writing through a
 // read-only fd) is retrievable with hipPeekAtLastError().
 TEST_F(HipFileIoLastError, failedSyncIoRecordsHipError)
@@ -344,5 +347,6 @@ TEST_F(HipFileIoLastError, failedSyncIoRecordsHipError)
     hipFileHandleDeregister(handle);
     close(fd);
 }
+#endif
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
