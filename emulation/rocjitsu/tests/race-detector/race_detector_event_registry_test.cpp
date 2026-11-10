@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <gtest/gtest.h>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -135,5 +136,143 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   EXPECT_TRUE(intervals.overlapsRange(16, 24));
   EXPECT_TRUE(intervals.overlapsRange(32, 40));
   EXPECT_FALSE(intervals.overlapsRange(24, 32));
+}
+} // namespace
+
+// ---- Retirement of completed LDS events ----
+//
+// A completed LDS event stays live until a barrier only so that other waves of
+// the workgroup can still race with it. A single-wave workgroup has no other
+// wave, so its waits retire LDS events immediately.
+
+namespace {
+constexpr uint32_t kTileBytes = 128;
+constexpr std::array kAsyncStoreObligations{
+    MemoryCounterObligation{WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
+constexpr std::array kAsyncLoadObligations{
+    MemoryCounterObligation{WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_LOAD}};
+
+std::unique_ptr<RaceDetector> makeDetector(int nWaves, std::vector<RaceViolation> &violations) {
+  return std::make_unique<RaceDetector>(
+      nWaves, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0),
+      [&violations](RaceViolation v) { violations.push_back(v); },
+      counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5), /*ldsSizeBytes=*/64 * 1024);
+}
+
+/// An async store reading one tile: an LDS read on ASYNCcnt.
+void asyncStoreTile(WaveRaceState &wave, uint64_t pc, uint32_t address) {
+  const LdsByteRange range{.address = address, .bytes = kTileBytes};
+  wave.registerLdsRangeEvent(testInstruction(pc), MemoryEventType::LDS_TO_GLOBAL,
+                             std::span(&range, 1), kAsyncStoreObligations,
+                             MemoryOrderClass::ASYNC_STORE);
+}
+
+/// An async load writing one tile: an LDS write on ASYNCcnt.
+void asyncLoadTile(WaveRaceState &wave, uint64_t pc, uint32_t address) {
+  const LdsByteRange range{.address = address, .bytes = kTileBytes};
+  wave.registerLdsRangeEvent(testInstruction(pc), MemoryEventType::GLOBAL_TO_LDS,
+                             std::span(&range, 1), kAsyncLoadObligations,
+                             MemoryOrderClass::ASYNC_LOAD);
+}
+
+void waitAsynccnt(WaveRaceState &wave, int count) {
+  PendingWaitCount wait;
+  wait.add(WaitCounterType::ASYNCCNT, count);
+  wave.dispatch(wait);
+}
+
+TEST(RaceDetector, SingleWave_CompletedLdsEventsAreRetiredWithoutABarrier) {
+  std::vector<RaceViolation> violations;
+  auto detector = makeDetector(/*nWaves=*/1, violations);
+  auto &wave = detector->getWaveRaceState(0);
+  asyncStoreTile(wave, /*pc=*/0, /*address=*/0);
+  asyncLoadTile(wave, /*pc=*/1, /*address=*/kTileBytes);
+  ASSERT_EQ(detector->getLdsReadEvents().size(), 1u);
+  ASSERT_EQ(detector->getLdsWriteEvents().size(), 1u);
+
+  waitAsynccnt(wave, 0);
+
+  EXPECT_TRUE(detector->getLdsReadEvents().empty());
+  EXPECT_TRUE(detector->getLdsWriteEvents().empty());
+  EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+  EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::RETIRED);
+  EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::RETIRED);
+  EXPECT_TRUE(violations.empty());
+}
+
+TEST(RaceDetector, MultiWave_CompletedLdsEventsStayLiveUntilABarrier) {
+  std::vector<RaceViolation> violations;
+  auto detector = makeDetector(/*nWaves=*/2, violations);
+  auto &wave = detector->getWaveRaceState(0);
+  asyncStoreTile(wave, /*pc=*/0, /*address=*/0);
+  asyncLoadTile(wave, /*pc=*/1, /*address=*/kTileBytes);
+
+  waitAsynccnt(wave, 0);
+
+  // Another wave can still race with the completed events.
+  EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(detector->getLdsReadEvents().size(), 1u);
+  EXPECT_EQ(detector->getLdsWriteEvents().size(), 1u);
+  EXPECT_EQ(wave.getBarrierPendingEvents().size(), 2u);
+  detector->validateWrite(/*addr=*/0, WaveId{1}, /*lane=*/0, /*nBytes=*/4, MemoryOrderClass::LDS);
+  EXPECT_EQ(violations.size(), 1u);
+
+  wave.flushBarrierPendingEvents();
+  EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::RETIRED);
+  EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::RETIRED);
+  EXPECT_TRUE(detector->getLdsReadEvents().empty());
+  EXPECT_TRUE(detector->getLdsWriteEvents().empty());
+}
+
+TEST(RaceDetector, SingleWave_DoubleBufferedStoreLoopKeepsOnlyPendingStores) {
+  // Each iteration checks a refill of one of two tiles as a DS write would be
+  // checked, stores the tile with an async store, and waits until at most one
+  // store is outstanding. The wait completes the store of the tile the next
+  // iteration refills, so only one store is ever pending, and the read list
+  // must not grow with the loop.
+  constexpr int kIterations = 8192;
+  std::vector<RaceViolation> violations;
+  auto detector = makeDetector(/*nWaves=*/1, violations);
+  auto &wave = detector->getWaveRaceState(0);
+  for (int iteration = 0; iteration < kIterations; ++iteration) {
+    const uint32_t tile = (iteration % 2) * kTileBytes;
+    detector->validateWrite(static_cast<int>(tile), WaveId{0}, /*lane=*/0,
+                            static_cast<int>(kTileBytes), MemoryOrderClass::LDS);
+    asyncStoreTile(wave, static_cast<uint64_t>(iteration), tile);
+    waitAsynccnt(wave, 1);
+    ASSERT_EQ(detector->getLdsReadEvents().size(), 1u) << "iteration " << iteration;
+  }
+  EXPECT_TRUE(violations.empty());
+  ASSERT_EQ(detector->events().totalAllocated(), kIterations);
+  // Every completed store is retired and can be trimmed; the pending one cannot.
+  // The registry has not trimmed the last completed store yet: a trim attempt
+  // runs while a store is being allocated, when the previous store is still
+  // pending, so trimming stops before it.
+  EXPECT_TRUE(detector->events().isTrimmable(EventId{kIterations - 2}));
+  EXPECT_FALSE(detector->events().isTrimmable(EventId{kIterations - 1}));
+}
+
+TEST(RaceDetector, SingleWave_RetiredLdsEventsAreTrimmed) {
+  // Each store completes before the next is issued. The registry attempts a
+  // trim when it allocates event kTrimAttemptInterval - 1, after adding it:
+  // every earlier event is then retired and can be trimmed in a single-wave
+  // workgroup, while in a two-wave workgroup each one waits for a barrier.
+  for (const int nWaves : {1, 2}) {
+    SCOPED_TRACE(nWaves);
+    std::vector<RaceViolation> violations;
+    auto detector = makeDetector(nWaves, violations);
+    auto &wave = detector->getWaveRaceState(0);
+    for (int index = 0; index < EventRegistry::kTrimAttemptInterval; ++index) {
+      asyncStoreTile(wave, static_cast<uint64_t>(index), /*address=*/0);
+      if (index + 1 < EventRegistry::kTrimAttemptInterval)
+        waitAsynccnt(wave, 0);
+    }
+    EXPECT_EQ(detector->events().trimmedCount(),
+              nWaves == 1 ? EventRegistry::kTrimAttemptInterval - 1 : 0);
+    EXPECT_EQ(detector->getLdsReadEvents().size(),
+              nWaves == 1 ? 1u : static_cast<size_t>(EventRegistry::kTrimAttemptInterval));
+    EXPECT_TRUE(violations.empty());
+  }
 }
 } // namespace
