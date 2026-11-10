@@ -264,18 +264,45 @@ hsa_status_t hsa_ext_sampler_create(hsa_agent_t agent,
   if (sampler_descriptor == NULL || sampler == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  hsa_ext_sampler_descriptor_v2_t sampler_descriptor_v2 = {
+  // Widen to v3. Anisotropy is a v3-only concept, so it is off here.
+  hsa_ext_sampler_descriptor_v3_t sampler_descriptor_v3 = {
       sampler_descriptor->coordinate_mode,
      sampler_descriptor->filter_mode, HSA_EXT_SAMPLER_FILTER_MODE_NONE,
       {sampler_descriptor->address_mode,
-          sampler_descriptor->address_mode, sampler_descriptor->address_mode}
+          sampler_descriptor->address_mode, sampler_descriptor->address_mode},
+      0
   };
-  return ImageRuntime::instance()->CreateSamplerHandle(agent, sampler_descriptor_v2, *sampler);
+  return ImageRuntime::instance()->CreateSamplerHandle(agent, sampler_descriptor_v3, *sampler);
   CATCH;
 }
 
 hsa_status_t hsa_ext_sampler_create_v2(hsa_agent_t agent,
                                     const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor,
+                                    hsa_ext_sampler_t* sampler) {
+  TRY;
+  if (agent.handle == 0) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  if (sampler_descriptor == NULL || sampler == NULL) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Widen to v3. Anisotropy is a v3-only concept, so it is off here.
+  hsa_ext_sampler_descriptor_v3_t sampler_descriptor_v3 = {
+      sampler_descriptor->coordinate_mode,
+      sampler_descriptor->filter_mode,
+      sampler_descriptor->mipmap_filter_mode,
+      {sampler_descriptor->address_modes[0],
+          sampler_descriptor->address_modes[1], sampler_descriptor->address_modes[2]},
+      0
+  };
+  return ImageRuntime::instance()->CreateSamplerHandle(agent, sampler_descriptor_v3, *sampler);
+  CATCH;
+}
+
+hsa_status_t hsa_ext_sampler_create_v3(hsa_agent_t agent,
+                                    const hsa_ext_sampler_descriptor_v3_t* sampler_descriptor,
                                     hsa_ext_sampler_t* sampler) {
   TRY;
   if (agent.handle == 0) {
@@ -611,6 +638,8 @@ void LoadImage(core::ImageExtTableInternal* image_api,
   image_api->hsa_amd_image_get_info_max_dim_fn = hsa_amd_image_get_info_max_dim;
 
   image_api->hsa_ext_sampler_create_v2_fn = hsa_ext_sampler_create_v2;
+
+  image_api->hsa_ext_sampler_create_v3_fn = hsa_ext_sampler_create_v3;
 
   // V2 unified APIs for images and mipmaps
   image_api->hsa_ext_image_data_get_info_v2_fn = hsa_ext_image_data_get_info_v2;

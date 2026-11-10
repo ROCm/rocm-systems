@@ -1224,11 +1224,12 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
       uint64_t old_val = lds->read64(addr);
       uint64_t new_val;
       if (d.atomic_op == AtomicOp::BARRIER_ARRIVE) {
-        uint64_t decrement = 0;
-        const bool has_decrement = store_data.size() >= lane * src_stride + 8;
-        if (has_decrement)
-          std::memcpy(&decrement, &store_data[lane * src_stride], 8);
-        new_val = lds_barrier_cell_update_arrive(old_val, has_decrement ? decrement : 1);
+        // The returning DS instruction supplies UPDATE_VAL.b32 in the low DWORD
+        // of DATA0. An asynchronous arrival has a fixed update of one.
+        uint32_t update = 1;
+        if (store_data.size() >= lane * src_stride + sizeof(update))
+          std::memcpy(&update, &store_data[lane * src_stride], sizeof(update));
+        new_val = lds_barrier_cell_update_arrive(old_val, update);
       } else if (fp_operation) {
         uint64_t source_bits = 0, compare_bits = 0;
         std::memcpy(&source_bits, &store_data[lane * src_stride], 8);
