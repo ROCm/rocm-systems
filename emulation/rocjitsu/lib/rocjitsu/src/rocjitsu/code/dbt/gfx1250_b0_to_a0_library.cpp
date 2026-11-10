@@ -146,54 +146,56 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 
-  info->source_code_object_id = rocjitsu::stable_code_object_id(source_elf, source_size);
+  return [&]() noexcept -> rj_status_t {
+    info->source_code_object_id = rocjitsu::stable_code_object_id(source_elf, source_size);
 
-  const auto *source_bytes = static_cast<const uint8_t *>(source_elf);
-  rocjitsu::AmdGpuCodeObject source(source_bytes, source_size);
-  if (!source.is_valid() || source.target_id() != ROCJITSU_CODE_TARGET_GFX1250) {
-    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindInputInvalidCodeObject,
-                    "source is not a valid gfx1250 AMDGPU code object");
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
-  }
+    const auto *source_bytes = static_cast<const uint8_t *>(source_elf);
+    rocjitsu::AmdGpuCodeObject source(source_bytes, source_size);
+    if (!source.is_valid() || source.target_id() != ROCJITSU_CODE_TARGET_GFX1250) {
+      emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindInputInvalidCodeObject,
+                      "source is not a valid gfx1250 AMDGPU code object");
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+    }
 
-  rocjitsu::BinaryTranslatorOptions options;
-  options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
-  options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
-                                        options);
-  translator.set_trace_callback([&](const rocjitsu::TranslationTraceEvent &trace) {
-    if (trace.changed)
-      ++info->changed_instruction_count;
-  });
-  auto result = translator.translate(source);
-  // Diagnostics are reported for every outcome, not only failures. A
-  // translation can succeed and still have something to say -- a family passed
-  // through unchanged because its A0 handling is not implemented yet is
-  // exactly the kind of gap someone triaging a misbehaving kernel needs to
-  // see, and it never reaches the caller if reporting is conditional on the
-  // object being undispatchable.
-  rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
-  // Internal failures describe this translation attempt; rejected input can be cached.
-  const auto status = rocjitsu::gfx1250_b0_to_a0_translation_status(
-      result.diagnostics, !result.elf_bytes.empty(), result.dispatchable());
-  if (status != ROCJITSU_STATUS_SUCCESS) {
-    if (result.diagnostics.empty())
-      emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
-                      "translation produced no dispatchable code object");
-    return status;
-  }
+    rocjitsu::BinaryTranslatorOptions options;
+    options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
+    options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
+    rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+                                          options);
+    translator.set_trace_callback([&](const rocjitsu::TranslationTraceEvent &trace) {
+      if (trace.changed)
+        ++info->changed_instruction_count;
+    });
+    auto result = translator.translate(source);
+    // Diagnostics are reported for every outcome, not only failures. A
+    // translation can succeed and still have something to say -- a family passed
+    // through unchanged because its A0 handling is not implemented yet is
+    // exactly the kind of gap someone triaging a misbehaving kernel needs to
+    // see, and it never reaches the caller if reporting is conditional on the
+    // object being undispatchable.
+    rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
+    // Internal failures describe this translation attempt; rejected input can be cached.
+    const auto status = rocjitsu::gfx1250_b0_to_a0_translation_status(
+        result.diagnostics, !result.elf_bytes.empty(), result.dispatchable());
+    if (status != ROCJITSU_STATUS_SUCCESS) {
+      if (result.diagnostics.empty())
+        emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
+                        "translation produced no dispatchable code object");
+      return status;
+    }
 
-  auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));
-  if (!output) {
-    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindOutputAllocationFailed,
-                    "could not allocate the translated code object");
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  }
+    auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));
+    if (!output) {
+      emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindOutputAllocationFailed,
+                      "could not allocate the translated code object");
+      return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+    }
 
-  std::memcpy(output, result.elf_bytes.data(), result.elf_bytes.size());
-  *translated_elf = output;
-  *translated_size = result.elf_bytes.size();
-  return ROCJITSU_STATUS_SUCCESS;
+    std::memcpy(output, result.elf_bytes.data(), result.elf_bytes.size());
+    *translated_elf = output;
+    *translated_size = result.elf_bytes.size();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 void rj_gfx1250_b0_to_a0_free(void *translated_elf) { std::free(translated_elf); }
