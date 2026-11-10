@@ -3734,6 +3734,10 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     while (nBytes / (nChannels * chunkSize) < nstepsLL128 * 64 / ppn && chunkSize > 131072) chunkSize /= 2;
     // coverity[integer_division]
     while (nBytes / (nChannels * chunkSize) < nstepsLL128 * 16 / ppn && chunkSize > 32768) chunkSize /= 2;
+  } else if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_NAN) {
+    // The NaN step is sized for Ring. A full step per tree chunk leaves the up/down pipeline too few chunks in
+    // flight across the tree's levels, so Tree moves a fraction of the slot per step.
+    chunkSize = std::min(chunkSize, 64 * 1024);
   } else if (info->func == ncclFuncAllGather && info->algorithm == NCCL_ALGO_PAT) {
     while (chunkSize * nChannels * 32 > nBytes && chunkSize > 65536) chunkSize /= 2;
   } else if (info->func == ncclFuncReduceScatter && info->algorithm == NCCL_ALGO_PAT) {
