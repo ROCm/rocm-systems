@@ -169,8 +169,8 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_MaxExtent_RoundTrip) {
 }
 
 /*
-Writes and reads back a layered 2D array at its maximum width and layer count, through every
-combination of pinned host and device memory.
+Writes and reads back a layered 2D array at its maximum width, height and layer count, through
+every combination of pinned host and device memory.
 */
 HIP_TEST_CASE(Unit_hipMalloc3DArray_Layered_MaxExtent_RoundTrip) {
   CHECK_IMAGE_SUPPORT
@@ -181,6 +181,7 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Layered_MaxExtent_RoundTrip) {
 
   const hipExtent extent = GENERATE_COPY(
       make_hipExtent(prop.maxTexture2DLayered[0], kThin, kThin),
+      make_hipExtent(kThin, prop.maxTexture2DLayered[1], kThin),
       make_hipExtent(kSmall, kSmall, prop.maxTexture2DLayered[2]));
   const Side writeSide = GENERATE(Side::PinnedHost, Side::Device);
   const Side readSide = GENERATE(Side::PinnedHost, Side::Device);
