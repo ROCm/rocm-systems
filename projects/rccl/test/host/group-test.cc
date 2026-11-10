@@ -1987,6 +1987,11 @@ class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
       free(comm_->devrState.teamHead);
       comm_->devrState.teamHead = next;
     }
+    // Default reqs need no resource window, so the create registers no memory and no window;
+    // the only other allocation, the window table, lives in the fake shadow pool that
+    // ResetDevRuntimeMicroFakes frees. Non-default reqs would need the memory and window freed here.
+    EXPECT_EQ(nullptr, comm_->devrState.memHead);
+    EXPECT_EQ(0, comm_->devrState.winSortedCount);
     ncclDevCommCompat_v22902 = saved22902_;
     ncclDevCommCompat_v22907 = saved22907_;
     ResetDevRuntimeMicroFakes();
