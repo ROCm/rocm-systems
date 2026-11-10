@@ -32,9 +32,10 @@ The per-scenario expectation is passed explicitly via --expect:
   clean-exit      : exit_marker present in JSON (proves clean atexit finalization). Used
                     when the app handles signals and rocprofv3 doesn't (--disable-signal-handlers)
   flushed-markers : valid JSON with >10 marker entries (proves the profiler flushed before
-                    the process died on the signal). Also used for coordinated shutdown,
-                    where reaching validation proves the parent did not deadlock waiting for
-                    children before chaining the signal to the application.
+                    the process died on the signal). Covers both the "app doesn't handle
+                    signals" case and the coordinated-shutdown case. For the latter,
+                    simply reaching this validator proves there was no deadlock (a
+                    regression trips the execute-step ctest TIMEOUT instead).
 """
 
 import json
@@ -116,9 +117,10 @@ def test_clean_exit(output_dir, expect, process_type):
 
 def test_flushed_markers(output_dir, expect):
     """flushed-markers: JSON must contain >10 marker entries, proving the profiler flushed
-    before the process died on the signal. For coordinated shutdown, reaching this validator
-    also proves the execute step did not deadlock. exit_marker is intentionally NOT required here.
-    """
+    before the process died on the signal. Covers the "app doesn't handle signals" case and
+    the coordinated-shutdown case (reaching this validator at all already proves the
+    coordinated case did not deadlock -- a regression trips the execute-step ctest
+    TIMEOUT). exit_marker is intentionally NOT required here."""
     if expect != "flushed-markers":
         pytest.skip(f"expectation is '{expect}', not flushed-markers")
 

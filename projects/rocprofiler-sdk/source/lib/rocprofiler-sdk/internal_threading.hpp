@@ -77,7 +77,9 @@ private:
 
 using task_group_t = TaskGroup;
 
-// True when the current process inherited task groups from an earlier fork generation.
+// True in a fork child: g_fork_generation != 0. The inline interposition pool
+// and its gate are never legitimately recreated in a child, so a nonzero
+// generation is conclusive (see D4/D6).
 bool
 fork_stale();
 
