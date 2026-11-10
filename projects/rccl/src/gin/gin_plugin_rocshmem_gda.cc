@@ -20,6 +20,7 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "gin/gin_type_env.h"
 #include "common_cast.h"  // IbCastInitDevices/IbCastDevs/IbCastGetPhysProperties
 #include <hip/hip_runtime.h>
 #include <mutex>
@@ -129,8 +130,7 @@ static int ginRocshmemGdaBuildDevTable() {
 }
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  const char* gin_type = getenv("NCCL_GIN_TYPE");
-  if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
+  if (!ncclGinTypeEnabled(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA, /*enabledByDefault=*/false)) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
   // Populate the IB-CAST device table, then build the GIN-capable subset.
   if (IbCastInitDevices(logFunction, nullptr) != ncclSuccess) return ncclInternalError;
