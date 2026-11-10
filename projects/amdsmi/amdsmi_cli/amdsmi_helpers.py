@@ -2535,6 +2535,27 @@ class AMDSMIHelpers:
                 return "fabric-unknown"
             return "FABRIC-UNKNOWN"
 
+        if source == "ainic":
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "ainic-uncorrected"
+                return "AINIC-UNCORRECTED"
+            if error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "ainic-corrected"
+                return "AINIC-CORRECTED"
+            if error_severity == "fatal":
+                if notify_type == "BOOT":
+                    if for_filename:
+                        return "ainic-boot"
+                    return "AINIC-BOOT"
+                if for_filename:
+                    return "ainic-fatal"
+                return "AINIC-FATAL"
+            if for_filename:
+                return "ainic-unknown"
+            return "AINIC-UNKNOWN"
+
         if error_severity == "non_fatal_uncorrected":
             if for_filename:
                 return "uncorrected"
@@ -3163,6 +3184,100 @@ class AMDSMIHelpers:
                 emit_inline,
                 cper_counter,
             )
+        return collected_json_rows
+
+    def ras_cper_ainic(
+        self, args, ainic_handle, logger, ainic_idx, emit_inline=True, cper_counter=None
+    ):
+        """Fetch and process CPER entries for a single AI-NIC device.
+
+        Reads /sys/kernel/debug/pds_core/<bdf>/cper_events via the existing
+        GPU CPER file reader (same UEFI binary format).  The pds_core ring
+        holds at most 64 entries; the cursor tracks position across --follow
+        iterations with the same semantics as GPU CPER.
+
+        Args:
+            args: Parsed CLI arguments (severity, folder, file_limit, follow, etc.)
+            ainic_handle: AI-NIC processor handle
+            logger: AMDSMILogger instance
+            ainic_idx: Index into args.ainic_cursor for this device
+            emit_inline: Whether to emit output inline vs. return rows for batching
+            cper_counter: Shared 1-indexed filename counter across all devices
+
+        Returns:
+            list: Collected JSON rows (empty list if not JSON format)
+
+        Side effects:
+            ``args.ainic_cursor[ainic_idx]`` is updated with the new cursor position.
+        """
+        severity_mask = self._parse_cper_severity_mask(args.severity)
+        buffer_size = 1048576
+        if cper_counter is None:
+            cper_counter = [0]
+
+        ainic_cursors = getattr(args, "ainic_cursor", None)
+        if ainic_cursors is None:
+            ainic_cursors = []
+            args.ainic_cursor = ainic_cursors
+        while len(ainic_cursors) <= ainic_idx:
+            ainic_cursors.append(0)
+
+        collected_json_rows = []
+        entries = {}
+        cper_data = []
+        num_entries = 0
+
+        while True:
+            try:
+                entries, new_cursor, cper_data, _status = (
+                    amdsmi_interface.amdsmi_get_ainic_cper_entries(
+                        ainic_handle, severity_mask, buffer_size, ainic_cursors[ainic_idx]
+                    )
+                )
+                logging.debug("ainic_cper_entries | entries: %s", entries)
+                num_entries += len(entries)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing AI-NIC CPER. This command requires elevation"
+                    ) from e
+                if e.get_error_code() in (
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND,
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR,
+                ):
+                    logging.debug("AI-NIC CPER not available for this device: %s", e)
+                    return []
+                logging.debug("Cannot retrieve AI-NIC CPER entries: %s", e)
+                break
+
+            ainic_cursors[ainic_idx] = new_cursor
+            if len(entries) == 0:
+                break
+
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                ainic_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
+
+        if num_entries == 0 and not args.follow:
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                ainic_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
+
         return collected_json_rows
 
     @staticmethod

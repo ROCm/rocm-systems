@@ -3864,6 +3864,47 @@ def amdsmi_get_fabric_cper_entries(
     return entries, cur.value, cper_data, ret
 
 
+def amdsmi_get_ainic_cper_entries(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    severity_mask: int,
+    buffer_size: int = 4 * 1048576,
+    cursor: int = 0,
+) -> Tuple[Dict[int, Dict[str, Any]], int, List[Dict[str, Any]], int]:
+    """
+    Retrieve CPER entries from an AI-NIC device via the pds_core debugfs ring.
+
+    The pds_core driver exposes CPER records (same UEFI binary format as amdgpu)
+    at /sys/kernel/debug/pds_core/<bdf>/cper_events.  The ring holds at most 64
+    entries; older ones are silently overwritten by firmware when it fills.
+
+    Args:
+        processor_handle: AI-NIC processor handle (AMDSMI_PROCESSOR_TYPE_AMD_NIC)
+        severity_mask: Bitmask of severity levels (1 << AMDSMI_CPER_SEV_*)
+        buffer_size: Size of the read buffer in bytes (default 4 MB)
+        cursor: Record index from the previous call (0 for first call)
+
+    Returns:
+        Tuple of (entries_dict, new_cursor, cper_data_list, status_code)
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not an AINIC handle
+        AmdSmiLibraryException: Underlying API failure (file not found, etc.)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = ainic_info_t(processor_handle)
+    bdf = _format_bdf(info.bus.bdf)
+    cper_path = Path(f"/sys/kernel/debug/pds_core/{bdf}/cper_events")
+
+    entries, new_cursor, cper_data, status = amdsmi_get_gpu_cper_entries(
+        cper_path, severity_mask, buffer_size, cursor
+    )
+    for entry in entries.values():
+        entry["source"] = "ainic"
+    return entries, new_cursor, cper_data, status
+
+
 def amdsmi_get_afids_from_cper(
     cper_afid_data: Union[bytes, List[Dict[str, Any]]],
 ) -> Tuple[List[int], int]:

@@ -297,6 +297,16 @@ class RasCommands:
                     cper_counter=cper_counter,
                 )
                 all_json_rows.extend(rows)
+            for idx, ainic_handle in enumerate(self.device_handles_ainics):
+                rows = self.helpers.ras_cper_ainic(
+                    args,
+                    ainic_handle,
+                    self.logger,
+                    idx,
+                    emit_inline=not is_json,
+                    cper_counter=cper_counter,
+                )
+                all_json_rows.extend(rows)
             if is_json and (all_json_rows or not args.follow):
                 self.logger.multiple_device_output = all_json_rows
                 self.logger.print_output(multiple_device_enabled=True, emit_empty=True)
