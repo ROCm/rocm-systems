@@ -458,7 +458,7 @@ protected:
   }
 };
 
-TEST_P(Gfx1250SplitCounterCapacityTest, CounterAtCapacityKeepsOldestPending) {
+TEST_P(Gfx1250SplitCounterCapacityTest, CounterBelowCapacityKeepsOldestPending) {
   auto builder = makeGfx1250Test();
   issue(builder, capacity());
 
