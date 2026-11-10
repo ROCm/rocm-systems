@@ -108,8 +108,11 @@ bool supports_counter_capacity(rj_code_arch_t arch) {
 }
 
 /// gfx1250 (CDNA5) issues an EXEC-zero memory instruction and counts it, unless
-/// every counter it could add to is zero (CDNA5 ISA 3.2.2.1), in which case no
-/// older operation remains to complete. Either way, its admission is sound.
+/// it is skipped: "VMEM can be skipped only if: EXEC == 0 and LOADcnt / STOREcnt
+/// / ASYNCcnt / TENSORcnt == 0", FLAT also requires DScnt == 0, and "LDS can be
+/// skipped only if: DScnt==0 and EXEC==0" (CDNA5 ISA 3.2.2.1). A skipped
+/// instruction leaves no older operation on those counters to complete, so
+/// either way its admission is sound.
 bool exec_zero_memory_issue_counts(rj_code_arch_t arch) { return arch == ROCJITSU_CODE_ARCH_CDNA5; }
 
 /// On gfx1250 (CDNA5) "Every Flat instruction increments both DScnt and either
@@ -787,7 +790,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
   // Tensor instructions carry no memory issue metadata, so their TENSORcnt
-  // backpressure is applied here, once per counted transfer, before the
+  // backpressure is applied here, once per tensor instruction, before the
   // transfer's LDS bytes are checked. That way the issue can complete the
   // oldest transfer first, as the stall at a full TENSORcnt does.
   if (supports_counter_capacity(wf.cu().arch()) &&

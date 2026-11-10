@@ -357,17 +357,19 @@ is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
 through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
-issue-time pressure: one LGKMCNT token before GFX12, and on gfx1250 one KMcnt
-token, or two for `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5
-ISA 5.4). Message occupancy and returning
-message results are not retained as pending events. Timestamp-query operations
-such as `s_memtime` and `s_memrealtime` are not accounted for, nor are the
-gfx1250 barrier instructions that use KMcnt: `s_barrier_signal_isfirst`,
-`s_get_barrier_state` and `s_barrier_leave` (CDNA5 ISA 5.6.3). These operations
-therefore remain unsupported rather than being treated as complete message,
-timestamp or barrier modeling. Leaving out a counter's operations only makes
-its capacity model conservative: the detector can miss a completion, never
-retire too much.
+issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
+through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
+`s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
+gfx1250 that pressure cannot complete anything, because the only events the
+detector registers on KMcnt are scalar loads, which complete out of order.
+Message occupancy and returning message results are not retained as pending
+events. Timestamp-query operations such as `s_memtime` and `s_memrealtime` are
+not accounted for, nor are the gfx1250 barrier instructions that use KMcnt:
+`s_barrier_signal_isfirst`, `s_get_barrier_state` and `s_barrier_leave` (CDNA5
+ISA 5.6.3). These operations therefore remain unsupported rather than being
+treated as complete message, timestamp or barrier modeling. Leaving out a
+counter's operations only makes its capacity model conservative: the detector
+can miss a completion, never retire too much.
 
 For example, CDNA cannot issue the final scalar load below while all 15 earlier
 LGKM tokens remain outstanding:
@@ -403,9 +405,8 @@ capacity constraints of the domains its addresses resolve to, once they are
 resolved.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
-ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (CDNA5
-ISA 5.7.1, table "Counter Size Description"), so each holds 63 tokens, or 31
-for KMcnt. These are the capacities the core memory-wait checker uses. Each
+ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
+counter table in CDNA5 ISA 5.7.1), so each holds 63 tokens, or 31 for KMcnt. These are the capacities the core memory-wait checker uses. Each
 counter constrains only its own events: STOREcnt pressure does not complete a
 pending load, and a scalar load does not complete a pending DS operation.
 Async loads and async stores share ASYNCcnt but complete in order only within
@@ -539,6 +540,8 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `race_detector_tests.cpp` — drives `RaceDetector` and `WaveRaceState` directly
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
+- `race_detector_counter_capacity_tests.cpp` — counter-capacity backpressure,
+  for the combined counters before GFX12 and the gfx1250 split counters.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
   tensor DMA transfers and async copies on gfx1250.
