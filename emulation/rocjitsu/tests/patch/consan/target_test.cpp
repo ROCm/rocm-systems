@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace rocjitsu::consan {
@@ -74,6 +75,48 @@ TEST_P(ConSanTargetStatic, CallableArtifactsPreserveStaticSitesAndPrivateFrameAd
     corrupted.image[text->sectionOffset() + sites.front().probe_offset] ^= 1;
     corrupted.manifest.prepared.sha256 = digest(corrupted.image);
     EXPECT_TRUE(validate_prepared(original, corrupted, error).failed());
+  }
+}
+
+TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-9"));
+  ASSERT_FALSE(original.empty());
+  InputError error;
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(artifact.value().manifest.sites[0].width, 8u);
+  EXPECT_EQ(artifact.value().manifest.sites[1].width, 4u);
+}
+
+TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
+  const test::TargetMode mode = GetParam();
+  for (const auto &[name, width] : std::array<std::pair<const char *, uint32_t>, 5>{
+           {{"u16", 2}, {"i16", 2}, {"b64", 8}, {"b128", 16}, {"b128-alias", 16}}}) {
+    SCOPED_TRACE(name);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
+    for (const SiteFacts &site : artifact.value().manifest.sites)
+      EXPECT_EQ(site.width, width);
+    EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+  }
+  for (const char *name : {"excluded-b8", "excluded-b96", "excluded-partial"}) {
+    SCOPED_TRACE(name);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    EXPECT_TRUE(
+        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error).failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
   }
 }
 

@@ -39,6 +39,25 @@ RUNTIME_CASES = (
     'reused-signal',
 )
 ANALYSIS_CASES = (*RUNTIME_CASES, 'repeat_race', 'utf8_entry')
+CORE_WIDTH_CASES = (
+    'wide_u16',
+    'wide_i16',
+    'wide_b64',
+    'wide_b128',
+)
+GFX1250_WIDTH_CASES = (
+    *CORE_WIDTH_CASES,
+    'wide_u16_high',
+    'wide_i16_high',
+    'wide_b64_high',
+    'wide_b128_high',
+    'wide_alias',
+    'wide_collision',
+    'mixed_overlap',
+    'mixed_b16',
+    'mixed_disjoint',
+    'mixed_read_read',
+)
 
 
 def required_names():
@@ -55,6 +74,7 @@ def required_names():
         'ConSanHsaPlugin.RejectedAmdBarrierCannotOverwritePendingDispatchCompletion',
         'ConSanHsaPlugin.UntrackedBarriersAfterARejectionRetainTheirSignalsWithoutPublication',
         'ConSanHsaPlugin.MissingAmdSignalCreationKeepsCoreSignalSupportAvailable',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.mixed_barrier',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_empty',
         'ConSanSimProductionE2E.gfx1250.wave32.assembly.barrier_high',
@@ -88,6 +108,9 @@ def required_names():
     }
     for gpu, wave_size in MODES:
         suffix = f'{gpu}Wave{wave_size}'
+        width_cases = GFX1250_WIDTH_CASES if gpu == 'gfx1250' else CORE_WIDTH_CASES
+        for case in width_cases:
+            names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave_size}.assembly.{case}')
         for case in RUNTIME_CASES:
             names.add(
                 f'ConSanSimRuntimeE2E.{gpu}.wave{wave_size}.named-assembly.{case}'
@@ -114,12 +137,14 @@ def required_names():
             'UnreachableEntryOrDenseSitesFailBeforeArtifactPublication',
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
+            'QualifyOnlyWholeRegisterSingleRangeForms',
         ):
             names.add(f'ConSanTargets/ConSanTargetStatic.{case}/{suffix}')
         for case in (
             'AssemblyAliasPreservesAllGuestRegistersAndPublishesBothWaves',
             'HighLaneMasksAndEmptyExecHaveRealPublicationEvidence',
             'ThreeWavesAndPartialTailUseDistinctRows',
+            'NativeWidthsPreserveEveryWordAndAllGuestState',
         ):
             names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
         names.add(f'ConSanSimE2E.{gpu}.wave{wave_size}.assembly.high_lane')

@@ -26,6 +26,8 @@ struct NativeLdsAccess {
   AccessKind kind = AccessKind::Read;
   uint16_t address_vgpr = 0;
   uint16_t immediate_bytes = 0;
+  // Byte count set by decoding; zero is unspecified and cannot qualify a site.
+  uint32_t width = 0;
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.

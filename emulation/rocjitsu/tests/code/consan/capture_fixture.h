@@ -33,6 +33,7 @@ inline CaptureHeader capture_header() {
                     .prepared_vgprs = 16};
   manifest.sites = {{.analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Write,
+                     .width = 4,
                      .original_size = 8,
                      .prepared_guest_offset = 32,
                      .prepared_guest_size = 8,
@@ -41,6 +42,7 @@ inline CaptureHeader capture_header() {
                     {.id = 1,
                      .analysis = AnalysisKind::LdsRaceDetection,
                      .access = AccessKind::Read,
+                     .width = 4,
                      .original_offset = 8,
                      .original_size = 8,
                      .prepared_guest_offset = 160,

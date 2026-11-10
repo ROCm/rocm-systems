@@ -25,11 +25,12 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x92, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
+    0x93, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-b32;gfx1250-epoch-workgroup-barriers;one-workgroup-1d;mask64;address-groups-per-"
+    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;one-workgroup-1d;"
+    "mask64;address-groups-per-"
     "site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Remaining lanes after these slots are filled cause one lost occurrence;
@@ -157,7 +158,7 @@ public:
   bool operator==(const ImageIdentity &) const = default;
 };
 
-/// @brief One physical native LDS instruction, owned by the sole MVP entry.
+/// @brief One physical native LDS instruction, owned by the sole entry.
 /// @details Offsets are .text-relative. A zero mapping size means missing,
 /// whereas offset zero is a valid location. Both checks share this reservation.
 class SiteFacts {
@@ -168,7 +169,8 @@ public:
   RecordKind record = RecordKind::Access;
   uint32_t range_id = 0;
   AccessKind access = AccessKind::Read;
-  uint32_t width = 4;
+  // Byte count: explicitly set to 2, 4, 8 or 16. Zero is unspecified/invalid.
+  uint32_t width = 0;
   uint64_t original_offset = 0;
   uint32_t original_size = 0;
   uint64_t prepared_guest_offset = 0;
@@ -219,7 +221,7 @@ public:
 
 /// @brief Owning static handoff shared by AOT, runtime and offline readers.
 /// @details This subset admits one entry, dynamically sized wave rows, native LDS
-/// b32 Read/Write, qualified full workgroup barriers, no private frame
+/// single-range Read/Write, qualified full workgroup barriers, no private frame
 /// or segment addends. The compiler must establish the scope from original instructions.
 /// Codec validation establishes structural consistency, not ISA safety.
 class Manifest {

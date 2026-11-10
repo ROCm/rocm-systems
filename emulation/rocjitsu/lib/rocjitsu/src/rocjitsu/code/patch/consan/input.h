@@ -61,7 +61,7 @@ struct InputProgram {
   std::vector<BarrierFacts> barriers;
 };
 
-/// @brief Build an owning, qualified input program for the native LDS b32 MVP.
+/// @brief Build an owning, qualified input program for the bounded native LDS profile.
 /// @details The closed, acyclic reachable CFG admits a deliberately explicit
 /// integer/argument/output instruction subset. Unsupported memory or sync is a
 /// preparation failure, never an omitted operation interpreted as no ordering.

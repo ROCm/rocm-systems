@@ -65,7 +65,7 @@ void rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride) {
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
 void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 site,
-                      u32 address, u32 immediate, u32 mask_low, u32 mask_high) {
+                      u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width) {
   GlobalWords dispatch = context(low, high);
   GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
   u64 remaining = u64{uniform(mask_low)} | (u64{uniform(mask_high)} << 32);
@@ -93,7 +93,7 @@ void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 sit
       record[wire::kRecordSequence / 4] = sequence;
       record[wire::kRecordPhase / 4] = output[wire::kRowFinalPhase / 4];
       record[wire::kRecordLdsOffset / 4] = u32(offset);
-      record[wire::kRecordWidth / 4] = 4;
+      record[wire::kRecordWidth / 4] = uniform(width);
       record[wire::kRecordGuestMask / 4] = u32(matching);
       record[wire::kRecordGuestMask / 4 + 1] = u32(matching >> 32);
       record[wire::kRecordFlags / 4] = wire::kExactGuestMask | (offset >> 32 ? 2u : 0u);
