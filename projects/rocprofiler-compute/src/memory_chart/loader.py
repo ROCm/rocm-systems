@@ -490,9 +490,17 @@ def _block(
     )
 
 
+def _check_metric_ref(path: Path, raw: Dict[str, Any], where: str) -> None:
+    for key in ("metric_name", "metric_id"):
+        value = raw[key]
+        if not isinstance(value, str) or not value:
+            _fail(path, f"{key} of {where} must be a non-empty string, not {value!r}")
+
+
 def _item(path: Path, raw: dict[str, Any]) -> LayoutItem:
     where = repr(raw.get("metric_name"))
     _check_keys(path, raw, ITEM_KEYS, where)
+    _check_metric_ref(path, raw, where)
     _check_choice(path, raw["category"], _ITEM_CATEGORIES, f"category of {where}")
     if not isinstance(raw["bar"], bool):
         _fail(path, f"bar of {where} must be true or false, not {raw['bar']!r}")
@@ -504,6 +512,7 @@ def _item(path: Path, raw: dict[str, Any]) -> LayoutItem:
 def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
     where = f"arrow {raw.get('metric_name')!r}"
     _check_keys(path, raw, ARROW_KEYS, where)
+    _check_metric_ref(path, raw, where)
     _check_choice(path, raw["direction"], _DIRECTIONS, f"direction of {where}")
     _check_choice(path, raw["category"], _ARROW_CATEGORIES, f"category of {where}")
     _check_choice(path, raw["style"], _ARROW_STYLES, f"style of {where}")

@@ -6,9 +6,15 @@
 
 import json
 
+import pytest
 from memory_chart_layout_format import format_layout, with_metric_ids
 
-from memory_chart.loader import layout_files, metric_entries
+from memory_chart.loader import (
+    LayoutError,
+    layout_files,
+    layout_from_json,
+    metric_entries,
+)
 
 
 def reversed_keys(value):
@@ -35,3 +41,11 @@ def test_metric_ids_are_filled_in_from_the_panel_config():
         for entry in metric_entries(data):
             del entry["metric_id"]
         assert with_metric_ids(path, data) == json.loads(text)
+
+
+def test_a_missing_metric_name_is_reported_as_a_missing_key():
+    path = layout_files()[0]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del metric_entries(data)[0]["metric_name"]
+    with pytest.raises(LayoutError, match=r"missing \['metric_name'\]"):
+        layout_from_json(path, with_metric_ids(path, data))

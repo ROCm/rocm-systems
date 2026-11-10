@@ -50,7 +50,10 @@ def with_metric_ids(path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             f"{path.name}: archs {archs} must share one memory chart panel numbering"
         )
     for entry in metric_entries(data):
-        name = entry.get("metric_name")
+        # The loader check that follows reports an entry without a name
+        if "metric_name" not in entry:
+            continue
+        name = entry["metric_name"]
         if name not in numberings[0]:
             raise LayoutError(
                 f"{path.name}: metric {name!r} is not in the memory chart panel"
