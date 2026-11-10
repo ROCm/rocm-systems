@@ -8455,6 +8455,28 @@ TEST_P(IsaTest, SEndpgm_Halts) {
   EXPECT_TRUE(fx.halted());
 }
 
+// The emulator's null-PC return sentinel is another normal termination path.
+// Keep a counter pending to distinguish draining it from freeing the wave early.
+TEST(ComputeUnitTest, NullPcReturnDrainsMemoryBeforeHalt) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1));
+  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
+  constexpr uint64_t kPc = 0x1000;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
+  amdgpu::Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  wave->wait_counters().increment(amdgpu::WaitCounterType::LGKMCNT);
+
+  fixture.cu()->step();
+
+  ASSERT_EQ(wave->state(), amdgpu::WfState::ENDING);
+  EXPECT_FALSE(wave->is_halted());
+  wave->release_wait_counter(amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(wave->is_halted());
+}
+
 TEST_P(IsaTest, VMovB32_PerLane) {
   ExecFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize(arch()));
@@ -8706,8 +8728,8 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   uint32_t s1 = vb + 18;
   uint32_t s2 = vb + 256;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, s0, s1, s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc);
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, s0, s1, s2, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, const_acc);
 
   // Verify: every output element should be exactly 32.0f
   float expected = 32.0f;
@@ -8758,8 +8780,8 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Execute MFMA with zero accumulator (const_acc = 0.0f)
   uint32_t dst = vb + 256;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
-                   amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
 
   // With const_acc=0.0, all outputs should be 32.0 (sum of 32 ones*ones)
   float expected = 32.0f;
@@ -10903,6 +10925,71 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
       }
     }
   }
+}
+
+TEST(Pm4DispatchTest, NativeRingFetchesRaw57BitBranchTarget) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5"));
+  auto *halts = f.capture_halts();
+  constexpr uint64_t code = 0x8000, ring = 0x9000, target_page = 0xa000;
+  constexpr uint64_t target = (uint64_t{1} << 56) | target_page;
+  constexpr uint64_t root = 0x1000, leaf_table = 0x5000;
+  // The low ring and the high target share the lower four page-table levels.
+  f.mem()->write64(root + (target >> 48) * sizeof(uint64_t), (root + 4096) | 1);
+  for (uint64_t table = root; table < leaf_table; table += 4096)
+    f.mem()->write64(table, (table + 4096) | 1);
+  for (uint64_t page : {code, ring, target_page})
+    f.mem()->write64(leaf_table + (page >> 12) * sizeof(uint64_t),
+                     page | (uint64_t{1} << 63) | 0x71);
+  const auto space = f.soc_ptr->gpu_vm().register_unrouted_gfx12_address_space(
+      77, root, std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem()));
+  ASSERT_TRUE(space);
+  const auto setpc = build_s_setpc_b64(0, f.cu()->arch());
+  const auto endpgm = build_s_endpgm(f.cu()->arch());
+  ASSERT_TRUE(setpc.succeeded());
+  ASSERT_TRUE(endpgm.succeeded());
+  f.mem()->write32(code, setpc.value());
+  f.mem()->write32(target_page, endpgm.value());
+  const uint32_t packets[] = {
+      0xc0037600,
+      amdgpu::kPm4ComputeNumThreadX,
+      1,
+      1,
+      1,
+      0xc0027600,
+      amdgpu::kPm4ComputePgmLo,
+      uint32_t(code >> 8),
+      0,
+      0xc0017600,
+      amdgpu::kPm4ComputePgmRsrc2,
+      2u << 1,
+      0xc0027600,
+      amdgpu::kPm4ComputeUserData0,
+      uint32_t(target),
+      uint32_t(target >> 32),
+      0xc0031500,
+      1,
+      1,
+      1,
+      0x8001,
+  };
+  for (size_t i = 0; i < std::size(packets); ++i)
+    f.mem()->write32(ring + i * sizeof(uint32_t), packets[i]);
+  const auto registration =
+      f.cp()->register_queue({.address_space = space,
+                              .process_id = 77,
+                              .queue_id = 71,
+                              .ring_base_va = ring,
+                              .ring_size = 256,
+                              .read_ptr_va = ring + 256,
+                              .packet_format = amdgpu::QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  ASSERT_EQ(f.cp()->notify_pm4_queue_doorbell(registration, std::size(packets)),
+            amdgpu::QueueSubmissionStatus::Accepted);
+  f.engine->run();
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(71, 77));
+  EXPECT_EQ(halts->snapshots().size(), 1u);
+  EXPECT_TRUE(f.cp()->unregister_pm4_queue_registration(registration));
 }
 
 TEST(Pm4DispatchTest, MaskedPredExecDoesNotReplaySkippedNativeRingTail) {

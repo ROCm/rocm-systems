@@ -24,6 +24,8 @@ pub(crate) struct ApiLeaseScope {
     previous: u64,
     /// The parent count stays live until the thread-local marker is cleared.
     _token: InFlightToken,
+    /// A lease scope must be dropped on the thread whose marker it changed.
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl ApiLeaseScope {
@@ -33,6 +35,7 @@ impl ApiLeaseScope {
         Self {
             previous,
             _token: token,
+            _thread_bound: std::marker::PhantomData,
         }
     }
 
@@ -85,7 +88,7 @@ impl InFlightTracker {
     }
 
     /// Initializes the closed process gate before its first HSA generation.
-    fn new_process() -> Self {
+    pub(crate) fn new_process() -> Self {
         Self {
             process: true,
             state: AtomicUsize::new(ADMISSION_CLOSED),
@@ -189,9 +192,35 @@ impl Drop for InFlightToken {
 /// Admits one raw-handle operation for its full callback duration.
 pub(crate) fn enter_public_raw_handle() -> Option<InFlightToken> {
     #[cfg(test)]
-    return TEST_RAW_HANDLES.enter();
+    return TEST_PUBLIC_RAW_GATE
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_else(|| TEST_RAW_HANDLES.clone())
+        .enter();
     #[cfg(not(test))]
     PROCESS_ADMISSION.enter()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lets one test thread race a process gate without closing other tests' gate.
+    static TEST_PUBLIC_RAW_GATE: std::cell::RefCell<Option<Arc<InFlightTracker>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn install_test_public_raw_gate(gate: Arc<InFlightTracker>) -> impl Drop {
+    /// Restores the test thread's previous raw-handle gate on scope exit.
+    struct RestoreGate(Option<Arc<InFlightTracker>>);
+
+    impl Drop for RestoreGate {
+        fn drop(&mut self) {
+            TEST_PUBLIC_RAW_GATE.with(|slot| {
+                slot.replace(self.0.take());
+            });
+        }
+    }
+
+    RestoreGate(TEST_PUBLIC_RAW_GATE.with(|slot| slot.replace(Some(gate))))
 }
 
 #[cfg(test)]
