@@ -14,6 +14,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 #include "bootstrap.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 
@@ -45,60 +46,28 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
          !comm->MNNVL && ddaArchSupported;
 }
 
-} // namespace
-
-ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
-  // Skip DDA if:
-  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
-  // - multi-node runs
-  // - not using 1 process per GPU
-  // - MNNVL (fabric-based P2P)
-  // - the arch is not one the DDA algorithm actually runs on. The dispatch path
-  //   (rcclDdaEnabled() in collectives.cc) only enables DDA on gfx942/gfx950; on
-  //   every other arch the algorithm is never selected, so allocating the IPC
-  //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
-  //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
-  //   which aborts comm init entirely. Gate init to match dispatch.
-  if (!ddaIpcCommEligible(comm)) {
-    return ncclSuccess;
-  }
-
-  // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
-  // comm->isAllCudaP2p is set via ncclTopoCheckP2p which on AMD/HIP returns true
-  // whenever ranks share a hostHash, regardless of actual P2P support (paths.cc).
-  // Use hipDeviceCanAccessPeer directly — the authoritative runtime check for IPC
-  // capability, and the same check used in init.cc for hasPeerAccess.
-  for (int i = 0; i < comm->nRanks; i++) {
-    for (int j = i + 1; j < comm->nRanks; j++) {
-      int canAccess = 0;
-      hipError_t err = hipDeviceCanAccessPeer(&canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
-      if (err != hipSuccess || !canAccess) {
-        INFO(NCCL_INIT, "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
-             comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
-        return ncclSuccess;
-      }
-    }
-  }
-
-  size_t bytes = DDA_IPC_BUFFER_SIZE;
-  if (bytes == 0) {
-    return ncclSuccess;
-  }
-
+// Allocates and zeroes the scratch. Returns null, with the HIP error cleared, on failure.
+void* ddaIpcAllocScratch(ncclComm* comm, size_t bytes) {
   void* scratch = nullptr;
 #if defined(HIP_UNCACHED_MEMORY)
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocUncached));
 #else
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
 #endif
+  if (scratch == nullptr) {
+    (void)cudaGetLastError();
+    return nullptr;
+  }
 
   // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
   // false-matches leftover flag words (mirrors the fabric path). Harmless for
   // the copy-based DDA collectives, which overwrite their staging area per op.
-  if (scratch != nullptr) {
-    HIP_CALL(hipMemset(scratch, 0, bytes));
-  }
+  HIP_CALL(hipMemset(scratch, 0, bytes));
+  return scratch;
+}
 
+// Takes ownership of scratch. Failures are logged and leave the comm without DDA IPC.
+ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
   auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
     CUDACHECKIGNORE(cudaFree(scratch));
@@ -238,6 +207,102 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   return ncclSuccess;
 }
 
+// Collective. Each rank votes on whether it holds its scratch, so a rank that cannot allocate
+// (out of memory, or capturing, where the setup's synchronous copies are illegal) leaves every
+// rank without DDA IPC instead of only some. *agreed reports whether the setup ran.
+ncclResult_t ddaIpcVoteAndSetup(ncclComm* comm, size_t bytes, bool mayAllocate, bool* agreed) {
+  *agreed = false;
+  void* scratch = mayAllocate ? ddaIpcAllocScratch(comm, bytes) : nullptr;
+  std::vector<uint8_t> ready(comm->nRanks);
+  ready[comm->rank] = scratch != nullptr;
+  ncclResult_t res = bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t));
+  if (res != ncclSuccess || std::find(ready.begin(), ready.end(), 0) != ready.end()) {
+    CUDACHECKIGNORE(cudaFree(scratch));
+    return res;
+  }
+  *agreed = true;
+  return ddaIpcSetup(comm, scratch, bytes);
+}
+
+} // namespace
+
+ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+  // Skip DDA if:
+  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
+  // - multi-node runs
+  // - not using 1 process per GPU
+  // - MNNVL (fabric-based P2P)
+  // - the arch is not one the DDA algorithm actually runs on. The dispatch path
+  //   (rcclDdaEnabled() in collectives.cc) only enables DDA on gfx942/gfx950; on
+  //   every other arch the algorithm is never selected, so allocating the IPC
+  //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
+  //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
+  //   which aborts comm init entirely. Gate init to match dispatch.
+  if (!ddaIpcCommEligible(comm)) {
+    return ncclSuccess;
+  }
+
+  // DDA IPC requires cross-GPU IPC memory mapping (hipIpcOpenMemHandle).
+  // comm->isAllCudaP2p is set via ncclTopoCheckP2p which on AMD/HIP returns true
+  // whenever ranks share a hostHash, regardless of actual P2P support (paths.cc).
+  // Use hipDeviceCanAccessPeer directly — the authoritative runtime check for IPC
+  // capability, and the same check used in init.cc for hasPeerAccess.
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = i + 1; j < comm->nRanks; j++) {
+      int canAccess = 0;
+      hipError_t err = hipDeviceCanAccessPeer(&canAccess, comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+      if (err != hipSuccess || !canAccess) {
+        INFO(NCCL_INIT, "ncclDdaIpcCommInit: no P2P between GPU %d and GPU %d, skipping DDA IPC",
+             comm->peerInfo[i].cudaDev, comm->peerInfo[j].cudaDev);
+        return ncclSuccess;
+      }
+    }
+  }
+
+  size_t bytes = DDA_IPC_BUFFER_SIZE;
+  if (bytes == 0) {
+    return ncclSuccess;
+  }
+
+  if (rcclParamDdaIpcLazyInit() != 0) {
+    comm->ddaIpcLazyScratchBytes = bytes;
+    INFO(NCCL_INIT, "ncclDdaIpcCommInit: deferring the %zu-byte scratch to the first DDA IPC collective", bytes);
+    return ncclSuccess;
+  }
+  bool agreed = false;
+  return ddaIpcVoteAndSetup(comm, bytes, /*mayAllocate=*/true, &agreed);
+}
+
+ncclResult_t ncclDdaIpcEnsureInit(ncclComm* comm, bool capturing) {
+  if (comm == nullptr || comm->ddaIpcLazyScratchBytes == 0) {
+    return ncclSuccess;
+  }
+  // Votes run on the 1st, 2nd, 4th, 8th... trigger, so a rank that stays unready (capturing,
+  // out of memory) costs its peers O(log n) bootstrap AllGathers.
+  const uint64_t call = ++comm->ddaIpcLazyCalls;
+  if ((call & (call - 1)) != 0) {
+    return ncclSuccess;
+  }
+
+  // A rank that cannot select its device still votes (not ready): returning early would leave
+  // its peers waiting in the vote.
+  int savedDev = -1;
+  bool onDevice = cudaGetDevice(&savedDev) == cudaSuccess;
+  const bool switchDevice = onDevice && savedDev != comm->cudaDev;
+  if (switchDevice) onDevice = cudaSetDevice(comm->cudaDev) == cudaSuccess;
+  if (!onDevice) (void)cudaGetLastError();
+  bool agreed = false;
+  ncclResult_t res = ddaIpcVoteAndSetup(comm, comm->ddaIpcLazyScratchBytes, onDevice && !capturing, &agreed);
+  if (agreed) {
+    comm->ddaIpcLazyScratchBytes = 0;
+  } else if (res == ncclSuccess) {
+    INFO(NCCL_INIT, "ncclDdaIpcEnsureInit: not every rank is ready (call %lu, capturing %d); DDA IPC stays deferred",
+         (unsigned long)call, (int)capturing);
+  }
+  if (switchDevice) CUDACHECKIGNORE(cudaSetDevice(savedDev));
+  return res;
+}
+
 ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
@@ -304,5 +369,6 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
+  comm->ddaIpcLazyScratchBytes = 0;
   return ncclSuccess;
 }

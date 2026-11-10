@@ -46,6 +46,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "../common/LogCapture.hpp"                 // RcclUnitTesting::CaptureLog
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
@@ -6998,6 +6999,69 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaIpcChosenOnNonGfx1250Arch) {
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
         EXPECT_EQ(121u, decision.nMaxChannels);  // proves ncclAllGatherDdaIpcBlocks ran, not a sibling
 
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A deferred DDA IPC setup runs on the first live call whose shape could take the IPC path,
+// before the resource-dependent eligibility check, so that call can already pick DDA IPC.
+TEST(WrapMicrotestIsolated, SelectAllGather_LiveCallRunsDeferredDdaIpcSetup) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_LiveCallRunsDeferredDdaIpcSetup",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaIpcLazyScratchBytes = 1 << 20;
+        std::vector<bool> ensureCapturing;
+        ScopedHook shape(g_allGatherDdaIpcShapeEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+        ScopedHook ensure(g_ddaIpcEnsureInit, [&](ncclComm* c, bool capturing) {
+          ensureCapturing.push_back(capturing);
+          c->ddaIpcLazyScratchBytes = 0;
+          return ncclSuccess;
+        });
+        ScopedHook ipcEligible(g_allGatherDdaIpcEligible, [&](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          return !ensureCapturing.empty();
+        });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(std::vector<bool>{false}, ensureCapturing);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Reporting queries never run the collective setup, and neither does a shape the IPC path
+// cannot take: both are decided from the deferred state alone.
+TEST(WrapMicrotestIsolated, SelectAllGather_QueryAndIneligibleShapeLeaveDdaIpcDeferred) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_QueryAndIneligibleShapeLeaveDdaIpcDeferred",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx942");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaIpcLazyScratchBytes = 1 << 20;
+        bool shapeOk = true;
+        int ensureCalls = 0;
+        ScopedHook shape(g_allGatherDdaIpcShapeEligible,
+                         [&](ncclComm*, size_t, ncclDataType_t) { return shapeOk; });
+        ScopedHook ensure(g_ddaIpcEnsureInit, [&](ncclComm*, bool) {
+          ensureCalls++;
+          return ncclSuccess;
+        });
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(0, ensureCalls);
+        shapeOk = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(0, ensureCalls);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_DDA_IPC, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

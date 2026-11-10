@@ -731,6 +731,10 @@ struct ncclComm {
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
   // matching deallocator at teardown.
   bool ddaScratchIsVmm;
+  // Nonzero while the IPC path has deferred its setup (RCCL_DDA_IPC_LAZY_INIT): the
+  // scratch bytes ncclDdaIpcEnsureInit will allocate. ddaIpcLazyCalls paces its votes.
+  size_t ddaIpcLazyScratchBytes;
+  uint64_t ddaIpcLazyCalls;
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
@@ -1135,6 +1139,12 @@ struct ncclComm {
 
   uint64_t endMagic;
 };
+
+// DDA scratch bytes the comm holds, or will allocate when its deferred IPC setup runs.
+// Rank-invariant, so selection can size-check against it before the scratch exists.
+inline size_t ncclDdaScratchCapacity(const struct ncclComm* comm) {
+  return comm->ddaScratch != nullptr ? comm->ddaScratchBytes : comm->ddaIpcLazyScratchBytes;
+}
 
 inline bool ncclNvlsTransportEnabled(const struct ncclComm* comm) {
   return comm->nvlsSupport && !(comm->config.nvlsHostMode & ncclNvlsHostModeDisableTransport);

@@ -40,6 +40,12 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) {
 #endif
 const char* ncclGetErrorString(ncclResult_t) { FailLoudUnfaked("enqueue_test_deps", "ncclGetErrorString"); }
 
+// ipc_init.cu owns ncclDdaIpcEnsureInit; dda_fakes.cc, which defines it elsewhere, does not link here.
+// taskAppend reaches it only for a comm with a deferred DDA IPC setup.
+ncclResult_t ncclDdaIpcEnsureInit(struct ncclComm*, bool) {
+  FailLoudUnfaked("enqueue_test_deps", "ncclDdaIpcEnsureInit");
+}
+
 void ResetEnqueueTestDeps() {
   ResetAllocatorFakes();
   ResetHipFakes();

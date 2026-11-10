@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -41,6 +42,7 @@ constexpr int kRanks = nccl_dda_detail::kDdaNranks;
 constexpr auto kRendezvousTimeout = std::chrono::seconds(3);
 
 int64_t g_ddaEnable = 1;
+int64_t g_ddaIpcLazyInit = 0;
 
 class SimBootstrap {
 public:
@@ -59,6 +61,7 @@ public:
 
   ncclResult_t allGather(int rank, void* allData, int size) {
     std::unique_lock<std::mutex> lock(mu_);
+    ++allGatherCalls;
     GatherRound& round = gatherRounds_[nextGather_[rank]++];
     if (round.size < 0) {
       round.size = size;
@@ -111,6 +114,7 @@ public:
   int timeouts = 0;
   int desyncs = 0;
   int barrierCalls = 0;
+  int allGatherCalls = 0;
 
 private:
   struct GatherRound {
@@ -140,6 +144,7 @@ class DdaIpcLifecycleMicrotest : public ::testing::Test {
 protected:
   void SetUp() override {
     g_ddaEnable = 1;
+    g_ddaIpcLazyInit = 0;
     for (int rank = 0; rank < kRanks; ++rank) {
       peerInfo_[rank].rank = rank;
       peerInfo_[rank].cudaDev = rank;
@@ -184,6 +189,19 @@ protected:
     }
   }
 
+  // capturing[rank] is what each rank reports about its stream.
+  void ensureDdaIpcForAllRanks(const std::vector<bool>& capturing = std::vector<bool>(kRanks, false)) {
+    std::vector<std::thread> threads;
+    for (int rank = 0; rank < kRanks; ++rank) {
+      threads.emplace_back([this, rank, &capturing] {
+        ensureResults_[rank] = ncclDdaIpcEnsureInit(comms_[rank].get(), capturing[rank]);
+      });
+    }
+    for (auto& thread : threads) {
+      thread.join();
+    }
+  }
+
   void closeDdaIpcPeerMappingsForAllRanks() {
     std::vector<std::thread> threads;
     for (int rank = 0; rank < kRanks; ++rank) {
@@ -215,6 +233,7 @@ protected:
   ncclPeerInfo peerInfo_[kRanks] = {};
   std::unique_ptr<ncclComm> comms_[kRanks];
   ncclResult_t initResults_[kRanks] = {};
+  ncclResult_t ensureResults_[kRanks] = {};
   ncclResult_t closeResults_[kRanks] = {};
   ncclResult_t finiResults_[kRanks] = {};
   SimBootstrap bootstrap_;
@@ -325,6 +344,123 @@ TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialComm
   for (int rank = 0; rank < kRanks; ++rank) {
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
   }
+}
+
+// A one-rank scratch allocation failure leaves every rank without DDA IPC, so no rank
+// later picks DDA while its peers cannot.
+TEST_F(DdaIpcLifecycleMicrotest, OneRankScratchFailureLeavesEveryRankWithoutDdaIpc) {
+  std::atomic<int> scratchAllocs{0};
+  ScopedHook<hipError_t(void**, size_t, unsigned)> failOneScratch{
+    g_hipExtMallocWithFlags, [this, &scratchAllocs](void** ptr, size_t size, unsigned) {
+    if (size == DDA_IPC_BUFFER_SIZE && scratchAllocs.fetch_add(1) == 0) {
+      *ptr = nullptr;
+      return hipErrorOutOfMemory;
+    }
+    *ptr = allocate(size);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  EXPECT_EQ(kRanks, scratchAllocs.load());
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;  // DDA IPC is optional
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
+  }
+  EXPECT_TRUE(liveAllocations_.empty());
+  EXPECT_EQ(0, openMappingCount());
+}
+
+// RCCL_DDA_IPC_LAZY_INIT=1: comm init allocates nothing, and the first ensure on every rank
+// builds exactly what eager init would have.
+TEST_F(DdaIpcLifecycleMicrotest, LazyInitDefersScratchUntilFirstEnsure) {
+  g_ddaIpcLazyInit = 1;
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
+    EXPECT_EQ(static_cast<size_t>(DDA_IPC_BUFFER_SIZE), ncclDdaScratchCapacity(comms_[rank].get())) << "rank " << rank;
+  }
+  EXPECT_TRUE(liveAllocations_.empty());
+  EXPECT_EQ(0, openMappingCount());
+
+  ensureDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, ensureResults_[rank]) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
+    EXPECT_EQ(0u, comms_[rank]->ddaIpcLazyScratchBytes) << "rank " << rank;
+  }
+  EXPECT_EQ(2 * kRanks * (kRanks - 1), openMappingCount());
+
+  // Once set up, further ensures are local no-ops.
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, ncclDdaIpcEnsureInit(comms_[rank].get(), /*capturing=*/false)) << "rank " << rank;
+  }
+
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
+  EXPECT_EQ(0, bootstrap_.timeouts);
+  EXPECT_EQ(0, bootstrap_.desyncs);
+  EXPECT_TRUE(liveAllocations_.empty());
+  for (int rank = 0; rank < kRanks; ++rank) {
+  }
+}
+
+// A rank that is capturing votes not ready, so every rank stays deferred and holds nothing.
+// The next vote (call 2) succeeds; call 3 does not vote at all.
+TEST_F(DdaIpcLifecycleMicrotest, LazyInitWaitsWhileAnyRankCaptures) {
+  g_ddaIpcLazyInit = 1;
+  initializeDdaIpcForAllRanks();
+
+  std::vector<bool> rank0Capturing(kRanks, false);
+  rank0Capturing[0] = true;
+  ensureDdaIpcForAllRanks(rank0Capturing);
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, ensureResults_[rank]) << "rank " << rank;
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(static_cast<size_t>(DDA_IPC_BUFFER_SIZE), comms_[rank]->ddaIpcLazyScratchBytes) << "rank " << rank;
+  }
+  EXPECT_TRUE(liveAllocations_.empty());
+
+  ensureDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, ensureResults_[rank]) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(0u, comms_[rank]->ddaIpcLazyScratchBytes) << "rank " << rank;
+  }
+
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
+  EXPECT_EQ(0, bootstrap_.timeouts);
+  EXPECT_EQ(0, bootstrap_.desyncs);
+  EXPECT_TRUE(liveAllocations_.empty());
+}
+
+// The votes back off: after a failed first vote, call 2 votes, call 3 does not.
+TEST_F(DdaIpcLifecycleMicrotest, LazyInitVotesOnlyOnPowerOfTwoCalls) {
+  g_ddaIpcLazyInit = 1;
+  initializeDdaIpcForAllRanks();
+  std::vector<bool> allCapturing(kRanks, true);
+  ensureDdaIpcForAllRanks(allCapturing);  // call 1: votes, nobody ready
+  ensureDdaIpcForAllRanks(allCapturing);  // call 2: votes, nobody ready
+  const int gathersAfterTwoVotes = bootstrap_.allGatherCalls;
+  ensureDdaIpcForAllRanks();              // call 3: no vote, even though all are ready
+  EXPECT_EQ(gathersAfterTwoVotes, bootstrap_.allGatherCalls);
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+  }
+  ensureDdaIpcForAllRanks();              // call 4: votes and sets up
+  for (int rank = 0; rank < kRanks; ++rank) {
+    ASSERT_EQ(ncclSuccess, ensureResults_[rank]) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+  }
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
+  EXPECT_EQ(0, bootstrap_.desyncs);
+  EXPECT_TRUE(liveAllocations_.empty());
 }
 
 TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaKeepsScratchForCeScratchCollectives) {
@@ -505,4 +641,8 @@ TEST(DdaIpcMemHandlerMicrotest, PartialOpenFailureClosesMappingsOpenedBeforeTheF
 
 int64_t rcclParamDdaEnable() {
   return g_ddaEnable;
+}
+
+int64_t rcclParamDdaIpcLazyInit() {
+  return g_ddaIpcLazyInit;
 }

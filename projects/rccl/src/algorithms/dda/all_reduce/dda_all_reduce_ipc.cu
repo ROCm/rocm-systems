@@ -90,28 +90,19 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
 
 } // namespace
 
-bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                 ncclDataType_t datatype, ncclRedOp_t op) {
+bool ncclAllReduceDdaIpcShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   if (comm == nullptr) {
     return false;
   }
-  // IPC path: requires its own handler + barrier state, a single node, and
-  // exactly kDdaNranks ranks (the IPC kernels fix the rank count at compile
-  // time).
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcBarrierState == nullptr) {
-    return false;
-  }
+  // IPC path: a single node and exactly kDdaNranks ranks (the IPC kernels fix
+  // the rank count at compile time).
   if (comm->nNodes != 1) {
     return false;
   }
   if (comm->nRanks != kDdaNranks) {
     return false;
   }
-  // Checks shared by both DDA all-reduce backends.
   if (comm->bootstrap == nullptr) {
-    return false;
-  }
-  if (comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
     return false;
   }
   if (count == 0) {
@@ -124,14 +115,11 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     return false;
   }
   const size_t bytes = count * ncclTypeSize(datatype);
-  if (bytes > comm->ddaScratchBytes) {
+  if (bytes > ncclDdaScratchCapacity(comm)) {
     return false;
   }
   if (bytes % 16) {
     // 16-byte alignment: the DDA kernels do 16-byte vectorized loads.
-    return false;
-  }
-  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
   if (bytes > kDdaFlatTreeThresholdBytes) {
@@ -142,6 +130,21 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     }
   }
   return true;
+}
+
+bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                 ncclDataType_t datatype, ncclRedOp_t op) {
+  if (comm == nullptr) {
+    return false;
+  }
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcBarrierState == nullptr || comm->ddaScratch == nullptr ||
+      comm->ddaPeerPtrsDev == nullptr) {
+    return false;
+  }
+  if (!ncclAllReduceDdaIpcShapeEligible(comm, count, datatype, op)) {
+    return false;
+  }
+  return dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff);
 }
 
 uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {

@@ -65,6 +65,13 @@ extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabr
 extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLL128Eligible;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLLBlocks;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_broadcastDdaFabricLL128Blocks;
+// Rank-invariant IPC shape checks that gate a deferred DDA IPC setup. False by default.
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_allReduceDdaIpcShapeEligible;
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaIpcShapeEligible;
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaIpcShapeEligible;
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_reduceScatterDdaIpcShapeEligible;
+// The deferred DDA IPC setup the selectors trigger. Succeeds without doing anything by default.
+extern std::function<ncclResult_t(ncclComm*, bool /*capturing*/)> g_ddaIpcEnsureInit;
 
 // The launchers. Fail loud until a test installs them.
 using DdaLaunchHook = std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t)>;
