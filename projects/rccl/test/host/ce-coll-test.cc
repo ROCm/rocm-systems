@@ -408,8 +408,16 @@ class CeInitMicrotest : public ::testing::Test {
     ncclWindow_vidmem vidmem{};
     ncclDevrWindow win{};
   };
+  // A device fill lands when its stream is synchronized. hipMemset of device memory only queues on the null stream.
+  struct Fill {
+    hipStream_t stream;
+    void* dst;
+    int value;
+    size_t bytes;
+  };
   Allocation allocs_[2];  // the signal buffer, then the ready/complete flag window
   int nAllocs_ = 0;
+  std::vector<Fill> queued_;
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
   ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t size) {
     if (nAllocs_ == 2) return ncclInternalError;
@@ -434,7 +442,19 @@ class CeInitMicrotest : public ::testing::Test {
         return ncclSuccess;
       }};
   ScopedHook<size_t(const ncclComm*)> nonRegCap_{g_rcclCeArNonRegCap, [](const ncclComm*) { return size_t{0}; }};
-  ScopedHook<hipError_t(hipStream_t)> streamSync_{g_hipStreamSynchronize, [](hipStream_t) { return hipSuccess; }};
+  ScopedHook<hipError_t(void*, int, size_t)> memset_{g_hipMemset, [this](void* dst, int value, size_t bytes) {
+    queued_.push_back({nullptr, dst, value, bytes});
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(void*, int, size_t, hipStream_t)> memsetAsync_{
+      g_hipMemsetAsync, [this](void* dst, int value, size_t bytes, hipStream_t stream) {
+        queued_.push_back({stream, dst, value, bytes});
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t)> streamSync_{g_hipStreamSynchronize, [this](hipStream_t stream) {
+    Land(stream);
+    return hipSuccess;
+  }};
 
   void SetUp() override {
     comm_->nRanks = 2;
@@ -455,6 +475,16 @@ class CeInitMicrotest : public ::testing::Test {
     }
     return nullptr;
   }
+  void Land(hipStream_t stream) {
+    for (auto it = queued_.begin(); it != queued_.end();) {
+      if (it->stream != stream) {
+        ++it;
+        continue;
+      }
+      std::memset(it->dst, it->value, it->bytes);
+      it = queued_.erase(it);
+    }
+  }
 };
 
 TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
@@ -468,6 +498,7 @@ TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
 
 TEST_F(CeInitMicrotest, StaleSignalBuffer_ClearsIt) {
   ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+  Land(nullptr);
 
   const Allocation* signal = Find(comm_->ceColl.signalBuffer);
   ASSERT_NE(nullptr, signal);
