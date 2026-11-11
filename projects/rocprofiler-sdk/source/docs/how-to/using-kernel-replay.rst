@@ -207,7 +207,7 @@ It does **not** restore:
 
 Detected unsupported argument memory, failed snapshot capture, or failed required memory checks
 cause the dispatch to run once without replay. The same applies if the kernarg buffer cannot be
-verified and safely inspected.
+verified and safely inspected. Kernels unknown to the SDK also run once without replay.
 
 Argument-memory checks are best effort: indirect pointers and some aggregate fields can be missed,
 allowing writes outside the snapshot to accumulate across passes. Scalar values can also cause
