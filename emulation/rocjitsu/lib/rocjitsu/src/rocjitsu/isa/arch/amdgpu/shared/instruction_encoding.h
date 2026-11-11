@@ -203,6 +203,30 @@ constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
   return selector < allocation ? static_cast<uint16_t>(selector) : 0;
 }
 
+template <typename Encoding>
+constexpr std::array<uint8_t, 4> shader_export_sources(const Encoding &inst) {
+  return {static_cast<uint8_t>(inst.vsrc0), static_cast<uint8_t>(inst.vsrc1),
+          static_cast<uint8_t>(inst.vsrc2), static_cast<uint8_t>(inst.vsrc3)};
+}
+
+class ShaderExportOperands {
+public:
+  static constexpr uint8_t kLastMrt = 7, kDepth = 8, kFirstPosition = 12, kLastPosition = 16,
+                           kPrimitive = 20, kDualSource0 = 21, kDualSource1 = 22;
+  uint8_t target;
+  uint8_t components;
+  bool row_from_m0;
+  std::array<uint8_t, 4> sources;
+
+  /// Decode the shared GFX11 EXP and GFX12 VEXPORT operand layout.
+  template <typename Encoding> static ShaderExportOperands decode(const Encoding &inst) {
+    return {static_cast<uint8_t>(inst.tgt), static_cast<uint8_t>(inst.en), bool(inst.row_en),
+            shader_export_sources(inst)};
+  }
+
+  bool channel_enabled(unsigned channel) const { return components & (1u << channel); }
+};
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -232,6 +256,7 @@ struct RegisterModifiers {
   /// Sampling controls select active lanes and implicit derivative inputs from the 2x2 quad.
   std::optional<ImageSampleSources> image_sample_sources;
   const Operand *image_store_data = nullptr;
+  std::optional<ShaderExportOperands> shader_export;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.

@@ -473,6 +473,9 @@ class IsaProfile(ABC):
     # The issued buffer load keeps its wait-counter obligation.
     check_buffer_load_result_bounds = False
 
+    supports_sleep_wakeup_credit = False
+    models_nop_issue_delay = False
+
     @property
     def uses_rj_arith_matrix(self) -> bool:
         """Opt into rj-arith matrix execution independently of operand layout."""
@@ -2380,6 +2383,8 @@ class Rdna1Profile(_AmdgpuProfileBase):
     def mimg_r128_resource(self, name: str) -> bool:
         return not name.startswith('IMAGE_BVH')
 
+    models_nop_issue_delay = True
+
     @property
     def mimg_max_nsa_words(self) -> int:
         return 3
@@ -2909,6 +2914,17 @@ class Rdna4Profile(_AmdgpuProfileBase):
       ``gen_vopd`` after normal instruction generation skips it.
     """
 
+    supports_sleep_wakeup_credit = True
+
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            **super().semantic_overrides,
+            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
+            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
+            'S_BARRIER_WAIT': ('barrier', '', ''),
+        }
+
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
@@ -3169,14 +3185,6 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        return {
-            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
-            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
-            'S_BARRIER_WAIT': ('barrier', '', ''),
-        }
-
-    @property
     def renders_true16_vop3_operands(self) -> bool:
         return True
 
@@ -3258,6 +3266,17 @@ class Cdna5Profile(Rdna4Profile):
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
 
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        overrides = dict(super().semantic_overrides)
+        for mnemonic in (
+            'S_BARRIER_SIGNAL',
+            'S_BARRIER_SIGNAL_ISFIRST',
+            'S_BARRIER_WAIT',
+        ):
+            overrides.pop(mnemonic, None)
+        return overrides
+
     flat_saddr_null_aliases = ()
 
     @property
@@ -3328,17 +3347,6 @@ class Cdna5Profile(Rdna4Profile):
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
         return TransposeKind.CDNA5_DS_TR_B8
-
-    @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        overrides = dict(super().semantic_overrides)
-        for mnemonic in (
-            'S_BARRIER_SIGNAL',
-            'S_BARRIER_SIGNAL_ISFIRST',
-            'S_BARRIER_WAIT',
-        ):
-            overrides.pop(mnemonic, None)
-        return overrides
 
     @property
     def ds_addtid_m0_base_bits(self) -> int:

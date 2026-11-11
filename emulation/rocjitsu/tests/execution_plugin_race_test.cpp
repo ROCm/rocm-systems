@@ -4777,6 +4777,226 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
   verify_wait_order(/*storecnt_first=*/false);
 }
 
+TEST(RaceDetectorPluginTest, Cdna1TrapCompletesOnlyTheEnteringWavesMemoryObligations) {
+  constexpr uint64_t program = 0x1000, handler = 0x2000, data = 0x3000;
+  for (bool install_handler : {false, true}) {
+    SCOPED_TRACE(install_handler);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(2, "cdna1"));
+    PluginSinkConfig config;
+    StringSink &sink = config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *race = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    auto callbacks = std::make_unique<OrderingPlugin>();
+    const auto *trace = callbacks.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(callbacks)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    auto *cu = f.cu();
+    cu->set_functional_quantum(1);
+    auto *wf = cu->dispatch_wf(0, program, 104, 256);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    auto *peer = cu->dispatch_wf(0, program, 104, 256);
+    ASSERT_NE(peer, nullptr);
+    peer->set_debug_suspended(true);
+    std::array waves{wf, peer};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+
+    // A completed wave-local wait must retain this LDS footprint for peers.
+    auto *state = static_cast<RaceWavefrontState *>(wf->plugin_state(race->slot_index()));
+    const std::array ranges{LdsByteRange{.address = 0, .bytes = 4}};
+    const std::array obligations{
+        MemoryCounterObligation{WaitCounterType::VMCNT, MemoryOrderClass::UNORDERED}};
+    state->race_state->registerLdsRangeEvent(testInstruction(program - 4),
+                                             MemoryEventType::GLOBAL_TO_LDS, ranges, obligations,
+                                             MemoryOrderClass::UNORDERED);
+    auto *peer_state = static_cast<RaceWavefrontState *>(peer->plugin_state(race->slot_index()));
+    const std::array peer_ranges{LdsByteRange{.address = 4, .bytes = 4}};
+    peer_state->race_state->registerLdsRangeEvent(testInstruction(program - 4),
+                                                  MemoryEventType::GLOBAL_TO_LDS, peer_ranges,
+                                                  obligations, MemoryOrderClass::UNORDERED);
+    const auto &events = state->race_state->getDetector()->events();
+    ASSERT_EQ(events.status(EventId{0}), EventStatus::ACTIVE);
+
+    f.mem->write32(data, 123);
+    f.mem->write32(program, 0xc0020200u); // s_load_dword s8, s[0:1], 0
+    f.mem->write32(program + 4, 0);
+    f.mem->write32(program + 8, 0xbf920007u);  // s_trap 7
+    f.mem->write32(program + 12, 0xbe890008u); // s_mov_b32 s9, s8
+    f.mem->write32(handler, 0xbe890008u);
+    if (install_handler) {
+      cu->set_trap_handler_resolver(
+          [](const Wavefront &) { return ComputeUnitCore::TrapHandlerConfig{handler, 0, false}; });
+    }
+    cu->write_sgpr(wf->sgpr_alloc().base, data);
+    cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
+    cu->step();
+    ASSERT_EQ(wf->pc, program + 8);
+    if (install_handler) {
+      wf->wait_counters().vmcnt = 1;
+      cu->step();
+      EXPECT_EQ(wf->pc, program + 8);
+      wf->release_wait_counter(WaitCounterType::VMCNT);
+    }
+    const uint64_t consumer = install_handler ? handler : program + 12;
+    for (unsigned i = 0; i < 24 && wf->pc != consumer; ++i)
+      cu->step();
+    ASSERT_EQ(wf->pc, consumer);
+    cu->step();
+    EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 9), 123u);
+    EXPECT_EQ(sink.str().find("type=SGPR access=read reg=8") == std::string::npos, install_handler)
+        << sink.str();
+    EXPECT_EQ(events.status(EventId{0}),
+              install_handler ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE);
+    EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
+    const auto trap_callbacks = [&](HookEvent::Kind kind) {
+      return std::ranges::count_if(trace->events, [&](const HookEvent &event) {
+        return event.kind == kind && event.pc == program + 8 && event.mnemonic == "s_trap";
+      });
+    };
+    EXPECT_EQ(trap_callbacks(HookEvent::BEFORE_INSTRUCTION), 1);
+    EXPECT_EQ(trap_callbacks(HookEvent::AFTER_INSTRUCTION), install_handler ? 1 : 0);
+    wf->halt();
+    peer->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, Cdna2ScalarLoadsFollowPrivilegeAndTakenTrapDrain) {
+  struct Case {
+    bool ttmp;
+    bool handler_installed;
+    bool privileged;
+  };
+  for (const Case test :
+       {Case{true, false, false}, Case{true, false, true}, Case{false, false, false},
+        Case{false, true, false}, Case{false, true, true}}) {
+    SCOPED_TRACE(testing::Message() << "ttmp=" << test.ttmp << " installed="
+                                    << test.handler_installed << " privileged=" << test.privileged);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna2", 64, 102));
+    PluginSinkConfig config;
+    auto &sink = config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<ExecutionPlugin>("base-only")));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    const auto *detector = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    constexpr uint32_t pc = 0x1000, handler = 0x2000, data = 0x4000;
+    constexpr uint32_t value = 0x11223344, sentinel = 0x55667788;
+    auto *cu = f.cu();
+    if (test.handler_installed)
+      cu->set_trap_handler_resolver(
+          [](const Wavefront &) { return ComputeUnitCore::TrapHandlerConfig{handler, 0, false}; });
+    auto *wave = cu->dispatch_wf(0, pc, 32, 32);
+    ASSERT_NE(wave, nullptr);
+    std::array waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 32, waves);
+    wave->set_in_trap_handler(test.privileged);
+    wave->set_ttmp(4, sentinel);
+    const uint32_t base = wave->sgpr_alloc().base;
+    cu->write_sgpr(base, data);
+    cu->write_sgpr(base + 1, 0);
+    f.mem->write32(data, value);
+    // s_load_dword {ttmp4,s2}, s[0:1], 0
+    f.mem->write32(pc, test.ttmp ? 0xc0021c00 : 0xc0020080);
+    f.mem->write32(pc + 4, 0);
+    f.mem->write32(pc + 8, 0xbf920007);                        // s_trap 7
+    const uint32_t read = test.ttmp ? 0xbe830070 : 0xbe830002; // s_mov_b32 s3, {ttmp4,s2}
+    f.mem->write32(pc + 12, read);
+    f.mem->write32(handler, read);
+    cu->step();
+    ASSERT_EQ(wave->pc, pc + 8);
+    auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(detector->slot_index()));
+    ASSERT_NE(state, nullptr);
+    auto &race = *state->race_state;
+    ASSERT_EQ(race.getWaveMemoryEvents().size(), 1u);
+    const auto event = race.getWaveMemoryEvents().front();
+    const auto &events = race.getDetector()->events();
+    ASSERT_TRUE(events.hasPendingWaitCounter(event, WaitCounterType::LGKMCNT));
+    if (test.ttmp) {
+      EXPECT_EQ(events.registers(event).empty(), !test.privileged);
+    }
+    cu->step();
+    const bool entered = test.handler_installed && !test.privileged;
+    ASSERT_EQ(wave->pc, entered ? handler : pc + 12);
+    EXPECT_EQ(events.hasPendingWaitCounter(event, WaitCounterType::LGKMCNT), !entered);
+    cu->step();
+    EXPECT_EQ(cu->read_sgpr(base + 3), test.ttmp && !test.privileged ? sentinel : value);
+    const bool expect_race = !entered && (!test.ttmp || test.privileged);
+    EXPECT_EQ(sink.str().find(test.ttmp ? "type=TTMP" : "type=SGPR") != std::string::npos,
+              expect_race);
+    wave->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, Cdna4TrapObservesOnlyIssuedAttemptsAndProvesOnlyHandlerEntry) {
+  enum class Entry { Taken, RevokedDuringWait, AlreadyInHandler };
+  for (const Entry action : {Entry::Taken, Entry::RevokedDuringWait, Entry::AlreadyInHandler}) {
+    SCOPED_TRACE(static_cast<int>(action));
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    auto ordering = std::make_unique<OrderingPlugin>();
+    const auto &events = ordering->events;
+    ASSERT_TRUE(f.plugin_group_->add(std::move(ordering)));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    constexpr uint64_t start = 0x2000;
+    constexpr uint64_t trap_pc = start + 8;
+    constexpr uint64_t handler = 0x4000;
+    constexpr uint32_t consume = 0x7e040301; // v_mov_b32 v2, v1
+    f.mem->write32(start, 0xd86c0000);       // ds_read_b32 v1, v0
+    f.mem->write32(start + 4, 0x01000000);
+    f.mem->write32(trap_pc, 0xbf920001); // s_trap 1
+    f.mem->write32(trap_pc + 4, consume);
+    f.mem->write32(handler, consume);
+
+    bool configured = true;
+    auto *cu = f.cu();
+    cu->set_trap_handler_resolver([&](const Wavefront &) {
+      return ComputeUnitCore::TrapHandlerConfig{configured ? handler : 0, 0, false};
+    });
+    auto *wave = cu->dispatch_wf(0, start, /*sgprs=*/32, /*vgprs=*/8);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    wave->set_m0(256);
+    wave->set_lds_size(256);
+    std::array waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(0, 0, 8, 32, waves);
+    cu->step();
+    ASSERT_EQ(wave->pc, trap_pc);
+    const auto trap_issues = [&] {
+      return std::ranges::count_if(events, [&](const HookEvent &event) {
+        return event.kind == HookEvent::BEFORE_INSTRUCTION && event.pc == trap_pc;
+      });
+    };
+    wave->wait_counters().increment(WaitCounterType::VMCNT);
+    if (action == Entry::AlreadyInHandler)
+      wave->set_in_trap_handler(true);
+    cu->step();
+    if (action != Entry::AlreadyInHandler) {
+      EXPECT_EQ(trap_issues(), 0);
+      ASSERT_EQ(wave->pc, trap_pc);
+      configured = action != Entry::RevokedDuringWait;
+      wave->release_wait_counter(WaitCounterType::VMCNT);
+      cu->step();
+    }
+    EXPECT_EQ(trap_issues(), 1);
+    ASSERT_EQ(wave->pc, action == Entry::Taken ? handler : trap_pc + 4);
+    cu->step(); // Read the result of the LDS load at the actual successor.
+    EXPECT_EQ(sink.str().find("RACE ") == std::string::npos, action == Entry::Taken) << sink.str();
+  }
+}
+
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));

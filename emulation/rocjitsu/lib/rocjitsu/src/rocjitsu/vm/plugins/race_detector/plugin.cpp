@@ -1064,6 +1064,19 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   if (const auto reg = wf.instruction_exec_write();
       reg && reg->index < wf.wf_size() / 32 && !wf.instruction_execution_failed())
     get_state(wf)->race_state->checkGdsExecWrite();
+  // The CDNA1 CU delivers this hook for S_TRAP only after entering a configured
+  // handler. Its implicit wait completes this wave's register obligations.
+  // Cross-wave LDS intervals still need a barrier.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && inst.mnemonic() == "s_trap" &&
+      wf.in_trap_handler()) {
+    PendingWaitCount wait;
+    for (auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
+                         amdgpu::WaitCounterType::LGKMCNT})
+      wait.add(counter, 0);
+    get_state(wf)->race_state->dispatch(wait);
+    return;
+  }
+
   // Embedded waits (e.g. VINTERP wait_exp) must retire before operand access.
   if (!inst.is_waitcnt())
     return;
@@ -1073,7 +1086,27 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   if (fields.failed() || !fields.value())
     return;
 
-  apply_wait_fields(*s->race_state, *fields.value(), arch);
+  onAmdgpuImplicitMemoryWait(wf, *fields.value());
+}
+
+void RaceDetectorPlugin::onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
+                                                    const amdgpu::WaitFields &fields) {
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  apply_wait_fields(*s->race_state, fields, wf.cu().arch());
+}
+
+void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA2)
+    return;
+  auto *s = get_state(wf);
+  if (!s || !s->race_state)
+    return;
+  PendingWaitCount drain;
+  for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
+                             amdgpu::WaitCounterType::LGKMCNT})
+    drain.add(counter, 0);
+  s->race_state->dispatch(drain);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,

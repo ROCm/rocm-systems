@@ -20,6 +20,12 @@ class Instruction;
 
 namespace rocjitsu::amdgpu {
 
+/// GFX11 and GFX12 exports retire in independent target streams.
+[[nodiscard]] constexpr bool has_typed_export_waits(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
 /// @brief Architectural wait-counter domains.
 ///
 /// @details GFX12 targets use the split counter names directly. Legacy gfx9

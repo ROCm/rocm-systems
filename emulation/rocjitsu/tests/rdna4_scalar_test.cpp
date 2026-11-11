@@ -45,6 +45,32 @@ protected:
 class Rdna4Scalar : public ScalarExecution {
 protected:
   void SetUp() override { initialize(ROCJITSU_CODE_ARCH_RDNA4); }
+
+  void check_workgroup_barrier(std::span<const uint32_t> code, std::array<uint32_t, 2> expected) {
+    constexpr uint64_t pc = 0x1000;
+    for (size_t i = 0; i < code.size(); ++i)
+      memory.write32(pc + i * 4, code[i]);
+    cu->begin_workgroup(0, 0, 2);
+    wave->pc = pc;
+    auto *peer = cu->dispatch_wf(0, pc, 106, 16);
+    ASSERT_NE(peer, nullptr);
+    const std::array waves{wave, peer};
+    std::array<uint32_t, 2> results{0xffffffffu, 0xffffffffu};
+    for (auto *member : waves)
+      cu->write_sgpr(member->sgpr_alloc().base, 0xffffffffu);
+    for (unsigned tick = 0; tick < 64 && !cu->is_idle(); ++tick) {
+      cu->step();
+      // Wave retirement releases and clears its registers. Capture s0 at ENDPGM.
+      for (size_t i = 0; i < waves.size(); ++i)
+        if (!waves[i]->is_halted() && waves[i]->pc == pc + code.size_bytes() - sizeof(uint32_t))
+          results[i] = cu->read_sgpr(waves[i]->sgpr_alloc().base);
+    }
+    EXPECT_TRUE(wave->is_halted());
+    EXPECT_TRUE(peer->is_halted());
+    std::ranges::sort(results);
+    EXPECT_EQ(results, expected);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+  }
 };
 
 class ScalarFloatingPoint : public ScalarExecution,
@@ -200,6 +226,16 @@ TEST_F(Rdna4Scalar, Wave64NarrowMaskUpdatesPreserveHighWordAndTestLowWord) {
     // AND_SAVEEXEC with zero returns old EXEC_LO; AND_NOT0_WREXEC with -1 returns result.
     EXPECT_EQ(cu->read_sgpr(base + 2), word == 0xbe822080u ? 0x4567u : 0u);
   }
+}
+
+TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
+  const uint32_t code[] = {
+      0xbe804ec1, // s_barrier_signal -1
+      0xbf94ffff, // s_barrier_wait -1
+      0xbe800081, // s_mov_b32 s0, 1
+      0xbfb00000, // s_endpgm
+  };
+  ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {1, 1}));
 }
 
 TEST_F(Rdna4Scalar, SplitWaitsReplacePreviousTargetAndMaskReservedBits) {
