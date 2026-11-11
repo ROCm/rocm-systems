@@ -119,6 +119,9 @@ typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_device_lib_linking)(
     amd_comgr_action_info_t action_info, bool link_device_lib);
 typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_bundle_entry_ids)(
     amd_comgr_action_info_t action_info, const char* bundle_entry_ids[], size_t count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_package_entry_ids)(
+    amd_comgr_action_info_t action_info, const amd_comgr_target_id_t package_entry_ids[],
+    size_t count);
 typedef amd_comgr_status_t (*t_amd_comgr_set_data_from_file_slice)(amd_comgr_data_t data, int fd,
                                                                    uint64_t offset, uint64_t size);
 typedef amd_comgr_status_t (*t_amd_comgr_lookup_code_object)(amd_comgr_data_t data,
@@ -181,6 +184,7 @@ struct ComgrEntryPoints {
   t_amd_comgr_map_name_expression_to_symbol_name amd_comgr_map_name_expression_to_symbol_name;
   t_amd_comgr_action_info_set_device_lib_linking amd_comgr_action_info_set_device_lib_linking;
   t_amd_comgr_action_info_set_bundle_entry_ids amd_comgr_action_info_set_bundle_entry_ids;
+  t_amd_comgr_action_info_set_package_entry_ids amd_comgr_action_info_set_package_entry_ids;
   t_amd_comgr_set_data_from_file_slice amd_comgr_set_data_from_file_slice;
   t_amd_comgr_lookup_code_object amd_comgr_lookup_code_object;
 };
@@ -423,6 +427,24 @@ class Comgr : public amd::AllStatic {
 #endif
     return COMGR_DYN(amd_comgr_action_info_set_bundle_entry_ids)(action_info, bundle_entry_ids,
                                                                  count);
+  }
+
+  static amd_comgr_status_t action_info_set_package_entry_ids(
+      amd_comgr_action_info_t action_info, const amd_comgr_target_id_t package_entry_ids[],
+      size_t count) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_set_package_entry_ids == nullptr) {
+      // A comgr older than 3.5 has no llvm-offload-binary unpackaging support. Only the package
+      // paths need it, so it is loaded optionally and the failure is reported here rather than
+      // taking down every other COMGR-backed path in Comgr::LoadLib().
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "The loaded COMGR library is too old for offload packages: it does not export "
+              "amd_comgr_action_info_set_package_entry_ids (requires COMGR 3.5 or newer)");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_set_package_entry_ids)(action_info, package_entry_ids,
+                                                                  count);
   }
 
  private:

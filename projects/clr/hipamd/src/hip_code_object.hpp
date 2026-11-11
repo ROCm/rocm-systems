@@ -35,6 +35,10 @@ constexpr char kOffloadBundleCompressedMagicStr[] = "CCOB";
 static constexpr size_t kOffloadBundleCompressedMagicStrSize =
     sizeof(kOffloadBundleCompressedMagicStr);
 
+// llvm-offload-binary package magic
+constexpr unsigned char kOffloadPackageMagic[] = {0x10, 0xFF, 0x10, 0xAD};
+static constexpr size_t kOffloadPackageMagicSize = sizeof(kOffloadPackageMagic);
+
 constexpr char kOffloadKindHip[] = "hip";
 constexpr char kOffloadKindHipv4[] = "hipv4";
 constexpr char kOffloadKindHcc[] = "hcc";
@@ -72,6 +76,18 @@ struct ClangOffloadBundleCompressedHeader {
   uint64_t Hash;
   const char compressedBinarydesc[1];
 };
+
+// llvm-offload-binary package header, mirroring llvm::object::OffloadBinary::Header. Only the
+// fixed 32-byte prologue is mirrored, since comgr can handle the rest.
+struct OffloadPackageHeader {
+  unsigned char magic[kOffloadPackageMagicSize];
+  uint32_t version;
+  uint64_t totalSize;
+  uint64_t entriesOffset;
+  uint64_t entriesCount;
+};
+static_assert(sizeof(OffloadPackageHeader) == 32,
+              "OffloadPackageHeader must match the on-disk llvm::object::OffloadBinary::Header");
 }  // namespace symbols
 
 // Forward Declaration for friend usage

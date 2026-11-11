@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-find_package(amd_comgr 3.2 REQUIRED CONFIG
+find_package(amd_comgr 3.5 REQUIRED CONFIG
   PATHS
     ${ROCM_PATH}
     ${ROCM_INSTALL_PATH}
