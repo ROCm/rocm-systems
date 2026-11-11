@@ -1847,9 +1847,10 @@ separate pools; CUs and GPUs in one VM share its pool. Fork children reject
 inherited helper state and use synchronous execution. Pool lifetime tests
 cover this fallback; arbitrary forked application workloads are not qualified.</p>
 <h2 id="eligibility-and-fallback">Eligibility and fallback<a class="headerlink" href="#eligibility-and-fallback" title="Permanent link">&para;</a></h2>
-<p>The default instruction families are dense FP16, FP8/BF8 and scaled/unscaled
-f8f6f4 MFMA on gfx950, and f32-output FP16/BF16 K32, FP8/BF8 K64/K128,
-dense FP4 and scaled 16x16x128 f8f6f4 WMMA on gfx1250.
+<p>The eligible instruction families are FP8/BF8 and scaled/unscaled f8f6f4
+MFMA on gfx950, and FP8/BF8 K64/K128, dense FP4 and scaled 16x16x128
+f8f6f4 WMMA on gfx1250. Dense FP16/BF16 MFMA and FP16/BF16 K32 WMMA
+execute synchronously through rj-arith and do not use the helper pool.
 Both targets use <a href="../mma-admission/">cached lookahead admission</a> to require an
 independent MMA that can remain on the issuer. Scaled instructions require
 vector or inline scale operands; scalar-register scales execute synchronously.

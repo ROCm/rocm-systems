@@ -2443,12 +2443,10 @@ by shader engine, array, and WGP. Within an engine, array <code>a</code> and WGP
 CU child <code>a * num_cu_per_sh + w</code>, which reports <code>WGP_ID = w</code>. The KFD mask loop
 does not select direct-CU groups; their WGP IDs still follow CU child order.</p>
 <h3 id="cpu-arithmetic-policy">CPU arithmetic policy<a class="headerlink" href="#cpu-arithmetic-policy" title="Permanent link">&para;</a></h3>
-<p>This policy currently applies to RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and
-RDNA3/RDNA4 fused floating-point arithmetic, basic floating-point arithmetic and
-selection, division, dot products, conversions, math functions, comparisons, integer arithmetic, scalar arithmetic, dual-issue arithmetic, graphics operations and register/lane routing. Other instructions retain their
-existing implementations while integration proceeds by instruction family.</p>
 <p>The optional top-level <code>arithmetic</code> object selects one semantics mode for
-RDNA3/RDNA4 instructions executed through rj-arith:</p>
+instructions executed through rj-arith, regardless of GPU architecture.
+Instructions not yet migrated to rj-arith retain their existing implementations
+and do not use this setting.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">"arithmetic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="nt">"semantics"</span><span class="p">:</span><span class="w"> </span><span class="s2">"compatibility"</span>
 <span class="p">}</span>
