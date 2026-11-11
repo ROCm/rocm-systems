@@ -6,6 +6,7 @@
 #include "common/synchronized.hpp"
 #include "core/agent.hpp"
 #include "core/categories.hpp"
+#include "core/collection/schema.hpp"
 #include "core/state.hpp"
 
 #include <cassert>
@@ -333,6 +334,16 @@ struct metadata_registry
     std::optional<std::reference_wrapper<const info::gpu_perf_counter_name_entry>>
     find_gpu_perf_counter_by_id(std::uint32_t device_id, std::uint64_t counter_id) const;
 
+    /**
+     * Stores a counter schema and returns its registry-assigned id. An equal schema
+     * returns its existing id, so ids survive a sampler re-setup and re-attach.
+     * Thread-safe.
+     */
+    [[nodiscard]] std::uint32_t add_counter_schema(const collection::schema& description);
+
+    /** The counter schemas; index = schema id. */
+    [[nodiscard]] std::vector<collection::schema> get_counter_schemas() const;
+
 private:
     common::synchronized<info::process, state::thread> m_process;
     common::synchronized<
@@ -364,6 +375,8 @@ private:
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
         m_gpu_perf_counter_index{};
+    common::synchronized<std::vector<collection::schema>, state::thread>
+        m_counter_schemas;
 };
 
 }  // namespace rocprofsys::trace_cache

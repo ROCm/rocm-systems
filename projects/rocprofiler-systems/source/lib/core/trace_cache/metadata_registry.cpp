@@ -3,6 +3,7 @@
 
 #include "metadata_registry.hpp"
 #include "agent_manager.hpp"
+#include "core/collection/schema.hpp"
 #include "logger/debug.hpp"
 
 #include "core/config.hpp"
@@ -12,11 +13,15 @@
 #include <cstdint>
 
 #include <fstream>
+#include <iterator>
+#include <stdexcept>
 
+#include <fmt/format.h>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -307,6 +312,74 @@ from_json_agent(const nlohmann::json& _json)
 }
 
 nlohmann::json
+to_json(const collection::column_spec& column)
+{
+    nlohmann::json result;
+    result["symbol"]              = column.symbol;
+    result["description"]         = column.description;
+    result["unit"]                = column.unit;
+    result["pmc_name"]            = column.pmc_name;
+    result["perfetto_track_name"] = column.perfetto_track_name;
+    result["rocpd_track_name"]    = column.rocpd_track_name;
+    result["category_id"]         = column.category_id;
+    result["block"]               = column.block;
+    result["expression"]          = column.expression;
+    result["is_constant"]         = column.is_constant;
+    result["is_derived"]          = column.is_derived;
+    return result;
+}
+
+collection::column_spec
+from_json_column(const nlohmann::json& json_value)
+{
+    collection::column_spec column;
+    column.symbol              = json_value.at("symbol").get<std::string>();
+    column.description         = json_value.at("description").get<std::string>();
+    column.unit                = json_value.at("unit").get<std::string>();
+    column.pmc_name            = json_value.at("pmc_name").get<std::string>();
+    column.perfetto_track_name = json_value.at("perfetto_track_name").get<std::string>();
+    column.rocpd_track_name    = json_value.at("rocpd_track_name").get<std::string>();
+    column.category_id         = json_value.at("category_id").get<std::uint32_t>();
+    column.block               = json_value.at("block").get<std::string>();
+    column.expression          = json_value.at("expression").get<std::string>();
+    column.is_constant         = json_value.at("is_constant").get<bool>();
+    column.is_derived          = json_value.at("is_derived").get<bool>();
+    return column;
+}
+
+nlohmann::json
+to_json(const collection::schema& description)
+{
+    nlohmann::json result;
+    result["agent"]          = static_cast<std::int32_t>(description.agent);
+    result["device"]         = description.device;
+    result["target_arch"]    = description.target_arch;
+    result["event_category"] = description.event_category;
+    result["columns"]        = nlohmann::json::array();
+    for(const auto& column : description.columns)
+    {
+        result["columns"].push_back(to_json(column));
+    }
+    return result;
+}
+
+collection::schema
+from_json_schema(const nlohmann::json& json_value)
+{
+    collection::schema description;
+    description.agent =
+        static_cast<agent_type>(json_value.at("agent").get<std::int32_t>());
+    description.device         = json_value.at("device").get<std::uint32_t>();
+    description.target_arch    = json_value.at("target_arch").get<std::string>();
+    description.event_category = json_value.at("event_category").get<std::string>();
+    for(const auto& column : json_value.at("columns"))
+    {
+        description.columns.push_back(from_json_column(column));
+    }
+    return description;
+}
+
+nlohmann::json
 to_json(const metadata_registry&                   _registry,
         const std::vector<std::shared_ptr<agent>>& _agents)
 {
@@ -372,6 +445,13 @@ to_json(const metadata_registry&                   _registry,
         kernel_symbol_array.push_back(to_json(kernel_symbol));
     }
     result["kernel_symbols"] = kernel_symbol_array;
+
+    nlohmann::json counter_schema_array = nlohmann::json::array();
+    for(const auto& description : _registry.get_counter_schemas())
+    {
+        counter_schema_array.push_back(to_json(description));
+    }
+    result["counter_schemas"] = counter_schema_array;
 
     for(const auto& agent : _agents)
     {
@@ -441,6 +521,20 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         auto const kernel_symbol = from_json_kernel_symbol(item);
         _registry.add_kernel_symbol(kernel_symbol);
     });
+
+    std::uint32_t expected_schema_id = 0;
+    fill_from_json(
+        "counter_schemas", [&_registry, &expected_schema_id](const auto& item) {
+            const auto schema_id = _registry.add_counter_schema(from_json_schema(item));
+            // The batches in the cache file refer to the schemas by file position
+            if(schema_id != expected_schema_id)
+            {
+                throw std::runtime_error(
+                    fmt::format("counter schema {} of the metadata file got id {}",
+                                expected_schema_id, schema_id));
+            }
+            ++expected_schema_id;
+        });
 
     if(!_agents.empty())
     {
@@ -655,6 +749,26 @@ metadata_registry::get_kernel_symbol_list() const
         result;
     m_kernel_symbols.rlock(assign_set_to_vector(result));
     return result;
+}
+
+std::uint32_t
+metadata_registry::add_counter_schema(const collection::schema& description)
+{
+    return m_counter_schemas.wlock([&description](auto& schemas) {
+        const auto found = std::ranges::find(schemas, description);
+        if(found != schemas.end())
+        {
+            return static_cast<std::uint32_t>(std::distance(schemas.begin(), found));
+        }
+        schemas.push_back(description);
+        return static_cast<std::uint32_t>(schemas.size() - 1);
+    });
+}
+
+std::vector<collection::schema>
+metadata_registry::get_counter_schemas() const
+{
+    return m_counter_schemas.rlock([](const auto& schemas) { return schemas; });
 }
 
 bool
