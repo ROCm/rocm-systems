@@ -246,7 +246,8 @@ int rj_arith_v_div_fixup_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // gfx11 additionally accepts DX10_CLAMP_OFF. FP16 accepts FP16_OVFL: finite overflow
 // saturates to the signed maximum finite value before and after OMOD; true infinities
 // are preserved. FP16_OVFL has no effect on FP32.
-// Compatibility selects mode 2 for FP16/FP32 FMA variants; FP64 uses Loose.
+// Compatibility selects mode 2 for FP16/FP32 FMA variants and RDNA4 FP64; RDNA3 FP64
+// uses Loose.
 // gfx12 accepts IEEE_MODE without changing NaN quieting or OMOD gating.
 // gfx11 disables OMOD when IEEE_MODE is set or output denormals are preserved.
 
@@ -745,20 +746,23 @@ int rj_arith_v_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 // FP64 arithmetic: two VGPRs per operand, holding each lane's low/high words.
-// Supports ALU ABS/NEG on present sources, OMOD and CLAMP, with loose semantics.
-// Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
-// Compatibility resolves to Loose; dropping status alone does not enable exact FP64 arithmetic.
+// Supports ALU ABS/NEG on present sources, OMOD and CLAMP. The _gfx12 forms
+// support loose and bit-exact numeric semantics, and Compatibility resolves to
+// mode 2; the RDNA3 forms are loose-only, return UNSUPPORTED_SEMANTICS for mode 2
+// and resolve Compatibility to Loose. Mode 3 returns UNSUPPORTED_FP_STATUS.
 // Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling in
-// Loose and Compatibility without changing host floating-point controls.
+// every accepted mode without changing host floating-point controls.
 // Host nearest-even rounding and enabled denormals are required. Whole VGPR
 // aliases may cross operand halves; sources are read before destination writes.
 // ADD/MUL/FMA use APIs without _gfx12 for RDNA3 and _gfx12 variants for RDNA4.
 // RDNA3 ignores OMOD when output denormals are preserved or RJ_ARITH_FP_IEEE_MODE is
 // set; RDNA4 applies it regardless. These three families accept guest input/output
-// denormal flushing, also in Wave64. They remain loose-only: IEEE-mode support
-// does not promise exact NaN behavior or exception reporting.
+// denormal flushing, also in Wave64. On RDNA3, IEEE-mode support does not promise
+// exact NaN behavior; no form reports exceptions.
 // Output flushing and OMOD test tininess after rounding: a MUL or FMA result that
 // reaches minimum normal only through subnormal rounding is still flushed.
+// RDNA4 returns the first NaN of A, B, C after source modifiers, quieted, except
+// that an invalid FMA product returns 0xfff8000000000000 even when C is a NaN.
 // CLAMP maps NaNs to +0; RDNA3 preserves NaNs with RJ_ARITH_FP_DX10_CLAMP_OFF.
 int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
@@ -808,8 +812,8 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // Unary FP64 TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT use the same low/high VGPR
-// layout, Compatibility resolution (Loose) and host-environment contract as FP64
-// FMA above. SQRT/RCP/RSQ share the layout and modifiers but resolve Compatibility
+// layout, per-architecture semantics, Compatibility resolution and host-environment
+// contract as FP64 FMA above. SQRT/RCP/RSQ share the layout and modifiers but resolve Compatibility
 // to the empirical TRANS-unit model; see their declarations below. Guest rounding
 // controls FRACT subtraction and output scaling; the integral operation itself
 // has the direction named by its mnemonic.
@@ -817,7 +821,7 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // RDNA3 disables OMOD when IEEE
 // is set or output denormals are preserved; RDNA4 applies OMOD independently.
 // Supports A ABS/NEG,
-// OMOD and CLAMP, with loose semantics. RNDNE rounds ties to even; FRACT computes
+// OMOD and CLAMP. RNDNE rounds ties to even; FRACT computes
 // x - floor(x), capped at 0x3fefffffffffffff before output modifiers.
 // These RDNA3 unary forms accept DX10_CLAMP_OFF to preserve NaNs under CLAMP.
 int rj_arith_v_trunc_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -960,10 +964,10 @@ int rj_arith_v_frexp_exp_i16_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // VGPR or an FP64 low/high pair. Returns zero for zeros, infinities and NaNs;
 // preserved finite nonzero inputs satisfy A = FREXP_MANT(A) * 2^D.
 // A ABS/NEG, OMOD and CLAMP are accepted but do not change the integer result.
-// D may alias either whole source VGPR. FP64 supports loose semantics only
-// and honors guest input flushing. IEEE and output flushing do not change the integer result.
-// FP32 supports exact semantics and guest input flushing; output flushing and
-// IEEE mode do not change its integer result. Flushed subnormals return zero.
+// D may alias either whole source VGPR. Both widths support loose and exact
+// semantics on both architectures, Compatibility resolves to mode 2, and they
+// honor guest input flushing; output flushing and IEEE mode do not change the
+// integer result. Flushed subnormals return zero.
 // Both RDNA3 widths accept DX10_CLAMP_OFF without changing the integer result.
 // Mode 3 FP status reporting is unsupported on both architectures.
 // FP status pointers are unused in modes 0..2; a null pointer does not enable mode 3.

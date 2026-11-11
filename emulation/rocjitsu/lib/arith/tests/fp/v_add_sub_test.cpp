@@ -299,12 +299,12 @@ TEST(FpAddF64, GuestRounding) {
                 {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
                  0x7fefffffffffffffULL}}};
   for (const auto &sample : cases) {
-    for (auto call : {rj_arith_v_add_f64_w32, rj_arith_v_add_f64_w32_gfx12}) {
-      check_binary64_rounding<32>(call, sample.a, sample.b, sample.expected);
-    }
-    for (auto call : {rj_arith_v_add_f64_w64, rj_arith_v_add_f64_w64_gfx12}) {
-      check_binary64_rounding<64>(call, sample.a, sample.b, sample.expected);
-    }
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample.a, sample.b, sample.expected);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample.a, sample.b, sample.expected);
   }
 }
 

@@ -7027,7 +7027,8 @@ TEST(ArithBridgeTest, DoubleFmaPairAliasesModifiersAndPolicies) {
               ASSERT_TRUE(instruction.succeeded());
               fixture.recorder->reads.clear();
               fixture.recorder->writes.clear();
-              const bool rejected = policy_kind >= 2;
+              // RDNA4 accepts strict exact numeric requests; neither architecture reports status.
+              const bool rejected = policy_kind == 3 || (policy_kind == 2 && rdna3);
               EXPECT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .failed(),
                         rejected);

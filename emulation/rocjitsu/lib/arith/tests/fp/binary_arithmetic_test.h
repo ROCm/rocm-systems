@@ -23,26 +23,34 @@ namespace rocjitsu::arith::test {
 
 // Check explicit expectations for all guest rounding modes on the last lane,
 // including the upper Wave64 half. Expectations do not use host FP arithmetic.
+// RDNA4 entry points are also checked in strict exact mode.
 template <int Lanes, typename Call>
 void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (&expected)[4],
-                             uint64_t instruction_flags = 0, uint64_t fp_flags = 0) {
+                             uint64_t instruction_flags = 0, uint64_t fp_flags = 0,
+                             bool gfx12 = true) {
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (unsigned rounding = 0; rounding < 4; ++rounding) {
-      Registers<6, Lanes> r;
-      write_fp(r.v, Lanes - 1, 64, a);
-      write_fp(r.v + 2, Lanes - 1, 64, b);
-      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | fp_flags | (uint64_t(rounding) << 24),
-                     Mask(1) << (Lanes - 1), instruction_flags, r.v + 4, r.v, r.v + 2, nullptr),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(read_fp(r.v + 4, Lanes - 1, 64), expected[rounding]);
+    for (uint64_t semantics : hardware_semantics()) {
+      if (!gfx12 && semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+        continue;
+      }
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << rounding);
+        Registers<6, Lanes> r;
+        write_fp(r.v, Lanes - 1, 64, a);
+        write_fp(r.v + 2, Lanes - 1, 64, b);
+        ASSERT_EQ(call(cpu | semantics | fp_flags | (uint64_t(rounding) << 24),
+                       Mask(1) << (Lanes - 1), instruction_flags, r.v + 4, r.v, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(read_fp(r.v + 4, Lanes - 1, 64), expected[rounding]);
+      }
     }
   }
 }
 
 // Test ADD/SUB/SUBREV/MUL, using the independent scalar reference at the call site.
-// FP32 has exact numeric support on these inputs; FP16/FP64 and packed arithmetic
-// support Loose/Compatibility but reject explicit exact modes. Reporting is
+// FP32 and RDNA4 FP64 have exact numeric support on these inputs; FP16, RDNA3 FP64
+// and packed arithmetic support Loose/Compatibility but reject explicit exact modes. Reporting is
 // supported only by FP32 MUL, whose
 // named tests also exercise its literal exception cases separately.
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
@@ -107,7 +115,8 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
-            if (Width != 32 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+            if ((Width == 16 || (Width == 64 && !gfx12)) &&
+                semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
               EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               result.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);

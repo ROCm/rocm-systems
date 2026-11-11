@@ -160,9 +160,10 @@ void check_fma(Call entry_point, bool gfx12) {
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
-            // FP64 is loose-only; FP32 supports exact numeric results on
-            // this domain. Neither format currently supports FP status.
-            if (Width == 64 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+            // RDNA3 FP64 is loose-only; RDNA4 FP64 and FP32 support exact numeric
+            // results on this domain. Neither format currently supports FP status.
+            if (Width == 64 && !gfx12 &&
+                semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
