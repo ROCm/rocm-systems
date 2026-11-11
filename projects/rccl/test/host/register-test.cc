@@ -1154,7 +1154,7 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddress_DeregistersNetHandlesButKeepsPe
   EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
   EXPECT_TRUE(deregistered_.empty());
 
-  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(rcclRegAutoRelease(comm_.get()), ncclSuccess);
   EXPECT_EQ(netDeregistered.size(), 1u);
   EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{import}));
 }
@@ -1313,15 +1313,30 @@ TEST_F(RegisterAutoLocalMicrotest, Release_LeavesOwnedRecordAGraphHoldsToTheGrap
   free(reg->ipcInfos);
 }
 
-TEST_F(RegisterAutoLocalMicrotest, Cleanup_TearsDownRetiredRecords) {
+TEST_F(RegisterAutoLocalMicrotest, Cleanup_DropsOwnedAndRetiredRecordsWithoutProxyCalls) {
+  ncclReg* user = Seed(0x40000, 0x41000);
+  ncclIpcRegInfo* userImport = AddPeerImport(user);
   ncclReg* stale = Auto(0x10000, kPage);
-  ncclIpcRegInfo* staleImport = AddPeerImport(stale);
+  AddPeerImport(stale);
   bufferId_ = 8;
-  ASSERT_NE(Auto(0x10000, kPage), nullptr);
+  ncclReg* fresh = Auto(0x10000, kPage);
+  ASSERT_NE(fresh, nullptr);
+  AddPeerImport(fresh);
+  auto* netHandle = static_cast<ncclRegNetHandles*>(calloc(1, sizeof(ncclRegNetHandles)));
+  fresh->netHandleHead = netHandle;
+  fresh->state |= NET_REG_COMPLETE;
+  int netDeregs = 0;
+  ScopedHook net(g_ncclNetDeregBuffer, [&](ncclComm*, ncclProxyConnector*, void*) {
+    ++netDeregs;
+    return ncclSuccess;
+  });
 
+  // After an abort the proxies are gone, so only the user's record may still make proxy calls.
   EXPECT_EQ(CleanupAll(), ncclSuccess);
-  EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{staleImport}));
+  EXPECT_EQ(deregistered_, (std::vector<ncclIpcRegInfo*>{userImport}));
+  EXPECT_EQ(netDeregs, 0);
   EXPECT_TRUE(Retired().empty());
+  EXPECT_EQ(comm_->regCache.rcclRetiredBytes, 0u);
 }
 
 }  // namespace

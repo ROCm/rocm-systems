@@ -170,15 +170,41 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
   return ncclSuccess;
 }
 
-// Frees every retired record, carrying on past a failed teardown and returning the first error.
-static ncclResult_t rcclRegFreeRetired(struct ncclComm* comm) {
+// Frees an RCCL-owned record without the proxy calls regCleanup makes. ncclRegCleanup runs after the proxies are
+// destroyed, so a record rcclRegAutoRelease did not release (abort, or a failed destroy) cannot ask the peers to
+// unmap it; their imports go with their own teardown.
+static ncclResult_t rcclRegDropLocal(struct ncclComm* comm, struct ncclReg* reg) {
+  ncclResult_t ret = ncclSuccess;
+  for (struct ncclRegNetHandles* netHandle = reg->netHandleHead; netHandle;) {
+    struct ncclRegNetHandles* next = netHandle->next;
+    free(netHandle);
+    netHandle = next;
+  }
+  if (reg->ipcInfos) {
+    for (int i = 0; i < reg->ipcInfosSize; ++i) free(reg->ipcInfos[i]);
+    free(reg->ipcInfos);
+  }
+  if (reg->regIpcAddrs.hostPeerRmtAddrs) free(reg->regIpcAddrs.hostPeerRmtAddrs);
+  if (reg->regIpcAddrs.devPeerRmtAddrs)
+    NCCLCHECKIGNORE(ncclCudaFree(reg->regIpcAddrs.devPeerRmtAddrs, comm->memManager), ret);
+  free(reg);
+  return ret;
+}
+
+// Frees every retired record, carrying on past a failed teardown and returning the first error. Without the proxies,
+// drops them locally.
+static ncclResult_t rcclRegFreeRetired(struct ncclComm* comm, bool proxiesRunning) {
   struct ncclRegCache* cache = &comm->regCache;
   ncclResult_t ret = ncclSuccess;
   while (cache->rcclRetired) {
     struct ncclReg* reg = cache->rcclRetired;
     cache->rcclRetired = reg->rcclAuto.retiredNext;
-    NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
-    free(reg);
+    if (proxiesRunning) {
+      NCCLCHECKIGNORE(regCleanup(comm, reg), ret);
+      free(reg);
+    } else {
+      NCCLCHECKIGNORE(rcclRegDropLocal(comm, reg), ret);
+    }
   }
   cache->rcclRetiredBytes = 0;
   return ret;
@@ -190,11 +216,15 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
     struct ncclReg* reg = cache->slots[i];
     INFO(NCCL_DESTROY, "Cleanup buffer %p pages %lx", (void*)reg->begAddr,
          (reg->endAddr - reg->begAddr) / cache->pageSize);
+    if (reg->rcclAuto.owned && reg->localRefs == 1 && reg->graphRefs == 0) {
+      NCCLCHECK(rcclRegDropLocal(comm, reg));
+      continue;
+    }
     NCCLCHECK(regCleanup(comm, reg));
     free(reg);
   }
   free(cache->slots);
-  NCCLCHECK(rcclRegFreeRetired(comm));
+  NCCLCHECK(rcclRegFreeRetired(comm, /*proxiesRunning=*/false));
   return ncclSuccess;
 }
 
@@ -370,7 +400,7 @@ ncclResult_t rcclRegAutoRelease(struct ncclComm* comm) {
     cache->slots[kept++] = reg;
   }
   cache->population = kept;
-  NCCLCHECKIGNORE(rcclRegFreeRetired(comm), ret);
+  NCCLCHECKIGNORE(rcclRegFreeRetired(comm, /*proxiesRunning=*/true), ret);
   return ret;
 }
 

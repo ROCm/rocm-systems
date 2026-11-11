@@ -3517,6 +3517,11 @@
           "name": "RingAutoRegister_SendRecv_ToUnregisteredPeer_8rank",
           "description": "Send/recv from an auto-registered buffer into an unregistered peer buffer completes with exact data (8 ranks)",
           "test_filter": "RingAutoRegister.SendRecv_FromAutoRegisteredBufferToUnregisteredPeer"
+        },
+        {
+          "name": "RingAutoRegister_Abort_WithLiveAndRetiredRecords_8rank",
+          "description": "ncclCommAbort after RCCL registered a buffer, freed it and registered its replacement completes on every rank (8 ranks)",
+          "test_filter": "RingAutoRegister.AbortWithLiveAndRetiredRecords_Completes"
         }
       ]
     },

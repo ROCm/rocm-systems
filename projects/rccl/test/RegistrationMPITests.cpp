@@ -3908,6 +3908,42 @@ TEST_F(RingAutoRegister, AllGather_FreedAndReusedAddress)
     runStaleAllocation(true);
 }
 
+// Abort skips rcclRegAutoRelease, so commFree meets RCCL's live and retired records after the proxies are gone.
+TEST_F(RingAutoRegister, AbortWithLiveAndRetiredRecords_Completes)
+{
+    if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    if (auto reason = skipReason(); !reason.empty()) GTEST_SKIP() << reason;
+
+    int rank = 0, nRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+    const size_t bytes = kCountPerRank * sizeof(float);
+
+    void* send = nullptr;
+    void* recv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&send, bytes));
+    auto sendGuard   = makeHipMemBufferAutoGuard(send);
+    auto recvCleanup = makeScopeGuard([&]() {
+        if (recv) (void)ncclMemFree(recv);
+    });
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, bytes));
+    runAndCheck(false, (float*)send, (float*)recv, rank, nRanks, "before free");
+    if (HasFailure() || IsSkipped()) return;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemFree(recv));
+    recv = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recv, bytes));
+    runAndCheck(false, (float*)send, (float*)recv, rank, nRanks, "after reuse");
+    if (HasFailure() || IsSkipped()) return;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    ncclComm_t comm = test_comm_;
+    test_comm_      = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(comm));
+}
+
 // Send/recv must not use RCCL's registration: the peer's buffer is unregistered, and a one-sided direct path hangs.
 TEST_F(RingAutoRegister, SendRecv_FromAutoRegisteredBufferToUnregisteredPeer)
 {

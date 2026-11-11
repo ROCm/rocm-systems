@@ -71,7 +71,7 @@ struct ncclRegCache {
   struct ncclReg** slots;
   int capacity, population;
   uintptr_t pageSize;
-  // RCCL: stale RCCL-owned records. Their peer imports stay mapped until ncclRegCleanup, because unmapping one
+  // RCCL: stale RCCL-owned records. Their peer imports stay mapped until rcclRegAutoRelease, because unmapping one
   // while collectives are in flight deadlocks (hipMemUnmap in the peer's proxy waits for a kernel that waits
   // on this rank). rcclRetiredBytes is what they keep resident; passing RCCL_RING_AUTO_REGISTER_WARN_BYTES warns once.
   // There is deliberately no cap: a rank that stopped registering while its ring neighbours still did would hang.
@@ -112,7 +112,8 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
 // onto the retired list. The caller must not use a stale record.
 ncclResult_t rcclRegCheckOwned(struct ncclComm* comm, const void* buff, struct ncclReg* reg, bool* stale);
 // Releases every RCCL-owned record, live or retired, including its peer imports. Call it while the peers'
-// proxies are still running and no collective on comm is in flight.
+// proxies are still running and no collective on comm is in flight. Records it does not release are dropped by
+// ncclRegCleanup without unmapping the peers' imports.
 ncclResult_t rcclRegAutoRelease(struct ncclComm* comm);
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
 ncclResult_t ncclCommGraphDeregister(const ncclComm_t comm, struct ncclReg* handle);
