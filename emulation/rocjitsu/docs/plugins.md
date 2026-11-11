@@ -776,11 +776,18 @@ neither reading nor writing that field from a helper is safe. Issuer-thread issu
 callbacks may report failures. The CU checks the retained error after the full
 issue callback fanout and drains accepted jobs before cancelling the wave.
 
-Throughput, instruction mix, and kernel logging support this contract. The
-[simulator race detector](race-detector.md) keeps synchronous execution until
-its dependency-event access and diagnostic context support concurrent register
-hooks within one wave. Plugins and the host
-must be rebuilt together, as for other execution-plugin interface changes.
+Throughput, instruction mix, kernel logging, and the
+[simulator race detector](race-detector.md) support this contract. Race captures
+instruction evidence on the issuer without observing helper register accesses;
+the core checks register dependencies before async publication. A plugin that
+requires synchronous inspection still disables offload for the whole group.
+Plugins and the host must be rebuilt together, as for other execution-plugin
+interface changes.
+
+Plugin support does not make an instruction eligible for offload. The current
+arithmetic handlers require issuer-owned error state, so the core executes
+them synchronously even when helpers are requested. See
+[asynchronous instructions](async-instructions.md) for the current policy.
 
 Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
 instruction. Samples with a prepared footprint use `image_sample_footprints`
