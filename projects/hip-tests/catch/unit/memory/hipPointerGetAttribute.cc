@@ -42,6 +42,7 @@ behaviour
 }
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <string>
 static constexpr auto NUM_W{16};
 static constexpr auto NUM_H{16};
@@ -379,33 +380,25 @@ HIP_TEST_CASE(Unit_hipPointerGetAttribute_ipc_capable) {
      plain hipMalloc buffers, and gate that decision on this attribute. Querying it must succeed
      (not report hipErrorNotSupported) and must report these allocators as IPC-capable. */
   SECTION("ExtMallocWithFlags Fine-grained Allocation") {
-    int* A_d;
-    const hipError_t alloc_error =
-        hipExtMallocWithFlags(reinterpret_cast<void**>(&A_d), Nbytes, hipDeviceMallocFinegrained);
-    if (alloc_error != hipSuccess) {
-      (void)hipGetLastError();
+    ExtMallocGuard<int> alloc(Nbytes, hipDeviceMallocFinegrained);
+    if (alloc.ptr() == nullptr) {
       WARN("Skipping section: fine-grained allocation is not supported on this device.");
       return;
     }
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
-                                     reinterpret_cast<hipDeviceptr_t>(A_d)));
+                                     reinterpret_cast<hipDeviceptr_t>(alloc.ptr())));
     REQUIRE(datatype == 1);
-    HIP_CHECK(hipFree(A_d));
   }
 
   SECTION("ExtMallocWithFlags Uncached Allocation") {
-    int* A_d;
-    const hipError_t alloc_error =
-        hipExtMallocWithFlags(reinterpret_cast<void**>(&A_d), Nbytes, hipDeviceMallocUncached);
-    if (alloc_error != hipSuccess) {
-      (void)hipGetLastError();
+    ExtMallocGuard<int> alloc(Nbytes, hipDeviceMallocUncached);
+    if (alloc.ptr() == nullptr) {
       WARN("Skipping section: uncached allocation is not supported on this device.");
       return;
     }
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
-                                     reinterpret_cast<hipDeviceptr_t>(A_d)));
+                                     reinterpret_cast<hipDeviceptr_t>(alloc.ptr())));
     REQUIRE(datatype == 1);
-    HIP_CHECK(hipFree(A_d));
   }
 #endif
 

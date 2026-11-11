@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
+#include <resource_guards.hh>
 
 #include "hipIpcHandleHex.hh"
 
@@ -14,6 +15,40 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+
+namespace {
+/* Owns a device pointer obtained from hipIpcOpenMemHandle, closing it on destruction so a failed
+   assertion cannot leave the mapping behind. */
+class IpcMappingGuard {
+ public:
+  IpcMappingGuard(const hipIpcMemHandle_t& handle, unsigned int flags) {
+    HIP_CHECK(hipIpcOpenMemHandle(&ptr_, handle, flags));
+  }
+
+  IpcMappingGuard(const IpcMappingGuard&) = delete;
+  IpcMappingGuard(IpcMappingGuard&&) = delete;
+
+  ~IpcMappingGuard() {
+    // No Catch macros, don't want to possibly throw in the destructor
+    if (ptr_ != nullptr) {
+      static_cast<void>(hipIpcCloseMemHandle(ptr_));
+    }
+  }
+
+  /* Closes the mapping early, so that the caller can assert on the result. The destructor then has
+     nothing left to do. */
+  hipError_t close() {
+    void* const ptr = ptr_;
+    ptr_ = nullptr;
+    return hipIpcCloseMemHandle(ptr);
+  }
+
+  void* ptr() const { return ptr_; }
+
+ private:
+  void* ptr_ = nullptr;
+};
+}  // namespace
 
 /**
  * @addtogroup hipIpcOpenMemHandle hipIpcOpenMemHandle
@@ -40,14 +75,13 @@
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process) {
-  hipDeviceptr_t ptr1, ptr2;
+  hipDeviceptr_t ptr2;
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr1), 1024));
-  HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr1)));
+  LinearAllocGuard<char> alloc(LinearAllocs::hipMalloc, 1024);
+  HIP_CHECK(hipIpcGetMemHandle(&handle, alloc.ptr()));
   HIP_CHECK_ERROR(
       hipIpcOpenMemHandle(reinterpret_cast<void**>(&ptr2), handle, hipIpcMemLazyEnablePeerAccess),
       hipErrorInvalidContext);
-  HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr1)));
 }
 
 
@@ -101,17 +135,14 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device
   } else {  // parent
     REQUIRE(close(fd[0]) == 0);
 
-    hipDeviceptr_t ptr;
     hipIpcMemHandle_t handle;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr), 1024));
-    HIP_CHECK(hipIpcGetMemHandle(&handle, reinterpret_cast<void*>(ptr)));
+    LinearAllocGuard<char> alloc(LinearAllocs::hipMalloc, 1024);
+    HIP_CHECK(hipIpcGetMemHandle(&handle, alloc.ptr()));
 
     REQUIRE(write(fd[1], &handle, sizeof(handle)) >= 0);
     REQUIRE(close(fd[1]) == 0);
 
     REQUIRE(wait(NULL) >= 0);
-
-    HIP_CHECK(hipFree(reinterpret_cast<void*>(ptr)));
   }
 }
 #endif
@@ -140,17 +171,16 @@ static __global__ void square_kernel(int* buf) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
-  int* d_buf;
-  HIP_CHECK(hipMalloc(&d_buf, BYTE_SIZE));
+  LinearAllocGuard<int> d_buf(LinearAllocs::hipMalloc, BYTE_SIZE);
 
   std::vector<int> h_buf(DATA_SIZE);
   for (int i = 0; i < DATA_SIZE; i++) {
     h_buf[i] = i % 1024;
   }
-  HIP_CHECK(hipMemcpy(d_buf, h_buf.data(), BYTE_SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_buf.ptr(), h_buf.data(), BYTE_SIZE, hipMemcpyHostToDevice));
 
   hipIpcMemHandle_t handle;
-  HIP_CHECK(hipIpcGetMemHandle(&handle, d_buf));
+  HIP_CHECK(hipIpcGetMemHandle(&handle, d_buf.ptr()));
 
   std::string hex = ipcHandleToHex(handle);
 
@@ -159,13 +189,11 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc) {
   REQUIRE(child.spawn("Unit_hipIpcOpenMemHandle_Multiproc_Child") == 0);
   REQUIRE(child.wait() == 0);
 
-  HIP_CHECK(hipMemcpy(h_buf.data(), d_buf, BYTE_SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(h_buf.data(), d_buf.ptr(), BYTE_SIZE, hipMemcpyDeviceToHost));
   for (int i = 0; i < DATA_SIZE; i++) {
     int expected = (i % 1024) * (i % 1024);
     REQUIRE(h_buf[i] == expected);
   }
-
-  HIP_CHECK(hipFree(d_buf));
 }
 
 /**
@@ -190,21 +218,20 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_Child) {
 
   hipIpcMemHandle_t handle = hexToIpcHandle<hipIpcMemHandle_t>(hex);
 
-  void* devPtr = nullptr;
-  HIP_CHECK(hipIpcOpenMemHandle(&devPtr, handle, hipIpcMemLazyEnablePeerAccess));
+  IpcMappingGuard mapping(handle, hipIpcMemLazyEnablePeerAccess);
 
   square_kernel<<<dim3(DATA_SIZE / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK)>>>(
-      reinterpret_cast<int*>(devPtr));
+      reinterpret_cast<int*>(mapping.ptr()));
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<int> result(DATA_SIZE);
-  HIP_CHECK(hipMemcpy(result.data(), devPtr, BYTE_SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result.data(), mapping.ptr(), BYTE_SIZE, hipMemcpyDeviceToHost));
   for (int i = 0; i < DATA_SIZE; i++) {
     int expected = (i % 1024) * (i % 1024);
     REQUIRE(result[i] == expected);
   }
 
-  HIP_CHECK(hipIpcCloseMemHandle(devPtr));
+  HIP_CHECK(mapping.close());
 }
 
 #if HT_AMD
@@ -311,15 +338,12 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Handshake) {
 
   HIP_CHECK(hipSetDevice(kExporterDevice));
 
-  uint32_t* buf = nullptr;
-  const hipError_t allocError =
-      hipExtMallocWithFlags(reinterpret_cast<void**>(&buf), kSlotCount * sizeof(uint32_t),
-                            allocFlags);
-  if (allocError != hipSuccess) {
-    (void)hipGetLastError();
+  ExtMallocGuard<uint32_t> alloc(kSlotCount * sizeof(uint32_t), allocFlags);
+  if (alloc.ptr() == nullptr) {
     WARN("Skipping section: this allocation flavour is not supported on this device.");
     return;
   }
+  uint32_t* const buf = alloc.ptr();
   HIP_CHECK(hipMemset(buf, 0, kSlotCount * sizeof(uint32_t)));
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -350,8 +374,6 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Handshake) {
   uint32_t ack = 0;
   HIP_CHECK(hipMemcpy(&ack, buf + kSlotParentAck, sizeof(ack), hipMemcpyDeviceToHost));
   REQUIRE(ack == kParentToken);
-
-  HIP_CHECK(hipFree(buf));
 }
 
 /**
@@ -380,9 +402,8 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Child) {
   HIP_CHECK(hipSetDevice(std::atoi(peerDevice)));
 
   hipIpcMemHandle_t handle = hexToIpcHandle<hipIpcMemHandle_t>(hex);
-  void* devPtr = nullptr;
-  HIP_CHECK(hipIpcOpenMemHandle(&devPtr, handle, hipIpcMemLazyEnablePeerAccess));
-  uint32_t* buf = reinterpret_cast<uint32_t*>(devPtr);
+  IpcMappingGuard mapping(handle, hipIpcMemLazyEnablePeerAccess);
+  uint32_t* buf = reinterpret_cast<uint32_t*>(mapping.ptr());
 
   ipc_publish_kernel<<<1, 1>>>(buf);
   HIP_CHECK(hipGetLastError());
@@ -391,7 +412,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Child) {
   // The exporting GPU's acknowledgement must become visible here, again with no barrier.
   const bool sawAck = PollSlot(buf, kSlotParentAck, kParentToken, std::chrono::seconds(60));
 
-  HIP_CHECK(hipIpcCloseMemHandle(devPtr));
+  HIP_CHECK(mapping.close());
   REQUIRE(sawAck);
 }
 #endif  // HT_AMD

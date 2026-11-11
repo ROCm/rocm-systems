@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <resource_guards.hh>
 
 #include <algorithm>
 #include <chrono>
@@ -39,13 +40,6 @@ constexpr int kSentinelValue = 0x1234;
 constexpr int kMaxBarrierDevices = 4;
 
 typedef int ShareableHandle;
-
-struct ImportedWindow {
-  void* ptr = nullptr;
-  size_t size = 0;
-  hipMemGenericAllocationHandle_t allocation_handle{};
-  hipMemGenericAllocationHandle_t imported_handle{};
-};
 
 void CheckVmmSupported(int device_ordinal) {
   int value = 0;
@@ -81,53 +75,67 @@ size_t RoundUpToGranularity(size_t size, int owner_device) {
  * Creates an allocation on `owner_device`, exports it as a POSIX fd, imports it back, maps it,
  * and grants read-write access to every device in `access_devices` with a single
  * `hipMemSetAccess` call over the whole range -- the multi-device access-descriptor array shape a
- * communication library uses to publish a window to all of its ranks.
+ * communication library uses to publish a window to all of its ranks. The window is unmapped and
+ * both handles released when the guard goes out of scope, so a failed assertion cannot leak it.
  */
-ImportedWindow CreateSharedWindow(int owner_device, const std::vector<int>& access_devices,
-                                  size_t requested_size) {
-  ImportedWindow window;
-  window.size = RoundUpToGranularity(requested_size, owner_device);
+class ImportedWindowGuard {
+ public:
+  ImportedWindowGuard(int owner_device, const std::vector<int>& access_devices,
+                      size_t requested_size)
+      : size_{RoundUpToGranularity(requested_size, owner_device)} {
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id = owner_device;
 
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = owner_device;
+    HIP_CHECK(hipSetDevice(owner_device));
+    HIP_CHECK(hipMemCreate(&allocation_handle_, size_, &prop, 0));
 
-  HIP_CHECK(hipSetDevice(owner_device));
-  HIP_CHECK(hipMemCreate(&window.allocation_handle, window.size, &prop, 0));
+    ShareableHandle shareable_handle = -1;
+    HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle_,
+                                            hipMemHandleTypePosixFileDescriptor, 0));
+    HIP_CHECK(hipMemImportFromShareableHandle(
+        &imported_handle_, reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+        hipMemHandleTypePosixFileDescriptor));
+    REQUIRE(close(shareable_handle) == 0);
 
-  ShareableHandle shareable_handle = -1;
-  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, window.allocation_handle,
-                                          hipMemHandleTypePosixFileDescriptor, 0));
-  HIP_CHECK(hipMemImportFromShareableHandle(
-      &window.imported_handle, reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
-      hipMemHandleTypePosixFileDescriptor));
-  REQUIRE(close(shareable_handle) == 0);
+    HIP_CHECK(hipMemAddressReserve(&ptr_, size_, 0, nullptr, 0));
+    HIP_CHECK(hipMemMap(ptr_, size_, 0, imported_handle_, 0));
 
-  HIP_CHECK(hipMemAddressReserve(&window.ptr, window.size, 0, nullptr, 0));
-  HIP_CHECK(hipMemMap(window.ptr, window.size, 0, window.imported_handle, 0));
-
-  std::vector<hipMemAccessDesc> access_descs;
-  access_descs.reserve(access_devices.size());
-  for (int device : access_devices) {
-    hipMemAccessDesc desc{};
-    desc.location.type = hipMemLocationTypeDevice;
-    desc.location.id = device;
-    desc.flags = hipMemAccessFlagsProtReadWrite;
-    access_descs.push_back(desc);
+    std::vector<hipMemAccessDesc> access_descs;
+    access_descs.reserve(access_devices.size());
+    for (int device : access_devices) {
+      hipMemAccessDesc desc{};
+      desc.location.type = hipMemLocationTypeDevice;
+      desc.location.id = device;
+      desc.flags = hipMemAccessFlagsProtReadWrite;
+      access_descs.push_back(desc);
+    }
+    HIP_CHECK(hipMemSetAccess(ptr_, size_, access_descs.data(), access_descs.size()));
   }
-  HIP_CHECK(hipMemSetAccess(window.ptr, window.size, access_descs.data(), access_descs.size()));
 
-  return window;
-}
+  ImportedWindowGuard(const ImportedWindowGuard&) = delete;
+  ImportedWindowGuard(ImportedWindowGuard&&) = delete;
 
-void DestroySharedWindow(const ImportedWindow& window) {
-  HIP_CHECK(hipMemUnmap(window.ptr, window.size));
-  HIP_CHECK(hipMemAddressFree(window.ptr, window.size));
-  HIP_CHECK(hipMemRelease(window.imported_handle));
-  HIP_CHECK(hipMemRelease(window.allocation_handle));
-}
+  ~ImportedWindowGuard() {
+    // No Catch macros, don't want to possibly throw in the destructor
+    if (ptr_ != nullptr) {
+      static_cast<void>(hipMemUnmap(ptr_, size_));
+      static_cast<void>(hipMemAddressFree(ptr_, size_));
+      static_cast<void>(hipMemRelease(imported_handle_));
+      static_cast<void>(hipMemRelease(allocation_handle_));
+    }
+  }
+
+  template <typename T> T* ptr() const { return reinterpret_cast<T*>(ptr_); }
+
+ private:
+  const size_t size_;
+  hipMemGenericAllocationHandle_t allocation_handle_{};
+  hipMemGenericAllocationHandle_t imported_handle_{};
+  void* ptr_ = nullptr;
+};
 
 /* Returns the first `count` devices that can all reach each other, or an empty vector. */
 std::vector<int> GetMutuallyPeerAccessibleDevices(int count) {
@@ -203,20 +211,21 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_WaitValueGatedByPeerWrite) {
   CheckVmmSupported(devices[1]);
   CheckStreamWaitValueSupported(devices[1]);
 
-  const ImportedWindow window = CreateSharedWindow(devices[0], devices, sizeof(uint32_t));
-  uint32_t* flag = reinterpret_cast<uint32_t*>(window.ptr);
+  // Declared before the streams and the sentinel so that it is torn down after them.
+  const ImportedWindowGuard window(devices[0], devices, sizeof(uint32_t));
+  uint32_t* flag = window.ptr<uint32_t>();
 
   HIP_CHECK(hipSetDevice(devices[0]));
-  hipStream_t writer_stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&writer_stream, hipStreamNonBlocking));
+  const StreamGuard writer(Streams::withFlags, hipStreamNonBlocking);
+  const hipStream_t writer_stream = writer.stream();
   HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(flag), 0, 1));
   HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(hipSetDevice(devices[1]));
-  hipStream_t waiter_stream = nullptr;
-  HIP_CHECK(hipStreamCreateWithFlags(&waiter_stream, hipStreamNonBlocking));
-  int* sentinel = nullptr;
-  HIP_CHECK(hipMalloc(&sentinel, sizeof(int)));
+  const StreamGuard waiter(Streams::withFlags, hipStreamNonBlocking);
+  const hipStream_t waiter_stream = waiter.stream();
+  LinearAllocGuard<int> sentinel_alloc(LinearAllocs::hipMalloc, sizeof(int));
+  int* const sentinel = sentinel_alloc.ptr();
   HIP_CHECK(hipMemset(sentinel, 0, sizeof(int)));
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -250,11 +259,6 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_WaitValueGatedByPeerWrite) {
   HIP_CHECK(hipMemcpy(&observed, sentinel, sizeof(observed), hipMemcpyDeviceToHost));
   REQUIRE(observed == kSentinelValue);
 
-  HIP_CHECK(hipFree(sentinel));
-  HIP_CHECK(hipStreamDestroy(waiter_stream));
-  HIP_CHECK(hipSetDevice(devices[0]));
-  HIP_CHECK(hipStreamDestroy(writer_stream));
-  DestroySharedWindow(window);
   HIP_CHECK(hipSetDevice(0));
 }
 
@@ -301,23 +305,30 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   for (int device : devices) CheckVmmSupported(device);
   for (int device : devices) CheckStreamWaitValueSupported(device);
 
-  const ImportedWindow window =
-      CreateSharedWindow(devices[0], devices, rank_count * sizeof(uint32_t));
-  uint32_t* slots = reinterpret_cast<uint32_t*>(window.ptr);
+  // Declared before the streams and the sentinels so that it is torn down after them.
+  const ImportedWindowGuard window(devices[0], devices, rank_count * sizeof(uint32_t));
+  uint32_t* slots = window.ptr<uint32_t>();
 
   HIP_CHECK(hipSetDevice(devices[0]));
   HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(slots), 0, rank_count));
   HIP_CHECK(hipDeviceSynchronize());
 
-  std::vector<hipStream_t> streams(rank_count, nullptr);
-  std::vector<int*> sentinels(rank_count, nullptr);
+  std::vector<StreamGuard> stream_guards;
+  std::vector<LinearAllocGuard<int>> sentinels;
+  stream_guards.reserve(rank_count);
+  sentinels.reserve(rank_count);
   for (int rank = 0; rank < rank_count; ++rank) {
     HIP_CHECK(hipSetDevice(devices[rank]));
-    HIP_CHECK(hipStreamCreateWithFlags(&streams[rank], hipStreamNonBlocking));
-    HIP_CHECK(hipMalloc(&sentinels[rank], sizeof(int)));
-    HIP_CHECK(hipMemset(sentinels[rank], 0, sizeof(int)));
+    stream_guards.emplace_back(Streams::withFlags, hipStreamNonBlocking);
+    sentinels.emplace_back(LinearAllocs::hipMalloc, sizeof(int));
+    HIP_CHECK(hipMemset(sentinels[rank].ptr(), 0, sizeof(int)));
     HIP_CHECK(hipDeviceSynchronize());
   }
+
+  // Raw handles, for the barrier issue path and for WaitForStreams.
+  std::vector<hipStream_t> streams;
+  streams.reserve(rank_count);
+  for (const StreamGuard& guard : stream_guards) streams.push_back(guard.stream());
 
   // Each rank publishes its own slot, then waits on every rank's slot -- two batches per rank,
   // matching the order a communication library issues them in -- and finally writes a sentinel
@@ -342,7 +353,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
     }
     HIP_CHECK(hipStreamBatchMemOp(streams[rank], rank_count, wait_ops.data(), 0));
 
-    write_sentinel_kernel<<<1, 1, 0, streams[rank]>>>(sentinels[rank], kSentinelValue);
+    write_sentinel_kernel<<<1, 1, 0, streams[rank]>>>(sentinels[rank].ptr(), kSentinelValue);
     HIP_CHECK(hipGetLastError());
   };
 
@@ -353,7 +364,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   std::vector<int> gated_sentinels(rank_count, -1);
   for (int rank = 1; rank < rank_count; ++rank) {
     HIP_CHECK(hipSetDevice(devices[rank]));
-    HIP_CHECK(hipMemcpy(&gated_sentinels[rank], sentinels[rank], sizeof(int),
+    HIP_CHECK(hipMemcpy(&gated_sentinels[rank], sentinels[rank].ptr(), sizeof(int),
                         hipMemcpyDeviceToHost));
   }
 
@@ -364,12 +375,10 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   if (!barrier_completed) {
     // Release the stalled barrier from an independent stream so teardown cannot hang.
     HIP_CHECK(hipSetDevice(devices[0]));
-    hipStream_t rescue_stream = nullptr;
-    HIP_CHECK(hipStreamCreateWithFlags(&rescue_stream, hipStreamNonBlocking));
+    const StreamGuard rescue(Streams::withFlags, hipStreamNonBlocking);
     HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(slots), kBarrierToken, rank_count,
-                                rescue_stream));
-    HIP_CHECK(hipStreamSynchronize(rescue_stream));
-    HIP_CHECK(hipStreamDestroy(rescue_stream));
+                                rescue.stream()));
+    HIP_CHECK(hipStreamSynchronize(rescue.stream()));
     (void)WaitForStreams(streams, std::chrono::seconds(30));
   }
 
@@ -377,10 +386,8 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   for (int rank = 0; rank < rank_count; ++rank) {
     HIP_CHECK(hipSetDevice(devices[rank]));
     HIP_CHECK(hipStreamSynchronize(streams[rank]));
-    HIP_CHECK(hipMemcpy(&released_sentinels[rank], sentinels[rank], sizeof(int),
+    HIP_CHECK(hipMemcpy(&released_sentinels[rank], sentinels[rank].ptr(), sizeof(int),
                         hipMemcpyDeviceToHost));
-    HIP_CHECK(hipStreamDestroy(streams[rank]));
-    HIP_CHECK(hipFree(sentinels[rank]));
   }
 
   // While rank 0 was held back, no other rank may have passed the barrier.
@@ -399,7 +406,6 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   REQUIRE(std::all_of(observed.begin(), observed.end(),
                       [](uint32_t value) { return value == kBarrierToken; }));
 
-  DestroySharedWindow(window);
   HIP_CHECK(hipSetDevice(0));
 }
 

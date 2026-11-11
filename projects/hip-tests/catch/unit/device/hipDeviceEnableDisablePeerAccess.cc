@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
+#include <resource_guards.hh>
 
 #include <algorithm>
 #include <vector>
@@ -153,20 +154,18 @@ HIP_TEST_CASE(Unit_hipDeviceEnablePeerAccess_AlreadyEnabled_ErrorIsClearable) {
   HIP_CHECK(hipGetLastError());
 
   // An unrelated call must succeed, and peer access must actually be in effect.
-  void* peerPtr = nullptr;
+  constexpr size_t kSize = 1024;
   HIP_CHECK(hipSetDevice(1));
-  HIP_CHECK(hipMalloc(&peerPtr, 1024));
-  HIP_CHECK(hipMemset(peerPtr, 0x5a, 1024));
+  LinearAllocGuard<unsigned char> peer_alloc(LinearAllocs::hipMalloc, kSize);
+  HIP_CHECK(hipMemset(peer_alloc.ptr(), 0x5a, kSize));
   HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(hipSetDevice(0));
-  std::vector<unsigned char> readback(1024, 0);
-  HIP_CHECK(hipMemcpy(readback.data(), peerPtr, 1024, hipMemcpyDeviceToHost));
+  std::vector<unsigned char> readback(kSize, 0);
+  HIP_CHECK(hipMemcpy(readback.data(), peer_alloc.ptr(), kSize, hipMemcpyDeviceToHost));
   REQUIRE(std::all_of(readback.begin(), readback.end(),
                       [](unsigned char value) { return value == 0x5a; }));
 
-  HIP_CHECK(hipFree(peerPtr));
-  HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipDeviceDisablePeerAccess(1));
 }
 
