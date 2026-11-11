@@ -175,8 +175,8 @@ TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
         amdgpu::AtomicOp::PK_ADD_BF16, amdgpu::AtomicOp::APPEND, amdgpu::AtomicOp::CONSUME,
         amdgpu::AtomicOp::BARRIER_ARRIVE, static_cast<amdgpu::AtomicOp>(0xff)}) {
     SCOPED_TRACE(static_cast<unsigned>(op));
-    EXPECT_THROW(amdgpu::apply_int_atomic<uint32_t>(op, 1, 2, 1), std::invalid_argument);
-    EXPECT_THROW(amdgpu::apply_int_atomic<uint64_t>(op, 1, 2, 1), std::invalid_argument);
+    EXPECT_TRUE(amdgpu::apply_int_atomic<uint32_t>(op, 1, 2, 1).failed());
+    EXPECT_TRUE(amdgpu::apply_int_atomic<uint64_t>(op, 1, 2, 1).failed());
   }
 }
 
