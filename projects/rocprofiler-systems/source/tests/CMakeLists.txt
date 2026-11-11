@@ -6,6 +6,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:lib-common-units-tests>
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:core-collection-tests>
+    $<TARGET_OBJECTS:core-collection-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
@@ -25,6 +26,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
+    $<TARGET_OBJECTS:categories-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
     $<TARGET_OBJECTS:lib-components-tests>
