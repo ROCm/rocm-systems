@@ -210,6 +210,10 @@ All tests support the same set of arguments :
   * `-D,--device_implementation <implementation number>` Enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0).
   * `-V,--device_cta_count <number>` Set number of CTAs for device implementation (default: 16).
   * `-x,--cta_policy <0/1/2>` Set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set).
+  * `reduce_perf` (single node only):
+    * `-D 3` reduces through LSA pointers. Messages up to `NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES` bytes take an LL tier (default: the smaller of 16 MiB / (4 × ranks) and 1 MiB; 0 disables it). The resolved value is printed at startup.
+    * `-D 4` (RCCL 2.29+, out-of-place only: `-O 1`; needs the GIN Anvil SDMA backend: `NCCL_GIN_ENABLE=1 NCCL_GIN_TYPE=7`, and one GPU per process, since that backend faults with `-t` or `-g` above 1) copies with GIN Anvil SDMA and reduces with CUs. `NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS` sets the SDMA puts per partition (default: grows with the partition size, up to 16, when `-V` is at least twice the rank count).
+    * Both variables must have the same value on every rank, or ranks wait for each other forever.
 * RCCL Reporter output
   * `-X,--rccl_output_file <file>` RCCL Reporter output file for csv/json (used with -Z). Default : disabled.
   * `-Z,--rccl_output_format <csv|json>` Set RCCL Reporter output format (csv or json). Default : disabled.
