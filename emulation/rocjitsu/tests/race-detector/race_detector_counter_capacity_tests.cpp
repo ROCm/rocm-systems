@@ -678,7 +678,8 @@ TEST(RaceDetector, Gfx1250CounterCapacity_AsyncLoadIssueRetiresOldestAsyncStore)
 }
 
 // Tensor loads and stores complete in one issue-ordered class (CDNA5 ISA
-// 10.11.1).
+// 10.11.1). A tensor transfer is an LDS event, so in this single-wave
+// workgroup the transfer that capacity completes is retired at once.
 TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::TENSORCNT);
   auto builder = makeGfx1250Test();
@@ -691,7 +692,7 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
   }
 
   EXPECT_FALSE(builder.hasRace());
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(statusOf(builder, 0), EventStatus::RETIRED);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
 }
 
