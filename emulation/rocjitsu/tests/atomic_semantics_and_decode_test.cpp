@@ -54,9 +54,11 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 using namespace rocjitsu;
 namespace {
 constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 class InstructionPolicyMachine {
 public:
@@ -116,8 +118,9 @@ public:
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    // CDNA requires a valid DATA_FORMAT; RDNA selects COMPLETE byte-range bounds.
-    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
+    // CDNA and RDNA require a valid format; RDNA selects COMPLETE byte-range bounds.
+    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32
+                                                                   : (3u << 28) | kRdnaFormat32);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     util::FailureOr<uint32_t> returned = run(words, src, 0, 0, 0xf0, true, buffer);
@@ -207,6 +210,96 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
     }
   }
 }
+// Measured on gfx1030, gfx1100 and gfx1201: a resource whose FORMAT is INVALID
+// turns raw buffer loads, stores and atomics into no-ops for every OOB_SELECT,
+// with or without ADD_TID. Loads and returning atomics produce zero.
+TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
+  enum class Op { Load, Store, AtomicAdd };
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    // s[4:7] holds the resource, v0 the data, v4 the unused address and base 0x1000 the target.
+    const auto words = [arch](Op op) {
+      const bool atomic = op == Op::AtomicAdd;
+      std::array<uint32_t, 3> words{};
+      const auto copy = [&](const auto &built) { std::ranges::copy(built, words.begin()); };
+      switch (arch) {
+      case ROCJITSU_CODE_ARCH_RDNA1:
+        copy(rdna1::build_mubuf(
+            op == Op::Load    ? rdna1::kBufferLoadDwordMubuf
+            : op == Op::Store ? rdna1::kBufferStoreDwordMubuf
+                              : rdna1::kBufferAtomicAddMubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA2:
+        copy(rdna2::build_mubuf(
+            op == Op::Load    ? rdna2::kBufferLoadDwordMubuf
+            : op == Op::Store ? rdna2::kBufferStoreDwordMubuf
+                              : rdna2::kBufferAtomicAddMubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA3:
+        copy(rdna3::build_mubuf(
+            op == Op::Load    ? rdna3::kBufferLoadB32Mubuf
+            : op == Op::Store ? rdna3::kBufferStoreB32Mubuf
+                              : rdna3::kBufferAtomicAddU32Mubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      case ROCJITSU_CODE_ARCH_RDNA3_5:
+        copy(rdna3_5::build_mubuf(
+            op == Op::Load    ? rdna3_5::kBufferLoadB32Mubuf
+            : op == Op::Store ? rdna3_5::kBufferStoreB32Mubuf
+                              : rdna3_5::kBufferAtomicAddU32Mubuf,
+            {.glc = atomic, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128}));
+        break;
+      default:
+        copy(rdna4::build_vbuffer(
+            op == Op::Load    ? rdna4::kBufferLoadB32Vbuffer
+            : op == Op::Store ? rdna4::kBufferStoreB32Vbuffer
+                              : rdna4::kBufferAtomicAddU32Vbuffer,
+            {.soffset = 124, .vdata = 0, .rsrc = 4, .th = atomic, .vaddr = 4}));
+        break;
+      }
+      return words;
+    };
+    // Each OOB_SELECT and ADD_TID pairs FORMAT 0 with a bound control, so the
+    // bounds check alone cannot account for an unbound result.
+    std::vector<uint32_t> word3s;
+    for (uint32_t oob = 0; oob < 4; ++oob)
+      for (uint32_t add_tid : {0u, 1u << 23})
+        for (uint32_t format : {0u, kRdnaFormat32})
+          word3s.push_back((oob << 28) | add_tid | format);
+    // Bit 18 is STRIDE_SCALE on RDNA4, not FORMAT.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+      word3s.push_back(0x30040000u);
+    for (uint32_t word3 : word3s) {
+      SCOPED_TRACE(word3);
+      const bool bound = word3 & kRdnaFormat32;
+      for (Op op : {Op::Load, Op::Store, Op::AtomicAdd}) {
+        SCOPED_TRACE(static_cast<int>(op));
+        InstructionPolicyMachine machine(arch);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        machine.memory.write32(0x1000, 7);
+        const uint32_t scalar = machine.wave->sgpr_alloc().base;
+        machine.cu->write_sgpr(scalar + 4, 0x1000);
+        machine.cu->write_sgpr(scalar + 5, 4u << 16); // A zero stride fails OOB_SELECT 0 on RDNA3+.
+        machine.cu->write_sgpr(scalar + 6, 4096);
+        machine.cu->write_sgpr(scalar + 7, word3);
+        machine.cu->write_vgpr(machine.base + 4, 0, 0);
+        const util::FailureOr<uint32_t> returned =
+            machine.run(words(op), 5, 0, 0, 0xf0, true, true);
+        ASSERT_TRUE(returned.succeeded());
+        EXPECT_EQ(returned.value(), op == Op::Store ? 5u : bound ? 7u : 0u);
+        EXPECT_EQ(machine.memory.read32(0x1000), !bound            ? 7u
+                                                 : op == Op::Load  ? 7u
+                                                 : op == Op::Store ? 5u
+                                                                   : 12u);
+      }
+    }
+  }
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedLegacyCsub) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
@@ -744,11 +837,13 @@ protected:
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
     compute_unit_->write_sgpr(scalar_base + 5, 0);
     compute_unit_->write_sgpr(scalar_base + 6, 4096);
-    // RDNA selects this fixture's range rule; CDNA1-4 needs a valid DATA_FORMAT.
+    // RDNA3+ selects this fixture's range rule; CDNA1-4 and RDNA need a valid format.
     // CDNA5 uses the default descriptor encoding.
     uint32_t word3 = 0;
     if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
-      word3 = 2u << 28;
+      word3 = (2u << 28) | kRdnaFormat32;
+    else if (amdgpu::addr_calc::uses_rdna_buffer_addressing(GetParam()))
+      word3 = kRdnaFormat32;
     else if (arch_is_cdna_4_or_lower(GetParam()))
       word3 = kGfx9DataFormat32;
     compute_unit_->write_sgpr(scalar_base + 7, word3);
