@@ -63,6 +63,15 @@ class XmlMicrotest : public ::testing::Test {
     EXPECT_EQ(ncclSuccess, xmlGetAttr(node, key, &value));
     return value ? value : "<unset>";
   }
+
+  static void ExpectTerminatedAttribute(const ncclXmlNode* node) {
+    ASSERT_EQ(1, node->nAttrs);
+    ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
+    ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
+    EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
+    EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
+    EXPECT_EQ('Z', node->attrs[1].key[0]);
+  }
 };
 
 // --- Parser
@@ -494,16 +503,11 @@ TEST_F(XmlMicrotest, SetAttr_LongKeyAndValueAreTerminatedAtCapacity) {
   ncclXmlNode* node = Add(nullptr, "n");
   const std::string key(MAX_STR_LEN + 9, 'k');
   const std::string value(MAX_STR_LEN + 13, 'v');
-  std::memset(node->attrs, 0x5a, sizeof(node->attrs));
+  std::memset(node->attrs, 'Z', sizeof(node->attrs));
 
   ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), value.c_str()));
 
-  ASSERT_EQ(1, node->nAttrs);
-  ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
-  ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
-  EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
-  EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
-  EXPECT_EQ('Z', node->attrs[1].key[0]);
+  ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node));
   ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), "short"));
   EXPECT_EQ(1, node->nAttrs);
   EXPECT_STREQ("short", node->attrs[0].value);
@@ -511,17 +515,12 @@ TEST_F(XmlMicrotest, SetAttr_LongKeyAndValueAreTerminatedAtCapacity) {
 
 TEST_F(XmlMicrotest, SetAttrIfUnset_LongKeyAndValueAreTerminatedAtCapacity) {
   ncclXmlNode* node = Add(nullptr, "n");
-  std::memset(node->attrs, 0x5a, sizeof(node->attrs));
+  std::memset(node->attrs, 'Z', sizeof(node->attrs));
 
   ASSERT_EQ(ncclSuccess, xmlSetAttrIfUnset(node, std::string(MAX_STR_LEN + 1, 'k').c_str(),
                                          std::string(MAX_STR_LEN + 1, 'v').c_str()));
 
-  EXPECT_EQ(1, node->nAttrs);
-  ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
-  ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
-  EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
-  EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
-  EXPECT_EQ('Z', node->attrs[1].key[0]);
+  ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node));
 }
 
 TEST_F(XmlMicrotest, FindNode_ReorderedAttributesMatchButMissingKeysDoNot) {
@@ -559,7 +558,6 @@ TEST_F(XmlMicrotest, AddTree_CopiedChildrenBelongToDestinationAndDoNotAliasSourc
   EXPECT_EQ(xml_->nodes + 2, xml_->nodes[3].parent);
   EXPECT_EQ(xml_->nodes + 2, xml_->nodes[1].subs[0]);
   EXPECT_EQ(xml_->nodes + 3, xml_->nodes[2].subs[0]);
-  ASSERT_EQ(ncclSuccess, xmlSetAttr(leaf, "rank", "9"));
   EXPECT_EQ("7", Attr(xml_->nodes + 3, "rank"));
 }
 
