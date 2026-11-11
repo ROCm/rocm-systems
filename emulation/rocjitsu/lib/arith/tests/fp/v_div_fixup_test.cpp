@@ -292,7 +292,8 @@ TEST(FpDivFixupF16Gfx12, OmodOverflowRounding) {
 
 // gfx1100 IEEE=0 capture (hw1100-noieee) lanes at their MODE. FP16_OVFL saturates the
 // recovered overflow before OMOD; OMOD scales the flushed result and then flushes to signed
-// zero; IEEE clear keeps a selected sNaN under OMOD.
+// zero; IEEE clear keeps a selected sNaN under OMOD. The MODE 0x0c and 0x04 rows are separate
+// gfx1100 (W7900) lanes: an OMOD overflow rounds toward zero to max-finite but up to infinity.
 TEST(FpDivFixupF16Gfx11, CapturedOverflowOmodAndNan) {
   using namespace rocjitsu::arith::test;
   const struct {
@@ -313,6 +314,8 @@ TEST(FpDivFixupF16Gfx11, CapturedOverflowOmodAndNan) {
       {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_2, 0x7c01},
       {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_4, 0x7c01},
       {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_HALF, 0x7c01},
+      {0x00000c, 0x7bff, 0x3c00, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7bff},
+      {0x000004, 0x7bff, 0x3c00, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7c00},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
     for (const auto &sample : cases) {

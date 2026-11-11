@@ -70,3 +70,40 @@ TEST(MathRcpIflagF32Gfx11, CapturedOmodWithIeeeClear) {
     }
   }
 }
+
+// gfx1100 IEEE=1 capture (hw2-gfx1100): IEEE mode disables RCP_IFLAG OMOD under every captured
+// MODE, so mul:2, mul:4 and div:2 all return the unscaled reciprocal (1.0 mul:2 -> 1.0).
+TEST(MathRcpIflagF32Gfx11, CapturedOmodIgnoredWithIeeeSet) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t inputs[] = {0x00800000, 0x3f800000, 0xff800000, 0x3fc00000};
+  const uint32_t expected[] = {0x7e800000, 0x3f800000, 0x80000000, 0x3f2aaaaa};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      for (uint32_t m : {0xf0u, 0x00u, 0xffu, 0x50u, 0xa0u}) {
+        for (uint64_t omod : {uint64_t(RJ_ARITH_ALU_OMOD_2), uint64_t(RJ_ARITH_ALU_OMOD_4),
+                              uint64_t(RJ_ARITH_ALU_OMOD_HALF)}) {
+          for (bool wide : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << std::hex << m
+                                              << '/' << omod << '/' << wide);
+            uint32_t a[64], d[64], status = 0;
+            for (int lane = 0; lane < 64; ++lane) {
+              a[lane] = inputs[lane % 4];
+            }
+            uint32_t *dest[] = {d};
+            const uint32_t *source[] = {a};
+            const uint64_t flags = cpu | semantics | RJ_ARITH_FP_IEEE_MODE |
+                                   (m & 0x10 ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) |
+                                   (m & 0x20 ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+            ASSERT_EQ(wide ? rj_arith_v_rcp_iflag_f32_w64(flags, ~0ULL, omod, dest, source, &status)
+                           : rj_arith_v_rcp_iflag_f32_w32(flags, ~0U, omod, dest, source, &status),
+                      RJ_ARITH_SUCCESS);
+            for (int lane = 0; lane < (wide ? 64 : 32); ++lane) {
+              EXPECT_EQ(d[lane], expected[lane % 4]) << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
