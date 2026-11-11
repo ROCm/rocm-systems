@@ -15,7 +15,7 @@ struct category_class_t
     bool gpu{};          // device work: goes on a stream track
     bool launch_site{};  // a runtime or driver call that can launch device work
 
-    std::optional<reader_types::event_type_t> event_type{};
+    std::optional<reader_types::event_type_t> event_type;
 };
 
 // What a trace's category string means; unknown categories are plain host events.

@@ -42,7 +42,7 @@ public:
 
         unsigned char magic[2] = {};
         const auto    n        = std::fread(magic, 1, sizeof(magic), m_fp.get());
-        std::rewind(m_fp.get());
+        std::fseek(m_fp.get(), 0, SEEK_SET);
         m_gzip = n == 2 && magic[0] == 0x1f && magic[1] == 0x8b;
         if(m_gzip)
         {
@@ -62,10 +62,12 @@ public:
 
     input_buf(const input_buf&)            = delete;
     input_buf& operator=(const input_buf&) = delete;
+    input_buf(input_buf&&)                 = delete;
+    input_buf& operator=(input_buf&&)      = delete;
 
-    bool               gzip() const { return m_gzip; }
-    const std::string& error() const { return m_error; }
-    std::uint64_t      inflate_ms() const { return m_inflate_ms; }
+    [[nodiscard]] bool               gzip() const { return m_gzip; }
+    [[nodiscard]] const std::string& error() const { return m_error; }
+    [[nodiscard]] std::uint64_t      inflate_ms() const { return m_inflate_ms; }
 
 protected:
     int_type underflow() override
@@ -264,9 +266,9 @@ public:
 
     const std::string& parse_error_message() const { return m_parse_error; }
 
-    bool null() { return true; }
-    bool boolean(bool) { return true; }
-    bool binary(binary_t&) { return true; }
+    static bool null() { return true; }
+    static bool boolean(bool /*val*/) { return true; }
+    static bool binary(binary_t& /*val*/) { return true; }
 
     bool number_integer(number_integer_t v)
     {
@@ -330,7 +332,7 @@ public:
         return true;
     }
 
-    bool start_object(std::size_t)
+    bool start_object(std::size_t /*elements*/)
     {
         ++m_depth;
         if(m_depth == 3 && m_k1 == "traceEvents")
@@ -363,7 +365,7 @@ public:
         return true;
     }
 
-    bool start_array(std::size_t)
+    bool start_array(std::size_t /*elements*/)
     {
         ++m_depth;
         return true;
@@ -391,7 +393,9 @@ public:
         return true;
     }
 
-    bool parse_error(std::size_t position, const std::string&, const json_t::exception& e)
+    bool parse_error(std::size_t position,
+                     const std::string& /*last_token*/,
+                     const json_t::exception& e)
     {
         m_parse_error =
             std::string{ e.what() } + " (byte " + std::to_string(position) + ")";
