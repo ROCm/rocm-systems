@@ -9302,55 +9302,59 @@ TEST(ArithBridgeTest, InterpolationDistinguishesHalfAndFloatDenormalControls) {
 }
 
 // Captured on gfx1100 and gfx1201. The first NaN wins after source modifiers;
-// narrowing P2 to FP16 always sets the quiet bit.
+// narrowing P2 to FP16 always sets the quiet bit. Strict exact requests match too.
 TEST(ArithBridgeTest, InterpolationNanPayloadsFollowGuestModes) {
-  for (bool rdna3 : {true, false}) {
-    BridgeFixture fixture(rdna3);
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    fixture.wave->set_exec(1);
-    for (unsigned op = 0; op < 6; ++op) {
-      const bool half = op >= 2, p2 = op & 1;
-      const unsigned coefficient = p2 ? 2 : 1;
-      fixture.cu->write_vgpr(fixture.base(), coefficient, half ? 0x7c15U : 0x7f801abcU);
-      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xffc00456U);
-      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x3f803c00U);
-      for (uint32_t denorm : {0U, 0xf0U})
-        for (bool ieee : {false, true})
-          for (bool dx10 : {false, true})
-            for (uint8_t clamp : {0, 1}) {
-              SCOPED_TRACE(::testing::Message() << rdna3 << '/' << op << '/' << denorm << '/'
-                                                << ieee << '/' << dx10 << '/' << +clamp);
-              fixture.wave->set_mode_raw(denorm | (uint32_t(ieee) << 9) | (uint32_t(dx10) << 8));
-              fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
-              const auto words = rdna3 ? rdna3::build_vinterp(op, {.vdst = 3,
-                                                                   .clamp = clamp,
-                                                                   .src0 = 256,
-                                                                   .src1 = 257,
-                                                                   .src2 = 258,
-                                                                   .neg = 1})
-                                       : rdna4::build_vinterp(op, {.vdst = 3,
-                                                                   .clamp = clamp,
-                                                                   .src0 = 256,
-                                                                   .src1 = 257,
-                                                                   .src2 = 258,
-                                                                   .neg = 1});
-              auto inst = fixture.decoder->decode_window(words);
-              ASSERT_TRUE(inst.succeeded());
-              ASSERT_TRUE(
-                  fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
-              uint32_t expected = half ? 0xff82a000U : 0xff801abcU;
-              if (ieee || !rdna3)
-                expected |= 0x00400000U;
-              if (half && p2)
-                expected = 0xfe15U;
-              if (clamp && (dx10 || !rdna3))
-                expected = 0;
-              if (half && p2)
-                expected |= 0xabcd0000U;
-              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), expected);
-            }
+  for (auto semantics :
+       {ArithmeticSemantics::Compatibility, ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+        ArithmeticSemantics::BitExactEmpirical})
+    for (bool rdna3 : {true, false}) {
+      BridgeFixture fixture(rdna3, 32, ArithmeticPolicy{semantics});
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      for (unsigned op = 0; op < 6; ++op) {
+        const bool half = op >= 2, p2 = op & 1;
+        const unsigned coefficient = p2 ? 2 : 1;
+        fixture.cu->write_vgpr(fixture.base(), coefficient, half ? 0x7c15U : 0x7f801abcU);
+        fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xffc00456U);
+        fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x3f803c00U);
+        for (uint32_t denorm : {0U, 0xf0U})
+          for (bool ieee : {false, true})
+            for (bool dx10 : {false, true})
+              for (uint8_t clamp : {0, 1}) {
+                SCOPED_TRACE(::testing::Message()
+                             << int(semantics) << '/' << rdna3 << '/' << op << '/' << denorm << '/'
+                             << ieee << '/' << dx10 << '/' << +clamp);
+                fixture.wave->set_mode_raw(denorm | (uint32_t(ieee) << 9) | (uint32_t(dx10) << 8));
+                fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
+                const auto words = rdna3 ? rdna3::build_vinterp(op, {.vdst = 3,
+                                                                     .clamp = clamp,
+                                                                     .src0 = 256,
+                                                                     .src1 = 257,
+                                                                     .src2 = 258,
+                                                                     .neg = 1})
+                                         : rdna4::build_vinterp(op, {.vdst = 3,
+                                                                     .clamp = clamp,
+                                                                     .src0 = 256,
+                                                                     .src1 = 257,
+                                                                     .src2 = 258,
+                                                                     .neg = 1});
+                auto inst = fixture.decoder->decode_window(words);
+                ASSERT_TRUE(inst.succeeded());
+                ASSERT_TRUE(
+                    fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+                uint32_t expected = half ? 0xff82a000U : 0xff801abcU;
+                if (ieee || !rdna3)
+                  expected |= 0x00400000U;
+                if (half && p2)
+                  expected = 0xfe15U;
+                if (clamp && (dx10 || !rdna3))
+                  expected = 0;
+                if (half && p2)
+                  expected |= 0xabcd0000U;
+                EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), expected);
+              }
+      }
     }
-  }
 }
 
 TEST(ArithBridgeTest, InterpolationCarriesPackedSignalingNanIntoP2) {
