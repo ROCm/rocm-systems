@@ -10041,7 +10041,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &test::kUnimplementedInstruction,
+  uint64_t kernel = f.write_kernel(0x1000, test::kUnimplementedInstruction.data(),
                                    sizeof(test::kUnimplementedInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
@@ -10060,7 +10060,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
 
 TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   struct InstructionCase {
-    uint32_t word;
+    std::span<const uint32_t> words;
     std::string_view detail;
     std::string_view diagnostic;
   };
@@ -10069,8 +10069,8 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   for (const auto instruction :
        {InstructionCase{test::kUnimplementedInstruction, test::kUnimplementedInstructionMnemonic,
                         "unimplemented instruction"},
-        InstructionCase{test::kUndecodableInstruction, test::kUndecodableInstructionText,
-                        "could not decode"}}) {
+        InstructionCase{std::span(&test::kUndecodableInstruction, 1),
+                        test::kUndecodableInstructionText, "could not decode"}}) {
     SCOPED_TRACE(instruction.diagnostic);
     for (uint32_t threads : {1u, 2u}) {
       // The larger grid leaves queued workgroups behind the resident waves.
@@ -10084,7 +10084,8 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
         auto *observations = probe.get();
         ASSERT_TRUE(group->add(std::move(probe)));
         f.soc_ptr->set_plugin_group(group);
-        const uint64_t kernel = f.write_kernel(0x1000, &instruction.word, sizeof(instruction.word));
+        const uint64_t kernel =
+            f.write_kernel(0x1000, instruction.words.data(), instruction.words.size_bytes());
         test::AqlQueue queue(f.mem(), f.cp());
         init_completion_signal(f.mem(), kCompletionSignal);
         queue.submit(make_dispatch_packet(kernel, kCompletionSignal, grid_size));
@@ -10229,7 +10230,7 @@ TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
         EXPECT_TRUE(failed_wave->is_halted());
         return true;
       });
-  const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUnimplementedInstruction,
+  const uint64_t kernel = fixture.write_kernel(0x1000, test::kUnimplementedInstruction.data(),
                                                sizeof(test::kUnimplementedInstruction));
   init_completion_signal(fixture.mem(), 0x3000);
   test::AqlQueue queue(fixture.mem(), fixture.cp());
@@ -10350,9 +10351,10 @@ TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
   ASSERT_TRUE(group->add(std::move(lifecycle)));
   fixture.soc_ptr->set_plugin_group(group);
 
-  std::array<uint32_t, 34> failing_code;
+  std::array<uint32_t, 35> failing_code;
   failing_code.fill(SOPP_S_NOP);
-  failing_code[32] = vm_fault ? SOPP_S_NOP : test::kUnimplementedInstruction;
+  if (!vm_fault)
+    std::ranges::copy(test::kUnimplementedInstruction, failing_code.begin() + 32);
   failing_code.back() = SOPP_S_ENDPGM;
   const uint64_t failing_kernel =
       fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));
@@ -10925,6 +10927,71 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
       }
     }
   }
+}
+
+TEST(Pm4DispatchTest, NativeRingFetchesRaw57BitBranchTarget) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5"));
+  auto *halts = f.capture_halts();
+  constexpr uint64_t code = 0x8000, ring = 0x9000, target_page = 0xa000;
+  constexpr uint64_t target = (uint64_t{1} << 56) | target_page;
+  constexpr uint64_t root = 0x1000, leaf_table = 0x5000;
+  // The low ring and the high target share the lower four page-table levels.
+  f.mem()->write64(root + (target >> 48) * sizeof(uint64_t), (root + 4096) | 1);
+  for (uint64_t table = root; table < leaf_table; table += 4096)
+    f.mem()->write64(table, (table + 4096) | 1);
+  for (uint64_t page : {code, ring, target_page})
+    f.mem()->write64(leaf_table + (page >> 12) * sizeof(uint64_t),
+                     page | (uint64_t{1} << 63) | 0x71);
+  const auto space = f.soc_ptr->gpu_vm().register_unrouted_gfx12_address_space(
+      77, root, std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem()));
+  ASSERT_TRUE(space);
+  const auto setpc = build_s_setpc_b64(0, f.cu()->arch());
+  const auto endpgm = build_s_endpgm(f.cu()->arch());
+  ASSERT_TRUE(setpc.succeeded());
+  ASSERT_TRUE(endpgm.succeeded());
+  f.mem()->write32(code, setpc.value());
+  f.mem()->write32(target_page, endpgm.value());
+  const uint32_t packets[] = {
+      0xc0037600,
+      amdgpu::kPm4ComputeNumThreadX,
+      1,
+      1,
+      1,
+      0xc0027600,
+      amdgpu::kPm4ComputePgmLo,
+      uint32_t(code >> 8),
+      0,
+      0xc0017600,
+      amdgpu::kPm4ComputePgmRsrc2,
+      2u << 1,
+      0xc0027600,
+      amdgpu::kPm4ComputeUserData0,
+      uint32_t(target),
+      uint32_t(target >> 32),
+      0xc0031500,
+      1,
+      1,
+      1,
+      0x8001,
+  };
+  for (size_t i = 0; i < std::size(packets); ++i)
+    f.mem()->write32(ring + i * sizeof(uint32_t), packets[i]);
+  const auto registration =
+      f.cp()->register_queue({.address_space = space,
+                              .process_id = 77,
+                              .queue_id = 71,
+                              .ring_base_va = ring,
+                              .ring_size = 256,
+                              .read_ptr_va = ring + 256,
+                              .packet_format = amdgpu::QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  ASSERT_EQ(f.cp()->notify_pm4_queue_doorbell(registration, std::size(packets)),
+            amdgpu::QueueSubmissionStatus::Accepted);
+  f.engine->run();
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(71, 77));
+  EXPECT_EQ(halts->snapshots().size(), 1u);
+  EXPECT_TRUE(f.cp()->unregister_pm4_queue_registration(registration));
 }
 
 TEST(Pm4DispatchTest, MaskedPredExecDoesNotReplaySkippedNativeRingTail) {

@@ -108,7 +108,7 @@ The example above is intentionally minimal.
 
 | Field | Type | Description |
 |---|---|---|
-| `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
+| `max_ticks` | int | Finite tick horizon (0 = unlimited). A finite run also stops if an active primary has no queued work before the limit. |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
 | `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
 | `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
@@ -350,13 +350,10 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 ### CPU arithmetic policy
 
-This policy currently applies to RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and
-RDNA3/RDNA4 fused floating-point arithmetic, basic floating-point arithmetic and
-selection, division, dot products, conversions, math functions, comparisons, graphics operations and register/lane routing. Other instructions retain their
-existing implementations while integration proceeds by instruction family.
-
 The optional top-level `arithmetic` object selects one semantics mode for
-RDNA3/RDNA4 instructions executed through rj-arith:
+instructions executed through rj-arith, regardless of GPU architecture.
+Instructions not yet migrated to rj-arith retain their existing implementations
+and do not use this setting.
 
 ```json
 "arithmetic": {
@@ -408,7 +405,6 @@ invalid and inexact cases; mode 3 accepts those instructions.
 Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.
-VOPD pairs still use legacy execution and do not yet enforce strict rj-arith policies.
 
 Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
 guest rounding and denormal controls; integer WMMA does not accept those controls.
@@ -420,6 +416,13 @@ does not retain legacy host-environment isolation; nondefault host controls are
 outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
 selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
 It does not change semantics.
+
+Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
+handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
+multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
+produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
+`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+
 
 ### Memory wait diagnostics
 

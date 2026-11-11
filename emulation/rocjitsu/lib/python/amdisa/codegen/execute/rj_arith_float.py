@@ -7,9 +7,11 @@ from . import ExecuteContext
 from .rj_arith_names import wave_api
 from .rj_arith_graphics import CUBE_NAMES
 
-# RCP_IFLAG and SQRT carry their legacy exception policies into rj-arith;
-# other entries here have no legacy classifier.
-
+PSEUDO_SCALAR_NAMES = {
+    f'V_S_{operation}_F{bits}'
+    for operation in ('EXP', 'LOG', 'RCP', 'RSQ', 'SQRT')
+    for bits in (16, 32)
+}
 
 UNARY_F32 = {
     'V_TRUNC_F32',
@@ -243,6 +245,7 @@ FLOAT_NAMES = (
     | PACKED_BINARY16_NAMES
     | PACKED_CONVERSION_NAMES
     | PACKED_FMA16_NAMES
+    | PSEUDO_SCALAR_NAMES
     | TERNARY_SELECTION_RDNA3
     | TERNARY_SELECTION_RDNA4
     | UNARY_F16
@@ -254,6 +257,34 @@ FLOAT_NAMES = (
 
 class RjArithBody(str):
     """An emitted body whose arithmetic and SIMD dispatch belong to rj-arith."""
+
+
+def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch != 'rdna4' or mnemonic not in PSEUDO_SCALAR_NAMES or not is_vop3:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    half = mnemonic.endswith('F16')
+    return '\n'.join(
+        [
+            '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+            '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+            '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
+            '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
+            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()},',
+            f'      wf.cu().arithmetic_flags(),',
+            f'      modifiers, {dst[0]}, {src[0]}, {str(half).lower()});',
+        ]
+    )
+
+
+# RCP_IFLAG and SQRT carry their legacy exception policies into rj-arith;
+# other entries here have no legacy classifier.
 
 
 def gen_float_unary32(ctx: ExecuteContext) -> str | None:
@@ -1168,7 +1199,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'      (({high} & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW);',
                 f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
                 '      wf.cu().arithmetic_flags(), modifiers,',
-                f'      {dst[0]}, {", ".join(src)});',
+                f'      {dst[0]}, {", ".join(src)}, 0xF, 0xF, wf.exec() & wf.vgpr_write_mask());',
             ]
         )
     if mnemonic not in DOT2_F32_NAMES:
