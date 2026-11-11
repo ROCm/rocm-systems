@@ -409,7 +409,9 @@ class ROContext : public Context {
 
   __device__ volatile char *get_status_flag();
 
-  __device__ void count_network_nbi_posted();
+  __device__ void post_network_nbi(ro_net_cmds cmd, void *dest, const void *source, size_t nelems, int pe);
+
+  __device__ bool elect_queue_lane();
 
   __device__ void proxy_fence();
 
