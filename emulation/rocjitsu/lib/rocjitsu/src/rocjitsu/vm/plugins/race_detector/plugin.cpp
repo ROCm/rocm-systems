@@ -631,6 +631,8 @@ void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint
   auto *s = get_state(wf);
   assert(s && s->race_state);
   uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+  if (s->race_state->getVgprMemoryEvents(static_cast<int>(logical_reg)).empty())
+    return;
   s->race_state->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
 }
 
@@ -639,6 +641,8 @@ void RaceDetectorPlugin::onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uin
   auto *s = get_state(wf);
   assert(s && s->race_state);
   uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+  if (s->race_state->getVgprMemoryEvents(static_cast<int>(logical_reg)).empty())
+    return;
   s->race_state->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
 }
 
