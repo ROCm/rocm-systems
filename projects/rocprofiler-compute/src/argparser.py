@@ -948,7 +948,7 @@ class ExperimentalAction(argparse.Action):
 
 
 class CliHelpFormatter(argparse.RawTextHelpFormatter):
-    """Show options as "-b, --block <ids>...", per .ai/rules/cli-options.md."""
+    """Show options as "-b, --block <ids>...", per CONTRIBUTING.md."""
 
     def __init__(self, prog: str, max_help_position: int = 40) -> None:
         super().__init__(prog, max_help_position=max_help_position)
