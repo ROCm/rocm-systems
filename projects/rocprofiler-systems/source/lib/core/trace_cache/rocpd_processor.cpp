@@ -151,7 +151,7 @@ rocpd_processor_t::handle(const scratch_memory_sample& sms)
     const auto& agent_ref = m_agent_manager->get_agent_by_handle(sms.agent_id_handle);
 
     auto [memory_operation, memory_type_val] = parse_memory_operation_name(sms.name);
-    auto extdata_json_str = fmt::format("{{\"flags\": {}}}", sms.flags);
+    auto extdata_json_str = fmt::format("{{\"flags\": \"{}\"}}", sms.flags);
 
     auto const event =
         make_event(sms.correlation_id_internal, sms.correlation_id_ancestor, 0,
