@@ -35,7 +35,7 @@ use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
     CacheAssociations, Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo,
-    TopologySnapshot,
+    TopologyGraphSnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -208,7 +208,7 @@ pub(crate) struct HsaState {
     /// CPU and GPU cache records exposed through HSA queries.
     pub(crate) caches: Vec<Cache>,
     /// Passive node, cache, and reported-route facts for this HSA generation.
-    pub(crate) topology: TopologySnapshot,
+    pub(crate) topology: TopologyGraphSnapshot,
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
@@ -407,7 +407,7 @@ impl HsaState {
             .session
             .as_ref()
             .ok_or(ERROR)
-            .and_then(|session| session.topology_snapshot().map_err(map_error))
+            .and_then(|session| session.topology_graph_snapshot().map_err(map_error))
         {
             Ok(topology) => topology,
             Err(status) => {
@@ -458,7 +458,7 @@ impl HsaState {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: &CpuInfo,
-        topology: TopologySnapshot,
+        topology: TopologyGraphSnapshot,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;

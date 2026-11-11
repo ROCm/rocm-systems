@@ -6,7 +6,7 @@
 //! A host domain describes OS topology, not an activated device or a promise
 //! that the calling process may execute on its CPUs. Host observations come
 //! from independent OS files and are not one atomic hardware generation.
-//! The source-qualified topology model projects these observations into host
+//! The source-qualified topology graph projects these observations into host
 //! nodes and caches while retaining this richer CPU and cache-sharing view.
 
 use crate::topology::CacheInfo;
@@ -115,9 +115,10 @@ pub struct HostDomain {
     pub caches: HostCaches,
 }
 
-/// Passive host facts read without creating a session or activating a device.
+/// Host topology graph observations captured without creating a session or
+/// activating a device.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HostTopologySnapshot {
+pub struct HostTopologyGraphSnapshot {
     /// System memory capacity, if the OS reported a nonzero value.
     pub memory_bytes: Option<usize>,
     /// CPU model and processor-entry count, if both were reported.
@@ -134,7 +135,7 @@ pub struct HostTopologySnapshot {
     pub domains_complete: bool,
 }
 
-impl HostTopologySnapshot {
+impl HostTopologyGraphSnapshot {
     /// Resolves a KFD APIC ID only when it identifies exactly one logical CPU.
     #[must_use]
     pub fn logical_cpu_for_apic_id(&self, apic_id: u32) -> Option<u32> {
@@ -167,15 +168,15 @@ impl HostTopologySnapshot {
     }
 }
 
-/// Reads current host topology as independent, best-effort OS observations.
+/// Captures host topology graph facts as independent, best-effort OS observations.
 ///
 /// Missing identity and memory fields remain `None`; incomplete cache and
 /// domain scans retain their complete records and report `complete = false`.
 /// A later call may observe CPU hotplug or another topology change.
 #[cfg(target_os = "linux")]
 #[must_use]
-pub fn snapshot() -> HostTopologySnapshot {
-    linux::snapshot()
+pub fn graph_snapshot() -> HostTopologyGraphSnapshot {
+    linux::graph_snapshot()
 }
 
 #[cfg(target_os = "linux")]

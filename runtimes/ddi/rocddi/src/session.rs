@@ -15,7 +15,7 @@ use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::os::{ProcessIdentity, native_error};
-use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologySnapshot};
+use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
 use std::mem::ManuallyDrop;
 
@@ -422,20 +422,20 @@ impl Session {
         Ok(())
     }
 
-    /// Publishes a passive view only after every installed driver has supplied
-    /// and validated its contribution. KFD nodes and routes share one checked
-    /// generation per driver; the host OS reader is best effort and has no
-    /// common atomic generation with KFD or another driver.
+    /// Publishes a passive topology graph snapshot after every installed driver
+    /// has supplied and validated its contribution. KFD nodes and routes share
+    /// one checked generation per driver; the host OS reader is best effort
+    /// and has no common atomic generation with KFD or another driver.
     ///
     /// # Errors
     /// Reports malformed or duplicate records, native discovery failure, or
     /// allocation failure without publishing a partial candidate.
-    pub fn topology_snapshot(&self) -> Result<TopologySnapshot, Error> {
+    pub fn topology_graph_snapshot(&self) -> Result<TopologyGraphSnapshot, Error> {
         self.ensure_open()?;
-        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot())?;
+        let mut snapshot = TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot())?;
         for driver in &self.registry.drivers {
             let start = snapshot.endpoints.len();
-            driver.contribute_topology(&mut snapshot)?;
+            driver.contribute_topology_graph(&mut snapshot)?;
             for endpoint in &snapshot.endpoints[start..] {
                 Self::validate_endpoint_owner(driver, endpoint)?;
             }
@@ -1436,7 +1436,7 @@ mod tests {
         );
         assert_eq!(delivered, 0);
         assert_eq!(
-            session.topology_snapshot().unwrap_err().kind(),
+            session.topology_graph_snapshot().unwrap_err().kind(),
             ErrorKind::InvalidData
         );
         assert_eq!(
