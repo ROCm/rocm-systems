@@ -161,7 +161,7 @@ Rerun with the same command. Reports are written to `/tmp/output/race.log`.
 
 ## Next steps
 
--   Learn how the execution plugin system and sink configuration work in
-    [Execution plugin system](../conceptual/execution-plugins.md).
+-   See the JSON plugin and sink settings in the
+    [plugin output examples](https://rocm.github.io/rocm-systems/rocjitsu/plugins/#examples).
 -   Analyze final GPU code objects for missing wait instructions with
     [waitcheck hazard analyzer reference](../reference/waitcheck.md).
