@@ -1,8 +1,3 @@
-compute.inst_cache_fetch_lat:
-  name: Instruction Cache Fetch Latency
-  formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
-  unit: Cycles
-  description: Average latency to fetch instruction from GL1 to Instruction Cache.
 compute.insts_async_load:
   name: Instructions - Async Load
   formula: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)

@@ -565,20 +565,10 @@ wave.dispatched_wavefronts:
   formula: AVG(SQ_WAVES_sum)
   unit: Wavefronts
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVES_sum]
-wave.issue_wait:
-  formula: 100 * SUM(SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
-  unit: Percent
-  peak: 100
-  counters: [GRBM_GUI_ACTIVE, SQ_WAIT_INST_ANY, SQ_WAVES, SQ_WAVE_CYCLES]
 wave.life:
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVES_sum, SQ_WAVE_CYCLES_sum]
-wave.occupancy:
-  formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
-  unit: Wavefronts
-  peak: $max_waves_per_cu * $cu_per_gpu
-  counters: [GRBM_GUI_ACTIVE, SQ_BUSY_CYCLES_avr, SQ_WAVES, SQ_WAVE_CYCLES_sum]
 wave.occupancy_pct:
   formula: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu)
   unit: Percent

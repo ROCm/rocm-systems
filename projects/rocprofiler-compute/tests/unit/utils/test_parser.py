@@ -236,12 +236,12 @@ class TestBuildDfs:
 
     def test_metric_id_filter_keeps_every_row_that_shows_it(self, monkeypatch):
         """On the shipped gfx942 views, -b compute.salu_util keeps its Speed of Light
-        and Compute Pipeline rows, as -b 2.1.7 11.2.2 does, without the warning."""
+        and Compute Pipeline rows, as -b 2.2.7 11.2.2 does, without the warning."""
         warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
         by_id, by_rows = schema.ArchConfig(), schema.ArchConfig()
         for ac, tokens in (
             (by_id, ["compute.salu_util"]),
-            (by_rows, ["2.1.7", "11.2.2"]),
+            (by_rows, ["2.2.7", "11.2.2"]),
         ):
             ac.panel_configs = arch_panel_configs("gfx942")
             build_dfs(
@@ -251,8 +251,8 @@ class TestBuildDfs:
                 profiling_config={},
                 arch="gfx942",
             )
-        assert {201, 1102} <= set(by_id.dfs)
-        assert [len(by_id.dfs[table]) for table in (201, 1102)] == [1, 1]
+        assert {202, 1102} <= set(by_id.dfs)
+        assert [len(by_id.dfs[table]) for table in (202, 1102)] == [1, 1]
         assert {table: df.to_dict() for table, df in by_id.dfs.items()} == {
             table: df.to_dict() for table, df in by_rows.dfs.items()
         }
@@ -275,7 +275,7 @@ class TestBuildDfs:
                 profiling_config=config,
                 arch="gfx942",
             )
-        assert [len(saved.dfs[table]) for table in (201, 1102)] == [1, 1]
+        assert [len(saved.dfs[table]) for table in (202, 1102)] == [1, 1]
         assert {table: df.to_dict() for table, df in saved.dfs.items()} == {
             table: df.to_dict() for table, df in typed.dfs.items()
         }
