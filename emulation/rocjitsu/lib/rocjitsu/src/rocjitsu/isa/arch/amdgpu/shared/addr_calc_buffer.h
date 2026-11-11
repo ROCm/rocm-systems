@@ -272,6 +272,15 @@ inline bool uses_rdna_buffer_addressing(rj_code_arch_t arch) {
   return uses_gfx10_buffer_addressing(arch) || uses_rdna_buffer_range_check(arch);
 }
 
+/// @brief RDNA V# FORMAT, word3[18:12] (word3[17:12] on RDNA4).
+/// @details INVALID (0) unbinds the resource for every vector buffer access:
+/// gfx1030, gfx1100 and gfx1201 return zero for loads and returning atomics
+/// and leave memory untouched for any OOB_SELECT, with or without ADD_TID.
+/// Scalar buffer loads ignore it.
+inline uint32_t rdna_buffer_resource_format(rj_code_arch_t arch, uint32_t srd3) {
+  return (srd3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0x3f : 0x7f);
+}
+
 /// @brief Address GFX10 buffers using their single SWIZZLE_ENABLE bit.
 /// @details CACHE_SWIZZLE does not change addresses. The IDXEN+ADD_TID rule
 /// follows the RDNA1 manual and remains unqualified on GFX10 hardware; the
@@ -373,6 +382,11 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   // The ISA keys the stride-field exemption on ADD_TID itself, independently
   // of the IDXEN qualification used below for adding lanes to linear buffers.
   if (gfx9 && !format_op && gfx9_srd.data_format == 0 && !gfx9_srd.add_tid_enable) {
+    reject_vector_memory_access(d);
+    return;
+  }
+  // Raw RDNA accesses too, with no ADD_TID exemption (see rdna_buffer_resource_format).
+  if (!gfx9 && rdna_buffer_resource_format(arch, srd3) == 0) {
     reject_vector_memory_access(d);
     return;
   }

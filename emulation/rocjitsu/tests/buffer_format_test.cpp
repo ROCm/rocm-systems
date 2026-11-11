@@ -67,6 +67,7 @@
 #include <memory>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 using namespace rocjitsu;
 constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
 constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
@@ -1892,7 +1893,7 @@ TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedInd
     SCOPED_TRACE(testing::Message() << test.mode << ':' << test.records << ':' << test.offset);
     cu->write_sgpr(sb + 1, (16u << 16) | (test.swizzle ? 1u << 31 : 0));
     cu->write_sgpr(sb + 2, test.records);
-    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0));
+    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0) | kRdnaFormat32);
     const auto words =
         GetParam() == ROCJITSU_CODE_ARCH_RDNA1
             ? rdna1::build_mubuf(rdna1::kBufferLoadDwordx2,
