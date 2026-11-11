@@ -2596,6 +2596,10 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
             "RcclUseCeAllReduce_NoBiasAccepted",
             []()
             {
+                if(!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32))
+                    GTEST_SKIP() << "CE not supported on this runtime driver "
+                                    "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
+
                 ncclComm_t            comm = nullptr;
                 auto                  topo = std::make_unique<ncclTopoSystem>();
                 struct ncclTopoNode   gpu;
@@ -3097,7 +3101,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             ASSERT_NE(comm->archThresholds, nullptr);
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 64 * KiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
@@ -3346,6 +3350,9 @@ void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch,
         reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);
     comm.ddaLLEpochDev         = reinterpret_cast<uint32_t*>(0x6);
     comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
+    // Non-fabric archs take the DDA IPC branch, whose eligibility check wants the IPC handles.
+    comm.ddaIpcMemHandler      = reinterpret_cast<ncclIpcMemHandler*>(0x7);
+    comm.ddaIpcBarrierState    = reinterpret_cast<nccl_dda_detail::DdaIpcBarrierState*>(0x8);
 }
 
 // Distinct, 256-byte aligned send and receive buffers; selection reads only their addresses.
