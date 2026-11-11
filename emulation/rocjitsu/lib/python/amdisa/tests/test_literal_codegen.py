@@ -700,14 +700,11 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
-    assert (
-        'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(simm32))' in body
-    )
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
-    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(simm32)') < body.index(
-        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
-    )
+    assert 'rj_arith_s_fmamk_f32(' in body
+    assert 'input0 = registers.read_scalar(ssrc0)' in body
+    assert 'input1 = registers.read_scalar(simm32)' in body
+    assert 'input2 = registers.read_scalar(ssrc1)' in body
+    assert '&result, input0, input1, input2,' in body
 
 
 @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
@@ -794,11 +791,12 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
-    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
+    assert 'registers.read_scalar64(ssrc0)' in body
+    assert 'registers.read_scalar64(ssrc1)' in body
+    assert 'registers.write_scalar64(sdst, result);' in body
+    assert 'rj_arith_s_mul_u64(' in body
+    assert 'registers.read_scalar(ssrc0)' not in body
+    assert 'registers.read_scalar(ssrc1)' not in body
 
 
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():

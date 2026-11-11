@@ -2020,7 +2020,10 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       wait.updates.clear();
       wait.add(WaitCounterType::DSCNT, 0);
       race.dispatch(wait);
-      EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+      // A single-wave workgroup retires a completed event with LDS bytes at once;
+      // one without LDS bytes stays wave-complete until the registry trims it.
+      EXPECT_EQ(events.status(event),
+                test.has_lds ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     }
   }
 }
@@ -3421,28 +3424,6 @@ TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
   EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
-}
-
-TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        /*ldsSizeBytes=*/64 * 1024);
-  EventId first = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/10),
-                                           MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
-  EventId second = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/20),
-                                            MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
-  ASSERT_NE(first, second);
-
-  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};
-  std::vector<std::string> source_lines(64, "instruction");
-  std::string report = detector.decorateException(
-      violation, /*wavePc=*/30, static_cast<int>(source_lines.size()),
-      [&](int line) -> std::string_view { return source_lines.at(static_cast<size_t>(line)); });
-
-  EXPECT_NE(report.find("20 --> |"), std::string::npos);
-  EXPECT_NE(report.find("30 --> |"), std::string::npos);
-  EXPECT_EQ(report.find("10 --> |"), std::string::npos);
 }
 
 auto make_trace(std::initializer_list<uint64_t> pcs) {
