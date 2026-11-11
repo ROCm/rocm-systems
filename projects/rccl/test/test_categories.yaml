@@ -121,7 +121,6 @@ test_categories:
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
-      - "GroupSimulateEstimate.*"
     exclude_windows:
       - "*"
     labels:
