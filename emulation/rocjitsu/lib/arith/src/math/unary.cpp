@@ -7,14 +7,14 @@
 // and is checked against gfx1201 hardware captures.
 
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "math/unary_exact.h"
 #include "math/unary_impl.h"
 #include "math/x86_64/rcp_exact.h"
 #include "math/x86_64/root_exact.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
 

@@ -7,9 +7,9 @@
 // Integer rounding extends rocjitsu util::rndne_scalar to directed rounding.
 // GFX1201 verifies all FP16 patterns and raw FP32 boundary/random values.
 
-#include "common/internal.h"
 #include "common/round_integral.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

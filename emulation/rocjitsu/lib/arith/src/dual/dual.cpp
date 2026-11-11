@@ -4,8 +4,12 @@
 // Individual decoded VOPD operations delegated to ordinary Wave32 arithmetic entry points.
 // Owns validation and dispatch for RDNA VOPDXY, which has no arithmetic modifiers.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_dot.h"
+#include "rj_arith/detail/rj_arith_dual.h"
+#include "rj_arith/detail/rj_arith_fp.h"
+#include "rj_arith/detail/rj_arith_integer.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

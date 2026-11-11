@@ -4,6 +4,7 @@
 // Tests for FP16/FP32 interpolation stages and quad-lane operand routing.
 
 #include "graphics/helpers.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 // Check graphics results, modifiers, EXEC masks, and source/destination aliases.
 TEST(GraphicsInterpP10F32W32, Arithmetic) {

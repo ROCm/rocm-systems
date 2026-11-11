@@ -5,7 +5,7 @@
 // Operand preparation and masked stores preserve the public split-VGPR layout.
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

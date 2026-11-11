@@ -6,11 +6,10 @@
 // including gfx11 accumulation stages, with scalar execution and SIMD dispatch.
 
 #include "common/float_formats.h"
-#include "common/internal.h"
 #include "common/packed16.h"
 #include "common/simd.h"
 #include "dot/gfx11_dot2.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 #include <stdint.h>
 

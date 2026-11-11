@@ -4,7 +4,7 @@
 // Tests for FP add/subtract and reversed-subtract entry points.
 
 #include "fp/binary_arithmetic_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 
