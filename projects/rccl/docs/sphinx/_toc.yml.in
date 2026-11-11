@@ -36,6 +36,8 @@ subtrees:
     title: Troubleshoot RCCL
   - file: how-to/using-rccl-ras-diagnostics
     title: Check job configuration with RAS diagnostics
+  - file: how-to/using-rccl-diagnostics
+    title: Verify GPU P2P paths with diagnostics
   - file: how-to/rccl-usage-tips
   - file: how-to/network-telemetry
     title: RCCL network telemetry
