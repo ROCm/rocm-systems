@@ -59,6 +59,11 @@ directory, which `run_host_tests.sh` runs, and `lib/test_executor.py` passes eve
 Units sharing a binary must be `#include`d from *different* test TUs and must not
 export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
+- **`rccl-UnitTestsMicroDevcommV23000`**: `src/devcomm/devcomm_v23000.cc`
+  (via `DEVCOMM_V23000_CC_PATH`, suites `DevcommV23000*`), covering requirement
+  filtering and both ABI-copy directions. Its own binary avoids the compatibility
+  table stub in `dev_runtime_micro_fakes.cc`. See `test_categories_micro_devcomm_v23000.yaml`.
+
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
@@ -82,8 +87,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `GroupCleanupTest.*`, `AsyncJobLaunchDirectTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
-    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
-    covered yet.
+    `devcomm-test.cc`); suites `Devcomm*`.
   - `dev_runtime.cc` and `dev_runtime_segments.cc` (`DEV_RUNTIME_CC_PATH`,
     `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
