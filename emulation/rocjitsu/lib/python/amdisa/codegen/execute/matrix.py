@@ -462,6 +462,95 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     'wf, vb, s2, amdgpu::VgprMsbRole::Src2);'
                 )
 
+    # FP64 BLGP is a negate mask, unlike the lane permutation used for FP32.
+    if (
+        arch in ('cdna3', 'cdna4')
+        and result_type == input_type == 'F64'
+        and (M, N, K, B) in {(16, 16, 4, 1), (4, 4, 4, 4)}
+    ):
+        api = 'rj_arith_' + name.lower() + '_w64'
+        outputs = M * N * B // 32
+        L.append(
+            '  const bool compatibility = (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+        )
+        L.append('      == RJ_ARITH_SEMANTICS_COMPATIBILITY;')
+        L.append('  // Preserve legacy FP32 widening only in Compatibility.')
+        L.append('  std::optional<uint64_t> inline_c;')
+        L.append(f'  if (!{s2}.decoded_vgpr()) {{')
+        L.append('    inline_c = compatibility')
+        L.append(
+            '        ? std::bit_cast<uint64_t>(double(std::bit_cast<float>(const_acc)))'
+        )
+        L.append(f'        : amdgpu::RegisterAccess(wf).read_scalar64({s2});')
+        L.append('  }')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<2, {outputs}, 64, {outputs}, false, true>('
+        )
+        L.append(f'      wf, {api}, cu.arithmetic_flags(), inst_.blgp,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append('      inline_c);')
+        return '\n'.join(L)
+
+    # Dense integer matrix formats share the observed whole-wave register bridge.
+    is_dense_i8_mfma = (
+        arch in ('cdna3', 'cdna4')
+        and result_type == 'I32'
+        and input_type == 'I8'
+        and M == N
+        and (M, K, B)
+        in {
+            (32, 4, 2),
+            (16, 4, 4),
+            (4, 4, 16),
+            (32, 16, 1),
+            (16, 32, 1),
+            (16, 64, 1),
+            (32, 32, 1),
+        }
+    )
+    is_dense_iu8_wmma = uses_fixed_wave32_split_k_dense_layout and (
+        M,
+        N,
+        K,
+        result_type,
+        input_type,
+    ) == (16, 16, 64, 'I32', 'IU8')
+    if is_dense_i8_mfma or is_dense_iu8_wmma:
+        lanes = 32 if is_dense_iu8_wmma else 64
+        api = 'rj_arith_' + name.lower() + f'_w{lanes}'
+        if is_dense_iu8_wmma:
+            L.append('  uint64_t controls = inst_.neg & 3;')
+            L.append('  if (inst_.clamp) controls |= RJ_ARITH_WMMA_CLAMP;')
+            inputs, outputs = 8, 8
+        else:
+            L.append(
+                '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3) | (uint64_t(inst_.blgp) << 7);'
+            )
+            inputs, outputs = M * K * B // 256, M * M * B // 64
+        if is_dense_i8_mfma:
+            L.append(
+                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append(
+                '    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });'
+            )
+            L.append(
+                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+            )
+            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<{inputs}, {outputs}, {lanes}>('
+        )
+        L.append(f'      wf, {api}, cu.arithmetic_flags(), controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        # Inline -1 is valid C even though its bits equal the legacy sentinel.
+        inline_acc = '!src2_off' if is_dense_iu8_wmma else f'!{s2}.decoded_vgpr()'
+        L.append(
+            f'      {inline_acc} ? std::optional<uint32_t>(const_acc) : std::nullopt'
+            + (', a_lanes, b_lanes);' if is_dense_i8_mfma else ');')
+        )
+        return '\n'.join(L)
+
     # Carry the existing MFMA register/accumulator resolution into the library bridge.
     # CDNA1/2 and other instruction families retain their original executors.
     if (
