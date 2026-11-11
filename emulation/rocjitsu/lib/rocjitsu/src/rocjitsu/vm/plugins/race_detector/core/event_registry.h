@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "rocjitsu/isa/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
-#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <algorithm>

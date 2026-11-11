@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/register_hazard_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
@@ -125,6 +126,19 @@ public:
   virtual bool observes_vgpr_reads() const { return true; }
   virtual bool observes_vgpr_writes() const { return true; }
   virtual bool observes_scalar_register_writes() const { return true; }
+
+  /// Request core register-dependency checking, independently of stderr warning
+  /// settings. Findings retain pending dependencies for later consumers; the
+  /// observer owns suppression. This does not request register-access hooks.
+  virtual bool observes_register_hazards() const { return false; }
+
+  /// Called on the issuer before the consuming instruction executes, including
+  /// before its ordinary before-execute or async-issue notification. The record
+  /// owns its instruction evidence; the wave is borrowed only for this callback.
+  /// Does not apply the core stderr budget. The observer must not mutate the
+  /// scoreboard or execute/replay instructions from this callback.
+  virtual void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation & /*hazard*/,
+                                      const amdgpu::Wavefront & /*wf*/) {}
 
   /// Opt in to asynchronous arithmetic and its issue notification.
   /// Leave false when relying on synchronous before/after state inspection:

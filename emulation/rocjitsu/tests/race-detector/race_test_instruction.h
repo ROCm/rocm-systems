@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
+#include "rocjitsu/isa/instruction_snapshot.h"
 
 #include <array>
 

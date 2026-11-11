@@ -132,6 +132,7 @@ public:
     observes_lds_direct_reads_ |= observes_lds_direct_reads;
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
     const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
+    const bool observes_register_hazards = p->observes_register_hazards();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     observes_before_execute_instruction_ |= observes_before_execute_instruction;
     observes_after_execute_instruction_ |= observes_after_execute_instruction;
@@ -144,6 +145,7 @@ public:
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
     observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
+    observes_register_hazards_ |= observes_register_hazards;
     supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
@@ -153,7 +155,7 @@ public:
         observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
         observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
         observes_memory_routing, observes_tensor_dma_memory_access, observes_tensor_dma_issue,
-        observes_lds_direct_reads, std::move(p)});
+        observes_lds_direct_reads, observes_register_hazards, std::move(p)});
     return true;
   }
 
@@ -179,6 +181,7 @@ public:
   bool observes_vgpr_reads() const { return observes_vgpr_reads_; }
   bool observes_vgpr_writes() const { return observes_vgpr_writes_; }
   bool observes_scalar_register_writes() const { return observes_scalar_register_writes_; }
+  bool observes_register_hazards() const { return observes_register_hazards_; }
 
   /// @brief Whether any contained plugin consumes the routed-memory hook.
   /// @details False for an empty group, so the caller's guard covers both.
@@ -216,6 +219,19 @@ public:
   }
 
   // -- AMDGPU (non-virtual) --
+  void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation &hazard,
+                              const amdgpu::Wavefront &wf) {
+    if (!observes_register_hazards_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_register_hazards && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuRegisterHazard(hazard, wf);
+      }
+    });
+  }
+
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) {
     if (!observes_before_execute_instruction_)
@@ -675,6 +691,7 @@ private:
   bool observes_lds_direct_reads_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_tensor_dma_issue_ = false;
+  bool observes_register_hazards_ = false;
   bool observes_sgpr_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool supports_async_instructions_ = true;
@@ -764,6 +781,7 @@ private:
     bool observes_tensor_dma_memory_access = false;
     bool observes_tensor_dma_issue = false;
     bool observes_lds_direct_reads = false;
+    bool observes_register_hazards = false;
     OwnedPlugin plugin;
   };
 
