@@ -690,6 +690,45 @@ def create_domain_query(connection: RocpdImportData, summary_queries, by_rank=Fa
     return {query_name: query}
 
 
+def create_process_files_query(connection: RocpdImportData, by_rank=False):
+    """
+    Generate a query mapping each process to the database file it was recorded in.
+
+    Args:
+        connection (RocpdImportData): The database connection object.
+        by_rank (bool, optional): If True, prepend the MPI rank as the first column (default: False).
+
+    Returns:
+        dict: A dictionary mapping the query name to its SQL statement.
+    """
+
+    rank_env_var = get_rank_env_variable_name(connection) if by_rank else None
+    rank_select = (
+        f"json_extract(P.environment, '$.{rank_env_var}') AS Rank,"
+        if rank_env_var is not None
+        else ""
+    )
+    rank_order = (
+        f"CAST(json_extract(P.environment, '$.{rank_env_var}') AS INTEGER),"
+        if rank_env_var is not None
+        else ""
+    )
+
+    query_name = "files"
+    query = f"""
+        SELECT
+            {rank_select}
+            P.id AS ProcessID,
+            N.hostname AS Hostname,
+            json_extract(P.extdata, '$.output_file') AS Filename
+        FROM rocpd_info_process P
+        LEFT JOIN rocpd_info_node N ON P.nid = N.id AND P.guid = N.guid
+        ORDER BY {rank_order} P.id
+    """
+
+    return {query_name: query}
+
+
 def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     """
     Generate all summary queries and export their results in the selected format.
@@ -732,7 +771,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
             ),
         )
 
-    summary_queries = {}
+    summary_queries = create_process_files_query(connection, by_rank)
 
     # Create the summary queries.
     # When region_categories is specified (and not NONE), only include view-based
