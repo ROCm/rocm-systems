@@ -41,6 +41,9 @@
 #include <string>
 #include <string_view>
 
+#include <sys/uio.h>
+#include <unistd.h>
+
 namespace rocprofiler
 {
 namespace kernel_replay
@@ -66,18 +69,16 @@ read_writable_host_mappings(std::istream& file)
         unsigned long long begin    = 0;
         unsigned long long end      = 0;
         char               perms[8] = {};
-        if(std::sscanf(line.c_str(), "%llx-%llx %7s", &begin, &end, perms) != 3) continue;
+        int                path_pos = 0;
+        if(std::sscanf(
+               line.c_str(), "%llx-%llx %7s %*s %*s %*s %n", &begin, &end, perms, &path_pos) != 3 ||
+           path_pos == 0)
+            continue;
         // Write permission is enough. A PROT_WRITE mapping is `-w-` here, and this check never
         // reads the page: it only asks whether a pointer lands in host memory the snapshot misses.
         if(perms[1] != 'w') continue;
-        if(line.find("/dev/kfd") != std::string::npos || line.find("/dev/dri") != std::string::npos)
-            continue;
-        // vvar, vdso and vsyscall hold scalars and host-only pointers, not memory a kernel is
-        // handed as data, and a by-value scalar whose bit pattern lands in their range would read
-        // as a false hit. The thread stacks are kept: a kernel argument may well point at a host
-        // variable, and missing that is the failure this module exists to catch.
-        if(line.find("[vvar") != std::string::npos || line.find("[vdso") != std::string::npos ||
-           line.find("[vsyscall") != std::string::npos)
+        const auto path = std::string_view{line}.substr(static_cast<size_t>(path_pos));
+        if(path == "/dev/kfd" || path == "/dev/kfd (deleted)" || path.rfind("/dev/dri/", 0) == 0)
             continue;
         out.spans.push_back({begin, end});
     }
@@ -154,6 +155,19 @@ region_bounds(size_t segment_size, uint64_t offset, uint64_t size, size_t& begin
     end = begin + static_cast<size_t>(size);
     return true;
 }
+
+bool
+kernarg_extent_is_covered(const pointer_facts_t& facts, uint64_t address, size_t size)
+{
+    if(!facts.pointer_info_succeeded || facts.type != pointer_facts_t::type_t::hsa ||
+       facts.owner_is_cpu == facts.owner_is_gpu || facts.allocation_base == 0 ||
+       address < facts.allocation_base ||
+       facts.allocation_size > std::numeric_limits<uint64_t>::max() - facts.allocation_base)
+        return false;
+
+    const auto offset = address - facts.allocation_base;
+    return offset < facts.allocation_size && size <= facts.allocation_size - offset;
+}
 }  // namespace
 
 const char*
@@ -161,12 +175,12 @@ to_string(kind_t kind)
 {
     switch(kind)
     {
-        case kind_t::host_pinned: return "host-pinned memory (hipHostMalloc)";
+        case kind_t::host_pinned: return "CPU-owned HSA memory (including host-pinned memory)";
         case kind_t::managed: return "managed memory (hipMallocManaged)";
         case kind_t::virtual_mem: return "a virtual-memory allocation (hipMallocAsync, hipMemMap)";
         case kind_t::device_other: return "device memory the snapshot does not track";
-        case kind_t::locked_host: return "locked host memory (hipHostRegister)";
-        case kind_t::host_pageable: return "pageable host memory";
+        case kind_t::locked_host: return "locked host memory";
+        case kind_t::host_pageable: return "writable host memory (pageable or registered)";
         case kind_t::unclassified: return "memory whose classification is unavailable";
     }
     return "untracked memory";
@@ -191,13 +205,23 @@ make_hsa_pointer_facts()
             {
                 facts.pointer_info_succeeded = true;
                 facts.type                   = convert_type(info.type);
+                const auto agent_base        = reinterpret_cast<uint64_t>(info.agentBaseAddress);
+                facts.in_agent_allocation    = agent_base != 0 && address >= agent_base &&
+                                            address - agent_base < info.sizeInBytes;
+                facts.allocation_base = facts.in_agent_allocation
+                                            ? agent_base
+                                            : reinterpret_cast<uint64_t>(info.hostBaseAddress);
+                facts.allocation_size = info.sizeInBytes;
                 if(facts.type == pointer_facts_t::type_t::hsa && info.agentOwner.handle != 0 &&
                    core != nullptr && core->hsa_agent_get_info_fn != nullptr)
                 {
                     auto device = hsa_device_type_t{};
                     if(core->hsa_agent_get_info_fn(
                            info.agentOwner, HSA_AGENT_INFO_DEVICE, &device) == HSA_STATUS_SUCCESS)
+                    {
                         facts.owner_is_cpu = (device == HSA_DEVICE_TYPE_CPU);
+                        facts.owner_is_gpu = (device == HSA_DEVICE_TYPE_GPU);
+                    }
                 }
             }
         }
@@ -205,8 +229,7 @@ make_hsa_pointer_facts()
         // HSA reports neither pageable host memory nor hipHostRegister'd memory with an owner or
         // extent, so fall back to the process's writable mappings. This is not gated on XNACK:
         // hipHostRegister maps memory into the GPU address space even with XNACK off, so a kernel
-        // can write it. vvar, vdso and vsyscall are excluded because a by-value scalar's bit
-        // pattern can land in them.
+        // can write it.
         if(facts.pointer_info_succeeded && facts.type == pointer_facts_t::type_t::unknown)
         {
             if(!mappings->has_value()) *mappings = read_writable_host_mappings();
@@ -329,8 +352,43 @@ can_replay_dispatch(const uint8_t*                                    kernarg,
 {
     try
     {
-        if(const auto hit =
-               scan_kernarg(kernarg, segment_size, pointer_regions, covered_spans(snapshot), facts))
+        if(segment_size == 0) return true;
+        const auto address      = reinterpret_cast<uint64_t>(kernarg);
+        const auto buffer_facts = kernarg != nullptr ? facts(address) : pointer_facts_t{};
+        if(kernarg == nullptr || !kernarg_extent_is_covered(buffer_facts, address, segment_size))
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "kernel replay: the kernarg segment is not covered by a known HSA allocation; "
+                   "running this dispatch once without replay";
+            return false;
+        }
+
+        auto bytes  = std::vector<uint8_t>(segment_size);
+        auto copied = false;
+        if(buffer_facts.owner_is_gpu && buffer_facts.in_agent_allocation)
+        {
+            auto* core = hsa::get_core_table();
+            copied =
+                core != nullptr && core->hsa_memory_copy_fn != nullptr &&
+                core->hsa_memory_copy_fn(bytes.data(), kernarg, bytes.size()) == HSA_STATUS_SUCCESS;
+        }
+        else
+        {
+            const auto local  = iovec{bytes.data(), bytes.size()};
+            const auto remote = iovec{const_cast<uint8_t*>(kernarg), segment_size};
+            const auto count  = ::process_vm_readv(::getpid(), &local, 1, &remote, 1, 0);
+            copied            = count >= 0 && static_cast<size_t>(count) == bytes.size();
+        }
+        if(!copied)
+        {
+            LOG_FIRST_N(WARNING, 1)
+                << "kernel replay: the complete kernarg segment could not be read safely; "
+                   "running this dispatch once without replay";
+            return false;
+        }
+
+        if(const auto hit = scan_kernarg(
+               bytes.data(), bytes.size(), pointer_regions, covered_spans(snapshot), facts))
         {
             LOG_FIRST_N(WARNING, 1) << fmt::format(
                 "kernel replay: kernarg offset {} points at 0x{:x}, {}; "
@@ -347,6 +405,11 @@ can_replay_dispatch(const uint8_t*                                    kernarg,
     {
         LOG_FIRST_N(WARNING, 1) << "kernel replay: could not allocate memory for the untracked "
                                    "memory check; running this dispatch once without replay";
+        return false;
+    } catch(...)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: the untracked memory check failed; "
+                                   "running this dispatch once without replay";
         return false;
     }
 }
@@ -392,6 +455,11 @@ can_replay_dispatch(const hsa_kernel_dispatch_packet_t&       packet,
     {
         LOG_FIRST_N(WARNING, 1) << "kernel replay: could not allocate memory for the untracked "
                                    "memory check; running this dispatch once without replay";
+        return false;
+    } catch(...)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel replay: the untracked memory check failed; "
+                                   "running this dispatch once without replay";
         return false;
     }
 }

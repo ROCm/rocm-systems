@@ -40,11 +40,13 @@
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -353,6 +355,10 @@ constexpr auto hidden_arg_value_kind_prefix        = "hidden";
 constexpr auto global_buffer_arg_value_kind        = "global_buffer";
 constexpr auto global_buffer_static_arg_value_kind = "global_buffer_static";
 constexpr auto by_value_arg_value_kind             = "by_value";
+constexpr auto hidden_pointer_value_kinds =
+    std::array<std::string_view, 3>{"hidden_printf_buffer",
+                                    "hidden_hostcall_buffer",
+                                    "hidden_heap_v1"};
 
 // A by-value argument this small cannot be told apart from an integer or floating-point scalar, and
 // a scalar whose bits happen to look like an address must not be mistaken for one.
@@ -362,8 +368,6 @@ constexpr uint64_t by_value_struct_min_size = 16;
 constexpr uint64_t pointer_arg_size = 8;
 }  // namespace
 
-// Defined out here, in hip::detail, so it matches the header. The anonymous namespace above is a
-// different scope, and a definition nested there does not see kernarg_arg_metadata_t.
 std::optional<std::vector<kernarg_region_t>>
 parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_arg_metadata_t>& args)
 {
@@ -382,7 +386,14 @@ parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_ar
         }
 
         if(arg.value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
+        {
             hidden_start = std::min(hidden_start, *arg.offset);
+            if(std::find(hidden_pointer_value_kinds.begin(),
+                         hidden_pointer_value_kinds.end(),
+                         *arg.value_kind) != hidden_pointer_value_kinds.end())
+                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                                   static_cast<uint32_t>(pointer_arg_size)});
+        }
         else if(*arg.value_kind == global_buffer_arg_value_kind ||
                 *arg.value_kind == global_buffer_static_arg_value_kind)
             regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),

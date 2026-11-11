@@ -98,25 +98,19 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  * single dispatch. HIP graph launches are not replayed, and a multi-packet submission runs once
  * without replay; each case warns once. Repeatability rests on a snapshot covering coarse-grained
  * device allocations owned by the agent plus module-scope @c __device__ / @c __constant__
- * variables. The check uses the kernel's own metadata to identify
- * pointer arguments and @c by_value arguments of at least 16 bytes. By-value arguments are scanned
- * in eight-byte words starting at their metadata offset. Smaller by-value arguments and pointer
- * fields at other offsets, such as fields in packed structs, are not detected; scalar aggregates
- * can also resemble pointers and cause replay to be declined. A scalar the width of a pointer is
- * not read as one; without metadata every argument word is checked. A dispatch whose checked
- * kernel arguments point at memory outside the snapshot (fine-grained device, unified or managed
- * memory, host memory, another agent's memory, @c hipMallocAsync and other virtual-memory-mapped
- * allocations)
- * runs once without replay and warns once. The same applies when pointer information or the
- * required host mappings cannot be queried. A pointer the kernel finds inside memory it was handed
- * is not seen, so a kernel writing through one observes values accumulated across passes rather
- * than identical inputs. Allocations carrying
- * @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot (HIP kernarg pools /
- * profiler buffers share that flag). A direct-HSA application that puts ordinary writable device
- * data behind the same flag sees the same omission -- an unsupported allocation class for beta.
- * Declining every replay while any such trackable allocation is live is not viable because the HIP
- * runtime itself keeps them live under interception. A failed restore aborts the process rather
- * than continuing with partially restored memory.
+ * variables exposed as HSA variable symbols. Internal or static device state not exposed as
+ * symbols is not restored.
+ *
+ * Argument-memory checks are best effort: indirect pointers and some aggregate fields can be
+ * missed, while scalar values can cause false declines. Detected memory outside the snapshot
+ * (fine-grained device, unified or managed memory, host memory, another agent's memory,
+ * @c hipMallocAsync and other virtual-memory-mapped allocations), failed snapshot capture, or
+ * failed required memory checks cause the dispatch to run once without replay. This includes a
+ * kernarg buffer that cannot be verified and safely inspected.
+ *
+ * Selected runtime copy/fill kernels bypass the guard; overlapping copies are not detected.
+ * Allocations carrying @c HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are excluded from the snapshot.
+ * A failed restore aborts the process rather than continuing with partially restored memory.
  *
  * @see `docs/how-to/using-kernel-replay.rst` for the full limitation list and
  * `docs/conceptual/kernel_replay/kernel_replay_memory_snapshot.md` for what the snapshot covers

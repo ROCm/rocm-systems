@@ -75,7 +75,7 @@ struct kernel_locator_t
 {
     uint64_t           kernel_id{0};
     size_t             segment_size{0};  // kernarg segment size the load reported
-    const std::string* name{nullptr};  // held by the string table, valid while the kernel is loaded
+    const std::string* name{nullptr};    // interned in the process-lifetime string table
     // The ranges of the kernarg segment that can hold a pointer, read from the kernel's amdhsa
     // metadata when its code object was loaded; null when that metadata was not readable.
     std::shared_ptr<const std::vector<kernarg_region_t>> pointer_regions{};

@@ -632,17 +632,23 @@ TEST(codeobj_library, kernarg_pointer_regions_preserve_known_regions_and_hidden_
     using rocprofiler::code_object::kernarg_region_t;
     using rocprofiler::code_object::hip::detail::parse_kernel_pointer_regions;
 
-    const auto regions = parse_kernel_pointer_regions(
-        32, {{"global_buffer", 8, 8}, {std::nullopt, 16, 8}, {"hidden_block", 24, 8}});
+    const auto regions = parse_kernel_pointer_regions(64,
+                                                      {{"global_buffer", 8, 8},
+                                                       {std::nullopt, 16, 8},
+                                                       {"hidden_block_count_x", 24, 4},
+                                                       {"hidden_printf_buffer", 32, 8},
+                                                       {"hidden_hostcall_buffer", 40, 8},
+                                                       {"hidden_heap_v1", 48, 8}});
 
     ASSERT_TRUE(regions);
-    EXPECT_EQ(*regions, (std::vector<kernarg_region_t>{{8, 8}, {0, 24}}));
+    EXPECT_EQ(*regions,
+              (std::vector<kernarg_region_t>{{8, 8}, {32, 8}, {40, 8}, {48, 8}, {0, 24}}));
 }
 
 // One pass over a code object's amdhsa metadata yields both maps: the symbol-to-device names the
 // loader already needed, and which kernarg bytes of each kernel can hold a pointer.
-// syncthreads_kernel(int* data) declares one 8-byte pointer, followed by the hidden arguments the
-// compiler appends, which are not the application's to point into.
+// syncthreads_kernel(int* data) declares one 8-byte pointer and metadata-described hostcall and
+// heap pointers. Scalar hidden arguments are excluded.
 TEST(codeobj_library, metadata_reports_kernarg_pointer_regions)
 {
     std::string path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
@@ -662,7 +668,8 @@ TEST(codeobj_library, metadata_reports_kernarg_pointer_regions)
     {
         const auto regions = metadata.kernarg_pointer_regions.find(key);
         ASSERT_NE(regions, metadata.kernarg_pointer_regions.end()) << key;
-        const auto expected = std::vector<rocprofiler::code_object::kernarg_region_t>{{0u, 8u}};
+        const auto expected = std::vector<rocprofiler::code_object::kernarg_region_t>{
+            {0u, 8u}, {88u, 8u}, {104u, 8u}};
         EXPECT_EQ(regions->second, expected) << key;
     }
 
