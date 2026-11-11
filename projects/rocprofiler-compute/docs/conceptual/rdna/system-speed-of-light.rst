@@ -195,7 +195,7 @@ The ``GL2-Fabric Read BW`` and ``GL2-Fabric Write BW`` rows have no peak. The 64
 MALL (Infinity Cache) serves part of the traffic that GL2 sends to the fabric, so the
 rows are not compared with the 640 GB/s DRAM peak. These EA rates use the configured
 32, 64, 128, and 256-byte request categories. Separate compressed request and data
-counters are not included. For the measured DRAM and MALL roofs, see :ref:`rdna4-roofline`.
+counters are not included. For the measured GDDR6 and MALL roofs, see :ref:`rdna4-roofline`.
 
 ``GL2 Cache BW`` measures uncompressed read requests at the GL2 output FIFOs. It does
 not measure all L2 traffic. The percentage of peak uses the L2 interface width, not
