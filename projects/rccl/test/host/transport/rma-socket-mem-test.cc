@@ -143,54 +143,6 @@ TEST_F(RmaSocketMemMicrotest, Copy_CudaDirectionsPropagateCopyErrorAfterResolvin
   EXPECT_EQ(copyTo.calls, 1);
 }
 
-TEST_F(RmaSocketMemMicrotest, Copy_CudaToHostUsesFromMapping) {
-  std::array<unsigned char, 4> data{};
-  const std::array<unsigned char, 4> bar{{1, 2, 3, 4}};
-  std::array<unsigned char, 4> host{};
-  auto handle =
-      Scene::MakeGdrMappedMr(data.data(), data.size(), const_cast<unsigned char*>(bar.data()), gdr_mh_t{12});
-  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&bar](gdr_mh_t mh, void* dst, const void* src, size_t size) {
-    EXPECT_EQ(mh.h, 12u);
-    EXPECT_EQ(src, bar.data());
-    std::memcpy(dst, src, size);
-    return ncclSuccess;
-  });
-  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) {
-    ADD_FAILURE() << "GPU-to-host must not use copy-to-mapping";
-    return ncclSuccess;
-  });
-
-  EXPECT_EQ(ncclRmaSocketProxyCopy(host.data(), NCCL_PTR_HOST, nullptr, data.data(), NCCL_PTR_CUDA, &handle,
-                                  data.size()),
-            ncclSuccess);
-  EXPECT_EQ(host, bar);
-  EXPECT_EQ(copyFrom.calls, 1);
-  EXPECT_EQ(copyTo.calls, 0);
-}
-
-TEST_F(RmaSocketMemMicrotest, Copy_HostToCudaUsesToMapping) {
-  std::array<unsigned char, 4> data{};
-  std::array<unsigned char, 4> bar{};
-  const std::array<unsigned char, 4> host{{5, 6, 7, 8}};
-  auto handle = Scene::MakeGdrMappedMr(data.data(), data.size(), bar.data(), gdr_mh_t{13});
-  ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [](gdr_mh_t, void*, const void*, size_t) {
-    ADD_FAILURE() << "host-to-GPU must not use copy-from-mapping";
-    return ncclSuccess;
-  });
-  ScopedHook copyTo(g_wrapGdrCopyToMapping, [](gdr_mh_t mh, void* dst, const void* src, size_t size) {
-    EXPECT_EQ(mh.h, 13u);
-    std::memcpy(dst, src, size);
-    return ncclSuccess;
-  });
-
-  EXPECT_EQ(ncclRmaSocketProxyCopy(data.data(), NCCL_PTR_CUDA, &handle, host.data(), NCCL_PTR_HOST, nullptr,
-                                  host.size()),
-            ncclSuccess);
-  EXPECT_EQ(bar, host);
-  EXPECT_EQ(copyFrom.calls, 0);
-  EXPECT_EQ(copyTo.calls, 1);
-}
-
 TEST_F(RmaSocketMemMicrotest, Copy_UnsupportedDirectionIsRejected) {
   std::array<unsigned char, 8> bytes{};
   ncclRmaSocketProxyMrHandle handle{};
@@ -244,11 +196,14 @@ TEST_F(RmaSocketMemMicrotest, Copy_MappingOffsetsAndLengthsReachCorrectGdrOperat
   std::array<unsigned char, 24> bar{};
   std::array<unsigned char, 12> host{};
   auto handle = Scene::MakeGdrMappedMr(device.data(), device.size(), bar.data(), gdr_mh_t{33});
+  host[3] = 5;
+  host[4] = 6;
   ScopedHook copyTo(g_wrapGdrCopyToMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
     EXPECT_EQ(33u, mapping.h);
     EXPECT_EQ(bar.data() + 11, destination);
     EXPECT_EQ(host.data() + 3, source);
     EXPECT_EQ(5u, size);
+    std::memcpy(destination, source, size);
     return ncclSuccess;
   });
   ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
@@ -256,15 +211,24 @@ TEST_F(RmaSocketMemMicrotest, Copy_MappingOffsetsAndLengthsReachCorrectGdrOperat
     EXPECT_EQ(host.data() + 2, destination);
     EXPECT_EQ(bar.data() + 7, source);
     EXPECT_EQ(3u, size);
+    std::memcpy(destination, source, size);
     return ncclSuccess;
   });
 
   ASSERT_EQ(ncclSuccess, ncclRmaSocketProxyCopy(device.data() + 11, NCCL_PTR_CUDA, &handle,
                                               host.data() + 3, NCCL_PTR_HOST, nullptr, 5));
+  EXPECT_EQ(1, copyTo.calls);
+  EXPECT_EQ(0, copyFrom.calls);
+  EXPECT_EQ(5, bar[11]);
+  EXPECT_EQ(6, bar[12]);
+  bar[7] = 9;
+  bar[8] = 10;
   ASSERT_EQ(ncclSuccess, ncclRmaSocketProxyCopy(host.data() + 2, NCCL_PTR_HOST, nullptr,
                                               device.data() + 7, NCCL_PTR_CUDA, &handle, 3));
   EXPECT_EQ(1, copyTo.calls);
   EXPECT_EQ(1, copyFrom.calls);
+  EXPECT_EQ(9, host[2]);
+  EXPECT_EQ(10, host[3]);
 }
 
 TEST_F(RmaSocketMemMicrotest, DeregMrSym_UnmapFailureUnlinksOnlyRequestedHandle) {
