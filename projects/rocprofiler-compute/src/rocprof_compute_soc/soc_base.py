@@ -580,8 +580,9 @@ class OmniSoC_Base:
         return filter_blocks
 
     def _allocate_perfmon_counter_files(
-        self, counters: Set[str]
-    ) -> Tuple[List["CounterFile"], int, int]:
+        self,
+        counters: set[str],
+    ) -> tuple[list[CounterFile], int, int]:
         """Bin-pack counters into perfmon buckets.
 
         Named *_ACCUM counters from rocprofiler-sdk (accumulate(BASE, HIGH_RES)
@@ -599,7 +600,7 @@ class OmniSoC_Base:
         Returns:
             output_files, file_count, and accu_file_count.
         """
-        output_files: List[CounterFile] = []
+        output_files: list[CounterFile] = []
         # Kept for call-site compatibility; dedicated accum files are gone.
         accu_file_count = 0
         work_set = set(counters)
