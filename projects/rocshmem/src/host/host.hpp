@@ -439,10 +439,11 @@ class HostInterface {
    * verbs headers stay out of the device-compiled template header.
    */
   __host__ bool verbs_amo_fetch_add(WindowInfo* window_info, void* dst,
-                                    uint64_t value, int pe, uint64_t* out);
+                                    uint64_t value, int pe,
+                                    uint64_t* fetch_val);
   __host__ bool verbs_amo_fetch_cas(WindowInfo* window_info, void* dst,
                                     uint64_t swap, uint64_t compare, int pe,
-                                    uint64_t* out);
+                                    uint64_t* fetch_val);
 #endif
 
   /*
