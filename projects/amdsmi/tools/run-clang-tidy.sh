@@ -46,7 +46,7 @@ fi
 
 # Find all source files
 mapfile -t FILES < <(
-    find . \( -name build -o -name .git -o -path "./src/ras-decode-instinct-staging" -o -path "./esmi_ib_library" -o -path "./rocm_smi/include/rocm_smi/kfd_ioctl.h" \) -prune -o \
+    find . \( -name build -o -name .git -o -path "./third_party/addc-base" -o -path "./esmi_ib_library" -o -path "./rocm_smi/include/rocm_smi/kfd_ioctl.h" \) -prune -o \
            \( -name "*.cc" -o -name "*.cpp" -o -name "*.c" \) -print
 )
 
