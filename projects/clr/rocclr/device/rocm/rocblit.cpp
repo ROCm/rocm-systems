@@ -1072,8 +1072,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       finalOps.push_back(indirect);
     }
 
-    // Submit in chunks so the signal ring never waits on a signal of an unsubmitted op.
-    const size_t chunk = std::max<size_t>(ROC_SIGNAL_POOL_SIZE, 1);
+    // Submit in chunks so a capped signal ring never waits on a signal of an unsubmitted op.
+    const size_t chunk = std::max<size_t>(gpu().Barriers().MaxUnsubmittedSignals(), 1);
     for (size_t first = 0; first < finalOps.size(); first += chunk) {
       const size_t last = std::min(finalOps.size(), first + chunk);
       for (size_t i = first; i < last; ++i) {
