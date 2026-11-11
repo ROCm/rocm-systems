@@ -9389,6 +9389,11 @@ hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream);
  * @param [in] nodeParams - Pointer to the node parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue.
  *
+ * @note @p nodeParams must be zero-initialized by the caller. Fields that are left
+ * uninitialized are still read, so stale stack contents can select unintended behavior
+ * or be rejected with #hipErrorInvalidValue. In particular #hipChildGraphNodeParams::ownership
+ * must be zeroed to get the default #hipGraphChildGraphOwnershipClone.
+ *
  */
 hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                            const hipGraphNode_t* pDependencies, size_t numDependencies,
