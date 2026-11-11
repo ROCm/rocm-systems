@@ -1,6 +1,6 @@
 # Profile Interface Architecture
 
-Status: proposal (Phases A and B implemented)
+Status: proposal (Phases A, B, and D implemented)
 
 This document describes the architecture for profile data storage and access in
 rocprofiler-compute, and records the decisions made in the design review so the
@@ -482,14 +482,23 @@ sequenceDiagram
 
 ## Phase D: Profile Data Interface and Drop `pmc_perf.csv` as Analyze Input
 
+Status: implemented, ahead of Phase C.
+
+Phase C has not landed, so profile still converts each pass's rocpd into
+`results_*.csv.gz` and also keeps the native tool's per-process CSVs.
+`file_io.create_df_pmc` reads the native CSVs when the workload has at least
+one complete set of them, and joins them in memory. Otherwise it reads
+`results_*.csv.gz`. Either way it pivots the rows into the PMC DataFrame.
+`pmc_perf.csv` is no longer written or read. The diagram below is the target
+once Phase C lands.
+
 Results from SDK and native collector are processed independently in profiling
 and analysis.
 
 This is the profile interface architecture phase. Analyze asks the profile data
 interface (a reader) for the DataFrame. The reader reads all per-process SDK kernel
 rocpds and all per-process native counter artifacts, and merges them in memory
-(across processes and tools). `pmc_perf.csv` may still be generated as a one-way
-export, but analyze does not read it back.
+(across processes and tools). Analyze neither writes nor reads `pmc_perf.csv`.
 
 Profile does not consolidate or process data, so there is no profile-side writer.
 The profile side is identical to Phase C; only the analyze side changes here.

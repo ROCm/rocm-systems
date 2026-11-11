@@ -16,8 +16,157 @@
 #include "gin_scratch__types.h"
 #endif
 
-template <bool EnableProfiler>
-__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+template <int UnrollPacks, int UnrollPeers, typename Pack, typename GetDst>
+static __device__ __forceinline__ void bcastPacksToLsa(GetDst const& getDst, intptr_t cursor, int packStride,
+                                                       Pack const (&tmp)[UnrollPacks], int nRanks, int rank,
+                                                       int selfSkip) {
+  int dr = selfSkip;
+  int r = rank + dr;
+  if (nRanks <= r) r -= nRanks;
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
+    NVCC_PRAGMA_UNROLL(UnrollPeers)
+    for (int up = 0; up < UnrollPeers; up++) {
+      Pack* dst = getDst(r) + cursor;
+      NVCC_PRAGMA_UNROLL(UnrollPacks)
+      for (int u = 0; u < UnrollPacks; u++) dst[u * packStride] = tmp[u];
+      if (++r == nRanks) r = 0;
+    }
+  }
+  NVCC_PRAGMA_UNROLL(UnrollPeers)
+  for (int up = 0; up < UnrollPeers; up++) {
+    if (dr + up == nRanks) break;
+    Pack* dst = getDst(r) + cursor;
+    NVCC_PRAGMA_UNROLL(UnrollPacks)
+    for (int u = 0; u < UnrollPacks; u++) dst[u * packStride] = tmp[u];
+    if (++r == nRanks) r = 0;
+  }
+}
+
+template <int BytePerPack, int UnrollPacks, int UnrollPeers>
+static __device__ void bcastLsaDeep(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam lsa,
+                                    int selfSkip, int nIters) {
+  using Pack = BytePack<BytePerPack>;
+  int wn = tn / WARP_SIZE;
+  int w = t / WARP_SIZE;
+  int lane = t % WARP_SIZE;
+
+  Pack const* inpPacks = (Pack const*)input.localPtr() + intptr_t(w) * UnrollPacks * WARP_SIZE + lane;
+  ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE + lane;
+  ncclLsaPointerGetter<Pack> getDst{outPacks};
+  intptr_t cursor = 0;
+  Pack tmp[UnrollPacks];
+
+  nIters -= w;
+  if (0 < nIters) {
+    NVCC_PRAGMA_UNROLL_AUTO
+    for (int u = 0; u < UnrollPacks; u++) tmp[u] = inpPacks[u * WARP_SIZE];
+
+    while (true) {
+      bcastPacksToLsa<UnrollPacks, UnrollPeers>(getDst, cursor, WARP_SIZE, tmp, lsa.nRanks, lsa.rank, selfSkip);
+      inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      cursor += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      nIters -= wn;
+      if (nIters <= 0) break;
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollPacks; u++) tmp[u] = inpPacks[u * WARP_SIZE];
+    }
+  }
+}
+
+// Whole packs left over once the tiled loop can no longer fill a warp tile.
+template <int BytePerPack, int UnrollPeers>
+static __device__ void bcastLsaPacks(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam lsa,
+                                     int selfSkip, size_t nPacks) {
+  using Pack = BytePack<BytePerPack>;
+  Pack const* inpPacks = (Pack const*)input.localPtr();
+  ncclLsaPointerGetter<Pack> getDst{(ncclSymPtr<Pack>)output};
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (size_t i = t; i < nPacks; i += tn) {
+    Pack tmp[1];
+    tmp[0] = inpPacks[i];
+    bcastPacksToLsa<1, UnrollPeers>(getDst, (intptr_t)i, 1, tmp, lsa.nRanks, lsa.rank, selfSkip);
+  }
+}
+
+// Unaligned head and ragged tail, one byte at a time.
+template <int UnrollPeers>
+static __device__ void bcastLsaEnds(int tn, int t, ncclSymPtr<char> input, ncclSymPtr<char> output, ncclTeam lsa,
+                                    int selfSkip, size_t nBytes, uint32_t nPreBytes, size_t nSufBytes) {
+  using Pack = BytePack<1>;
+  Pack const* inpPacks = (Pack const*)input.localPtr();
+  ncclLsaPointerGetter<Pack> getDst{(ncclSymPtr<Pack>)output};
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (size_t i = t; i < nPreBytes + nSufBytes; i += tn) {
+    size_t elt = i < nPreBytes ? i : nBytes - nPreBytes - nSufBytes + i;
+    Pack tmp[1];
+    tmp[0] = inpPacks[elt];
+    bcastPacksToLsa<1, UnrollPeers>(getDst, (intptr_t)elt, 1, tmp, lsa.nRanks, lsa.rank, selfSkip);
+  }
+}
+
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/true>) {
+  bcastMultimem(handler, tn, t, input, output, nElts);
+}
+
+// Intra-node bcast for railring without multimem.
+// Using same 16B/4B/byte tiers as the single node symmetric bcast.
+template <typename T>
+static __device__ void bcastLsa(ncclSymkArgsHandler& handler, int tn, int t, ncclSymPtr<T> input,
+                                ncclSymPtr<T> output, size_t nElts, BoolTag</*multimem=*/false>) {
+  ncclTeam lsa = ncclTeamLsa(handler.comm);
+  int selfSkip = (input == output) ? 1 : 0;
+  size_t nBytes = nElts * sizeof(T);
+
+  uint32_t alignment = uint32_t(input.offset - output.offset);
+  uint32_t nPreBytes = (16 - input.offset) % 16;
+  nPreBytes = min((size_t)nPreBytes, nBytes);
+  uintptr_t cursor = nPreBytes;
+
+  if (alignment % 16 == 0) {
+    constexpr int BytePerPack = 16, UnrollPacks = 4, UnrollPeers = 2;
+    constexpr int BytePerTile = UnrollPacks * WARP_SIZE * BytePerPack;
+    size_t tiles = (nBytes - cursor) / BytePerTile;
+    if (tiles != 0) {
+      bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip,
+                                                          (int)tiles);
+      cursor += tiles * BytePerTile;
+    }
+    size_t packs = (nBytes - cursor) / BytePerPack;
+    if (packs != 0) {
+      bcastLsaPacks<BytePerPack, /*UnrollPeers=*/4>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                    (ncclSymPtr<char>)output + cursor, lsa, selfSkip, packs);
+      cursor += packs * BytePerPack;
+    }
+  }
+
+  if (alignment % 4 == 0) {
+    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
+    constexpr int BytePerTile = UnrollPacks * WARP_SIZE * BytePerPack;
+    size_t tiles = (nBytes - cursor) / BytePerTile;
+    if (tiles != 0) {
+      bcastLsaDeep<BytePerPack, UnrollPacks, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                                          (ncclSymPtr<char>)output + cursor, lsa, selfSkip,
+                                                          (int)tiles);
+      cursor += tiles * BytePerTile;
+    }
+    size_t packs = (nBytes - cursor) / BytePerPack;
+    if (packs != 0) {
+      bcastLsaPacks<BytePerPack, UnrollPeers>(tn, t, (ncclSymPtr<char>)input + cursor,
+                                              (ncclSymPtr<char>)output + cursor, lsa, selfSkip, packs);
+      cursor += packs * BytePerPack;
+    }
+  }
+
+  bcastLsaEnds</*UnrollPeers=*/8>(tn, t, (ncclSymPtr<char>)input, (ncclSymPtr<char>)output, lsa, selfSkip, nBytes,
+                                  nPreBytes, nBytes - cursor);
+}
+
+template <bool EnableProfiler, bool multimem>
+static __device__ void agAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
   ncclCoopCta cta;
   ncclSymkArgsHandler handler(args);
   ncclTeam rail = ncclTeamRail(handler.comm);
@@ -25,12 +174,15 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   constexpr int chunkSize = ncclSymkAllGather_RailRing_ChunkSize;
   uint32_t lsaRank = ncclTeamLsa(handler.comm).rank;
   ncclGinSignal_t railSignals = handler.ginSyncHandle.railSignals + blockIdx.x * rail.nRanks;
-  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, /*multimem=*/true);
+  ncclBarrierSession<ncclCoopCta> bar(cta, ncclTeamTagWorld(), gin, blockIdx.x, multimem);
   int nextPeer = (rail.rank + 1) % rail.nRanks;
   int prevPeer = (rail.rank + rail.nRanks - 1) % rail.nRanks;
   uint64_t* localSignalPtr = gin.getSignalShadowPtr(railSignals + prevPeer);
   uint64_t localSignalValue = *localSignalPtr;
   const int ringThreads = WARP_SIZE;
+
+  // Zero the AMD software warp-span barrier slots before any coop sync (no-op on NVIDIA).
+  ncclCoopNamedBarrierInit();
 
   bar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
@@ -57,7 +209,7 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         if (dataPeer == rail.rank) {
           while (remainingElts) {
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
-              // Send data chunk to next peer in ring
+            // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, input + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
             advanceOffset(chunkElts, offset, remainingElts);
@@ -65,9 +217,9 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         } else {
           while (remainingElts) {
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
-              // Wait for ready signal from next peer before sending
+            // Wait for ready signal from next peer before sending
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-              // Send data chunk to next peer in ring
+            // Send data chunk to next peer in ring
             gin.put(rail, nextPeer, output + dgrank * nAllElts + offset, output + dgrank * nAllElts + offset, chunkElts,
                     ncclGin_SignalInc{railSignals + rail.rank}, ncclGin_None{}, warps);
             advanceOffset(chunkElts, offset, remainingElts);
@@ -75,10 +227,12 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
           }
         }
       }
+      // Count the last hop, which the LSA warps broadcast and this warp does not forward.
+      localSignalValue += (nElts + chunkSize - 1) / chunkSize;
       gin.flush(warps);
     } else {
       ncclCoopWarpSpan warps(1, blockDim.x / WARP_SIZE - 1, 1);
-        // Loop through rail ranks starting from itself
+      // Loop through rail ranks starting from itself
       for (int step = 0; step < rail.nRanks; step++) {
         int dataPeer = (rail.rank - step + rail.nRanks) % rail.nRanks;
         int dgrank = ncclTeamRankToWorld(handler.comm, rail, dataPeer);
@@ -87,18 +241,18 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
         if (dataPeer == rail.rank) {
           while (remainingElts) {
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
-              // Put self rank's data
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), input + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            // Put self rank's data
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), input + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag);
             advanceOffset(chunkElts, offset, remainingElts);
           }
         } else {
           while (remainingElts) {
             size_t chunkElts = min(min(remainingElts, size_t(chunkSize)), nElts - offset);
-              // Wait for signal from other peers before putting their data
+            // Wait for signal from other peers before putting their data
             gin.waitSignal(warps, railSignals + prevPeer, localSignalValue + 1, 32);
-            bcastMultimem(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
-                          output + dgrank * nAllElts + offset, chunkElts);
+            bcastLsa(handler, warps.num_threads(), warps.thread_rank(), output + dgrank * nAllElts + offset,
+                     output + dgrank * nAllElts + offset, chunkElts, multimemTag);
             advanceOffset(chunkElts, offset, remainingElts);
             localSignalValue++;
           }
@@ -113,4 +267,14 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct nc
   }
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaST(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier<EnableProfiler>(args, /*multimem=*/BoolTag<false>{});
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args) {
+  agAlgoHier<EnableProfiler>(args, /*multimem=*/BoolTag<true>{});
 }

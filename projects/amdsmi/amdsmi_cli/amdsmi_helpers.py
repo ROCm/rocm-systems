@@ -31,6 +31,16 @@ from BDF import BDF
 
 import amdsmi_cli_exceptions
 
+# Drivers whose absence the CLI explains: driver -> (device label, PCI vendor ID, PCI base
+# classes). The CPU's HSMP interface is an ACPI device, not a PCI function.
+DRIVER_DEVICES = {
+    "amdgpu": ("GPU", 0x1002, (0x03, 0x12)),  # display, processing accelerator
+    "hsmp_acpi": ("CPU", None, ()),
+    "ionic": ("AI NIC", 0x1DD8, (0x02,)),  # network controller
+    "bnxt_en": ("NIC", 0x14E4, (0x02,)),
+}
+HSMP_ACPI_DEVICES = Path("/sys/bus/acpi/devices")
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -238,6 +248,70 @@ class AMDSMIHelpers:
         self._brcm_switch_initialized_cached = result
         return result
 
+    def is_driver_loaded(self, driver):
+        """Returns True if *driver* (a DRIVER_DEVICES key) is loaded, even if the CLI did
+        not initialize it (e.g. CPU init turned off with AMDSMI_DISABLE_CPU_INIT)."""
+        if driver == "amdgpu":
+            return bool(self.is_amdgpu_initialized()) or self._is_module_live("amdgpu")
+        if driver == "hsmp_acpi":
+            # Either CPU driver (hsmp_acpi or amd_hsmp) creates /dev/hsmp
+            return bool(self.is_amd_hsmp_initialized()) or os.path.exists("/dev/hsmp")
+        return self._is_module_live(driver)
+
+    @staticmethod
+    def _is_module_live(module):
+        try:
+            return (Path("/sys/module") / module / "initstate").read_text().strip() == "live"
+        except OSError:
+            return False
+
+    def get_devices_without_driver(self, driver):
+        """Returns the devices present for *driver* while it is not loaded.
+
+        PCI addresses for GPUs and NICs, ACPI device names for the CPU; empty when the
+        driver is loaded or none of its hardware is present.
+        """
+        cache = self.__dict__.setdefault("_devices_without_driver", {})
+        if driver not in cache:
+            if self.is_driver_loaded(driver):
+                devices = []
+            elif driver == "hsmp_acpi":
+                devices = sorted(path.name for path in HSMP_ACPI_DEVICES.glob("AMDI0097:*"))
+            else:
+                _, vendor_id, base_classes = DRIVER_DEVICES[driver]
+                devices = self.get_pci_devices_without_driver(vendor_id, base_classes, driver)
+            cache[driver] = devices
+        return cache[driver]
+
+    def get_missing_drivers(self):
+        """Returns the drivers that are not loaded although their hardware is present."""
+        return [driver for driver in DRIVER_DEVICES if self.get_devices_without_driver(driver)]
+
+    def get_driver_notes(self, args):
+        """Returns a note for each missing driver of the command in *args*.
+
+        Only drivers for the device types the user selected (-g, -U/-O, -N) count, if any.
+        """
+        selected = set()
+        for option, drivers in (
+            ("gpu", ("amdgpu",)),
+            ("cpu", ("hsmp_acpi",)),
+            ("core", ("hsmp_acpi",)),
+            ("nic", ("ionic", "bnxt_en")),
+        ):
+            if getattr(args, option, None) is not None:
+                selected.update(drivers)
+        notes = []
+        for driver in getattr(args, "note_drivers", ()):
+            devices = self.get_devices_without_driver(driver)
+            if devices and (not selected or driver in selected):
+                label = DRIVER_DEVICES[driver][0]
+                notes.append(
+                    f"Note: {label} {' '.join(devices)}: {driver} driver not loaded"
+                    f" (sudo modprobe {driver})"
+                )
+        return notes
+
     def get_handles_by_processor_type(self, processor_type):
         """Get all processor handles of a given type across all sockets."""
         handles = []
@@ -389,14 +463,64 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_or_uuid(self, device_handle):
-        """Return the device CUID when available, falling back to the UUID."""
-        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
-        if identifier == "N/A":
-            identifier = self._query_or_na(
-                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        result = {
+            "derived_cuid": "N/A",
+            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "component_type": "UNKNOWN",
+            "auxiliary": "unknown",
+            "source": "UNKNOWN",
+            "identifier_kind": "unknown",
+            "cuid_metadata_status": "unknown",
+        }
+        try:
+            info = amdsmi_interface.amdsmi_get_gpu_cuid_info(device_handle)
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as error:
+            if not isinstance(error, amdsmi_exception.AmdSmiLibraryException):
+                result["cuid_metadata_status"] = "unsupported"
+            elif (
+                error.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            ):
+                result.update(
+                    component_type="N/A",
+                    auxiliary="N/A",
+                    source="N/A",
+                    cuid_metadata_status="not_supported",
+                )
+            else:
+                result["cuid_metadata_status"] = f"amdsmi_error_{error.get_error_code()}"
+            # Older libraries may provide the CUID-only API but not its metadata.
+            try:
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
+                return result
+            if cuid and cuid != "N/A":
+                result.update(derived_cuid=cuid, identifier_kind="cuid")
+            return result
+
+        cuid = info.get("derived")
+        if not cuid or cuid == "N/A":
+            result["cuid_metadata_status"] = "invalid_value"
+            return result
+        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result["component_type"] = info.get("component_type", "UNKNOWN")
+        source = info.get("source")
+        if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
+            result["source"] = source
+        else:
+            result["cuid_metadata_status"] = "partial"
+        auxiliary = info.get("auxiliary")
+        if isinstance(auxiliary, bool):
+            result["auxiliary"] = auxiliary
+        else:
+            result["cuid_metadata_status"] = "partial"
+        if include_primary:
+            result["primary_cuid"] = info.get("primary") or (
+                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
             )
-        return identifier
+        return result
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
@@ -1674,14 +1798,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -1793,8 +1917,8 @@ class AMDSMIHelpers:
     def get_fan_support(self):
         """Check if fan control is supported and return dynamic range info for all devices.
 
-        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
-        legacy hwmon GPUs. Results are cached to improve CLI performance.
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and falls
+        back to the legacy hwmon range. Results are cached to improve CLI performance.
 
         Returns:
             str: Range description for all GPUs, "N/A" if not supported.
@@ -1815,29 +1939,19 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
 
-                # Determine the range based on interface type
-                if max_speed <= 100:
-                    # This is likely a gpu_od GPU - try to get actual min from sysfs
-                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
-                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+                # Advertise the range the set path validates against: the gpu_od
+                # OD_RANGE where present, otherwise the legacy hwmon 0-255
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
 
-                    if has_gpu_od:
-                        # Use shared helper function to parse OD_RANGE
-                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
-                        if min_speed is not None:
-                            # Successfully parsed - use the actual range from sysfs
-                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
-                        else:
-                            # Parsing failed - fallback to 0-max_speed
-                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
-                    else:
-                        # gpu_od directory doesn't exist but max_speed <= 100
-                        # Could be an edge case - use 0-max_speed
-                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                min_speed = None
+                if has_gpu_od:
+                    min_speed, max_speed = self.parse_gpu_od_fan_range(gpu_od_path)
+
+                if min_speed is not None:
+                    gpu_ranges.append((idx, f"{min_speed}-{max_speed} or 0-100%%"))
                 else:
-                    # Legacy hwmon GPU (0-255)
                     gpu_ranges.append((idx, "0-255 or 0-100%%"))
 
             except amdsmi_interface.AmdSmiLibraryException as e:
@@ -2216,8 +2330,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -2237,6 +2353,30 @@ class AMDSMIHelpers:
             except Exception as _:
                 continue
         return pci_devices
+
+    @staticmethod
+    def get_pci_devices_without_driver(
+        vendor_id, base_classes, driver, pci_devices_path=Path("/sys/bus/pci/devices")
+    ):
+        """Returns PCI addresses of *vendor_id* functions in *base_classes* that are not
+        bound to a driver other than *driver*. Reads sysfs, so it works without the driver.
+        """
+        devices = []
+        for device in sorted(pci_devices_path.glob("*")):
+            try:
+                if int((device / "vendor").read_text(encoding="ascii"), 16) != vendor_id:
+                    continue
+                pci_class = int((device / "class").read_text(encoding="ascii"), 16)
+            except (OSError, ValueError):
+                continue
+            # sysfs "class" is 0xBBSSPP; Instinct GPUs (e.g. MI300, MI450) use base class 0x12
+            if (pci_class >> 16) not in base_classes:
+                continue
+            bound = device / "driver"
+            if bound.exists() and bound.resolve().name != driver:
+                continue  # owned by another driver, e.g. vfio-pci
+            devices.append(device.name)
+        return devices
 
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
@@ -3505,6 +3645,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 

@@ -12,7 +12,9 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#include "graph/topo.h"
 #include "gin/gin_host_proxy.h"
+#include "gin/gin_type_env.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"
 #include "gin/gin_host_anvil_sdma.h"
@@ -20,7 +22,11 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <mutex>
+
+static_assert(kRcclGinTypeListMin == NCCL_GIN_TYPE_PROXY && kRcclGinTypeListMax == NCCL_GIN_MAX_TYPES - 1,
+              "RCCL_GIN_TYPE_LIST bounds in gin_type_env.h no longer match ncclGinType_t");
 
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
@@ -174,6 +180,13 @@ static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginI
       return ncclSuccess;
     }
 
+    uint64_t ginTypeMask;
+    if (ginType == -1 && ncclGinTypeListMask(&ginTypeMask) && !(ginTypeMask & BIT(props.netDeviceType))) {
+      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Skipping plugin %s index %d type %d: not in RCCL_GIN_TYPE_LIST=%s",
+           gin->name, pluginIndex, props.netDeviceType, getenv("RCCL_GIN_TYPE_LIST"));
+      return ncclSuccess;
+    }
+
     for (int idx = 0; idx < pluginIndex; idx++) {
       if (pluginLibs[idx].state >= ncclGinPluginStateInitReady) {
         ncclNetProperties_t prev_props;
@@ -239,6 +252,25 @@ static void initPluginLibsOnceFunc() {
   int pluginCounter = 0;
 
   memset(pluginLibs, 0, NCCL_GIN_MAX_PLUGINS * sizeof(ginPluginLib_t));
+
+  // Same getenv() source as ncclGinTypeListMask / ncclGinTypeEnabled, so an
+  // NCCL_ENV_PLUGIN value cannot be logged here and then ignored at init.
+  const char* envGinTypes = getenv("RCCL_GIN_TYPE_LIST");
+  if (envGinTypes) {
+    uint64_t ginTypeMask;
+    bool valid = ncclGinParseTypeList(envGinTypes, &ginTypeMask);
+    if (const char* envGinType = ncclGinTypeEnv()) {
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set to %s", envGinTypes,
+           envGinType);
+    } else if (ginTypeMask == 0) {
+      WARN("RCCL_GIN_TYPE_LIST=%s names no valid GIN type, ignoring it", envGinTypes);
+    } else if (!valid) {
+      WARN("RCCL_GIN_TYPE_LIST=%s contains an invalid entry, ignoring that entry", envGinTypes);
+    } else {
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST set by environment to %s", envGinTypes);
+    }
+  }
+
   envGinPlugin = ncclGetEnv("NCCL_GIN_PLUGIN");
   if (envGinPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_PLUGIN set by environment to %s", envGinPlugin);
@@ -312,7 +344,7 @@ static void initPluginLibsOnceFunc() {
   pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
-  // Add internal rocshmem GDA plugin (device-initiated, NCCL_GIN_TYPE=6)
+  // Add internal rocshmem GDA plugin (device-initiated, NCCL_GIN_TYPE=6 or listed in RCCL_GIN_TYPE_LIST)
   pluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
   pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclGinVersion[0];
@@ -376,7 +408,15 @@ ncclResult_t ncclGinInit(struct ncclComm* comm) {
     }
   }
 
-  if (!initialized) INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to initialize any GIN plugin");
+  if (!initialized) {
+    uint64_t ginTypeMask;
+    if (ncclGinTypeListMask(&ginTypeMask)) {
+      WARN("GIN/Plugin: no GIN backend listed in RCCL_GIN_TYPE_LIST=%s could be registered",
+           getenv("RCCL_GIN_TYPE_LIST"));
+    } else {
+      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to initialize any GIN plugin");
+    }
+  }
   return ncclSuccess;
 }
 
@@ -406,16 +446,17 @@ static int ncclGetBackendPriority(struct ncclGinBackendState* backend) {
   case NCCL_GIN_TYPE_GDAKI:
     return 0;
 #ifdef ENABLE_ROCSHMEM_GIN
-  // [RCCL] Device-initiated AMD backends rank with GDAKI, ahead of the host proxy.
-  case NCCL_GIN_TYPE_ROCSHMEM_GDA:
+  // [RCCL] Distinct priorities: qsort is unstable, so ties would make the default backend arbitrary.
   case NCCL_GIN_TYPE_ANVIL_SDMA:
     return 0;
+  case NCCL_GIN_TYPE_ROCSHMEM_GDA:
+    return 1;
 #endif
   case NCCL_GIN_TYPE_PROXY:
-    return 1;
+    return 2;
   case NCCL_GIN_TYPE_EFA_GDA:
   case NCCL_GIN_TYPE_GPI:
-    return 2;
+    return 3;
   default:
     return INT_MAX;
   }
@@ -441,13 +482,26 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   int initialNumActiveBackends = ginState->numActiveBackends;
   int currentNumActiveBackends = 0;
+  // Finalized backends are kept for ncclGinFinalize alone: leave them in place
+  // and do not re-arm supported, which would let a new shared split reconnect.
+  if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array
+  // Close ALL non-global backends and compact the array. Anvil SDMA addresses
+  // peers by local device id, so it is dropped when more than one physical host
+  // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    if (!(BIT(backend->ginType) & globalBitMask)) {
-      WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+    const bool anvilMultiHost =
+        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+    if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
+      if (anvilMultiHost) {
+        INFO(NCCL_INIT | NCCL_NET,
+             "GIN backend ANVIL_SDMA is single-host only; removing it from active backends (nHosts=%d)",
+             comm->topo->nHosts);
+      } else {
+        WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+      }
       NCCLCHECK(ncclGinPluginFinalize(comm, backend->pluginIndex, backend->ginInstance));
     } else {
       ginState->backends[currentNumActiveBackends++] = *backend;

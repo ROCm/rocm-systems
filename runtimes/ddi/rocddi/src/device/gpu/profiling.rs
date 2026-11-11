@@ -8,6 +8,9 @@
 
 use crate::Error;
 use crate::device::gpu::GpuDevice;
+use crate::driver::{self, Driver, PcSamplingResource};
+use crate::memory::storage::{Owned, Shared};
+use std::num::NonZeroU32;
 
 /// Correlated device and system clocks returned by the native driver.
 #[doc(hidden)]
@@ -25,11 +28,206 @@ pub struct ClockCounters {
     pub gpu_frequency: u64,
 }
 
+/// Scalar progress reported by an SPM destination update, including on error.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SpmDestinationReport {
+    /// Timeout value returned by KFD.
+    pub timeout: u32,
+    /// Bytes copied before this result was returned.
+    pub bytes_copied: u32,
+    /// Whether KFD observed dropped samples.
+    pub data_loss: bool,
+}
+
+/// Native failure together with any scalar progress returned by KFD.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SpmDestinationFailure {
+    /// Native or process-state failure.
+    pub error: Error,
+    /// Output values available even though the update failed.
+    pub report: SpmDestinationReport,
+}
+
+/// KFD PC sampling mechanism available on an activated GPU.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingMethod {
+    /// Wave trap handler records program counters.
+    HostTrap,
+    /// Hardware periodically snapshots program counters.
+    Stochastic,
+}
+
+/// Unit used for a PC sampling interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingIntervalUnit {
+    /// Wall-clock microseconds.
+    Microseconds,
+    /// GPU clock cycles.
+    ClockCycles,
+    /// Issued instructions.
+    Instructions,
+}
+
+/// Native PC sampling capability reported for one method and interval unit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PcSamplingConfiguration {
+    /// Sampling mechanism.
+    pub method: PcSamplingMethod,
+    /// Unit in which the interval bounds are expressed.
+    pub unit: PcSamplingIntervalUnit,
+    /// Smallest interval accepted by the driver.
+    pub minimum_interval: u64,
+    /// Largest interval accepted by the driver.
+    pub maximum_interval: u64,
+    /// Native restrictions, including the power-of-two interval flag.
+    pub flags: u64,
+}
+
+/// Selects immutable driver support or configurations available right now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingConfigurationSet {
+    /// All configurations supported by the driver and device.
+    Supported,
+    /// Configurations allowed alongside existing native registrations.
+    Available,
+}
+
+/// A requested native PC sampling method and interval.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PcSamplingRequest {
+    /// Sampling mechanism.
+    pub method: PcSamplingMethod,
+    /// Unit in which `interval` is expressed.
+    pub unit: PcSamplingIntervalUnit,
+    /// Nonzero sampling interval.
+    pub interval: u64,
+}
+
+/// Retains the exact driver instance alongside a native PC sampling owner.
+pub(crate) struct DriverPcSampling<D: Driver, P: PcSamplingResource> {
+    /// Native registration dropped before its creating driver.
+    inner: Owned<P>,
+    /// Exact driver instance retained through cleanup.
+    _driver: Shared<D>,
+}
+
+impl<D: Driver, P: PcSamplingResource> DriverPcSampling<D, P> {
+    pub(crate) fn new(driver: Shared<D>, inner: Owned<P>) -> Self {
+        Self {
+            inner,
+            _driver: driver,
+        }
+    }
+
+    pub(crate) fn start(&mut self) -> Result<(), Error> {
+        self.inner.start()
+    }
+
+    pub(crate) fn stop(&mut self) -> Result<(), Error> {
+        self.inner.stop()
+    }
+
+    pub(crate) fn destroy(&mut self) -> Result<(), Error> {
+        self.inner.destroy()
+    }
+
+    pub(crate) fn relinquish_adopted(&mut self) -> Result<(), Error> {
+        self.inner.relinquish_adopted()
+    }
+}
+
+/// Owned PC sampling registration with explicit, retryable native teardown.
+pub struct PcSampling {
+    /// Concrete registration and retryable native cleanup state.
+    pub(crate) inner: driver::PcSamplingState,
+}
+
+impl PcSampling {
+    /// Starts sampling after the caller has installed the required trap and
+    /// sample buffer resources for this method.
+    ///
+    /// # Errors
+    /// Reports native setup failure or device loss. An ambiguous result keeps
+    /// this owner and its native context alive for explicit recovery.
+    pub fn start(&mut self) -> Result<(), Error> {
+        self.inner.start()
+    }
+
+    /// Stops a started sampling registration.
+    ///
+    /// # Errors
+    /// Reports a native stop failure while retaining the registration.
+    pub fn stop(&mut self) -> Result<(), Error> {
+        self.inner.stop()
+    }
+
+    /// Unregisters the native session. A failed operation retains its owner
+    /// for a later retry or process teardown.
+    ///
+    /// # Errors
+    /// Reports native stop or destroy failure.
+    pub fn destroy(&mut self) -> Result<(), Error> {
+        self.inner.destroy()
+    }
+
+    /// Gives an unstarted adopted trace back to its original owner when an
+    /// adapter cannot complete setup after adoption.
+    #[doc(hidden)]
+    pub fn relinquish_adopted(&mut self) -> Result<(), Error> {
+        self.inner.relinquish_adopted()
+    }
+}
+
 impl GpuDevice<'_> {
     /// Returns one driver-correlated device, host, and system clock sample.
     #[doc(hidden)]
     pub fn clock_counters(&self) -> Result<ClockCounters, Error> {
         self.driver.clock_counters()
+    }
+
+    /// Queries PC sampling configurations supported by the GPU driver or
+    /// currently available alongside native registrations. An empty result
+    /// means the driver offered no usable method in the selected set.
+    ///
+    /// # Errors
+    /// Returns `Unsupported` on an older KFD, or the native query failure.
+    #[doc(hidden)]
+    pub fn pc_sampling_configurations(
+        &self,
+        set: PcSamplingConfigurationSet,
+    ) -> Result<Vec<PcSamplingConfiguration>, Error> {
+        self.driver.pc_sampling_configurations(set)
+    }
+
+    /// Registers a native PC sampler. The caller must install and retain the
+    /// matching trap handler and GPU-visible sample buffers before `start`.
+    ///
+    /// # Errors
+    /// Rejects an invalid interval or unavailable method and reports native
+    /// registration failure.
+    #[doc(hidden)]
+    pub fn create_pc_sampling(&self, request: PcSamplingRequest) -> Result<PcSampling, Error> {
+        Ok(PcSampling {
+            inner: self.driver.create_pc_sampling(request, None)?,
+        })
+    }
+
+    /// Takes ownership of an existing stopped native registration on this
+    /// device. The creator retains ownership if this call returns an error.
+    ///
+    /// # Errors
+    /// Rejects an unavailable method or interval, or a lost device context.
+    #[doc(hidden)]
+    pub fn adopt_pc_sampling(
+        &self,
+        request: PcSamplingRequest,
+        trace_id: NonZeroU32,
+    ) -> Result<PcSampling, Error> {
+        Ok(PcSampling {
+            inner: self.driver.create_pc_sampling(request, Some(trace_id))?,
+        })
     }
 
     /// Replaces this device's process-level second-stage trap handler.
@@ -86,16 +284,11 @@ impl GpuDevice<'_> {
     pub unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error> {
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
-        unsafe {
-            self.driver
-                .spm_set_destination(size, timeout, bytes_copied, destination, data_loss)
-        }
+        unsafe { self.driver.spm_set_destination(size, timeout, destination) }
     }
 }

@@ -222,15 +222,17 @@ control the behavior of rocSHMEM.
       -
 
     * - | ``ROCSHMEM_SDMA_ENABLED``
-        | Enable or disable the SDMA transport at runtime (requires ``USE_SDMA`` build option).
-      - ``1``
-      - | ``0``: Disabled. All transfers use GPU load/store (IPC path).
+        | Enable or disable the SDMA transport at runtime. (build option ``USE_SDMA=OFF`` disables this feature).
+      - ``0``
+      - | ``0``: Disabled. All transfers use load/store (IPC path).
         | ``1``: Enabled. Transfers at or above ``ROCSHMEM_SDMA_THRESHOLD`` use the SDMA engine.
 
     * - | ``ROCSHMEM_SDMA_THRESHOLD``
-        | Minimum transfer size in bytes to route through the SDMA engine.
-        | Transfers smaller than this threshold use GPU load/store instead.
-      - ``256``
+        | Minimum transfer size in bytes to route through the SDMA engine for
+        | per-lane operations. Wave and workgroup operations automatically scale
+        | the threshold by the wavefront size (e.g., 1024 × 64 = 64KB on gfx9).
+        | Transfers smaller than the effective threshold use load/store (IPC path) instead.
+      - ``1024``
       - Size in bytes.
 
     * - | ``ROCSHMEM_SDMA_NUM_CHANNELS``
@@ -255,3 +257,36 @@ control the behavior of rocSHMEM.
       - ``0``
       - | ``0``: Apply wf_id spreading only for the default (shared) context.
         | ``1``: Apply wf_id spreading for all contexts.
+
+    * - | ``ROCSHMEM_TDM_TILE_BYTES``
+        | TDM (Tensor Data Mover) tile size in bytes for LDS-staged work-group
+        | or wave put/get on gfx1250 (requires ``USE_TDM`` build option).
+        | Doubled internally for double buffering; see
+        | ``rocshmem_query_tdm_lds_bytes()``. Wave put/get splits the
+        | registered LDS buffer evenly across the block's waves, so each
+        | wave's effective tile is smaller than this value.
+      - ``131072``
+      - | ``0``: auto-size the tile to use all LDS available per block on
+        | this device.
+        | Nonzero (default ``131072``): use this tile size explicitly. Must
+        | be a multiple of 8 bytes (the TDM element size); non-multiples are
+        | rounded down with a warning. If the requested size (doubled)
+        | doesn't fit in this device's shared memory per block, falls back
+        | to the auto-sized value instead.
+
+    * - | ``ROCSHMEM_TDM_PUT_THRESHOLD``
+        | Minimum transfer size in bytes to route a put through TDM for
+        | work-group or wave put on gfx1250 (requires ``USE_TDM`` build
+        | option). Transfers smaller than this use the normal (non-TDM)
+        | copy path instead, since TDM's issue latency isn't amortized for
+        | small transfers.
+      - ``16384``
+      - Size in bytes.
+
+    * - | ``ROCSHMEM_TDM_GET_THRESHOLD``
+        | Minimum transfer size in bytes to route a get through TDM for
+        | work-group or wave get on gfx1250 (requires ``USE_TDM`` build
+        | option). Gets are latency-bound on the remote read, so TDM pays
+        | off at a much smaller size than put.
+      - ``1024``
+      - Size in bytes.

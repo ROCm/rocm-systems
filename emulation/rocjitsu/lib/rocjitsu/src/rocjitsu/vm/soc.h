@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
@@ -21,6 +22,9 @@
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
+
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <atomic>
 #include <cassert>
@@ -73,10 +77,24 @@ public:
   /// the same path from its destructor.
   void release_vm_resources();
 
+  /// Move the GPU component tree into a VM wrapper, retaining its traversal root.
+  void move_components_to(simdojo::CompositeComponent &owner) {
+    owner.adopt_children(*this);
+    component_root_ = &owner;
+  }
+
+  /// Return this GPU's component tree, including components outside the XCD hierarchy.
+  const simdojo::CompositeComponent &component_root() const { return *component_root_; }
+
   uint32_t gpu_id() const { return gpu_id_; }
 
-  void add_xcd(amdgpu::Xcd *xcd);
-  void add_iod(amdgpu::Iod *iod);
+  /// @brief Attach an XCD during topology construction, before its CUs can execute.
+  /// @details A null pointer returns failure without changes. Failure diagnostics
+  /// are discarded when the emitter is omitted.
+  util::Result add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error = {});
+  /// @brief Add an IOD, or return failure without changes for a null pointer.
+  /// @details Failure diagnostics are discarded when the emitter is omitted.
+  util::Result add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
@@ -92,7 +110,10 @@ public:
 
   /// @brief Wire L2 → HBM backing store links (call after engine build).
   void wire_backing(simdojo::Topology &topo);
-  void set_arch(rj_code_arch_t arch);
+  /// @brief Set the architecture, or return failure while copy queues exist.
+  /// @details Rejection preserves both the architecture and the SDMA dialect.
+  /// Failure diagnostics are discarded when the emitter is omitted.
+  util::Result set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {});
   rj_code_arch_t arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
@@ -238,6 +259,12 @@ public:
   amdgpu::MesEngine &mes_engine() { return mes_engine_; }
   const amdgpu::MesEngine &mes_engine() const { return mes_engine_; }
 
+  /// @brief Return the device-global GWS store shared by every CU of every XCD.
+  /// @details GWS resources are device-global (one small register set per GPU),
+  /// and under XCD fan-out a single dispatch scatters its workgroups across XCDs,
+  /// so the whole SoC shares one store rather than one per XCD (see GwsDevice).
+  const std::shared_ptr<amdgpu::GwsDevice> &gws_device() const { return gws_device_; }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -263,12 +290,15 @@ private:
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();
+  /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
+  void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
 
+  const simdojo::CompositeComponent *component_root_ = this;
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
@@ -276,6 +306,8 @@ private:
   std::shared_ptr<amdgpu::DeviceCacheCoherence> cache_coherence_ =
       std::make_shared<amdgpu::DeviceCacheCoherence>();
   amdgpu::GpuVm gpu_vm_;
+  /// Device-global GWS store shared by every CU of every XCD (see gws_device()).
+  std::shared_ptr<amdgpu::GwsDevice> gws_device_ = std::make_shared<amdgpu::GwsDevice>();
   std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
   amdgpu::AddressSpaceHandle internal_address_space_;
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;

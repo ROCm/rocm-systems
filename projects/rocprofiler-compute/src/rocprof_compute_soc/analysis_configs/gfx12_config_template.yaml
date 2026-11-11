@@ -55,6 +55,9 @@ panels:
   - type: metric_table
     id: 8
     title: EA to HBM
+  - type: metric_table
+    id: 9
+    title: Workgroup Processors (WGPs)
 - file: roofline.yaml
   panel_id: 4
   panel_title: Roofline

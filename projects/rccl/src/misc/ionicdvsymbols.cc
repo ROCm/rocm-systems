@@ -53,6 +53,10 @@ ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
   LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_qp_set_gda", ionicdvSymbols->ionicdv_internal_qp_set_gda, IONIC_VERSION);
   LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_qp_set_puec_plane_route",
                    ionicdvSymbols->ionicdv_internal_qp_set_puec_plane_route, IONIC_VERSION);
+  LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_ctx_get_udma_count",
+                   ionicdvSymbols->ionicdv_internal_ctx_get_udma_count, IONIC_VERSION);
+  LOAD_SYM_VERSION(ionicdvhandle, "ionic_dv_qp_get_udma_idx",
+                   ionicdvSymbols->ionicdv_internal_qp_get_udma_idx, IONIC_VERSION);
   INFO(NCCL_INIT, "Loaded dlvsym from libionic.so[.1]");
 
   return ncclSuccess;
@@ -61,6 +65,8 @@ teardown:
   ionicdvSymbols->ionicdv_internal_qp_set_gda = NULL;
   ionicdvSymbols->ionicdv_internal_pd_set_udma_mask = NULL;
   ionicdvSymbols->ionicdv_internal_qp_set_puec_plane_route = NULL;
+  ionicdvSymbols->ionicdv_internal_ctx_get_udma_count = NULL;
+  ionicdvSymbols->ionicdv_internal_qp_get_udma_idx = NULL;
 
   if (ionicdvhandle != NULL) dlclose(ionicdvhandle);
   return ncclSystemError;

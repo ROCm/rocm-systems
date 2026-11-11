@@ -121,7 +121,6 @@ Panel Config:
           unit: WGPs per Cycle
           peak: $cu_per_gpu
           pct_of_peak: true
-          coll_level: SQG_LEVEL_WGP_ACTIVE
         IPC:
           value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
           unit: Instructions per Cycle
@@ -221,7 +220,6 @@ Panel Config:
           unit: Cycles
           peak: None
           pct_of_peak: false
-          coll_level: SQ_IFETCH_LEVEL
 
   metrics_description:
     VALU FLOPs (FP16): >-

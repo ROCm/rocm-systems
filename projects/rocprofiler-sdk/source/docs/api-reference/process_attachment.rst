@@ -162,7 +162,9 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
 - **rocattach_attach_tree(int pid)**: Attaches to a process and all of its descendants.
    - Enumerates the full process tree rooted at ``pid`` via ``/proc`` before attaching.
    - Attachment proceeds in breadth-first order from the root.
-   - If attachment to an individual child process fails, the error is logged and attachment continues with the remaining processes; the return status reflects the last error seen.
+   - If attachment to an individual process fails, the error is logged and attachment continues with the remaining processes.
+   - Returns ``ROCATTACH_STATUS_SUCCESS`` if at least one process in the tree attached, even if the root did not. The attached processes are recorded for ``rocattach_detach_tree``.
+   - Returns the status of the last failure if no process attached. Nothing is recorded in that case.
    - The process tree is snapshotted at the time of the call; processes spawned after this point are not included.
 
 - **rocattach_attach(int pid)**: Attaches to a single process only.
@@ -171,10 +173,10 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines attach and detach func
    - When profiling applications that spawn child processes, use ``rocattach_attach_tree`` instead.
 
 - **rocattach_detach_tree(int pid)**: Detaches from a process and all of its descendants.
-   - Enumerates the process tree rooted at ``pid`` via ``/proc`` at the time of the call.
-   - Only processes with an active attachment session are detached; others are silently skipped.
+   - Detaches exactly the processes recorded by the ``rocattach_attach_tree`` call for the same ``pid``; ``/proc`` is not re-enumerated.
+   - Returns ``ROCATTACH_STATUS_ERROR_INVALID_ARGUMENT`` if no tree attachment is recorded for ``pid``.
    - Symmetric counterpart to ``rocattach_attach_tree``; use these two together.
-   - Reentrant: the sessions lock is acquired and released per-process and isn't held across the ``/proc`` traversal, so concurrent calls from multiple threads are safe.
+   - Reentrant: the sessions lock is held only while the recorded list is taken and during each per-process detach, so concurrent calls from multiple threads are safe.
 
 - **rocattach_detach(int pid)**: Detaches from a single process.
    - Takes the target process ID as a parameter.

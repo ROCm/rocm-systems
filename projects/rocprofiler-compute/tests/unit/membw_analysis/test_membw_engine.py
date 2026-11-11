@@ -10,9 +10,15 @@ guidance collection, and debug output.
 
 import logging
 
+import pandas as pd
 import pytest
 
-from membw_analysis.engine import evaluate_membw_tree
+from membw_analysis import engine
+from membw_analysis.engine import (
+    evaluate_membw_dfs,
+    evaluate_membw_tree,
+    load_membw_spec,
+)
 from membw_analysis.models import NodeSpec, TreeSpec
 
 
@@ -51,6 +57,41 @@ def make_node(
         requires_siblings_false=tuple(requires_siblings_false),
         children=tuple(children),
     )
+
+
+def test_load_membw_spec_for_supported_architecture() -> None:
+    spec = load_membw_spec("gfx950")
+    assert spec is not None
+    assert spec.roots
+
+
+def test_load_membw_spec_warns_for_missing_architecture(monkeypatch) -> None:
+    warnings = []
+    monkeypatch.setattr(engine, "console_warning", lambda *args: warnings.append(args))
+
+    assert load_membw_spec("gfx900") is None
+    assert warnings == [("membw", "No tree spec for gfx900, skipping")]
+
+
+def test_evaluate_membw_dfs_extracts_and_logs(monkeypatch) -> None:
+    spec = make_tree_spec([
+        make_node("root", metric="m", op="gte", threshold_key="stall_pct_high")
+    ])
+    summaries = []
+    monkeypatch.setattr(engine, "log_evaluation_summary", summaries.append)
+    dfs = {
+        1701: pd.DataFrame({"Metric": ["m"], "Avg": [0.0]}),
+        3001: pd.DataFrame({"Metric": ["m"], "Avg": [12.0], "Unit": ["Percent"]}),
+    }
+
+    result = evaluate_membw_dfs(dfs, spec, "gfx950")
+
+    assert result is not None
+    assert result.nodes[0].state == "active"
+    assert result.nodes[0].supporting[0].value == 12.0
+    assert summaries == [result]
+    assert evaluate_membw_dfs({1701: dfs[1701]}, spec, "gfx950") is None
+    assert summaries == [result]
 
 
 class TestOperatorEvaluation:

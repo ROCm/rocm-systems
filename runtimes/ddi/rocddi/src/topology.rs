@@ -1,23 +1,36 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Passive hardware discovery records and topology relationships.
+//! Passive hardware facts and source-qualified topology relationships.
 //!
-//! An endpoint describes hardware discovered in one generation-consistent
-//! topology snapshot. It is inert: inspecting or cloning an endpoint does not
-//! activate hardware, acquire an address space, or grant access to memory. An
-//! activated endpoint is represented separately by `crate::device::Device`.
+//! The records defined here describe hardware independently of a topology
+//! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
+//! information can be used without a node ID. `graph` binds those facts to
+//! source-qualified nodes and reported relationships in one snapshot. Its
+//! public types are re-exported here so callers have one topology interface.
 //!
-//! Endpoint-kind variants carry only the capabilities meaningful to that kind.
-//! A backend publishes a variant only when it can populate and activate that
-//! endpoint faithfully; an activated device remains a separate session-owned
-//! state object.
+//! An endpoint is a passive discovery record. Optional facts from other
+//! sources may be populated later. Inspecting or cloning one does not activate
+//! hardware, acquire an address space, or grant memory access; an activated
+//! endpoint is a separate session-owned `crate::device::Device`. Endpoint-kind
+//! variants contain only capabilities meaningful to that kind.
 
 use crate::driver;
-use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
+use std::ops::{BitOr, BitOrAssign};
 
+mod gpu;
+mod graph;
+pub mod host;
 pub mod platform;
+pub use gpu::{
+    GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile,
+};
+pub use graph::{
+    AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
+    MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
+    TopologyCache, TopologyGraphSnapshot, TopologyNode, TopologySource,
+};
 
 /// Exact PCI function and configuration identity reported by the OS.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -42,289 +55,137 @@ pub struct PciInfo {
     pub revision_id: u32,
 }
 
-/// Immutable native cache metadata associated with one endpoint.
+/// Data and instruction classification reported by a topology source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheKind {
+    /// Data cache.
+    Data,
+    /// Instruction cache.
+    Instruction,
+    /// Cache holding both data and instructions.
+    Unified,
+    /// Another or unknown cache type.
+    Other,
+}
+
+/// Processor classes positively associated with a cache by its source.
+///
+/// These flags can be combined. An absent flag means the source did not report
+/// that association; it does not prove the processor cannot use the cache.
+/// Source-qualified nodes identify the particular cache and endpoint, while
+/// these flags only classify the reported processor kinds.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CacheAssociations(u32);
+
+impl CacheAssociations {
+    /// No processor association was reported.
+    pub const NONE: Self = Self(0);
+    /// The source associates this cache with CPUs.
+    pub const CPU: Self = Self(1 << 0);
+    /// The source associates this cache with GPU compute units.
+    pub const GPU_COMPUTE_UNIT: Self = Self(1 << 1);
+
+    /// Returns whether every association in `required` was reported.
+    #[must_use]
+    pub const fn contains(self, required: Self) -> bool {
+        self.0 & required.0 == required.0
+    }
+}
+
+impl BitOr for CacheAssociations {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for CacheAssociations {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+/// Passive cache information shared by host and endpoint topology.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
-    pub(crate) level: u32,
-    pub(crate) size_bytes: u64,
-    pub(crate) line_size_bytes: u32,
-    pub(crate) kind: u32,
+    /// Hierarchy level reported by the topology source.
+    pub level: u32,
+    /// Cache capacity in bytes.
+    pub size_bytes: u64,
+    /// Cache-line size in bytes, when the topology source reports one.
+    pub line_size_bytes: Option<u32>,
+    /// Data and instruction classification of this cache.
+    pub kind: CacheKind,
+    /// Processor classes positively associated with this cache by its source.
+    pub associations: CacheAssociations,
 }
 
 impl CacheInfo {
-    /// Returns the native cache level.
+    /// Creates cache information without a reported processor association.
     #[must_use]
-    pub const fn level(&self) -> u32 {
-        self.level
-    }
-
-    /// Returns the cache capacity in bytes.
-    #[must_use]
-    pub const fn size_bytes(&self) -> u64 {
-        self.size_bytes
-    }
-
-    /// Returns the native cache-line size in bytes.
-    #[must_use]
-    pub const fn line_size_bytes(&self) -> u32 {
-        self.line_size_bytes
+    pub const fn new(
+        level: u32,
+        size_bytes: u64,
+        line_size_bytes: Option<u32>,
+        kind: CacheKind,
+    ) -> Self {
+        Self {
+            level,
+            size_bytes,
+            line_size_bytes,
+            kind,
+            associations: CacheAssociations::NONE,
+        }
     }
 }
 
 /// Physical or logical interconnect kind reported by topology discovery.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryLinkType {
+    /// `HyperTransport` link.
     HyperTransport,
+    /// `QuickPath` Interconnect link.
     Qpi,
+    /// PCI Express link.
     Pcie,
+    /// InfiniBand link.
     Infiniband,
+    /// AMD XGMI link.
     Xgmi,
+    /// Link type not recognized by this runtime.
     Unknown,
 }
 
-/// Immutable properties of one directed native topology link.
-#[doc(hidden)]
+/// Passive properties of one directed native topology link.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
-    pub(crate) minimum_latency: u32,
-    pub(crate) maximum_latency: u32,
-    pub(crate) minimum_bandwidth: u32,
-    pub(crate) maximum_bandwidth: u32,
-    pub(crate) atomic_support_32bit: bool,
-    pub(crate) atomic_support_64bit: bool,
-    pub(crate) coherent_support: bool,
-    pub(crate) kind: MemoryLinkType,
-    pub(crate) numa_distance: u32,
+    /// Native minimum latency value for this direction.
+    pub minimum_latency: u32,
+    /// Native maximum latency value for this direction.
+    pub maximum_latency: u32,
+    /// Native minimum bandwidth value for this direction.
+    pub minimum_bandwidth: u32,
+    /// Native maximum bandwidth value for this direction.
+    pub maximum_bandwidth: u32,
+    /// Whether 32-bit atomics may cross this link.
+    pub atomic_support_32bit: bool,
+    /// Whether 64-bit atomics may cross this link.
+    pub atomic_support_64bit: bool,
+    /// Whether the link preserves coherent memory access.
+    pub coherent_support: bool,
+    /// Native interconnect classification.
+    pub kind: MemoryLinkType,
+    /// Native NUMA weight used for relative distance queries.
+    pub numa_distance: u32,
 }
 
 impl MemoryLinkInfo {
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_latency(self) -> u32 {
-        self.minimum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_latency(self) -> u32 {
-        self.maximum_latency
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn minimum_bandwidth(self) -> u32 {
-        self.minimum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn maximum_bandwidth(self) -> u32 {
-        self.maximum_bandwidth
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_32bit_atomics(self) -> bool {
-        self.atomic_support_32bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn supports_64bit_atomics(self) -> bool {
-        self.atomic_support_64bit
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn is_coherent(self) -> bool {
-        self.coherent_support
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn kind(self) -> MemoryLinkType {
-        self.kind
-    }
-
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn numa_distance(self) -> u32 {
-        self.numa_distance
-    }
-
-    #[doc(hidden)]
+    /// Number of native hops implied by the reported distance weight.
     #[must_use]
     pub const fn hop_count(self) -> u32 {
         if self.numa_distance == 0 { 0 } else { 1 }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TopologyKey {
-    pub(crate) group: u32,
-    pub(crate) member: u32,
-}
-
-/// Driver-local directed link. Host classification is explicit rather than
-/// inferred from an operating-system node or GPU identifier.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MemoryLink {
-    pub(crate) source: TopologyKey,
-    pub(crate) target: TopologyKey,
-    pub(crate) source_is_host: bool,
-    pub(crate) target_is_host: bool,
-    pub(crate) info: MemoryLinkInfo,
-}
-
-/// Queue transports qualified for one AMD GPU endpoint.
-///
-/// Queue formats are GPU capabilities rather than properties shared by every
-/// endpoint kind. A `false` value means the current backend did not qualify the
-/// corresponding transport; it does not make claims about the hardware in a
-/// different operating-system or driver environment.
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "each independently qualified GPU queue transport is an observable capability"
-)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct GpuQueueCapabilities {
-    /// Direct AQL transport is implemented for this endpoint.
-    pub aql: bool,
-    /// System-memory release/acquire through AQL packet fence scopes is
-    /// qualified for this endpoint and host architecture.
-    pub aql_system_cache_control: bool,
-    /// Direct native PM4 transport is implemented for this endpoint.
-    pub pm4: bool,
-    /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
-    pub kernel_pm4: bool,
-    /// System-memory release/acquire through PM4 cache controls is qualified
-    /// for this endpoint and host architecture.
-    pub pm4_system_cache_control: bool,
-    /// Direct monotonic-64-bit SDMA transport is implemented.
-    pub sdma: bool,
-    /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
-    pub kernel_sdma: bool,
-    /// System-memory release/acquire through the selected SDMA protocol is
-    /// qualified for this endpoint and host architecture.
-    pub sdma_system_cache_control: bool,
-    /// General-purpose SDMA engines; a count does not imply independence.
-    pub sdma_engine_count: u32,
-}
-
-/// GPU target and enabled compute geometry captured without activation.
-/// Required geometry fields must be complete and consistent before this record
-/// is published; opening an endpoint never substitutes guessed dimensions.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct GpuInfo {
-    /// Exact GFX major version.
-    pub gfx_major: u32,
-    /// Exact GFX minor version.
-    pub gfx_minor: u32,
-    /// Exact GFX stepping.
-    pub gfx_stepping: u32,
-    /// Globally unique immutable GPU identifier when reported by the backend.
-    pub unique_id: Option<u64>,
-    /// AMD GPU hive identifier, or zero when the endpoint has no hive.
-    pub hive_id: u64,
-    /// ASIC family identifier reported by the backend.
-    pub asic_family_id: u32,
-    /// Target ASIC revision, not PCI configuration revision.
-    pub asic_revision: u32,
-    /// Maximum compute-engine clock in megahertz.
-    pub maximum_engine_clock_mhz: u32,
-    /// VRAM interface width in bits reported by the native memory bank.
-    pub memory_bus_width_bits: u32,
-    /// Maximum VRAM clock in megahertz reported by the native memory bank.
-    pub maximum_memory_clock_mhz: u32,
-    /// Hardware wavefront lanes.
-    pub wavefront_size: u32,
-    /// Active compute units after harvesting.
-    pub compute_unit_count: u32,
-    /// SIMD units composing one compute unit.
-    pub simd_count_per_compute_unit: u32,
-    /// Maximum resident waves per compute unit.
-    pub maximum_wave_count_per_compute_unit: u32,
-    /// Maximum number of address watchpoints reported by the backend.
-    pub maximum_address_watch_point_count: u32,
-    /// Hardware context-save scratch-wave bound per compute unit.
-    pub maximum_scratch_wave_count_per_compute_unit: u32,
-    /// LDS bytes per compute unit.
-    pub local_data_share_byte_length: u64,
-    /// Active XCC count.
-    pub xcc_count: u32,
-    /// Uniform shader engines per XCC.
-    pub shader_engine_count_per_xcc: u32,
-    /// SIMD arrays composing one shader engine.
-    pub shader_array_count_per_engine: u32,
-    /// SDMA engines dedicated to XGMI transfers.
-    pub sdma_xgmi_engine_count: u32,
-    /// Global wave synchronization resources.
-    pub gws_count: u32,
-    /// The node exposes an IOMMU v2 translation agent.
-    pub iommu_v2_supported: bool,
-    /// Device-local memory can be coherently accessed by the host.
-    pub coherent_host_access: bool,
-    /// Packet processor firmware revision reported by the backend.
-    pub packet_processor_firmware_version: u32,
-    /// SDMA firmware revision reported by the backend.
-    pub sdma_firmware_version: u32,
-    /// Maximum persisting L2 cache reservation in bytes reported by topology.
-    /// Zero means the native driver did not report support.
-    pub persisting_l2_cache_size_max: u32,
-    /// GPU queue transports qualified by the current backend.
-    pub queues: GpuQueueCapabilities,
-}
-
-impl GpuInfo {
-    pub(crate) const fn scratch_bytes_per_xcc(gfx_major: u32) -> u64 {
-        if gfx_major >= 12 {
-            8_u64 << 30
-        } else {
-            4_u64 << 30
-        }
-    }
-
-    /// Maximum per-device scratch aperture implied by the GPU generation and
-    /// active XCC count. This is an address-space bound, not a reservation.
-    #[must_use]
-    pub const fn maximum_scratch_aperture_bytes(&self) -> u64 {
-        (self.xcc_count as u64).saturating_mul(Self::scratch_bytes_per_xcc(self.gfx_major))
-    }
-}
-
-/// Additional endpoint information queried through its owning driver.
-///
-/// The passive [`Endpoint`] keeps identity and discovered capabilities. This
-/// record may include optional information from other native sources without
-/// activating a device.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct EndpointDetails {
-    /// Optional product name for display to applications.
-    pub product_name: Option<String>,
-    /// Kind-specific information beyond the passive endpoint record.
-    pub kind: EndpointDetailsKind,
-}
-
-/// Kind-specific information obtained without activating an endpoint.
-///
-/// The endpoint itself records its engine kind. `Other` means its driver has
-/// no additional kind-specific information to report.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum EndpointDetailsKind {
-    /// Additional GPU information supplied by a qualified driver source.
-    #[non_exhaustive]
-    Gpu {
-        /// ASIC family from an additional source, if reported. The passive
-        /// GPU record supplies the fallback.
-        asic_family_id: Option<u32>,
-        /// GPU timestamp frequency in hertz, if reported.
-        counter_frequency_hz: Option<u64>,
-    },
-    /// No additional kind-specific information is available.
-    Other,
 }
 
 /// Kind-specific capabilities attached to one passive endpoint.
@@ -349,7 +210,8 @@ pub enum EndpointKind {
 }
 
 /// Passive description tied to one native endpoint identity. Its kind and
-/// memory fields describe expected implemented services. Activation separately
+/// memory fields describe expected implemented services. Optional information
+/// may be populated later from other native sources. Activation separately
 /// qualifies the installed native interface and obtains usable address-space
 /// resources. Cloning this record neither activates a device nor grants access
 /// to backing.
@@ -359,6 +221,8 @@ pub struct Endpoint {
     pub id: [u8; 16],
     /// UTF-8 diagnostic name with NUL termination.
     pub name: [u8; 128],
+    /// Optional product name for display, populated from an additional source.
+    pub product_name: Option<String>,
     /// Optional PCI attachment and configuration identity. Endpoints connected
     /// through another bus or fabric report `None`.
     pub pci: Option<PciInfo>,
@@ -382,18 +246,23 @@ pub struct Endpoint {
     /// Supported device permission bits. Every allocation requires READ and may
     /// independently request the supported WRITE and EXECUTE bits.
     pub supported_permissions: DeviceAccess,
-    pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
-    pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
-    pub(crate) topology_key: TopologyKey,
-    pub(crate) driver_instance: u64,
+    pub(crate) driver_instance: driver::DriverInstanceId,
     pub(crate) selector: driver::EndpointSelector,
 }
 
 impl Endpoint {
-    /// Returns this endpoint's kind-specific capability record.
-    #[must_use]
-    pub const fn kind(&self) -> &EndpointKind {
-        &self.kind
+    /// Compares all discovered facts while excluding optional information
+    /// populated later from other native sources.
+    pub(crate) fn matches_discovery(&self, other: &Self) -> bool {
+        let mut expected = self.clone();
+        expected.product_name.clone_from(&other.product_name);
+        if let (EndpointKind::Gpu { info: expected }, EndpointKind::Gpu { info: actual }) =
+            (&mut expected.kind, &other.kind)
+        {
+            expected.drm_asic_family_id = actual.drm_asic_family_id;
+            expected.counter_frequency_hz = actual.counter_frequency_hz;
+        }
+        expected == *other
     }
 
     /// Returns GPU-specific information when this is a GPU endpoint.
@@ -402,82 +271,6 @@ impl Endpoint {
         match &self.kind {
             EndpointKind::Gpu { info } => Some(info),
             EndpointKind::Cpu | EndpointKind::Npu | EndpointKind::Other => None,
-        }
-    }
-
-    /// Returns the native cache records associated with this endpoint.
-    #[must_use]
-    pub fn caches(&self) -> &[CacheInfo] {
-        self.caches.as_ref().map_or(&[], |caches| caches.as_slice())
-    }
-
-    /// Returns the directed native link from this endpoint to another endpoint.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to(&self, owner: &Self) -> Option<MemoryLinkInfo> {
-        if self.driver_instance != owner.driver_instance {
-            return None;
-        }
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key
-                    && link.target == owner.topology_key
-                    && !link.source_is_host
-                    && !link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from this endpoint to host memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_to_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source == self.topology_key && !link.source_is_host && link.target_is_host)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns the directed native link from the host to this endpoint's memory.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn memory_link_from_host(&self) -> Option<MemoryLinkInfo> {
-        self.memory_links.as_ref().and_then(|links| {
-            links.iter().rev().find_map(|link| {
-                (link.source_is_host && !link.target_is_host && link.target == self.topology_key)
-                    .then_some(link.info)
-            })
-        })
-    }
-
-    /// Returns whether this consumer has a cached direct route to the owner's
-    /// LOCAL memory. The owner itself is always reachable. Peer routes are
-    /// accepted only from the generation-consistent topology snapshot used to
-    /// construct this endpoint record.
-    #[must_use]
-    pub fn can_access_local_memory(&self, owner: &Self) -> bool {
-        self.driver_instance == owner.driver_instance
-            && ((self.topology_key == owner.topology_key)
-                || self
-                    .memory_link_to(owner)
-                    .is_some_and(|link| link.hop_count() != 0))
-    }
-}
-
-impl EndpointDetails {
-    /// Returns a kind-matched result with no additional driver information.
-    pub(crate) fn empty_for(endpoint: &Endpoint) -> Self {
-        Self {
-            product_name: None,
-            kind: endpoint
-                .gpu()
-                .map_or(EndpointDetailsKind::Other, |_| EndpointDetailsKind::Gpu {
-                    asic_family_id: None,
-                    counter_frequency_hz: None,
-                }),
         }
     }
 }

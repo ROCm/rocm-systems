@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
@@ -28,7 +30,7 @@ void L1ScalarCache::set_l2(L2Cache *l2) {
 void L1ScalarCache::set_gpu_vm(GpuVm *gpu_vm) {
   invalidate_all_lines();
   gpu_vm_ = gpu_vm;
-  mtype_cache_ = {};
+  mtype_cache_.clear();
 }
 
 VmAccessOutcome L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
@@ -149,6 +151,13 @@ void L1ScalarCache::writeback_all(uint32_t vmid) {
 void L1ScalarCache::invalidate_all() {
   synchronize_epoch();
   invalidate_all_lines();
+}
+
+void L1ScalarCache::discard(uint64_t addr, uint32_t num_lines, uint32_t vmid) {
+  synchronize_epoch();
+  addr = CacheStore::line_address(addr);
+  for (uint32_t i = 0; i < num_lines; ++i)
+    cache_.invalidate(addr + i * CacheStore::LINE_SIZE, vmid);
 }
 
 void L1ScalarCache::invalidate_all_lines() { cache_.invalidate_all(); }

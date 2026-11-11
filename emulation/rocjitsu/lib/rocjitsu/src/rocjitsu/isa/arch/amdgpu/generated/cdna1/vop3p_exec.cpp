@@ -167,9 +167,9 @@ void VMfmaF3232x32x1f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -185,9 +185,9 @@ void VMfmaF3216x16x1f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f32_spec<16, 16, 1, 4>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -203,12 +203,12 @@ void VMfmaF324x4x1f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_f32(cu, 4, 4, 1, 16, 32, dst, src0_base, src1_base, s2, amdgpu::extract_f32,
-                   amdgpu::extract_f32, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+  amdgpu::exec_f32<4, 4, 1, 16>(cu, 32, dst, src0_base, src1_base, s2, amdgpu::extract_f32,
+                                amdgpu::extract_f32, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
 }
 
 void VMfmaF3232x32x2f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -221,9 +221,9 @@ void VMfmaF3232x32x2f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f32_spec<32, 32, 2, 1>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -239,9 +239,9 @@ void VMfmaF3216x16x4f32Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -257,9 +257,9 @@ void VMfmaF3232x32x4f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -275,9 +275,9 @@ void VMfmaF3216x16x4f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f16_spec<16, 16, 4, 4>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                inst_.cbsz, inst_.abid, inst_.blgp);
@@ -293,12 +293,12 @@ void VMfmaF324x4x4f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_f32(cu, 4, 4, 4, 16, 16, dst, src0_base, src1_base, s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+  amdgpu::exec_f32<4, 4, 4, 16>(cu, 16, dst, src0_base, src1_base, s2, amdgpu::extract_f16,
+                                amdgpu::extract_f16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
 }
 
 void VMfmaF3232x32x8f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -311,9 +311,9 @@ void VMfmaF3232x32x8f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f16_spec<32, 32, 8>(cu, dst, src0_base, src1_base, s2, const_acc,
                                             inst_.cbsz, inst_.abid, inst_.blgp);
@@ -329,9 +329,9 @@ void VMfmaF3216x16x16f16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>(cu, dst, src0_base, src1_base, s2, const_acc,
                                              inst_.cbsz, inst_.abid, inst_.blgp);
@@ -347,9 +347,9 @@ void VMfmaI3232x32x4i8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_i32_i8(cu, 32, 32, 4, 2, dst, src0_base, src1_base, s2, const_acc, inst_.cbsz,
                       inst_.abid, inst_.blgp);
@@ -365,9 +365,9 @@ void VMfmaI3216x16x4i8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_i32_i8(cu, 16, 16, 4, 4, dst, src0_base, src1_base, s2, const_acc, inst_.cbsz,
                       inst_.abid, inst_.blgp);
@@ -383,9 +383,9 @@ void VMfmaI324x4x4i8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_i32_i8(cu, 4, 4, 4, 16, dst, src0_base, src1_base, s2, const_acc, inst_.cbsz,
                       inst_.abid, inst_.blgp);
@@ -401,9 +401,9 @@ void VMfmaI3232x32x8i8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_i32_i8(cu, 32, 32, 8, 1, dst, src0_base, src1_base, s2, const_acc, inst_.cbsz,
                       inst_.abid, inst_.blgp);
@@ -419,9 +419,9 @@ void VMfmaI3216x16x16i8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_i32_i8(cu, 16, 16, 16, 1, dst, src0_base, src1_base, s2, const_acc, inst_.cbsz,
                       inst_.abid, inst_.blgp);
@@ -437,9 +437,9 @@ void VMfmaF3232x32x2bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_bf16_spec<32, 32, 2, 2>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                 inst_.cbsz, inst_.abid, inst_.blgp);
@@ -455,9 +455,9 @@ void VMfmaF3216x16x2bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_bf16_spec<16, 16, 2, 4>(cu, dst, src0_base, src1_base, s2, const_acc,
                                                 inst_.cbsz, inst_.abid, inst_.blgp);
@@ -473,12 +473,13 @@ void VMfmaF324x4x2bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
-  amdgpu::exec_f32(cu, 4, 4, 2, 16, 16, dst, src0_base, src1_base, s2, amdgpu::extract_bf16,
-                   amdgpu::extract_bf16, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+  amdgpu::exec_f32<4, 4, 2, 16>(cu, 16, dst, src0_base, src1_base, s2, amdgpu::extract_bf16,
+                                amdgpu::extract_bf16, const_acc, inst_.cbsz, inst_.abid,
+                                inst_.blgp);
 }
 
 void VMfmaF3232x32x4bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -491,9 +492,9 @@ void VMfmaF3232x32x4bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4>(cu, dst, src0_base, src1_base, s2, const_acc,
                                              inst_.cbsz, inst_.abid, inst_.blgp);
@@ -509,9 +510,9 @@ void VMfmaF3216x16x8bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t src1_base = amdgpu::apply_gpr_idx_to_mma_base(
       wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
   uint32_t const_acc;
-  uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
-                                    [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
-  if (const_acc == amdgpu::ACC_FROM_VGPR)
+  uint32_t s2 = cdna1::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
+                                   [&] { return amdgpu::RegisterAccess(wf).read_scalar(src2); });
+  if (src2.decoded_vgpr())
     s2 = amdgpu::apply_gpr_idx_to_mma_base(wf, vb, s2, amdgpu::VgprMsbRole::Src2);
   amdgpu::exec_f32_mfma_bf16_spec<16, 16, 8>(cu, dst, src0_base, src1_base, s2, const_acc,
                                              inst_.cbsz, inst_.abid, inst_.blgp);

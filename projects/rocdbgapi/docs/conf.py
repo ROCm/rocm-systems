@@ -5,12 +5,11 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
-import os
-import subprocess
+import shutil
 
 from rocm_docs import ROCmDocs
 
-os.system("cp ../include/amd-dbgapi.h.in ../include/amd-dbgapi.h")
+shutil.copyfile("../include/amd-dbgapi.h.in", "../include/amd-dbgapi.h")
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
     match = re.search(r'.*\bproject\(amd-dbgapi VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())

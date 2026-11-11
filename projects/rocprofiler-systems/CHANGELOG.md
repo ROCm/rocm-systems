@@ -4,6 +4,30 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.11.0 for ROCm 10.3 (unreleased)
+
+### Added
+
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
+
+### Resolved issues
+
+- Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
+  finalization. Regions that never received their end callback are now emitted with the
+  finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
+- Fixed `rocprof-sys-instrument` aborting with `SIGABRT` on invalid input (non-ELF text
+  file, missing target, or already-instrumented binary). Uncaught `std::runtime_error`
+  exceptions from instrumentation setup are now caught in `main`, reported as
+  `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
+  terminating.
+- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
+  validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
+  the four defaults. Whitespace around `,` and `;` separators is now accepted.
+
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
 ### Added

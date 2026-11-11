@@ -72,6 +72,12 @@ enum amd_queue_capabilities_t {
    * V2 fields.
    */
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM, 1, 1),
+
+  /*
+   * This version of CP FW consumes the completion signal handle hints of
+   * amd_signal_hint_t. CP FW sets it once it has processed a packet on the queue.
+   */
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_QUEUE_CAPS_CP_SIGNAL_HINTS, 2, 1),
 };
 
 /* This is the original amd_queue_t structure. The definition is only kept

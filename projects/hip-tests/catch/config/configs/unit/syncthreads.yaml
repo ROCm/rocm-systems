@@ -2,13 +2,15 @@
 syncthreads:
   Unit___syncthreads_Positive_Basic:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Basic:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_count_Positive_Predicate_Zero:
     <<: *level_default
@@ -30,8 +32,9 @@ syncthreads:
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Basic:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_and_Positive_Predicate_Zero:
     <<: *level_default
@@ -53,8 +56,9 @@ syncthreads:
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Basic:
     <<: *level_default
-    # Below tests are failing PSDB
-    disabled: [amd_windows, amd_wsl]
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2744 - Linux-only test: unit/CMakeLists.txt gates add_subdirectory(syncthreads) under if(UNIX), so it is never built or run on native Windows."
     tags: [block, deviceLib, synchronization]
   Unit___syncthreads_or_Positive_Predicate_Zero:
     <<: *level_default

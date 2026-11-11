@@ -389,12 +389,10 @@ validate_config_file_values(const std::string& config_file, const std::string& t
         auto key       = std::string{};
         auto raw_value = std::string{};
 
-        if(auto const equal_pos = trimmed_line.find('='); equal_pos != std::string::npos)
+        if(auto const parsed = utility::string::split_key_value(trimmed_line))
         {
-            key = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(0, equal_pos));
-            raw_value = utility::string::trim(
-                std::string_view{ trimmed_line }.substr(equal_pos + 1));
+            key       = utility::string::trim(parsed->key);
+            raw_value = utility::string::trim(parsed->value);
         }
         else
         {
@@ -1916,17 +1914,18 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 #if defined(ROCPROFSYS_BUILD_HIPFILE) && ROCPROFSYS_BUILD_HIPFILE == 1
     if(_config->get<bool>(std::string{ env_vars::USE_HIPFILE }))
     {
-        // hipFile already defaults HIPFILE_STATS_LEVEL to 1, so injecting "1" here is a
-        // no-op. Do not override an explicit 0 either: that is the user's choice to turn
-        // hipFile's stats server off. Warn, because the combination produces empty
-        // telemetry despite ROCPROFSYS_USE_HIPFILE=ON.
+        // hipFile already defaults HIPFILE_STATS_LEVEL to 1. An explicit 0 is the
+        // user's choice to turn the statistics server off; do not override it.
+        // hipFileGetStatsL3 still returns success and a zero-filled snapshot in that
+        // mode, so the collector has to be turned off or those zeros are stored.
         if(rocprofsys::get_env<int>(env_vars::HIPFILE_STATS_LEVEL, 1) == 0)
         {
             LOG_WARNING("ROCPROFSYS_USE_HIPFILE=ON but HIPFILE_STATS_LEVEL=0; hipFile's "
                         "statistics server is disabled, so no hipFile telemetry will be "
                         "recorded. Unset HIPFILE_STATS_LEVEL or set it to 1 or higher");
+            _set(env_vars::USE_HIPFILE, false);
         }
-        if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
+        else if(!_config->get<bool>(std::string{ env_vars::USE_PROCESS_SAMPLING }))
         {
             LOG_WARNING(
                 "ROCPROFSYS_USE_HIPFILE=ON but ROCPROFSYS_USE_PROCESS_SAMPLING=OFF; "
@@ -3722,10 +3721,10 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
 get_mpi_rank_from_env()
 {
     // global rank env-vars: user-provided, then runtime-specific
-    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
-                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
-                                    "SLURM_PROCID" },
-                                  "MPI rank");
+    auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
+    env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
+                           k_mpi_rank_env_names.end());
+    return get_first_mpi_env_uint(env_var_options, "MPI rank");
 }
 
 [[nodiscard]] std::optional<std::uint64_t>

@@ -190,6 +190,57 @@ TEST_F(RasDiagnosticsEnvMicrotest, EnvironmentViews_DuplicateUpdatesPreserveOthe
   EXPECT_STREQ("TRACE", std::getenv("NCCL_DEBUG"));
 }
 
+// DefaultLoadParam backs ncclLoadParam in every binary that links env_fakes.cc, so a param reads
+// the scripted environment rather than always reporting its compile-time default. These call it
+// with a fresh cache, the way a param's first read does, because the NCCL_PARAM/RCCL_PARAM macros
+// short-circuit on their own static cache and so can only be driven once per binary.
+namespace {
+struct ParamSlot {
+  int64_t cache = INT64_MIN;  // param.h's `uninitialized`
+  int8_t noCache = -1;
+
+  int64_t Load(const char* env, int64_t deftVal) {
+    return ncclLoadParam(env, deftVal, INT64_MIN, &cache, &noCache);
+  }
+};
+}  // namespace
+
+TEST_F(RasDiagnosticsEnvMicrotest, LoadParam_UnmappedNameReadsTheDefault) {
+  ParamSlot slot;
+  EXPECT_EQ(slot.Load("NCCL_NOT_SCRIPTED", 7), 7);
+  EXPECT_EQ(slot.cache, 7);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, LoadParam_ScriptedValueOverridesTheDefault) {
+  SetMicroEnv("NCCL_SCRIPTED", "42");
+  ParamSlot slot;
+  EXPECT_EQ(slot.Load("NCCL_SCRIPTED", 7), 42);
+  // Written because RCCL_PARAM returns `cache` rather than the return value.
+  EXPECT_EQ(slot.cache, 42);
+  EXPECT_EQ(slot.noCache, 0);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, LoadParam_NonNumericValueFallsBackToTheDefault) {
+  // Production reports this and keeps the default; the fake keeps the default silently, but a
+  // scripted-but-unparsable value must not reach the param either way.
+  SetMicroEnv("NCCL_SCRIPTED", "not-a-number");
+  ParamSlot slot;
+  EXPECT_EQ(slot.Load("NCCL_SCRIPTED", 7), 7);
+}
+
+TEST_F(RasDiagnosticsEnvMicrotest, LoadParam_ResetDropsAnEarlierTestsOverride) {
+  // The scripted value must not outlive the test that set it -- with a fresh cache, which is what
+  // the fixture guarantees for every param a test is the first to read.
+  SetMicroEnv("NCCL_SCRIPTED", "42");
+  ParamSlot scripted;
+  ASSERT_EQ(scripted.Load("NCCL_SCRIPTED", 7), 42);
+
+  ResetEnvFakes();
+
+  ParamSlot afterReset;
+  EXPECT_EQ(afterReset.Load("NCCL_SCRIPTED", 7), 7);
+}
+
 TEST_F(RasDiagnosticsEnvMicrotest, CollectLocal_NoMatchingCommsReturnsEmpty) {
   struct rasDiagnosticsContext ctx{};
   struct rasDiagnosticsLocalData data{};

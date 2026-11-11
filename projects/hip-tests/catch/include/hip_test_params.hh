@@ -34,9 +34,9 @@ THE SOFTWARE.
  * @brief Global parameter store for test configuration.
  * 
  * Parameters are loaded from compile-time constants generated from
- * definitions.yaml at build time. main() (see hip_test_level.cc) resolves
- * the active test level before any test runs and loads the corresponding
- * parameters.
+ * definitions.yaml at build time. The listener in hip_test_listener.cc
+ * resolves the active level from HIP_TEST_LEVEL (see hip_test_level.hh) before
+ * any test runs and loads the corresponding parameters.
  * 
  * Thread Safety:
  *   This class is designed for single-threaded test execution (Catch2 default).
@@ -47,7 +47,7 @@ THE SOFTWARE.
  * TEST_CASE(Unit_hipMemcpy_Functional) {
  *     auto& params = TestParameterStore::instance();
  *     
- *     // Get parameters for current level (auto-detected from filter)
+ *     // Get parameters for current level (from HIP_TEST_LEVEL)
  *     auto sizes = params.getMemorySizesForCurrentLevel();
  *     auto size = GENERATE_COPY(from_range(sizes));
  *     
@@ -70,13 +70,13 @@ public:
 
     /**
      * @brief Initialize parameter store from generated compile-time constants
-     * Called once at test startup by main()
+     * Called once at test startup by the parameter listener
      */
     void initialize();
 
     /**
      * @brief Load parameters for a specific level
-     * Called by main() once the active level has been resolved
+     * Called by the parameter listener once the active level has been resolved
      * @param level Level name (e.g., "level_0", "level_1")
      */
     void loadLevelConfig(const std::string& level);
@@ -168,7 +168,7 @@ public:
     void clear();
 
     /**
-     * @brief Current test level (set by main())
+     * @brief Current test level (set by loadLevelConfig())
      */
     std::string currentTestLevel;
 

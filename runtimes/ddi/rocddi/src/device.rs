@@ -57,6 +57,14 @@ pub struct Device {
 }
 
 impl Device {
+    pub(crate) fn can_access_local_memory(&self, owner: &Self) -> bool {
+        self.driver_state.can_access_local_memory(
+            &owner.driver_state,
+            &self.endpoint,
+            &owner.endpoint,
+        )
+    }
+
     /// Returns the endpoint snapshot accepted at activation. This is a borrowed
     /// metadata view with no native observation or freshness guarantee.
     #[must_use]

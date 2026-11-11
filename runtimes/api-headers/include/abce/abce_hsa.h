@@ -144,12 +144,6 @@ static inline abce_hsa_queue_api_t abce_hsa_queue_api_direct(void) {
 typedef struct abce_hsa_ring_options_t {
   size_t min_submission_size;
   bool align64;
-  // The CPU's stores into the ring buffer pass through the GPU's HDP: a ring in
-  // device memory (HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) the CPU fills
-  // through a PCIe BAR. False for a ring in host memory, and for one in device
-  // memory behind a CPU-GPU xGMI link, which has no HDP.
-  bool host_writes_through_hdp;
-  abce_shared_ring_control_t* shared_control;
   abce_ring_commit_wait_fn_t commit_wait;
   void* commit_wait_user_data;
 } abce_hsa_ring_options_t;
@@ -158,18 +152,19 @@ static inline void abce_hsa_ring_options_initialize(abce_hsa_ring_options_t* out
   memset(out_options, 0, sizeof(*out_options));
 }
 
-// Non-owning adapter from a public SDMA hsa_queue_t to an ABCE ring.
+// Non-owning adapter from a public SDMA hsa_queue_t to an ABCE ring the host
+// alone submits to.
 //
-// The queue must remain alive until all submissions are complete and the adapter
-// is no longer registered with an orchestrator. Host/device sharing is supported
-// only when both views use the same abce_shared_ring_control_t. The adapter
-// itself must remain at a stable address because the ring callbacks use it as
-// their context.
+// The queue's ring buffer must be in host memory (the hsa_amd_queue_create
+// default): a ring the CPU fills through a PCIe BAR would also need its stores
+// flushed out of HDP before the doorbell, which this adapter does not do. The
+// queue must remain alive until all submissions are complete and the adapter is
+// no longer registered with an orchestrator. The adapter itself must remain at
+// a stable address because the ring callbacks use it as their context.
 typedef struct abce_hsa_queue_ring_t {
   hsa_queue_t* queue;
   abce_hsa_queue_api_t api;
   uint32_t engine_id;
-  bool host_writes_through_hdp;
   abce_ring_t ring;
 } abce_hsa_queue_ring_t;
 
@@ -187,21 +182,9 @@ static inline void abce_hsa_queue_ring_publish_write_index(void* user_data,
                                                            uint64_t new_write_index) {
   abce_hsa_queue_ring_t* adapter = (abce_hsa_queue_ring_t*)user_data;
   // SdmaQueue::StoreRelease stores the canonical write pointer and rings the
-  // KFD doorbell behind release ordering only, which on x86 leaves the packet
-  // stores in a VRAM ring unordered against the doorbell.
+  // KFD doorbell behind release ordering only, which on x86 does not order
+  // write-combined stores against the doorbell.
   abce_ring_host_store_fence();
-  if (adapter->host_writes_through_hdp) {
-    // HDP can still hold the packet stores when the doorbell, which does not
-    // pass through it, reaches the engine: it then fetches the ring's old
-    // contents. A read cannot complete ahead of the posted writes before it,
-    // and on x86 the doorbell store cannot pass the read, so reading back the
-    // frame's last dword lands the frame first. It is the readback CLR uses for
-    // kernel arguments in device memory.
-    const uint64_t last_dword_offset =
-        abce_ring_wrap(new_write_index - sizeof(uint32_t), adapter->queue->size);
-    (void)*(const volatile uint32_t*)((const char*)adapter->queue->base_address +
-                                      last_dword_offset);
-  }
   adapter->api.signal_store_release(adapter->queue->doorbell_signal,
                                     (hsa_signal_value_t)new_write_index);
 }
@@ -236,7 +219,6 @@ static inline hsa_status_t abce_hsa_queue_ring_initialize(
   out_adapter->queue = queue;
   out_adapter->api = *api;
   out_adapter->engine_id = resolved_engine_id;
-  out_adapter->host_writes_through_hdp = options->host_writes_through_hdp;
 
   abce_ring_config_t config;
   memset(&config, 0, sizeof(config));
@@ -246,7 +228,6 @@ static inline hsa_status_t abce_hsa_queue_ring_initialize(
   config.queue_ops.load_write_index = abce_hsa_queue_ring_load_write_index;
   config.queue_ops.publish_write_index = abce_hsa_queue_ring_publish_write_index;
   config.queue_ops.user_data = out_adapter;
-  config.shared_control = options->shared_control;
   config.min_submission_size = options->min_submission_size;
   config.align64 = options->align64;
   config.commit_wait = options->commit_wait;

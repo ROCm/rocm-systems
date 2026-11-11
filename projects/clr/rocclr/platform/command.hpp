@@ -109,7 +109,8 @@ class Event : public RuntimeObject {
   const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
-    ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
+    ProfilingInfo(bool enabled = false)
+        : enabled_(enabled), timed_(enabled), signal_required_(false) {
       if (enabled) {
         clear();
         correlation_id_ = amd::activity_prof::correlation_id;
@@ -123,7 +124,11 @@ class Event : public RuntimeObject {
 
     uint64_t correlation_id_;
     bool enabled_;             //!< Profiling enabled for the wave limiter
-    bool marker_ts_;           //!< TS marker
+    //! The command's barriers capture timestamps: it was created under queue or activity
+    //! profiling, or is a timed event marker. enabled_ alone may only track the batch.
+    bool timed_;
+    //! The completion needs a signal of its own: an event binds to it or a command waits on it
+    bool signal_required_;
     bool batch_flush_ = true;  //!< Command can flush the batch in direct dispatch mode
 
     void clear() {
@@ -163,10 +168,16 @@ class Event : public RuntimeObject {
   }
 
  public:
-  //! Use profiling info to force a tracking signal on command
-  void SetProfiling() {
+  //! Give the command's completion a signal of its own, tracked through profiling
+  void RequireSignal() {
     EnableProfiling();
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
+  }
+
+  //! Profile this command and capture the timestamps of its barriers
+  void EnableTiming() {
+    EnableProfiling();
+    profilingInfo_.timed_ = true;
   }
 
   //! Return the context for this event.
@@ -1235,12 +1246,13 @@ struct BatchCopyOp {
   size_t srcOffset;        //!< Offset in source buffer
   size_t dstOffset;        //!< Offset in destination buffer
   size_t size;             //!< Size of the copy in bytes
+  size_t sizeB{0};         //!< Swap dst-side size (0 = symmetric)
   CopyMetadata metadata;   //!< Copy metadata for this operation
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
-              size_t sz, CopyMetadata meta = CopyMetadata())
+              size_t sz, CopyMetadata meta = CopyMetadata(), size_t szB = 0)
       : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
-        dstOffset(dstOff), size(sz), metadata(meta) {}
+        dstOffset(dstOff), size(sz), sizeB(szB), metadata(meta) {}
 };
 
 //! Structure to hold pageable host-to-device write operation info for batch
@@ -1277,6 +1289,23 @@ struct BatchReadMemoryOp {
         src_offset(src_offset_arg),
         size(size_arg),
         metadata(metadata_arg) {}
+};
+
+//! Structure to hold one pitched box copy for batch rectangular copies
+struct BatchCopyRectOp {
+  Memory* src_memory;   //!< Source memory object
+  Memory* dst_memory;   //!< Destination memory object
+  BufferRect src_rect;  //!< Source origin, row pitch and slice pitch
+  BufferRect dst_rect;  //!< Destination origin, row pitch and slice pitch
+  Coord3D size;         //!< Box width in bytes, height and depth
+
+  BatchCopyRectOp(Memory* src_memory_arg, Memory* dst_memory_arg, const BufferRect& src_rect_arg,
+                  const BufferRect& dst_rect_arg, const Coord3D& size_arg)
+      : src_memory(src_memory_arg),
+        dst_memory(dst_memory_arg),
+        src_rect(src_rect_arg),
+        dst_rect(dst_rect_arg),
+        size(size_arg) {}
 };
 
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
@@ -1319,6 +1348,43 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch copy memory command for multiple pitched buffer-to-buffer box copies
+ *
+ *  \details Copies within a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryRectCommand : public Command {
+ public:
+  BatchCopyMemoryRectCommand(HostQueue& queue, cl_command_type cmd_type,
+                             const EventWaitList& event_wait_list,
+                             std::vector<BatchCopyRectOp>&& copy_ops)
+      : Command(queue, cmd_type, event_wait_list), copy_ops_(std::move(copy_ops)) {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->retain();
+        op.dst_memory->retain();
+      }
+    }
+  }
+
+  void releaseResources() override {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->release();
+        op.dst_memory->release();
+      }
+    }
+    Command::releaseResources();
+  }
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchCopyMemoryRect(*this); }
+
+  const std::vector<BatchCopyRectOp>& CopyOps() const { return copy_ops_; }
+
+ private:
+  std::vector<BatchCopyRectOp> copy_ops_;  //!< Vector of box copy operations
 };
 
 /*! \brief  A batch write memory command for multiple pageable host-to-device

@@ -16,10 +16,7 @@ from common.common import stub_modules_at_import
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
-    "driver_kernel_version": "6.19.14",
     "driver_version": "6.19.14.31400000",
-    "driver_build_version": "2370381",
-    "driver_full_version": "6.19.14.31400000-2370381",
 }
 
 
@@ -81,14 +78,20 @@ def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict
 
 
 def _run_version_with_interface(
-    interface: types.SimpleNamespace, gpu_version: bool = True, human_readable: bool = False
+    interface: types.SimpleNamespace,
+    gpu_version: bool = True,
+    human_readable: bool = False,
+    driver_loaded: bool = True,
+    all_drivers: bool = False,
 ) -> dict:
     module = _load_version_module(interface)
     commands = object.__new__(module.VersionCommands)
     commands.logger = _Logger(human_readable=human_readable)
-    commands.helpers = types.SimpleNamespace()
+    commands.helpers = types.SimpleNamespace(is_driver_loaded=lambda _driver: driver_loaded)
     commands.group_check_printed = True
-    args = types.SimpleNamespace(gpu_version=gpu_version, cpu_version=False, nic_version=False)
+    args = types.SimpleNamespace(
+        gpu_version=gpu_version, cpu_version=all_drivers, nic_version=all_drivers
+    )
     commands.version(args)
     return commands.logger.output
 
@@ -100,32 +103,21 @@ class TestVersionDriverOutput(unittest.TestCase):
         if not path.is_file():
             raise unittest.SkipTest(f"amd-smi CLI version.py not found at {path}")
 
-    def test_json_reports_driver_fields(self) -> None:
+    def test_json_reports_driver_version(self) -> None:
         output = _run_version()
-        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000-2370381")
-        self.assertNotIn("driver_kernel_version", output)
-        self.assertNotIn("driver_version", output)
-        self.assertNotIn("driver_build_version", output)
-        self.assertNotIn("driver_full_version", output)
-        self.assertNotIn("amdgpu_dkms_version", output)
+        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000")
 
-    def test_human_readable_reports_driver_fields_in_order(self) -> None:
+    def test_human_readable_reports_driver_version(self) -> None:
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             _run_version(human_readable=True)
 
         line = stdout.getvalue()
-        self.assertIn("amdgpu version: 6.19.14.31400000-2370381", line)
-        self.assertNotIn("Kernel version:", line)
-        self.assertNotIn("Driver version:", line)
-        self.assertNotIn("Build version:", line)
+        self.assertIn("amdgpu version: 6.19.14.31400000", line)
 
     def test_gpu_fields_are_na_when_gpu_version_is_disabled(self) -> None:
         output = _run_version(gpu_version=False)
         self.assertEqual(output["amdgpu_version"], "N/A")
-        self.assertNotIn("driver_kernel_version", output)
-        self.assertNotIn("driver_version", output)
-        self.assertNotIn("driver_build_version", output)
 
     def test_empty_gpu_list_reports_amdgpu_version_as_na(self) -> None:
         interface = _default_interface()
@@ -134,6 +126,15 @@ class TestVersionDriverOutput(unittest.TestCase):
         output = _run_version_with_interface(interface)
 
         self.assertEqual(output["amdgpu_version"], "N/A")
+
+    def test_unloaded_drivers_report_not_loaded(self) -> None:
+        output = _run_version_with_interface(
+            _default_interface(), driver_loaded=False, all_drivers=True
+        )
+
+        self.assertEqual(output["amdgpu_version"], "not loaded")
+        self.assertEqual(output["amd_hsmp_driver_version"], "not loaded")
+        self.assertEqual(output["nic_driver_version"], "not loaded")
 
     def test_driver_info_failure_reports_amdgpu_version_as_na(self) -> None:
         interface = _default_interface()

@@ -227,13 +227,25 @@ namespace envvar {
   }  // namespace gda
 
   namespace sdma {
-    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", true);
-    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes", 256);
+    const var<bool> enabled("ENABLED", "Enable SDMA transport at runtime", false);
+    const var<size_t> threshold("THRESHOLD", "SDMA transfer size threshold in bytes (scaled by WF_SIZE for wave/wg ops)", 1024);
     const var<int32_t> num_channels("NUM_CHANNELS", "Number of SDMA channels per destination [1, 8]", 1);
     const var<bool> spread_channels("SPREAD_CHANNELS",
         "Apply wf_id round-robin channel offset for all contexts (default: only for default ctx)",
         false);
   }  // namespace sdma
+
+  namespace tdm {
+    const var<uint32_t> tile_bytes("TILE_BYTES",
+        "TDM tile size in bytes for LDS-staged IPC transfers. 0 auto-sizes "
+        "the tile to use all LDS available per block", 131072);
+    const var<size_t> put_threshold("PUT_THRESHOLD",
+        "TDM transfer size threshold in bytes for put; transfers smaller "
+        "than this use the normal (non-TDM) copy path instead", 16384);
+    const var<size_t> get_threshold("GET_THRESHOLD",
+        "TDM transfer size threshold in bytes for get; transfers smaller "
+        "than this use the normal (non-TDM) copy path instead", 1024);
+  }  // namespace tdm
 
   namespace _detail {
     std::tuple<var_map_t&, std::mutex&> get_var_map() {

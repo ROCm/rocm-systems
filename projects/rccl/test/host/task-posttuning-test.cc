@@ -210,9 +210,12 @@ uint64_t TaskPostTuning_DevFuncKey(int coll, int devRedOp, int type, int algo, i
          (static_cast<uint64_t>(type & RCCL_FUNC_ID_MASK) << RCCL_DTYPE_SHIFT);
 }
 
+// LL128 AllReduce/AllGather/Broadcast resolve the non-registered variant (reg 2) until registration is known.
 void TaskPostTuning_StampDevFuncId(int algo, int proto, int devRedOp = ncclDevSum,
                                   ncclFunc_t func = ncclFuncAllReduce, ncclDataType_t datatype = ncclFloat32) {
-  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(func, devRedOp, datatype, algo, proto)] = kStampedDevFuncId;
+  const int regMode = ncclDevFuncIsLL128RegVariant(func, proto) ? 2 : 0;
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(func, devRedOp, datatype, algo, proto) |
+                      (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT)] = kStampedDevFuncId;
 }
 
 void TaskPostTuning_SetTunerOutput(struct ncclTuningResult_t* out, int algo, int proto) {
@@ -331,10 +334,11 @@ TEST_F(TaskPostTuningMicrotest, SetChunkSteps_PipelinedColls_TakeTheirOwnChunkAn
   struct ncclTaskColl allReduce = TaskPostTuning_PoisonedColl(ncclFuncAllReduce);
   struct ncclTaskColl allGather = TaskPostTuning_PoisonedColl(ncclFuncAllGather);
   struct ncclTaskColl reduceScatter = TaskPostTuning_PoisonedColl(ncclFuncReduceScatter);
+  TaskPrepScene scene;
 
-  postTuningSetChunkSteps(&allReduce);
-  postTuningSetChunkSteps(&allGather);
-  postTuningSetChunkSteps(&reduceScatter);
+  postTuningSetChunkSteps(scene.comm(), &allReduce);
+  postTuningSetChunkSteps(scene.comm(), &allGather);
+  postTuningSetChunkSteps(scene.comm(), &reduceScatter);
 
   EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, allReduce.chunkSteps);
   EXPECT_EQ(ALLREDUCE_SLICESTEPS, allReduce.sliceSteps);
@@ -347,14 +351,15 @@ TEST_F(TaskPostTuningMicrotest, SetChunkSteps_PipelinedColls_TakeTheirOwnChunkAn
 
 TEST_F(TaskPostTuningMicrotest, SetChunkSteps_BroadcastAndUnpipelinedFuncs_TakeASingleChunkAndSlice) {
   struct ncclTaskColl broadcast = TaskPostTuning_PoisonedColl(ncclFuncBroadcast);
+  TaskPrepScene scene;
 
-  postTuningSetChunkSteps(&broadcast);
+  postTuningSetChunkSteps(scene.comm(), &broadcast);
 
   EXPECT_EQ(BROADCAST_CHUNKSTEPS, broadcast.chunkSteps);
   EXPECT_EQ(BROADCAST_SLICESTEPS, broadcast.sliceSteps);
   for (ncclFunc_t func : {ncclFuncReduce, ncclFuncSend, ncclFuncAlltoAll, ncclFuncAllGatherV, ncclFuncPutSignal}) {
     struct ncclTaskColl task = TaskPostTuning_PoisonedColl(func);
-    postTuningSetChunkSteps(&task);
+    postTuningSetChunkSteps(scene.comm(), &task);
     EXPECT_EQ(kSingleStep, task.chunkSteps) << "func " << func;
     EXPECT_EQ(kSingleStep, task.sliceSteps) << "func " << func;
   }
@@ -733,6 +738,57 @@ TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_Broadcast_RescalesTheCountTo
   EXPECT_EQ(ncclFloat64, fill.raw()->datatype);
 }
 
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_RawCarriesAccAndOpCount_CopiesBoth) {
+  constexpr uint64_t kRawOpCount = 41;
+  TaskPostTuning_CollFill fill;
+  int acc = 0;
+  fill.raw()->acc = &acc;
+  fill.raw()->opCount = kRawOpCount;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(&acc, fill.task()->acc);
+  EXPECT_EQ(kRawOpCount, fill.task()->opCount);
+}
+
+// The ring Simple kernels pick their slicing from rcclUseOneSlice, whatever steps the API entry passed.
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_SingleNodeRingCollective_TakesTheKernelsOneSliceSteps) {
+  static char kGfx950[] = "gfx950";
+  static char kGfx942[] = "gfx942";
+  const struct {
+    char* arch;
+    int chunkSteps;
+  } kArchs[] = {{kGfx950, 1}, {kGfx942, ALLREDUCE_CHUNKSTEPS}};
+  for (const auto& arch : kArchs) {
+    for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
+      TaskPostTuning_CollFill fill(func);
+      fill.comm()->rcclUseOneSlice = 1;
+      fill.comm()->archName = arch.arch;
+
+      ASSERT_EQ(ncclSuccess, fill.Run()) << arch.arch << " func " << func;
+
+      EXPECT_EQ(arch.chunkSteps, fill.task()->chunkSteps) << arch.arch << " func " << func;
+      EXPECT_EQ(arch.chunkSteps, fill.task()->sliceSteps) << arch.arch << " func " << func;
+    }
+  }
+}
+
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_MultiNodeOrBroadcast_KeepsTheDefaultSteps) {
+  static char kGfx950[] = "gfx950";
+  TaskPostTuning_CollFill multiNode;
+  multiNode.comm()->archName = kGfx950;
+  ASSERT_EQ(ncclSuccess, multiNode.Run());
+  EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, multiNode.task()->chunkSteps);
+  EXPECT_EQ(ALLREDUCE_SLICESTEPS, multiNode.task()->sliceSteps);
+
+  TaskPostTuning_CollFill broadcast(ncclFuncBroadcast);
+  broadcast.comm()->rcclUseOneSlice = 1;
+  broadcast.comm()->archName = kGfx950;
+  ASSERT_EQ(ncclSuccess, broadcast.Run());
+  EXPECT_EQ(BROADCAST_CHUNKSTEPS, broadcast.task()->chunkSteps);
+  EXPECT_EQ(BROADCAST_SLICESTEPS, broadcast.task()->sliceSteps);
+}
+
 TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ReduceScatter_KeepsTheElementCountAndScalesTrafficByRank) {
   TaskPostTuning_CollFill fill(ncclFuncReduceScatter);
 
@@ -1067,24 +1123,62 @@ TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_FillRejectsTheConfig_Propa
   EXPECT_EQ(kUnwrittenDevFuncId, fill.task()->devFuncId);
 }
 
-// applyTuningToCollTask's !tuningOut.valid guard reads the untuned -1 sentinel as valid; fixing it turns this red.
-TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_CurrentlyPassesTheValidityGate) {
-  TaskPostTuning_CollFill fill;
-
-  EXPECT_EQ(ncclSuccess, fill.RunApplyTuning());
-
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.tuningOut()->valid);
-  EXPECT_EQ(NCCL_ALGO_UNDEF, fill.task()->algorithm);
-  EXPECT_EQ(NCCL_PROTO_UNDEF, fill.task()->protocol);
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.task()->nMaxChannels);
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.task()->nWarps);
-}
-
-// applyTuningToCollTask's !tuningOut.valid guard reads the untuned -1 sentinel as valid; fixing it turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_ReportsAnInternalError) {
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_ReportsAnInternalError) {
   TaskPostTuning_CollFill fill;
 
   EXPECT_EQ(ncclInternalError, fill.RunApplyTuning());
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_NoKernelBuiltForTheTuning_ReportsInvalidUsage) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+
+  EXPECT_EQ(ncclInvalidUsage, fill.RunApplyTuning());
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_AllReduceWithAcc_SelectsTheAccKernel) {
+  TaskPostTuning_CollFill fill;
+  int acc = 0;
+  fill.raw()->acc = &acc;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, NCCL_ALGO_RING,
+                                                NCCL_PROTO_SIMPLE) |
+                      (static_cast<uint64_t>(1) << RCCL_ACC_SHIFT)] = kStampedDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  EXPECT_EQ(&acc, fill.task()->acc);
+  EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_PipelinedCollective_SelectsThePipelinedKernel) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  size_t pipeliningBytes = 0;
+  ScopedHook pipelining(g_rcclSetPipelining, [&](struct ncclComm*, size_t const& nBytes, struct ncclTaskColl* task) {
+    pipeliningBytes = nBytes;
+    task->pipeline = 1;
+  });
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, NCCL_ALGO_RING,
+                                                NCCL_PROTO_SIMPLE) |
+                      (static_cast<uint64_t>(1) << RCCL_PIPELINE_SHIFT)] = kStampedDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  EXPECT_EQ(1, pipelining.calls);
+  EXPECT_EQ(kCount * sizeof(float), pipeliningBytes);
+  EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId);
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_ArchCannotRunTheKernel_ReportsInvalidUsage) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  TaskPostTuning_StampDevFuncId(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  g_rcclIsArchSupportedForFunc = false;
+
+  EXPECT_EQ(ncclInvalidUsage, fill.RunApplyTuning());
+
+  EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId);
 }
 
 constexpr bool kIsSend = true;
@@ -1303,13 +1397,13 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerOutsideTheCommunicator_R
   for (int peer : {-1, kRanks}) {
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_FALSE(needPreconnect) << "peer " << peer;
     needPreconnect = true;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_TRUE(needPreconnect) << "peer " << peer;
@@ -1320,14 +1414,14 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerIsThisRank_SucceedsWitho
   TaskPostTuning_P2pScene p2p;
   bool needPreconnect = false;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_FALSE(needPreconnect);
   EXPECT_FALSE(p2p.comm()->planner.peers[kP2pRank].sendSeen);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
   needPreconnect = true;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
 }
@@ -1337,7 +1431,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshSendPeer_ClaimsItsSendC
   const std::vector<int> sendChannels = p2p.Channels(kIsSend);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
@@ -1359,7 +1453,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   const std::vector<int> recvChannels = p2p.Channels(kIsRecv);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].recvSeen);
@@ -1376,6 +1470,37 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pRank), {}));
 }
 
+// Scatter with fewer parts than p2pnChannelsPerPeer claims only its own channels and leaves the side
+// unseen, so a later task to the same peer that uses every part still claims the rest.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
+      return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
+    });
+    const std::vector<int> channels = p2p.Channels(isSendNotRecv);
+    ASSERT_EQ(2u, channels.size());
+    bool needPreconnect = false;
+
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncScatter, &needPreconnect));
+
+    EXPECT_TRUE(needPreconnect);
+    EXPECT_FALSE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[0], kP2pPeer)->hasSeen);
+    EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {channels[0]}));
+
+    // The full-part task adds only the channel the Scatter left out.
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect));
+
+    EXPECT_TRUE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), channels));
+  }
+}
+
 // Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSide_ClaimsNoChannel) {
   for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
@@ -1383,7 +1508,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     p2p.Seen(isSendNotRecv, kP2pPeer) = true;
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1394,7 +1519,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     }
     needPreconnect = true;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1406,7 +1531,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerRecordedOnTheOtherSideOn
   p2p.comm()->planner.peers[kP2pPeer].recvSeen = true;
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer),
@@ -1420,7 +1545,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_SomeChannelsAlreadyConnected
     p2p.Conn(isSendNotRecv, channels.front(), kP2pPeer)->hasSeen = kConnected;
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1439,7 +1564,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_EveryChannelAlreadyConnected
     }
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1457,7 +1582,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CallerAlreadyNeedsSetup_Keep
     }
     bool needPreconnect = true;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1470,7 +1595,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelsBeyondTheFirstMaskWo
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_LE(CHANNELS_PER_MASK_WORD, channels.front()) << "isSendNotRecv " << isSendNotRecv;
@@ -1486,7 +1611,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelRangeStraddlingAMaskW
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_NE(0, channels.front() % CHANNELS_PER_MASK_WORD) << "isSendNotRecv " << isSendNotRecv;
@@ -2349,28 +2474,14 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupported_RejectsEveryRma
   }
 }
 
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_IsIgnoredOnHip) {
+  // The CUDA 12.5 driver gate is HIP-elided in postTuneRmaTaskAppend, and this
+  // binary always defines __HIP_PLATFORM_AMD__, so a too-old cache must not reject.
   TaskPostTuning_RmaScene rma;
   ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.PutSignal()));
-  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverAtTheRmaMinimum_IsAccepted) {
-  TaskPostTuning_RmaScene rma;
-  ncclCudaDriverVersionCache = kSupportedDriverVersion;
 
   EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
   EXPECT_EQ(1, rma.AppendedTaskCount());
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupportedAndDriverTooOld_ReportsTheUnsupportedCommFirst) {
-  TaskPostTuning_RmaScene rma;
-  rma.comm()->hostRmaSupport = false;
-  ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexBelowZero_RejectsTheTaskAndAppendsNothing) {
@@ -2400,14 +2511,35 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheTopOfTheRange_IsAc
   EXPECT_EQ(1, rma.AppendedTaskCount());
 }
 
-// postTuneRmaTaskAppend never range-checks ctx, unlike sigIdx above; fixing that turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = -1;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   struct ncclRawTaskRma raw = rma.Signal();
   raw.rmaOp.signal.ctx = kNumRmaCtx;
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+// Signal() and PutSignal() otherwise always use kRmaCtx, so a predicate narrowed to
+// ctx >= numRmaCtx - 1 would still leave the reject tests above green.
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheTopOfTheRange_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = kRmaLastCtx;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+  ASSERT_EQ(1u, rma.Tasks(kRmaLastCtx).size());
+  EXPECT_EQ(kRmaLastCtx, rma.Tasks(kRmaLastCtx)[0]->ctx);
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_NoSignalsConfigured_RejectsWaitSignalOnItsImplicitIndex) {
@@ -2819,12 +2951,33 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsWaitForOneOpe
   EXPECT_EQ(2, rma.AppendedTaskCount());
 }
 
-// The descriptor loop only checks opCnt and sigIdx, never ctx; the grouping scan then silently drops any
-// descriptor whose ctx falls outside [0, numRmaCtx), so the wait vanishes instead of being rejected.
-// Adding a ctx range check to the descriptor loop turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, -1)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kNumRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(-1, kRmaSigIdx, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerAtTheRankCount_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(rma.comm()->nRanks, kRmaSigIdx, kRmaCtx)};
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
@@ -3402,13 +3555,9 @@ TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_UnregisteredTask_MarshalsE
   EXPECT_EQ(kFlagClear, devWork->regUsed);
   EXPECT_EQ(kFlagClear, devWork->netRegUsed);
   EXPECT_EQ(kFlagClear, devWork->profilerEnabled);
-  // enqueue.cc:486,496,498 also copy acc, rcclUseOneSlice, and opCount; task_posttuning.cc drops all three.
-  EXPECT_EQ(nullptr, devWork->acc);
-  EXPECT_EQ(kFlagClear, devWork->rcclUseOneSlice);
-  EXPECT_EQ(0u, devWork->opCount);
 }
 
-TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_UnregisteredTask_CopiesAccRcclUseOneSliceAndOpCount) {
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_UnregisteredTask_CopiesAccRcclUseOneSliceAndOpCount) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
 
@@ -3422,6 +3571,7 @@ TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_UnregisteredTask_
 
 // enqueue.cc:519-538 also marshals the Direct ReduceScatter group when comm->enableDirectReduceScatter is
 // set; task_posttuning.cc has no equivalent, so these fields stay at devWork's zero-initialized defaults.
+// Porting the fields alone sums unwritten tempBuff slices: rawTaskAppend does not lower useDirect to Send/Recv.
 TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_DirectReduceScatterEnabled_CurrentlyDropsEveryField) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
@@ -3616,24 +3766,7 @@ uint64_t TaskPostTuning_RegVariantDevFuncKey(int algo, int proto, int regMode) {
          (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
 }
 
-// enqueue.cc:549-558 re-picks the device function once registration is known; task_posttuning.cc has no equivalent.
-TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_CurrentlyKeepsThePlaceholderFunction) {
-  TaskPostTuning_LegacyWork work;
-  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
-  ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
-    kRegisteredDevFuncId;
-  work.task()->datatype = ncclFloat32;
-  work.task()->protocol = NCCL_PROTO_LL128;
-  work.task()->regBufType = NCCL_IPC_REG_BUFFER;
-  work.task()->devFuncId = kUnregisteredDevFuncId;
-
-  ASSERT_EQ(ncclSuccess, work.Run());
-
-  EXPECT_EQ(kFlagSet, work.OnlyColl()->regUsed);
-  EXPECT_EQ(kUnregisteredDevFuncId, work.task()->devFuncId);
-}
-
-TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_RegisteredLl128Collective_ReselectsTheRegisteredFunction) {
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_ReselectsTheRegisteredFunction) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
   ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
@@ -4129,10 +4262,12 @@ constexpr int kOneTaskPerChannel = 1;
 constexpr int kUnsetResourceCap = 0;
 constexpr int kNoBcastPeers = 0;
 
-// ncclDevFuncId keys a Broadcast on coll and proto alone (device.h:909-912), unlike a general collective.
+// ncclDevFuncId keys a Broadcast on coll, proto and reg only; LL128 takes the non-registered variant (reg 2).
 uint64_t TaskPostTuning_BroadcastDevFuncKey(int proto) {
+  const int regMode = ncclDevFuncIsLL128RegVariant(ncclFuncBroadcast, proto) ? 2 : 0;
   return (static_cast<uint64_t>(ncclFuncBroadcast & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
-         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
+         (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
 }
 
 // The bcast peer range starts at the sentinels init.cc:872 uses, so a min/max update is not a no-op.

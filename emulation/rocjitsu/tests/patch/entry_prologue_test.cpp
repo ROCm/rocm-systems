@@ -9,6 +9,8 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -24,7 +26,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -64,13 +66,13 @@ public:
 /// expression that built it.
 class Kernel {
 public:
-  explicit Kernel(const std::vector<uint32_t> &words) : co_(words) {
-    decoder_ = Decoder::create(kArch);
+  explicit Kernel(const std::vector<uint32_t> &words, rj_code_arch_t arch = kArch) : co_(words) {
+    decoder_ = Decoder::create(arch);
     if (decoder_ == nullptr) {
       ADD_FAILURE() << "no decoder for the test arch";
       return;
     }
-    blocks_ = build_valid_blocks(co_, *decoder_, kArch);
+    blocks_ = build_valid_blocks(co_, *decoder_, arch);
     for (const auto &block : blocks_)
       scope_.push_back(block.get());
   }
@@ -89,8 +91,8 @@ private:
 [[nodiscard]] KD kernarg_descriptor(uint32_t kernarg_size = 0) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 2);
-  AMDHSA_BITS_SET(desc.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   desc.kernarg_size = kernarg_size;
   return desc;
 }
@@ -99,8 +101,8 @@ private:
 /// the pair lands above s[0:1].
 [[nodiscard]] KD kernarg_descriptor_at_slot(uint16_t expected_slot) {
   KD desc = kernarg_descriptor();
-  AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
-                  1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                     1);
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 4);
   EXPECT_EQ(kernarg_segment_ptr_sgpr(desc).value_or(0xFFFF), expected_slot);
   return desc;
@@ -110,18 +112,15 @@ private:
                             bool workgroup_id_y = false, bool workgroup_id_z = false) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, user_sgpr_count);
-  // Braces are load-bearing: AMDHSA_BITS_SET expands to two statements with no
-  // do-while wrapper, so an unbraced `if` would set the bit unconditionally. The
-  // field also has to be named literally at each call, since the macro pastes
-  // _SHIFT onto its argument.
+  // Name each field literally because RJ_AMDHSA_BITS_SET pastes _SHIFT onto it.
   if (workgroup_id_x) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
   }
   if (workgroup_id_y) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
   }
   if (workgroup_id_z) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
   }
   return desc;
 }
@@ -137,28 +136,42 @@ private:
 constexpr uint16_t kInlineZero = 128;
 
 /// A kernel whose only explicitly named ordinary SGPR is `sgpr`.
-[[nodiscard]] std::vector<uint32_t> kernel_naming_sgpr(uint16_t sgpr) {
-  return {build_s_mov_b32(sgpr, kInlineZero, kArch), build_s_endpgm(kArch)};
+util::FailureOr<std::vector<uint32_t>> kernel_naming_sgpr(uint16_t sgpr) {
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+
+  const auto move = build_s_mov_b32(sgpr, kInlineZero, kArch);
+  if (move.failed())
+    return util::Result::failure();
+  return std::vector<uint32_t>{move.value(), kEndpgmResult.value()};
 }
 
 // The floor is the higher of the two inputs. Here the kernel's own registers
 // reach past its ABI block.
 TEST(DbiEntryStorageFloor, TakesTheOperandScanWhenItExceedsTheAbiBlock) {
-  const Kernel kernel(kernel_naming_sgpr(24));
+  const auto words = kernel_naming_sgpr(24);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch), 25u);
 }
 
 TEST(DbiEntryStorageFloor, FoldsInUserSgprsAndEnabledWorkgroupIds) {
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+
   // Nothing named by the body, so the ABI block alone sets the floor: six user
   // SGPRs then two enabled workgroup dimensions, ending at s8.
-  const Kernel kernel({build_s_endpgm(kArch)});
+  const Kernel kernel({kEndpgmResult.value()});
   const KD desc = descriptor(/*user_sgpr_count=*/6, /*workgroup_id_x=*/true,
                              /*workgroup_id_y=*/true, /*workgroup_id_z=*/false);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), desc, kArch), 8u);
 }
 
 TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
-  const Kernel kernel({build_s_endpgm(kArch)});
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+
+  const Kernel kernel({kEndpgmResult.value()});
   const KD none = descriptor(/*user_sgpr_count=*/6);
   const KD all = descriptor(/*user_sgpr_count=*/6, /*workgroup_id_x=*/true,
                             /*workgroup_id_y=*/true, /*workgroup_id_z=*/true);
@@ -166,8 +179,28 @@ TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), all, kArch), 9u);
 }
 
+// RDNA decoders name v_cmp_eq_u32_e64 s1's mask as s[1:2]. A Wave32 kernel
+// writes s1 alone, so the floor is s2.
+TEST(DbiEntryStorageFloor, CountsAWave32CompareMaskAsOneSgpr) {
+  constexpr rj_code_arch_t kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kRdna4);
+  static_assert(endpgm.succeeded());
+  constexpr auto compare = rdna4::build_vop3(rdna4::kVCmpEqU32Vop3,
+                                             {.vdst = 1, .src0 = kInlineZero, .src1 = kInlineZero});
+  const Kernel kernel({compare[0], compare[1], endpgm.value()}, kRdna4);
+
+  const KD wave64{};
+  KD wave32{};
+  RJ_AMDHSA_BITS_SET(wave32.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave32, kRdna4), 2u);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave64, kRdna4), 3u);
+}
+
 TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
-  const Kernel kernel(kernel_naming_sgpr(24));
+  const auto words = kernel_naming_sgpr(24);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/40, link_pair());
   ASSERT_TRUE(storage.has_value());
@@ -179,7 +212,9 @@ TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
 // a 32-SGPR kernel leaves ordinary storage only below s26. A floor of 25 would
 // otherwise place the run at s[26:27], which flat scratch aliases.
 TEST(PlanDbiEntryStorage, RunInTheCdnaSpecialRegisterTailFailsClosed) {
-  const Kernel kernel(kernel_naming_sgpr(24));
+  const auto words = kernel_naming_sgpr(24);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -192,7 +227,9 @@ TEST(PlanDbiEntryStorage, RunInTheCdnaSpecialRegisterTailFailsClosed) {
 // allocation (fails if the tail grows past 6), and one ending at s27 does not
 // (fails if it shrinks below 5).
 TEST(PlanDbiEntryStorage, RunEndingSixBelowTheCdnaAllocationFits) {
-  const Kernel kernel(kernel_naming_sgpr(21));
+  const auto words = kernel_naming_sgpr(21);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/32, link_pair());
   ASSERT_TRUE(storage.has_value());
@@ -200,7 +237,9 @@ TEST(PlanDbiEntryStorage, RunEndingSixBelowTheCdnaAllocationFits) {
 }
 
 TEST(PlanDbiEntryStorage, RunEndingFourBelowTheCdnaAllocationFailsClosed) {
-  const Kernel kernel(kernel_naming_sgpr(23));
+  const auto words = kernel_naming_sgpr(23);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   EXPECT_FALSE(plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
                                       /*kernel_sgpr_count=*/32, link_pair())
                    .has_value());
@@ -209,7 +248,9 @@ TEST(PlanDbiEntryStorage, RunEndingFourBelowTheCdnaAllocationFailsClosed) {
 // The same kernel with room below the tail places the run under the reserved
 // link pair rather than treating s[30:31] as a floor.
 TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheCdnaSpecialRegisterTail) {
-  const Kernel kernel(kernel_naming_sgpr(18));
+  const auto words = kernel_naming_sgpr(18);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/32, link_pair());
   ASSERT_TRUE(storage.has_value());
@@ -221,7 +262,9 @@ TEST(PlanDbiEntryStorage, PlacesTheRunBelowTheCdnaSpecialRegisterTail) {
 // 112-SGPR allocation holds its special registers at s106..s111, so the
 // ordinary SGPRs reach the addressable maximum and a run at s[96:99] fits.
 TEST(PlanDbiEntryStorage, LargeCdnaAllocationKeepsTheTailAboveTheAddressableMaximum) {
-  const Kernel kernel(kernel_naming_sgpr(94));
+  const auto words = kernel_naming_sgpr(94);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/112, link_pair());
   ASSERT_TRUE(storage.has_value());
@@ -230,7 +273,10 @@ TEST(PlanDbiEntryStorage, LargeCdnaAllocationKeepsTheTailAboveTheAddressableMaxi
 
 // An allocation smaller than the tail leaves no ordinary SGPRs to search.
 TEST(PlanDbiEntryStorage, CdnaAllocationSmallerThanTheTailFailsClosed) {
-  const Kernel kernel({build_s_endpgm(kArch)});
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+
+  const Kernel kernel({kEndpgmResult.value()});
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -243,7 +289,9 @@ TEST(PlanDbiEntryStorage, CdnaAllocationSmallerThanTheTailFailsClosed) {
 // that fails on CDNA places the run at s[26:27]. Only the tail depends on the
 // arch here; the blocks are decoded as CDNA4.
 TEST(PlanDbiEntryStorage, RdnaHasNoSpecialRegisterTail) {
-  const Kernel kernel(kernel_naming_sgpr(24));
+  const auto words = kernel_naming_sgpr(24);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                              ROCJITSU_CODE_ARCH_RDNA4, /*kernel_sgpr_count=*/32, link_pair());
@@ -254,7 +302,9 @@ TEST(PlanDbiEntryStorage, RdnaHasNoSpecialRegisterTail) {
 // A floor of 29 aligns to 30, where the run would cover the link pair. The
 // planner must step past it rather than hand back overlapping storage.
 TEST(PlanDbiEntryStorage, StepsPastAReservedPairTheRunWouldCover) {
-  const Kernel kernel(kernel_naming_sgpr(28));
+  const auto words = kernel_naming_sgpr(28);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   const auto storage = plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
                                               kArch, /*kernel_sgpr_count=*/48, link_pair());
   ASSERT_TRUE(storage.has_value());
@@ -263,7 +313,9 @@ TEST(PlanDbiEntryStorage, StepsPastAReservedPairTheRunWouldCover) {
 }
 
 TEST(PlanDbiEntryStorage, FailsClosedWhenTheAllocationCannotHoldTheRun) {
-  const Kernel kernel(kernel_naming_sgpr(28));
+  const auto words = kernel_naming_sgpr(28);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -273,7 +325,9 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheAllocationCannotHoldTheRun) {
 }
 
 TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {
-  const Kernel kernel(kernel_naming_sgpr(33));
+  const auto words = kernel_naming_sgpr(33);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -285,8 +339,11 @@ TEST(PlanDbiEntryStorage, FailsClosedWhenTheFloorIsAtOrPastTheAllocation) {
 // s_movreld writes the SGPR M0 selects, which the operand scan cannot see, so
 // no run above the floor is provably unused.
 TEST(PlanDbiEntryStorage, FailsClosedOnRelativeSgprAccess) {
+  constexpr util::FailureOr<uint32_t> kEndpgmResult = build_s_endpgm(kArch);
+  static_assert(kEndpgmResult.succeeded());
+
   constexpr uint32_t kSMovreldB32S4S2 = 0xBE842C02u; // s_movreld_b32 s4, s2
-  const Kernel kernel({kSMovreldB32S4S2, build_s_endpgm(kArch)});
+  const Kernel kernel({kSMovreldB32S4S2, kEndpgmResult.value()});
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -299,7 +356,9 @@ TEST(PlanDbiEntryStorage, FailsClosedOnRelativeSgprAccess) {
 // allocatable maximum, so a kernel advertising more SGPRs than any target
 // allocates still cannot place storage past REGISTER_SET_ALLOCATABLE_SGPRS.
 TEST(PlanDbiEntryStorage, ClampsTheBoundToTheAllocatableSgprMaximum) {
-  const Kernel kernel(kernel_naming_sgpr(100));
+  const auto words = kernel_naming_sgpr(100);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0), kArch,
@@ -320,18 +379,25 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload =
+  const auto payload_result =
       build_s_load_dwordx2(kStorage.persistent_base, 0, prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, 0,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, 0, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
+  constexpr util::FailureOr<uint32_t> restore_low =
+      build_s_mov_b32(0, kStorage.entry_temp_base, kArch);
+  static_assert(restore_low.succeeded());
+  constexpr util::FailureOr<uint32_t> restore_high =
+      build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch);
+  static_assert(restore_high.succeeded());
   const std::vector<uint32_t> expected{
-      payload[0],
-      payload[1],
-      original[0],
-      original[1],
-      build_wait_scalar_loads_complete(kArch),
-      build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
-      build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+      payload[0],   payload[1],          original[0],          original[1],
+      wait.value(), restore_low.value(), restore_high.value(),
   };
   EXPECT_EQ(prologue->words, expected);
 }
@@ -349,18 +415,25 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
-                                            prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, /*sbase=*/2,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  const auto payload_result = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
+                                                   prologue->payload_byte_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, /*sbase=*/2, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
+  constexpr util::FailureOr<uint32_t> restore_low =
+      build_s_mov_b32(2, kStorage.entry_temp_base, kArch);
+  static_assert(restore_low.succeeded());
+  constexpr util::FailureOr<uint32_t> restore_high =
+      build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch);
+  static_assert(restore_high.succeeded());
   const std::vector<uint32_t> expected{
-      payload[0],
-      payload[1],
-      original[0],
-      original[1],
-      build_wait_scalar_loads_complete(kArch),
-      build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
-      build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
+      payload[0],   payload[1],          original[0],          original[1],
+      wait.value(), restore_low.value(), restore_high.value(),
   };
   EXPECT_EQ(prologue->words, expected);
 }
@@ -466,6 +539,17 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
   EXPECT_FALSE(error.empty());
 }
 
+TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+    std::string error;
+    const auto prologue = build_dbi_entry_prologue(
+        kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);
+    EXPECT_FALSE(prologue.has_value());
+    EXPECT_EQ(error, "unsupported target architecture for the SMEM offset range");
+  }
+}
+
 TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
   std::string error;
   EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
@@ -479,8 +563,10 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
 // field width.
 TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
   std::string error;
+  const auto offset_max = max_smem_byte_offset(kArch);
+  ASSERT_TRUE(offset_max.succeeded());
   const auto prologue =
-      build_dbi_entry_prologue(kernarg_descriptor(max_smem_byte_offset(kArch)), kArch,
+      build_dbi_entry_prologue(kernarg_descriptor(offset_max.value()), kArch,
                                {.persistent_base = 26, .entry_temp_base = 28}, &error);
   EXPECT_FALSE(prologue.has_value());
   EXPECT_FALSE(error.empty());
@@ -488,7 +574,9 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
 
 // The composed planner hands back storage choice and words in one answer.
 TEST(PlanDbiEntryPrologue, ReturnsTheStorageAndTheWordsItEncoded) {
-  const Kernel kernel(kernel_naming_sgpr(4));
+  const auto words = kernel_naming_sgpr(4);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
   const auto plan =
       plan_dbi_entry_prologue(kernel.scope(), kernarg_descriptor(/*kernarg_size=*/16), kArch,
@@ -512,9 +600,11 @@ TEST(PlanDbiEntryPrologue, ReturnsTheStorageAndTheWordsItEncoded) {
 // A preloading kernel has a second hardware entry 256 bytes past the
 // descriptor's, which a prologue at the descriptor entry would not cover.
 TEST(PlanDbiEntryPrologue, FailsClosedOnAKernargPreloadingKernel) {
-  const Kernel kernel(kernel_naming_sgpr(4));
+  const auto words = kernel_naming_sgpr(4);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   KD desc = kernarg_descriptor(/*kernarg_size=*/16);
-  AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   std::string error;
   const auto plan = plan_dbi_entry_prologue(kernel.scope(), desc, kArch,
@@ -526,7 +616,9 @@ TEST(PlanDbiEntryPrologue, FailsClosedOnAKernargPreloadingKernel) {
 // The reserved set reaches storage selection rather than being dropped on the
 // way through. Without it the run would start at s6.
 TEST(PlanDbiEntryPrologue, StepsPastTheReservedRegisters) {
-  const Kernel kernel(kernel_naming_sgpr(4));
+  const auto words = kernel_naming_sgpr(4);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   RegisterSet reserved = link_pair();
   reserved.expand({RegClass::SGPR, 6, 4});
 
@@ -541,7 +633,9 @@ TEST(PlanDbiEntryPrologue, StepsPastTheReservedRegisters) {
 
 // Either composed step failing fails the planner, not a partially-filled plan.
 TEST(PlanDbiEntryPrologue, PropagatesStorageAndWordFailures) {
-  const Kernel kernel(kernel_naming_sgpr(4));
+  const auto words = kernel_naming_sgpr(4);
+  ASSERT_TRUE(words.succeeded());
+  const Kernel kernel(words.value());
   std::string error;
 
   // No room for the run inside the allocation.

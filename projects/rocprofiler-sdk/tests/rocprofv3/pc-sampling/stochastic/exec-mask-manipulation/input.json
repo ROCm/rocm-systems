@@ -1,6 +1,7 @@
 {
     "jobs": [
         {
+            "pc_sampling_beta_enabled": true,
             "pc_sampling_unit": "cycles",
             "pc_sampling_method": "stochastic",
             "pc_sampling_interval": 1048576,

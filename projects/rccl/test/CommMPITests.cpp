@@ -11,11 +11,16 @@
 #include "TestChecks.hpp"
 #include "ResourceGuards.hpp"
 #include "SymmetricMemPrereq.hpp"
+#include "DeviceBufferHelpers.hpp"
 
 #include "nccl_device.h"
 #include "comm.h"
+#include "rccl_float8.h"
+
+#include <hip/hip_fp16.h>
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <regex>
 #include <string>
@@ -666,6 +671,552 @@ TEST_F(PatSharedConnectionMPITest, GroupedReduceScatterAndAllGatherOnOneCommunic
         ASSERT_MPI_EQ(size_t{0}, ag_mismatches);
     }
 }
+
+namespace
+{
+    enum class SizeTier
+    {
+        Short,
+        Large,
+        Count
+    };
+
+    constexpr const char* kSizeTierNames[] = {"short", "large"};
+    static_assert(sizeof(kSizeTierNames) / sizeof(kSizeTierNames[0])
+                      == static_cast<size_t>(SizeTier::Count),
+                  "kSizeTierNames needs one entry per SizeTier");
+
+    constexpr const char* kDtypeNames[] = {"int8",
+                                           "uint8",
+                                           "int32",
+                                           "uint32",
+                                           "int64",
+                                           "uint64",
+                                           "fp16",
+                                           "fp32",
+                                           "fp64",
+                                           "bf16",
+                                           "fp8e4m3",
+                                           "fp8e5m2"};
+    static_assert(sizeof(kDtypeNames) / sizeof(kDtypeNames[0])
+                      == static_cast<size_t>(ncclNumTypes),
+                  "kDtypeNames needs one entry per ncclDataType_t");
+
+    constexpr const char* sizeTierName(SizeTier tier)
+    {
+        return kSizeTierNames[static_cast<size_t>(tier)];
+    }
+
+    constexpr const char* dtypeName(ncclDataType_t dtype)
+    {
+        return kDtypeNames[static_cast<size_t>(dtype)];
+    }
+
+    struct DtypeSizeCase
+    {
+        ncclDataType_t dtype;
+        SizeTier       sizeTier;
+    };
+
+    constexpr DtypeSizeCase kShortTierCases[] = {
+        {ncclInt8, SizeTier::Short},
+        {ncclUint8, SizeTier::Short},
+        {ncclInt32, SizeTier::Short},
+        {ncclUint32, SizeTier::Short},
+        {ncclInt64, SizeTier::Short},
+        {ncclUint64, SizeTier::Short},
+        {ncclFloat16, SizeTier::Short},
+        {ncclFloat32, SizeTier::Short},
+        {ncclFloat64, SizeTier::Short},
+        {ncclBfloat16, SizeTier::Short},
+        {ncclFloat8e4m3, SizeTier::Short},
+        {ncclFloat8e5m2, SizeTier::Short},
+    };
+
+    constexpr DtypeSizeCase kLargeTierCases[] = {
+        {ncclFloat32, SizeTier::Large},
+        {ncclBfloat16, SizeTier::Large},
+        {ncclFloat8e4m3, SizeTier::Large},
+    };
+
+    std::vector<DtypeSizeCase> allDtypeSizeCases()
+    {
+        std::vector<DtypeSizeCase> cases(std::begin(kShortTierCases), std::end(kShortTierCases));
+        cases.insert(cases.end(), std::begin(kLargeTierCases), std::end(kLargeTierCases));
+        return cases;
+    }
+
+    // Unequal on purpose: a uniform bucket size would let a per-plan sizing bug cancel out across the burst.
+    constexpr size_t kBucketCounts[] = {64, 128, 256, 512, 1024, 2048};
+    constexpr size_t kBucketCountsPeriod = sizeof(kBucketCounts) / sizeof(kBucketCounts[0]);
+
+    constexpr size_t largestBucketCount()
+    {
+        size_t largest = 0;
+        for(size_t i = 0; i < kBucketCountsPeriod; ++i)
+        {
+            if(kBucketCounts[i] > largest)
+            {
+                largest = kBucketCounts[i];
+            }
+        }
+        return largest;
+    }
+
+    constexpr size_t kLargestBucket = largestBucketCount();
+
+    constexpr int kNcclStatusOffset = 1000;
+
+    template <typename T>
+    T makeStorageValue(int value)
+    {
+        return static_cast<T>(value);
+    }
+
+    template <>
+    __half makeStorageValue<__half>(int value)
+    {
+        return __float2half(static_cast<float>(value));
+    }
+
+    template <>
+    hip_bfloat16 makeStorageValue<hip_bfloat16>(int value)
+    {
+        return hip_bfloat16(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_float8 makeStorageValue<rccl_float8>(int value)
+    {
+        return rccl_float8(static_cast<float>(value));
+    }
+
+    template <>
+    rccl_bfloat8 makeStorageValue<rccl_bfloat8>(int value)
+    {
+        return rccl_bfloat8(static_cast<float>(value));
+    }
+
+    template <typename T>
+    float storageValueAsFloat(T value)
+    {
+        return static_cast<float>(value);
+    }
+
+    template <>
+    float storageValueAsFloat<__half>(__half value)
+    {
+        return __half2float(value);
+    }
+}
+
+class PersistentCommunicatorMPITest
+    : public MPITestBase
+    , public ::testing::WithParamInterface<DtypeSizeCase>
+{
+protected:
+    // A reduced element sums at most nranks 0/1 terms, and fp8e5m2 holds consecutive integers exactly only up to 8.
+    static constexpr int kMaxRanksAssumed = 8;
+
+    static constexpr int    kSteps           = 64;
+    static constexpr int    kGradientBuckets = 24;
+    static constexpr size_t kParamCount      = 1024;
+    static constexpr size_t kActivationCount = 1024;
+    static constexpr size_t kMetricCount     = 64;
+    static constexpr size_t kShortShardCount = 4096;
+
+    // Large enough to outrun the GPU caches; every ncclTypeSize divides it, so the element count is exact.
+    static constexpr size_t kLargeShardBytes = 2 * 1024 * 1024;
+
+    // 29 gives each fill its own residue (see assert); 15 ones of 29 let the reduced sum hit every value 0..nranks.
+    static constexpr size_t kContributionModulus   = 29;
+    static constexpr size_t kContributionThreshold = 15;
+
+    static_assert(kGradientBuckets + 4 <= static_cast<int>(kContributionModulus),
+                  "kContributionModulus must leave a residue per bucket and payload buffer");
+
+    // Modulus + 1 puts bucket b at residue b, so reducing the wrong bucket cannot match a neighbour's payload.
+    static constexpr size_t kBucketStride = kContributionModulus + 1;
+
+    // Distinct residues give distinct fills only while every buffer holds at least kContributionModulus elements.
+    static constexpr size_t kParamIndexBase      = static_cast<size_t>(kGradientBuckets);
+    static constexpr size_t kGradIndexBase       = kParamIndexBase + 1;
+    static constexpr size_t kActivationIndexBase = kParamIndexBase + 2;
+    static constexpr size_t kMetricIndexBase     = kParamIndexBase + 3;
+
+    static size_t bucketCount(int bucket)
+    {
+        return kBucketCounts[static_cast<size_t>(bucket) % kBucketCountsPeriod];
+    }
+
+    static size_t bucketIndex(int bucket, size_t element)
+    {
+        return static_cast<size_t>(bucket) * kBucketStride + element;
+    }
+
+    // Step-keyed so a no-op collective leaves stale data; rank-keyed so a dropped plus doubled rank changes the sum.
+    static int contribution(int step, int rank, size_t index)
+    {
+        return ((index + static_cast<size_t>(step) + static_cast<size_t>(rank))
+                    % kContributionModulus
+                < kContributionThreshold)
+                   ? 1
+                   : 0;
+    }
+
+    using ReducedContributionTable = std::array<int, kContributionModulus>;
+
+    static ReducedContributionTable makeReducedContributionTable(int nranks)
+    {
+        ReducedContributionTable table{};
+        for(size_t phase = 0; phase < kContributionModulus; ++phase)
+        {
+            int sum = 0;
+            for(int r = 0; r < nranks; ++r)
+            {
+                sum += contribution(/*step=*/0, r, phase);
+            }
+            table[phase] = sum;
+        }
+        return table;
+    }
+
+    static int reducedContribution(const ReducedContributionTable& table, int step, size_t index)
+    {
+        return table[(index + static_cast<size_t>(step)) % kContributionModulus];
+    }
+
+    template <typename T>
+    void runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count);
+};
+
+template <typename T>
+void PersistentCommunicatorMPITest::runPersistentCommunicatorCase(ncclDataType_t dtype, size_t shard_count)
+{
+    ncclComm_t comm = getActiveCommunicator();
+    ASSERT_MPI_TRUE(comm != nullptr);
+    hipStream_t stream = getActiveStream();
+    ASSERT_MPI_TRUE(stream != nullptr);
+
+    const int rank      = comm->rank;
+    const int nranks    = comm->nRanks;
+    const int next_rank = (rank + 1) % nranks;
+    const int prev_rank = (rank - 1 + nranks) % nranks;
+
+    const size_t total_grad = shard_count * static_cast<size_t>(nranks);
+
+    void* param_buffer = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&param_buffer, kParamCount * sizeof(T)));
+    auto param_guard = makeDeviceBufferAutoGuard(param_buffer);
+
+    std::vector<void*>                 bucket_buffers(kGradientBuckets, nullptr);
+    std::vector<DeviceBufferAutoGuard> bucket_guards;
+    bucket_guards.reserve(kGradientBuckets);
+    for(int b = 0; b < kGradientBuckets; ++b)
+    {
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&bucket_buffers[b], bucketCount(b) * sizeof(T)));
+        bucket_guards.push_back(makeDeviceBufferAutoGuard(bucket_buffers[b]));
+    }
+
+    void* grad_flat  = nullptr;
+    void* grad_shard = nullptr;
+    void* grad_full  = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_flat, total_grad * sizeof(T)));
+    auto grad_flat_guard = makeDeviceBufferAutoGuard(grad_flat);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_shard, shard_count * sizeof(T)));
+    auto grad_shard_guard = makeDeviceBufferAutoGuard(grad_shard);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&grad_full, total_grad * sizeof(T)));
+    auto grad_full_guard = makeDeviceBufferAutoGuard(grad_full);
+
+    void* activation_send = nullptr;
+    void* activation_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_send, kActivationCount * sizeof(T)));
+    auto activation_send_guard = makeDeviceBufferAutoGuard(activation_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&activation_recv, kActivationCount * sizeof(T)));
+    auto activation_recv_guard = makeDeviceBufferAutoGuard(activation_recv);
+
+    void* metric_send = nullptr;
+    void* metric_recv = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_send, kMetricCount * sizeof(T)));
+    auto metric_send_guard = makeDeviceBufferAutoGuard(metric_send);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&metric_recv, kMetricCount * sizeof(T)));
+    auto metric_recv_guard = makeDeviceBufferAutoGuard(metric_recv);
+
+    std::vector<T> host_param(kParamCount);
+    std::vector<T> host_bucket(kLargestBucket);
+    std::vector<T> host_grad(total_grad);
+    std::vector<T> host_shard(shard_count);
+    std::vector<T> host_full(total_grad);
+    std::vector<T> host_activation(kActivationCount);
+    std::vector<T> host_metric(kMetricCount);
+
+    const ReducedContributionTable reduced_table = makeReducedContributionTable(nranks);
+
+    TEST_INFO("persistent communicator: %d steps, %d ranks, %d fused AllReduce buckets/step, "
+              "%zu elements (%zu KiB) ReduceScatter+AllGather/step",
+              kSteps,
+              nranks,
+              kGradientBuckets,
+              total_grad,
+              total_grad * sizeof(T) / 1024);
+
+    for(int step = 0; step < kSteps; ++step)
+    {
+        SCOPED_TRACE("step " + std::to_string(step));
+
+        for(size_t i = 0; i < kParamCount; ++i)
+        {
+            host_param[i] = makeStorageValue<T>(contribution(step, rank, kParamIndexBase + i));
+        }
+        for(size_t i = 0; i < total_grad; ++i)
+        {
+            host_grad[i] = makeStorageValue<T>(contribution(step, rank, kGradIndexBase + i));
+        }
+        for(size_t i = 0; i < kActivationCount; ++i)
+        {
+            host_activation[i]
+                = makeStorageValue<T>(contribution(step, rank, kActivationIndexBase + i));
+        }
+        for(size_t i = 0; i < kMetricCount; ++i)
+        {
+            host_metric[i] = makeStorageValue<T>(contribution(step, rank, kMetricIndexBase + i));
+        }
+
+        // Not asserted per call: each ASSERT_MPI_EQ is an MPI_Allreduce, and an early return would leave a group open.
+        int  step_status = 0;
+        auto recordHip   = [&step_status](hipError_t status) {
+            if(status != hipSuccess && step_status == 0)
+            {
+                step_status = static_cast<int>(status);
+            }
+        };
+        auto recordNccl = [&step_status](ncclResult_t status) {
+            if(status != ncclSuccess && step_status == 0)
+            {
+                step_status = kNcclStatusOffset + static_cast<int>(status);
+            }
+        };
+
+        recordHip(hipMemcpy(
+            param_buffer, host_param.data(), kParamCount * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            grad_flat, host_grad.data(), total_grad * sizeof(T), hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(activation_send,
+                            host_activation.data(),
+                            kActivationCount * sizeof(T),
+                            hipMemcpyHostToDevice));
+        recordHip(hipMemcpy(
+            metric_send, host_metric.data(), kMetricCount * sizeof(T), hipMemcpyHostToDevice));
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            const size_t count = bucketCount(b);
+            for(size_t i = 0; i < count; ++i)
+            {
+                host_bucket[i] = makeStorageValue<T>(contribution(step, rank, bucketIndex(b, i)));
+            }
+            recordHip(hipMemcpy(
+                bucket_buffers[b], host_bucket.data(), count * sizeof(T), hipMemcpyHostToDevice));
+        }
+
+        recordNccl(ncclBroadcast(
+            param_buffer, param_buffer, kParamCount, dtype, /*root=*/0, comm, stream));
+
+        recordNccl(ncclGroupStart());
+        for(int b = 0; b < kGradientBuckets; ++b)
+        {
+            recordNccl(ncclAllReduce(bucket_buffers[b],
+                                     bucket_buffers[b],
+                                     bucketCount(b),
+                                     dtype,
+                                     ncclSum,
+                                     comm,
+                                     stream));
+        }
+        recordNccl(ncclGroupEnd());
+
+        recordNccl(
+            ncclReduceScatter(grad_flat, grad_shard, shard_count, dtype, ncclSum, comm, stream));
+        recordNccl(ncclAllGather(grad_shard, grad_full, shard_count, dtype, comm, stream));
+
+        recordNccl(ncclGroupStart());
+        recordNccl(ncclSend(activation_send, kActivationCount, dtype, next_rank, comm, stream));
+        recordNccl(ncclRecv(activation_recv, kActivationCount, dtype, prev_rank, comm, stream));
+        recordNccl(ncclGroupEnd());
+
+        recordNccl(ncclReduce(
+            metric_send, metric_recv, kMetricCount, dtype, ncclSum, /*root=*/0, comm, stream));
+
+        // Checked before the sync: a rank whose enqueue failed has nothing to drain and runs ahead while peers hang.
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_EQ(0, step_status);
+
+        recordHip(hipStreamSynchronize(stream));
+
+        recordHip(hipMemcpy(
+            host_param.data(), param_buffer, kParamCount * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_shard.data(), grad_shard, shard_count * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_full.data(), grad_full, total_grad * sizeof(T), hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(host_activation.data(),
+                            activation_recv,
+                            kActivationCount * sizeof(T),
+                            hipMemcpyDeviceToHost));
+        recordHip(hipMemcpy(
+            host_metric.data(), metric_recv, kMetricCount * sizeof(T), hipMemcpyDeviceToHost));
+
+        size_t      mismatches     = 0;
+        const char* first_phase    = nullptr;
+        size_t      first_index    = 0;
+        float       first_expected = 0.0f;
+        float       first_actual   = 0.0f;
+
+        auto check = [&](const char* phase, size_t index, float expected, float actual) {
+            if(expected == actual)
+            {
+                return;
+            }
+            if(mismatches == 0)
+            {
+                first_phase    = phase;
+                first_index    = index;
+                first_expected = expected;
+                first_actual   = actual;
+            }
+            ++mismatches;
+        };
+
+        if(step_status == 0)
+        {
+            for(size_t i = 0; i < kParamCount; ++i)
+            {
+                check("broadcast_param",
+                      kParamIndexBase + i,
+                      static_cast<float>(contribution(step, /*rank=*/0, kParamIndexBase + i)),
+                      storageValueAsFloat(host_param[i]));
+            }
+
+            for(int b = 0; b < kGradientBuckets; ++b)
+            {
+                const size_t     count         = bucketCount(b);
+                const hipError_t bucket_status = hipMemcpy(host_bucket.data(),
+                                                           bucket_buffers[b],
+                                                           count * sizeof(T),
+                                                           hipMemcpyDeviceToHost);
+                recordHip(bucket_status);
+                if(bucket_status != hipSuccess)
+                {
+                    continue;
+                }
+                for(size_t i = 0; i < count; ++i)
+                {
+                    const size_t index = bucketIndex(b, i);
+                    check("allreduce_bucket",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_bucket[i]));
+                }
+            }
+
+            for(size_t i = 0; i < shard_count; ++i)
+            {
+                const size_t index
+                    = kGradIndexBase + static_cast<size_t>(rank) * shard_count + i;
+                check("reducescatter_shard",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_shard[i]));
+            }
+
+            for(size_t i = 0; i < total_grad; ++i)
+            {
+                const size_t index = kGradIndexBase + i;
+                check("allgather_grad_full",
+                      index,
+                      static_cast<float>(reducedContribution(reduced_table, step, index)),
+                      storageValueAsFloat(host_full[i]));
+            }
+
+            for(size_t i = 0; i < kActivationCount; ++i)
+            {
+                check("p2p_activation",
+                      kActivationIndexBase + i,
+                      static_cast<float>(
+                          contribution(step, prev_rank, kActivationIndexBase + i)),
+                      storageValueAsFloat(host_activation[i]));
+            }
+
+            if(rank == 0)
+            {
+                for(size_t i = 0; i < kMetricCount; ++i)
+                {
+                    const size_t index = kMetricIndexBase + i;
+                    check("reduce_metric",
+                          index,
+                          static_cast<float>(reducedContribution(reduced_table, step, index)),
+                          storageValueAsFloat(host_metric[i]));
+                }
+            }
+        }
+
+        ncclResult_t async_error = ncclSuccess;
+        recordNccl(ncclCommGetAsyncError(comm, &async_error));
+        recordNccl(async_error);
+
+        EXPECT_EQ(size_t{0}, mismatches)
+            << "rank " << rank << ", first mismatch in phase "
+            << (first_phase != nullptr ? first_phase : "none") << " at payload index "
+            << first_index << ": expected " << first_expected << ", got " << first_actual;
+        EXPECT_EQ(0, step_status) << "rank " << rank;
+        ASSERT_MPI_TRUE(mismatches == 0 && step_status == 0);
+    }
+}
+
+TEST_P(PersistentCommunicatorMPITest, HeterogeneousCollectiveAndP2pSequenceOnOneCommunicator)
+{
+    const DtypeSizeCase& test_case = GetParam();
+    SCOPED_TRACE(std::string("dtype=") + dtypeName(test_case.dtype)
+                 + " tier=" + sizeTierName(test_case.sizeTier));
+
+    // Single node: the cache-coherence defect this targets is on intra-node P2P, which a multi-host job routes via NET.
+    SKIP_UNLESS_MPI_PREREQS(/*min_processes=*/2,
+                            /*max_processes=*/kMaxRanksAssumed,
+                            kNoPowerOfTwoRequired,
+                            /*min_nodes=*/1,
+                            kRequireSingleNode);
+
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    const size_t shard_count
+        = (test_case.sizeTier == SizeTier::Large)
+              ? kLargeShardBytes / static_cast<size_t>(ncclTypeSize(test_case.dtype))
+              : kShortShardCount;
+
+    switch(test_case.dtype)
+    {
+    case ncclInt8: runPersistentCommunicatorCase<int8_t>(test_case.dtype, shard_count); break;
+    case ncclUint8: runPersistentCommunicatorCase<uint8_t>(test_case.dtype, shard_count); break;
+    case ncclInt32: runPersistentCommunicatorCase<int32_t>(test_case.dtype, shard_count); break;
+    case ncclUint32: runPersistentCommunicatorCase<uint32_t>(test_case.dtype, shard_count); break;
+    case ncclInt64: runPersistentCommunicatorCase<int64_t>(test_case.dtype, shard_count); break;
+    case ncclUint64: runPersistentCommunicatorCase<uint64_t>(test_case.dtype, shard_count); break;
+    case ncclFloat16: runPersistentCommunicatorCase<__half>(test_case.dtype, shard_count); break;
+    case ncclFloat32: runPersistentCommunicatorCase<float>(test_case.dtype, shard_count); break;
+    case ncclFloat64: runPersistentCommunicatorCase<double>(test_case.dtype, shard_count); break;
+    case ncclBfloat16: runPersistentCommunicatorCase<hip_bfloat16>(test_case.dtype, shard_count); break;
+    case ncclFloat8e4m3: runPersistentCommunicatorCase<rccl_float8>(test_case.dtype, shard_count); break;
+    case ncclFloat8e5m2: runPersistentCommunicatorCase<rccl_bfloat8>(test_case.dtype, shard_count); break;
+    default: FAIL() << "no storage type mapped for datatype " << static_cast<int>(test_case.dtype);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(DtypeSizeCases,
+                         PersistentCommunicatorMPITest,
+                         ::testing::ValuesIn(allDtypeSizeCases()),
+                         [](const ::testing::TestParamInfo<DtypeSizeCase>& info) {
+                             return std::string(dtypeName(info.param.dtype)) + "_"
+                                    + sizeTierName(info.param.sizeTier);
+                         });
 
 /**
  * @class TrafficClassMPITest

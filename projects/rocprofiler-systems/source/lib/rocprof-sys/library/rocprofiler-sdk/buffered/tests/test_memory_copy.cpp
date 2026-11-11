@@ -127,9 +127,9 @@ TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
                                    .src_address_value       = k_mock_address,
                                    .stream_handle           = k_mock_stream_id };
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(Eq(expected_thread_info)))
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(Eq(expected_thread_info)))
         .Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track(Eq(expected_track))).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track(Eq(expected_track))).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream(Eq(k_mock_stream_id))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy(Eq(expected_sample))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(false));
@@ -159,8 +159,8 @@ TEST(memory_copy_test, on_memory_copy_writes_timemory_bundle_when_enabled)
     const std::uint64_t expected_elapsed_ns =
         record.end_timestamp - record.start_timestamp;
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
@@ -207,8 +207,8 @@ TEST(memory_copy_test, on_memory_copy_skips_timemory_bundle_for_unknown_thread)
     mock_sdk::memory_copy_record_t record{};
     record.thread_id = externals::k_unknown_tid;
 
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_track).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));

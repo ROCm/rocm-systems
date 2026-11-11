@@ -363,4 +363,39 @@ TEST(L2MaintenanceMutexTest, ExclusiveUnlockWakesBlockingReaders) {
   EXPECT_EQ(admitted.load(std::memory_order_relaxed), kReaders);
 }
 
+TEST(L2MaintenanceMutexTest, RepeatedMaintenanceWakesArrivingReaders) {
+  rocjitsu::amdgpu::L2MaintenanceMutex mutex;
+  constexpr unsigned kReaders = 32;
+  constexpr unsigned kRounds = 4096;
+  constexpr size_t kPayloadWords = 8192;
+  std::array<unsigned, kPayloadWords> payload{};
+  std::barrier start(kReaders + 1), done(kReaders + 1);
+  std::atomic<unsigned> failures = 0;
+  std::vector<std::jthread> readers;
+  for (unsigned i = 0; i < kReaders; ++i) {
+    readers.emplace_back([&, i] {
+      for (unsigned round = 1; round <= kRounds; ++round) {
+        start.arrive_and_wait();
+        {
+          std::shared_lock lock(mutex);
+          if (payload[i] != round || payload[payload.size() - 1 - i] != round)
+            failures.fetch_add(1, std::memory_order_relaxed);
+        }
+        done.arrive_and_wait();
+      }
+    });
+  }
+  for (unsigned round = 1; round <= kRounds; ++round) {
+    std::unique_lock lock(mutex);
+    start.arrive_and_wait();
+    // Publish a cache-sized update while readers arrive at the closed gate.
+    // Unlock can race with their transition from spinning to atomic wait.
+    payload.fill(round);
+    lock.unlock();
+    done.arrive_and_wait();
+  }
+  readers.clear();
+  EXPECT_EQ(failures.load(), 0u);
+}
+
 } // namespace

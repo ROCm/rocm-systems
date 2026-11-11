@@ -184,6 +184,18 @@ __host__ void GDAHostContext::putmem_signal_on_stream(
                                           signal, sig_op, pe, stream);
 }
 
+__host__ void GDAHostContext::signal_add_on_stream(uint64_t *sig_addr,
+                                                   uint64_t signal, int pe,
+                                                   hipStream_t stream) {
+  host_interface->signal_add_on_stream(sig_addr, signal, pe, stream);
+}
+
+__host__ void GDAHostContext::signal_set_on_stream(uint64_t *sig_addr,
+                                                   uint64_t signal, int pe,
+                                                   hipStream_t stream) {
+  host_interface->signal_set_on_stream(sig_addr, signal, pe, stream);
+}
+
 __host__ void GDAHostContext::signal_wait_until_on_stream(uint64_t *sig_addr,
                                                           int cmp,
                                                           uint64_t cmp_value,

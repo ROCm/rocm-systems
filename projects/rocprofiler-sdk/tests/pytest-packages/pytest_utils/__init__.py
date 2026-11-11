@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,11 @@
 
 from __future__ import absolute_import
 
+import json
+import os
+import shutil
+import subprocess
+
 
 def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
     """Collapse a dictionary entry list into a single mapped value"""
@@ -41,3 +46,34 @@ def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
         return check_return({key: data[key][0]})
 
     return check_return(data)
+
+
+def gpu_uses_auto_perf_level(agent):
+    """Query GPU 0 only, using its agent metadata to limit the check to gfx11/gfx12."""
+    if not agent.get("name", "").startswith(("gfx11", "gfx12")):
+        return False
+
+    amd_smi = shutil.which("amd-smi") or os.path.join(
+        os.environ.get("ROCM_PATH", "/opt/rocm"), "bin", "amd-smi"
+    )
+    try:
+        result = subprocess.run(
+            [amd_smi, "metric", "--gpu", "0", "--perf-level", "--json"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            timeout=5,
+        )
+        metrics = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        # An unavailable performance level must not hide a counter regression.
+        return False
+    if isinstance(metrics, dict):
+        metrics = metrics.get("gpu_data", [])
+    return (
+        isinstance(metrics, list)
+        and len(metrics) == 1
+        and isinstance(metrics[0], dict)
+        and metrics[0].get("perf_level") == "AMDSMI_DEV_PERF_LEVEL_AUTO"
+    )

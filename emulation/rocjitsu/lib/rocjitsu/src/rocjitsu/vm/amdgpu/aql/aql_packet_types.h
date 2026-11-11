@@ -13,6 +13,10 @@ namespace rocjitsu::amdgpu {
 
 inline constexpr std::size_t kAqlPacketBytes = 64;
 
+/// @brief ROCr queue exception status for an aborted wave.
+/// @details Matches KFD_EC_MASK(EC_QUEUE_WAVE_ABORT).
+inline constexpr uint64_t kAqlQueueWaveAbort = uint64_t{1};
+
 /// @brief ROCr queue exception status for a wave memory violation.
 /// @details Matches KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION).
 inline constexpr uint64_t kAqlQueueMemoryViolation = uint64_t{1} << 4;

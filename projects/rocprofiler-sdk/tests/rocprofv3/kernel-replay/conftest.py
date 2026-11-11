@@ -54,6 +54,16 @@ def pytest_addoption(parser):
         default=None,
         help="optional exact number of logical dispatches expected in the counter records",
     )
+    parser.addoption("--n-elems", type=int, default=1048576)
+    parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
+    parser.addoption("--max-scaling-ratio", type=float, default=10.0)
+
+
+def pytest_generate_tests(metafunc):
+    if "common_counter" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "common_counter", metafunc.config.getoption("--common-counters")
+        )
 
 
 @pytest.fixture

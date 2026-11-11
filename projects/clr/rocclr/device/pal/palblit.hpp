@@ -438,6 +438,7 @@ class KernelBlitManager : public DmaBlitManager {
 
   //! Writes CPU raw data into GPU memory
   void writeRawData(device::Memory& memory,  //!< Memory object for data udpate
+                    size_t offset,           //!< Byte offset into the memory object
                     size_t size,             //!< Size of raw data
                     const void* data         //!< Raw data pointer
   ) const;

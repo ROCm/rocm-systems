@@ -234,11 +234,6 @@ amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* par
   return ret;
 }
 
-amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metrics_t* metrics) {
-  amdsmi_status_t ret = amdsmi_get_gpu_metrics_info(proc, metrics);
-  return ret;
-}
-
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   if (num_partition == nullptr) {
     return AMDSMI_STATUS_INVAL;

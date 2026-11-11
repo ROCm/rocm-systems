@@ -92,8 +92,6 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
 
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op) {
-  (void)sendbuff;
-  (void)recvbuff;
   if (comm == nullptr) {
     return false;
   }
@@ -131,6 +129,9 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   }
   if (bytes % 16) {
     // 16-byte alignment: the DDA kernels do 16-byte vectorized loads.
+    return false;
+  }
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
     return false;
   }
   if (bytes > kDdaFlatTreeThresholdBytes) {

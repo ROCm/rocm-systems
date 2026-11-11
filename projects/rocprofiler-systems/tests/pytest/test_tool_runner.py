@@ -9,9 +9,19 @@ argparse env handling, or conflict detection.
 """
 
 from __future__ import annotations
+
 import json
+import shutil
+import signal
+from typing import ClassVar
+
 import pytest
-from conftest import RocprofsysTest
+from conftest import (
+    RocprofsysTest,
+    assert_resolved_settings,
+    host_counters_expected,
+    parse_metadata_settings,
+)
 
 pytestmark = [pytest.mark.tool_runner]
 
@@ -39,15 +49,6 @@ SAMPLING_NO_DELAY = {"ROCPROFSYS_SAMPLING_DELAY": "0.1"}
 
 
 @pytest.fixture
-def cpu_workload(rocprof_config) -> str:
-    """CPU workload with real, instrumentable functions. Used by most tests here."""
-    try:
-        return str(rocprof_config.get_target_executable("parallel-overhead"))
-    except FileNotFoundError:
-        pytest.skip("parallel-overhead example not built")
-
-
-@pytest.fixture
 def gpu_workload(rocprof_config) -> str:
     """HIP workload that dispatches real GPU kernels."""
     try:
@@ -60,30 +61,6 @@ def parallel_overhead_args(workload: str) -> list[str]:
     """Trailing "-- parallel-overhead <args>" so the flags under test act on
     real work. `workload` is the resolved parallel-overhead executable path."""
     return ["--", workload, *PARALLEL_OVERHEAD_ARGS]
-
-
-def _parse_metadata_settings(metadata_file) -> dict:
-    """Parse a metadata-*.json settings block into {KEY: resolved value}.
-
-    metadata.json records what each setting actually resolved to, so it catches
-    storage/serialization bugs the stdout echo might miss.
-    """
-    settings = json.loads(metadata_file.read_text())["rocprofiler-systems"]["metadata"][
-        "settings"
-    ]
-    return {
-        key: entry["value"]
-        for key, entry in settings.items()
-        if isinstance(entry, dict) and "value" in entry
-    }
-
-
-def _resolved_settings(result) -> dict:
-    """Find the run's metadata-*.json at the default output location and parse it."""
-    metadata_file = result.get_output_file("metadata*.json")
-    if metadata_file is None:
-        pytest.fail(f"No metadata*.json found under {result.output_dir}")
-    return _parse_metadata_settings(metadata_file)
 
 
 def _profile_has_label(result, needle: str) -> bool:
@@ -129,10 +106,9 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
             fail_regex=[r"ROCPROFSYS_TRACE=\S*:\S*"],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE"] is False, (
-            f"metadata.json still resolved ROCPROFSYS_TRACE to "
-            f"{settings['ROCPROFSYS_TRACE']!r}"
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE": False},
         )
         assert result.perfetto_file is None, (
             f"profile-only should disable tracing, but found a perfetto trace "
@@ -203,10 +179,14 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE"] is True
-        assert settings["ROCPROFSYS_USE_ROCPD"] is True
-        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_TRACE": True,
+                "ROCPROFSYS_USE_ROCPD": True,
+                "ROCPROFSYS_PROFILE": False,
+            },
+        )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert result.rocpd_files, "expected at least one rocpd database file"
         self.assert_perfetto(
@@ -238,10 +218,14 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_USE_ROCPD"] is True
-        assert settings["ROCPROFSYS_TRACE"] is False
-        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_USE_ROCPD": True,
+                "ROCPROFSYS_TRACE": False,
+                "ROCPROFSYS_PROFILE": False,
+            },
+        )
         assert result.perfetto_file is None, (
             f"rocpd-only should not produce a perfetto trace, found "
             f"{result.perfetto_file}"
@@ -277,16 +261,14 @@ class TestOutputFormatSelection(RocprofsysTest):
         # ROCPROFSYS_USE_ROCPD/TRACE/PROFILE are library defaults here (not
         # explicit env vars), so they do not appear in the env dump.  Verify
         # the resolved values from the metadata JSON instead.
-        settings = _resolved_settings(result)
-        assert (
-            settings["ROCPROFSYS_USE_ROCPD"] is True
-        ), "expected ROCPROFSYS_USE_ROCPD to default to true"
-        assert (
-            settings["ROCPROFSYS_TRACE"] is False
-        ), "expected ROCPROFSYS_TRACE to default to false"
-        assert (
-            settings["ROCPROFSYS_PROFILE"] is False
-        ), "expected ROCPROFSYS_PROFILE to default to false"
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_USE_ROCPD": True,
+                "ROCPROFSYS_TRACE": False,
+                "ROCPROFSYS_PROFILE": False,
+            },
+        )
         assert result.rocpd_files, "default run should produce a rocpd database"
         assert result.perfetto_file is None, (
             f"default run should not produce a perfetto trace, found "
@@ -316,10 +298,14 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE"] is True
-        assert settings["ROCPROFSYS_USE_ROCPD"] is False
-        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_TRACE": True,
+                "ROCPROFSYS_USE_ROCPD": False,
+                "ROCPROFSYS_PROFILE": False,
+            },
+        )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert not result.rocpd_files, (
             f"proto-only should not produce a rocpd database, found "
@@ -357,9 +343,10 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE"] is True
-        assert settings["ROCPROFSYS_PROFILE"] is False
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE": True, "ROCPROFSYS_PROFILE": False},
+        )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert result.perfetto_file.suffix == ".pftrace", (
             f"expected a .pftrace trace regardless of the token used, found "
@@ -443,10 +430,15 @@ class TestConfigOutput(RocprofsysTest):
             )
         self.assert_file_exists(metadata_file, description="Sample metadata output")
 
-        settings = _parse_metadata_settings(metadata_file)
-        assert settings["ROCPROFSYS_CONFIG_FILE"] == str(empty_cfg)
-        assert settings["ROCPROFSYS_OUTPUT_PATH"] == str(output_dir)
-        assert settings["ROCPROFSYS_OUTPUT_PREFIX"] == output_prefix
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_CONFIG_FILE": str(empty_cfg),
+                "ROCPROFSYS_OUTPUT_PATH": str(output_dir),
+                "ROCPROFSYS_OUTPUT_PREFIX": output_prefix,
+            },
+            metadata_file=metadata_file,
+        )
 
 
 # =============================================================================
@@ -535,12 +527,7 @@ class TestCliFlagEnvMapping(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        for key, expected in expected_settings.items():
-            assert settings[key] == expected, (
-                f"{flag_args}: expected {key}={expected!r} in metadata.json, "
-                f"got {settings[key]!r}"
-            )
+        assert_resolved_settings(result, expected_settings)
 
         if artifact_kind == "trace":
             assert result.perfetto_file is not None, (
@@ -592,9 +579,10 @@ class TestWaitDuration(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE_DELAY"] == 1.5
-        assert settings["ROCPROFSYS_SAMPLING_DELAY"] == 1.5
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_DELAY": 1.5, "ROCPROFSYS_SAMPLING_DELAY": 1.5},
+        )
 
     def test_duration_sets_duration_envs(self, target, cpu_workload):
         result = self.run_test(
@@ -611,9 +599,10 @@ class TestWaitDuration(RocprofsysTest):
             ],
         )
 
-        settings = _resolved_settings(result)
-        assert settings["ROCPROFSYS_TRACE_DURATION"] == 2.5
-        assert settings["ROCPROFSYS_SAMPLING_DURATION"] == 2.5
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_DURATION": 2.5, "ROCPROFSYS_SAMPLING_DURATION": 2.5},
+        )
 
 
 # =============================================================================
@@ -637,7 +626,10 @@ class TestTracePeriods(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
-        assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2"
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:2"},
+        )
 
     def test_repeated_periods_are_space_joined(self, target, cpu_workload):
         result = self.run_test(
@@ -653,7 +645,267 @@ class TestTracePeriods(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2 3:2"])
-        assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2 3:2"
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:2 3:2"},
+        )
+
+    def test_trace_periods_flag_sets_env(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--trace-periods", "0:2", *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:2"},
+        )
+
+
+# =============================================================================
+# --trace-clock-id (CLI -> settings). Window behavior on the controlled
+# workload lives in test_time_window.py.
+# =============================================================================
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("tool-runner-trace-clock-id")
+@pytest.mark.parametrize("target", TARGETS)
+class TestTraceClockId(RocprofsysTest):
+    """--trace-clock-id reaches ROCPROFSYS_TRACE_PERIOD_CLOCK_ID."""
+
+    def test_cputime_reaches_metadata(self, target, cpu_workload):
+        flag_args = ["--trace-clock-id", "cputime"]
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=[*flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result, pass_regex=[r"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID=cputime"]
+        )
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime"},
+        )
+
+
+# =============================================================================
+# --mode coverage: CLI -> settings and disabled trace artifacts. Functional
+# coverage generation is in test_code_coverage.py.
+# =============================================================================
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("tool-runner-mode-coverage")
+@pytest.mark.parametrize("target", TARGETS)
+class TestModeCoverage(RocprofsysTest):
+    """--mode coverage turns tracing/sampling off and skips trace artifacts."""
+
+    MODE_FLAGS: ClassVar[list[str]] = ["--mode", "coverage"]
+
+    def test_disables_trace_and_sampling(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[*self.MODE_FLAGS, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_MODE": "coverage",
+                "ROCPROFSYS_TRACE": False,
+                "ROCPROFSYS_USE_SAMPLING": False,
+                "ROCPROFSYS_USE_PROCESS_SAMPLING": False,
+                "ROCPROFSYS_USE_CODE_COVERAGE": True,
+            },
+        )
+        if result.perfetto_file is not None:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a Perfetto "
+                f"trace was still written: {result.perfetto_file}"
+            )
+        if result.rocpd_files:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a ROCpd "
+                f"database was still written: {[str(f) for f in result.rocpd_files]}"
+            )
+
+
+# =============================================================================
+# --profile-diff writes Timemory .diff. files against a prior profile. No HIP
+# dependency; profiles come from the CPU workload.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-profile-diff")
+@pytest.mark.parametrize("target", TARGETS)
+class TestProfileDiff(RocprofsysTest):
+    """--profile-diff writes wall_clock.diff.{txt,json} next to the new run."""
+
+    def test_writes_diff_against_baseline(self, target, cpu_workload, test_output_dir):
+        first = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=["-P", *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        profiles = [
+            path
+            for path in first.output_dir.iterdir()
+            if path.is_file() and "wall_clock" in path.name and ".diff." not in path.name
+        ]
+        if not profiles:
+            pytest.fail(f"no wall_clock profile under {first.output_dir} to diff against")
+        baseline = test_output_dir / "baseline"
+        baseline.mkdir()
+        for profile in profiles:
+            shutil.copy2(profile, baseline / profile.name)
+
+        flag_args = ["--profile-diff", str(baseline)]
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=["-P", *flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_DIFF_OUTPUT": True,
+                "ROCPROFSYS_INPUT_PATH": str(baseline),
+            },
+        )
+        if any(baseline.glob("*.diff.*")):
+            pytest.fail(f"--profile-diff wrote a diff file into the baseline {baseline}")
+        diff_txt = result.output_dir / "wall_clock.diff.txt"
+        diff_json = result.output_dir / "wall_clock.diff.json"
+        if not diff_txt.is_file() or not diff_json.is_file():
+            pytest.fail(
+                f"--profile-diff did not write wall_clock.diff.txt and "
+                f"wall_clock.diff.json under {result.output_dir}"
+            )
+        self.assert_file_regex(
+            diff_txt,
+            pass_regex=[
+                r"vs\.",
+                r"baseline/wall_clock\.json",
+                r"sec\s+\|\s+-?\d+\.\d+",
+            ],
+            subtest_name="wall_clock.diff.txt compares the baseline in seconds",
+        )
+        self.assert_file_regex(
+            diff_json,
+            pass_regex=[r'"unit_repr"\s*:\s*"sec"', r'"repr_data"\s*:\s*-?\d+\.\d+'],
+            subtest_name="wall_clock.diff.json has second values",
+        )
+
+
+# =============================================================================
+# --sampling-cputime-signal on the CPU workload: armed-signal log + samples.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-cputime-signal")
+@pytest.mark.parametrize("target", TARGETS)
+class TestSamplingCputimeSignal(RocprofsysTest):
+    """--sampling-cputime-signal moves the cputime sampler off SIGPROF."""
+
+    CPUTIME_SIGNAL = str(signal.SIGVTALRM.value)
+    SIGNAL_FLAGS: ClassVar[list[str]] = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
+
+    def test_override_keeps_sampling(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[
+                "-T",
+                "-S",
+                "cputime",
+                *self.SIGNAL_FLAGS,
+                *parallel_overhead_args(cpu_workload),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[rf"\[SIG{self.CPUTIME_SIGNAL}\] Sampler for thread 0"],
+            fail_regex=[rf"\[SIG{signal.SIGPROF.value}\] Sampler for thread"],
+        )
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL": int(self.CPUTIME_SIGNAL)},
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["fib"],
+            subtest_name="CPU samples still recorded on the overridden signal",
+        )
+
+
+# =============================================================================
+# -H --cpus --cpu-metrics: host counters on a CPU workload.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-cpu-metrics")
+@pytest.mark.parametrize("target", TARGETS)
+class TestCpuMetrics(RocprofsysTest):
+    """-H --cpus --cpu-metrics selects frequency/load host counters."""
+
+    CPU_METRICS_FLAGS: ClassVar[list[str]] = [
+        "-H",
+        "--cpus",
+        "0",
+        "--cpu-metrics",
+        "frequency,load",
+    ]
+
+    def test_frequency_and_load_counters(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[*self.CPU_METRICS_FLAGS, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_CPU_METRICS": "frequency,load",
+                "ROCPROFSYS_CPU_FREQ_ENABLED": True,
+                "ROCPROFSYS_SAMPLING_CPUS": "0",
+            },
+        )
+        # Workload still has to show up in the trace.
+        self.assert_perfetto(
+            result,
+            label_substrings=["fib"],
+            subtest_name="CPU workload recorded with host metrics enabled",
+        )
+        if "Agent not found" in result.test_output and "type: CPU" in result.test_output:
+            pytest.skip(
+                "CPU agent unavailable; CLI settings checked, host Frequency/Load "
+                "counters not sampled on this host"
+            )
+        self.assert_perfetto(
+            result,
+            subtest_name="host frequency and load counters",
+            counter_names_present=host_counters_expected(["Frequency (S)", "Load (S)"]),
+        )
 
 
 # =============================================================================
@@ -690,7 +942,7 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
 
         # -D must set the device-sampling env var.
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_USE_AMD_SMI=true"])
-        assert _resolved_settings(result)["ROCPROFSYS_USE_AMD_SMI"] is True
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": True})
 
         assert (
             result.perfetto_file is not None
@@ -706,3 +958,207 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
         assert (
             b"GFX Busy" in trace
         ), f"-D trace at {result.perfetto_file} has no GPU device counters"
+
+
+# ============================================================================
+# Backend -I / -E flags. Host backends (locks, kokkosp, mpip, ompt) run on
+# parallel-overhead. amd-smi runs transpose. -I rcclp is covered on an RCCL
+# workload in test_rccl.py.
+# ============================================================================
+
+RUN_TARGET = "rocprof-sys-run"
+
+_LOCKS_ON = {
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
+}
+
+_INCLUDE_ALL_OFF = {
+    "ROCPROFSYS_USE_MPIP": "OFF",
+    "ROCPROFSYS_USE_OMPT": "OFF",
+    "ROCPROFSYS_USE_KOKKOSP": "OFF",
+    "ROCPROFSYS_USE_RCCLP": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "OFF",
+}
+
+# flag_args, pass_regex, seed_env. The seed is the opposite of what the flag
+# sets, so the assertion only holds if the flag actually flipped it.
+BACKEND_ENV_CASES = [
+    pytest.param(
+        ["-I", "all"],
+        [
+            "ROCPROFSYS_USE_MPIP=true",
+            "ROCPROFSYS_USE_OMPT=true",
+            "ROCPROFSYS_USE_KOKKOSP=true",
+            "ROCPROFSYS_USE_RCCLP=true",
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=true",
+        ],
+        _INCLUDE_ALL_OFF,
+        marks=pytest.mark.mpi,
+        id="include-all",
+    ),
+    pytest.param(
+        ["-I", "mpip"],
+        ["ROCPROFSYS_USE_MPIP=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF"},
+        marks=pytest.mark.mpi,
+        id="mpip",
+    ),
+    pytest.param(
+        ["-I", "ompt"],
+        ["ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=pytest.mark.backend_include_ompt,
+        id="ompt",
+    ),
+    pytest.param(
+        ["-I", "kokkosp"],
+        ["ROCPROFSYS_USE_KOKKOSP=true"],
+        {"ROCPROFSYS_USE_KOKKOSP": "OFF"},
+        id="kokkosp",
+    ),
+    pytest.param(
+        ["-I", "mpip", "-I", "ompt"],
+        ["ROCPROFSYS_USE_MPIP=true", "ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF", "ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=[pytest.mark.mpi, pytest.mark.backend_include_ompt],
+        id="mpip-ompt",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_LOCKS=false"],
+        _LOCKS_ON,
+        id="mutex-locks",
+    ),
+    pytest.param(
+        ["-E", "rw-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false"],
+        _LOCKS_ON,
+        id="rw-locks",
+    ),
+    pytest.param(
+        ["-E", "spin-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false"],
+        _LOCKS_ON,
+        id="spin-locks",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks", "rw-locks", "spin-locks"],
+        [
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false",
+        ],
+        _LOCKS_ON,
+        id="all-locks",
+    ),
+]
+
+_ROCM_KERNEL_ARGS = ["--rocm=hip,kernel"]
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.sys_run
+@pytest.mark.backend_flags
+@pytest.mark.class_name("backend-flags-env")
+class TestBackendFlagsEnv(RocprofsysTest):
+    @pytest.mark.parametrize("flag_args, pass_regex, seed_env", BACKEND_ENV_CASES)
+    def test_resolved_setting(
+        self, domain_backend_flag_env, cpu_workload, flag_args, pass_regex, seed_env
+    ):
+        env = {**domain_backend_flag_env, **seed_env}
+        result = self.run_test(
+            "baseline",
+            target=RUN_TARGET,
+            env=env,
+            run_args=[*flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+        _assert_backend_settings(result, pass_regex)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sampling
+@pytest.mark.backend_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("backend-flags-artifacts")
+class TestBackendFlagsGpuArtifacts(RocprofsysTest):
+    def test_include_amd_smi(
+        self, domain_backend_flag_env, validation_rules_dir, transpose_baseline_rules
+    ):
+        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "OFF"}
+        result = self.run_transpose_sample(env, ["-I", "amd-smi", *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": True})
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto GPU counters",
+            categories=["hip_runtime_api"],
+            counter_names_present=["GFX Busy", "Temperature", "Power"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                *transpose_baseline_rules,
+                validation_rules_dir / "domain-flags" / "gpu-default-metrics-rules.json",
+            ],
+        )
+
+    def test_exclude_amd_smi(
+        self, domain_backend_flag_env, validation_rules_dir, transpose_baseline_rules
+    ):
+        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "ON"}
+        result = self.run_transpose_sample(env, ["-E", "amd-smi", *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=false"])
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": False})
+        # thread_cpu_time is only here so the validator lists the counter tracks.
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto without GPU counters",
+            categories=["hip_runtime_api"],
+            counter_names_present=["thread_cpu_time"],
+            fail_regex=[r"GPU \[\d+\]"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                *transpose_baseline_rules,
+                validation_rules_dir / "domain-flags" / "amd-smi-disabled-rules.json",
+            ],
+        )
+
+
+def _assert_backend_settings(result, pass_regex: list[str]) -> None:
+    """Assert the settings in pass_regex that are registered in this build.
+
+    Skip only when none of them are; a build-dependent key (rcclp) missing
+    from the build must not hide a real failure on the rest of the case.
+    """
+    metadata = result.get_output_file("metadata*.json")
+    if metadata is None:
+        pytest.fail(f"No metadata.json found under {result.output_dir}")
+    available = parse_metadata_settings(metadata)
+    expected = {}
+    unregistered = []
+    for entry in pass_regex:
+        key, value = entry.split("=", 1)
+        if key not in available:
+            unregistered.append(key)
+            continue
+        expected[key] = value == "true"
+    if not expected:
+        pytest.skip(f"Not registered as a setting in this build: {unregistered}")
+    assert_resolved_settings(result, expected)
+    if unregistered:
+        print(f"Not registered as a setting in this build, skipped: {unregistered}")

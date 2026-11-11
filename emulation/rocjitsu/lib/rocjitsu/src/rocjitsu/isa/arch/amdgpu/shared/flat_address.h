@@ -9,6 +9,27 @@ namespace rocjitsu::amdgpu {
 
 enum class FlatPrivateLayout { None, Interleaved, Linear, EncodedLane };
 
+/// @brief Generic-private backing layout for each supported architecture.
+inline constexpr FlatPrivateLayout flat_private_layout(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return FlatPrivateLayout::Interleaved;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return FlatPrivateLayout::Linear;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return FlatPrivateLayout::EncodedLane;
+  default:
+    return FlatPrivateLayout::None;
+  }
+}
+
 struct FlatAddress {
   uint64_t value;
   bool private_address = false;

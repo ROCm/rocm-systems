@@ -47,6 +47,8 @@
     #include <link.h>
 #endif
 
+#include <cstring>
+
 #if defined(__linux__)
     #include <amdgpu_drm.h>
 #endif
@@ -142,6 +144,10 @@ hsa_status_t KfdDriver::DisableRuntime() {
 }
 
 hsa_status_t KfdDriver::Init() {
+  // Bind XNACK before the topology snapshot. Aperture init reads the mode
+  // once, before HSA_SVM_HOST_UNREGISTER_DEBUG, and does not read it again.
+  bool xnack_mode = BindXnackMode();
+
   // Own one snapshot from before the debug probe through BuildTopology().
   if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
@@ -171,7 +177,6 @@ hsa_status_t KfdDriver::Init() {
   if (version_.KernelInterfaceMajorVersion == 1 && version_.KernelInterfaceMinorVersion == 0)
     core::g_use_interrupt_wait = false;
 
-  bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
   runtime_guard.Dismiss();
@@ -336,8 +341,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
@@ -347,6 +351,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);
+
+      // Suballocated fragments may hold stale data from previously freed
+      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
+      // kernel pages. Zero system-memory fragments so callers that rely on a
+      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
+      // buffer used as an atomic accumulator) behave as they do with a
+      // dedicated BO. Local (device) memory is not host-writable here and is
+      // left untouched (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
           HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
@@ -429,7 +444,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||

@@ -78,6 +78,54 @@ def test_split_preserves_only_selected_database_payloads(tmp_path, selected):
     assert not list((dest / "miopen_lib_generic").rglob("*.db.txt"))
 
 
+def test_split_routes_stepping_directory_to_base_arch(tmp_path):
+    # hipBLASLt installs gfx1250 A0 kernels under library/gfx1250v0/ with
+    # gfx1250 filenames; every file there must ship with the gfx1250 bundle.
+    source = tmp_path / "blas_lib_gfx125X-all"
+    prefix = "math-libs/BLAS/hipBLASLt/stage"
+    library = source / prefix / "lib/hipblaslt/library"
+    layout = {
+        "gfx1250": "gfx1250",
+        "gfx1250v0": "gfx1250",
+        "gfx1250-strict": "gfx1250-strict",
+    }
+    for directory, target in layout.items():
+        (library / directory).mkdir(parents=True)
+        for name in [
+            f"TensileLibrary_lazy_{target}.dat.zlib",
+            f"TensileLibrary_Type_HH_{target}.dat.zlib",
+            f"TensileLibrary_Type_HH_{target}.co",
+        ]:
+            (library / directory / name).write_text(directory)
+    write_artifact_manifest(source, [prefix])
+    dest = tmp_path / "split"
+    splitter = ArtifactSplitter(
+        artifact_prefix="blas_lib",
+        toolchain=Toolchain(),
+        database_handlers=[HipBLASLtHandler()],
+        gpu_targets=["gfx1250", "gfx1250-strict"],
+    )
+    splitter.split(source, dest)
+
+    def library_dirs(artifact):
+        output = dest / artifact / prefix / "lib/hipblaslt/library"
+        return {d.name: sorted(p.name for p in d.iterdir()) for d in output.iterdir()}
+
+    assert set(library_dirs("blas_lib_gfx1250")) == {"gfx1250", "gfx1250v0"}
+    assert len(library_dirs("blas_lib_gfx1250")["gfx1250v0"]) == 3
+    assert set(library_dirs("blas_lib_gfx1250-strict")) == {"gfx1250-strict"}
+    assert not [
+        p
+        for p in (dest / "blas_lib_generic").rglob("*")
+        if p.is_file() and "hipblaslt/library" in p.as_posix()
+    ]
+    verifier = ArtifactVerifier(dest, Toolchain())
+    verifier._check_architecture_separation(
+        [dest / "blas_lib_gfx1250", dest / "blas_lib_gfx1250-strict"]
+    )
+    assert verifier.results[-1].passed
+
+
 def test_archive_and_bundler_identity(tmp_path):
     target = "gfx1250-strict"
     assert (
@@ -129,6 +177,55 @@ def test_verifier_detects_target_directory_contamination(tmp_path):
     directory = artifact / "stage/lib/rocblas/library/gfx1250-strict"
     directory.mkdir(parents=True)
     (directory / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
+@pytest.mark.parametrize(
+    "artifact_target,passed", [("gfx1250", True), ("gfx1250-strict", False)]
+)
+def test_verifier_maps_stepping_directory_to_base_arch(
+    tmp_path, artifact_target, passed
+):
+    artifact = tmp_path / f"blas_lib_{artifact_target}"
+    directory = artifact / "stage/lib/hipblaslt/library/gfx1250v0"
+    directory.mkdir(parents=True)
+    (directory / "TensileLibrary_lazy_gfx1250.dat.zlib").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert verifier.results[-1].passed == passed
+
+
+def test_verifier_stepping_alias_scoped_to_known_libraries(tmp_path):
+    """The gfx1250v0 alias is scoped to hipBLASLt/hipSPARSELt and must not
+    apply under rocblas/library/, even though the directory name matches."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    directory = artifact / "stage/lib/rocblas/library/gfx1250v0"
+    directory.mkdir(parents=True)
+    (directory / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
+@pytest.mark.parametrize(
+    "directory",
+    [
+        # Wrong revision: only v0 is a known, verified stepping.
+        "gfx1250v1",
+        # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+        "gfx90av0",
+    ],
+)
+def test_verifier_flags_unknown_stepping_directory(tmp_path, directory):
+    """Only gfx1250v0 is a known, verified exception. A hypothetical, unverified
+    stepping suffix must still be flagged as contamination rather than silently
+    passed through, since we have no evidence it belongs with its base arch."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    stepping_dir = artifact / "stage/lib/hipblaslt/library" / directory
+    stepping_dir.mkdir(parents=True)
+    (stepping_dir / "TensileManifest.txt").write_text("data")
     verifier = ArtifactVerifier(tmp_path, Toolchain())
     verifier._check_architecture_separation([artifact])
     assert not verifier.results[-1].passed

@@ -1422,9 +1422,9 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// is the hwmon pwm1 duty cycle, whose maximum is AMDSMI_MAX_FAN_SPEED (255). On GPUs with the
+/// gpu_od sysfs interface, the range accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od
+/// OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -1482,8 +1482,9 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
+/// This is the hwmon pwm1_max ceiling, AMDSMI_MAX_FAN_SPEED (255), and pairs with
+/// `amdsmi_get_gpu_fan_speed()`. On GPUs with the gpu_od sysfs interface, the range accepted by
+/// `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -3527,7 +3528,7 @@ pub fn amdsmi_get_gpu_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
     block: AmdsmiGpuBlockT,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_ecc_count(
         processor_handle,
         block,
@@ -5076,6 +5077,52 @@ pub fn amdsmi_get_gpu_device_bdf(
     Ok(bdf)
 }
 
+/// Retrieves the DRM, HSA, HIP, and physical enumeration information for a GPU.
+///
+/// The returned [`AmdsmiEnumerationInfoT`] includes the DRM render node, HIP
+/// UUID, and enumeration IDs. The HIP UUID is distinct from the device UUID
+/// returned by [`amdsmi_get_gpu_device_uuid`].
+///
+/// Fields the library cannot determine are set to `0xFFFFFFFF` (`u32::MAX`)
+/// and the call still returns `Ok`. This applies to `hsa_id`, `hip_id`,
+/// `oam_id` and `physical_acc_id`, and to `drm_render` and `drm_card` when the
+/// device identifiers cannot be read. Compare against `u32::MAX` before using
+/// these values.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A processor handle obtained after initializing AMD SMI.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// # fn example(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult<()> {
+/// let info = amdsmi_get_gpu_enumeration_info(processor_handle)?;
+/// println!("DRM render node: renderD{}", info.drm_render);
+/// println!("HSA ID: {}, HIP ID: {}", info.hsa_id, info.hip_id);
+/// println!("HIP UUID: {}", info.hip_uuid());
+/// if info.oam_id == u32::MAX {
+///     println!("OAM ID is not available");
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns the underlying [`AmdsmiStatusT`] if the query fails.
+pub fn amdsmi_get_gpu_enumeration_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiEnumerationInfoT> {
+    let mut info = MaybeUninit::<AmdsmiEnumerationInfoT>::zeroed();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_enumeration_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    Ok(unsafe { info.assume_init() })
+}
+
 /// Get the UUID of the GPU device with the specified processor handle.
 ///
 /// Given a processor handle `processor_handle`, this function retrieves the UUID of the specified GPU device.
@@ -5633,7 +5680,7 @@ pub fn amdsmi_get_gpu_vbios_info(
 pub fn amdsmi_get_gpu_activity(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiEngineUsageT> {
-    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_activity(
         processor_handle,
         info.as_mut_ptr()
@@ -5684,7 +5731,7 @@ pub fn amdsmi_get_gpu_activity(
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
-    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
         info.as_mut_ptr()
@@ -5790,7 +5837,7 @@ pub fn amdsmi_get_clock_info(
     processor_handle: AmdsmiProcessorHandle,
     clk_type: AmdsmiClkTypeT,
 ) -> AmdsmiResult<AmdsmiClkInfoT> {
-    let mut info = MaybeUninit::<AmdsmiClkInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiClkInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_clock_info(
         processor_handle,
         clk_type,
@@ -5893,7 +5940,7 @@ pub fn amdsmi_get_gpu_vram_usage(
 pub fn amdsmi_get_gpu_total_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_total_ecc_count(
         processor_handle,
         ec.as_mut_ptr()
@@ -6258,6 +6305,121 @@ pub fn amdsmi_get_link_topology(
     ));
     let topology_info = unsafe { topology_info.assume_init() };
     Ok(topology_info)
+}
+
+/// Retrieves the CUID of the GPU or GPU partition with the specified processor handle.
+///
+/// The derived CUID names the component without disclosing its serial and is the value to
+/// record. The primary CUID is empty unless the caller is root. A temporary CUID has
+/// `auxiliary` set; do not record it alongside canonical CUIDs.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the CUID is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiCuidInfoT>` - Returns `Ok(AmdsmiCuidInfoT)` containing the [`AmdsmiCuidInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     match amdsmi_get_gpu_cuid_info(processor_handle) {
+///         Ok(info) => println!(
+///             "CUID: {} source: {:?} temporary: {}",
+///             info.derived(),
+///             info.source,
+///             info.auxiliary != 0
+///         ),
+///         Err(e) => panic!("Failed to get the CUID: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_cuid_info` call fails.
+pub fn amdsmi_get_gpu_cuid_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiCuidInfoT> {
+    let mut info = MaybeUninit::<AmdsmiCuidInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cuid_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Lists every component on the node that has a CUID.
+///
+/// Covers the platform, each CPU package, each AMD GPU or GPU partition, each NPU and each NIC
+/// function, ordered by component type, then BDF, then device path. No processor handle is
+/// needed, so components amd-smi does not manage are included.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiCuidComponentT>>` - Returns `Ok(Vec<AmdsmiCuidComponentT>)` containing the list of [`AmdsmiCuidComponentT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     match amdsmi_get_cuid_components() {
+///         Ok(components) => {
+///             for component in components {
+///                 println!(
+///                     "{:?} {} {}",
+///                     component.info.component_type,
+///                     component.bdf(),
+///                     component.info.derived()
+///                 );
+///             }
+///         }
+///         Err(e) => println!("Failed to list the CUID components: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_cuid_components` call fails.
+pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
+    loop {
+        let mut count: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_cuid_components(
+            &mut count,
+            null_mut()
+        ));
+
+        let mut components = Vec::<AmdsmiCuidComponentT>::with_capacity(count as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_cuid_components(&mut count, components.as_mut_ptr())
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                unsafe { components.set_len(count as usize) };
+                return Ok(components);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize => continue,
+            _ => return Err(status),
+        }
+    }
 }
 
 /// A macro to get all the GPU processor handles directly.

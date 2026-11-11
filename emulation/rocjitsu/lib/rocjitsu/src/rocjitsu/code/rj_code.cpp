@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <new>
+#include <string>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -45,13 +46,19 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
   if (!path || !exec)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto executable = std::make_unique<Executable>(path);
-  if (!executable->is_valid())
-    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  try {
+    auto handle = std::make_unique<rj_code_executable_t>();
+    handle->exec = std::make_unique<Executable>(path);
+    if (!handle->exec->is_valid())
+      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
 
-  *exec = new rj_code_executable_t{};
-  (*exec)->exec = std::move(executable);
-  return ROCJITSU_STATUS_SUCCESS;
+    *exec = handle.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  } catch (const std::bad_alloc &) {
+    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
+  }
 }
 
 void rj_code_executable_retain(rj_code_executable_t *exec) {
@@ -143,7 +150,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        DecodeResult decoded = decoder->decode(&inst_data[word_index]);
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
         if (decoded.failed())
           return ROCJITSU_STATUS_ERROR;
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
@@ -332,7 +340,7 @@ rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint
   if (!inst || !buf || buf_size == 0)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
+  const std::string dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
   std::strncpy(buf, dis.c_str(), buf_size - 1);
   buf[buf_size - 1] = '\0';
   return ROCJITSU_STATUS_SUCCESS;

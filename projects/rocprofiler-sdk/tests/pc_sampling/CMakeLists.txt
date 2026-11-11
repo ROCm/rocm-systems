@@ -81,5 +81,6 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     SKIP_REGULAR_EXPRESSION "PC sampling unavailable"
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
