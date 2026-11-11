@@ -9,7 +9,7 @@
 #
 # The tree holds the test binaries and one CTestTestfile.cmake that locates
 # itself and points the tests at <prefix>/bin/hrr-playback through
-# HRR_PLAYBACK_EXE (read by hrr_playback_exe() in tests/include/hrr_test_common.hh).
+# HRR_PLAYBACK_BIN (read by hrr_playback_bin() in tests/include/hrr_test_common.hh).
 # The GPU integration suite and the Python generator-rules test are not
 # installed: they need a GPU or the source tree.
 
@@ -29,7 +29,7 @@ foreach(_t hrr-unit-tests hrr-handler-tests)
     list(APPEND _hrr_installed_targets ${_t})
     # The HSA runtime leaves allocations at exit, which LeakSanitizer reports as
     # a failure of the ASan-built handler tests; see unit/CMakeLists.txt. The
-    set(_hrr_env "HRR_PLAYBACK_EXE=\${_hrr_prefix}/bin/hrr-playback")
+    set(_hrr_env "HRR_PLAYBACK_BIN=\${_hrr_prefix}/bin/hrr-playback")
     if(_t STREQUAL "hrr-handler-tests")
       set(_hrr_env "ASAN_OPTIONS=detect_leaks=0;${_hrr_env}")
     endif()

@@ -73,11 +73,11 @@ target_compile_definitions(hrr-unit-tests PRIVATE
 #     tree).
 if(TARGET hrr-playback)
   target_compile_definitions(hrr-unit-tests PRIVATE
-    HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>")
+    HRR_PLAYBACK_BIN="$<TARGET_FILE:hrr-playback>")
   add_dependencies(hrr-unit-tests hrr-playback)
 else()
   target_compile_definitions(hrr-unit-tests PRIVATE
-    HRR_PLAYBACK_EXE="hrr-playback")
+    HRR_PLAYBACK_BIN="hrr-playback")
 endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)

@@ -297,7 +297,7 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
 }
 #endif
 
-#if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
+#if defined(HRR_PLAYBACK_BIN) && defined(HRR_TEST_EXE)
 // Replay matches the recording only if it wrote each launch's input back; its
 // own buffer never sees the host's stores. With HIP_HRR_HOST_SNAPSHOTS=0 there
 // is nothing to write back and the checks fail.
@@ -433,7 +433,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostFork) {
   REQUIRE(ret == 0);
 }
 #endif
-#endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
+#endif  // HRR_PLAYBACK_BIN && HRR_TEST_EXE
 
 /**
  * @}

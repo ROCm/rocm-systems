@@ -24,8 +24,8 @@
  *   Unit_HRR_GraphRoundtrip:
  *     Same as Unit_HRR_CaptureReplayRoundtrip but for the HIP graph workload.
  *
- * HRR_TEST_EXE and HRR_PLAYBACK_EXE are required; CMakeLists.txt fails at
- * configure time if HRR_PLAYBACK_EXE is not found. Pass -DHRR_PLAYBACK_EXE=<path>
+ * HRR_TEST_EXE and HRR_PLAYBACK_BIN are required; CMakeLists.txt fails at
+ * configure time if HRR_PLAYBACK_BIN is not found. Pass -DHRR_PLAYBACK_BIN=<path>
  * if hrr-playback is not installed under CMAKE_INSTALL_PREFIX or ROCM_PATH.
  */
 
@@ -1900,7 +1900,7 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // replay (hipStreamSynchronize returns error 900 on an open capture stream).
   // -------------------------------------------------------------------------
   auto run_mt_playback = [&](const std::string& extra_args) {
-    hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+    hrr::test::SpawnProc proc(hrr_playback_bin(), /*capture_stdout=*/true);
     set_proc_search_path(proc);
 #ifdef _WIN32
     std::string mt_path_arg = "\"" + cap.path.string() + "\"";
