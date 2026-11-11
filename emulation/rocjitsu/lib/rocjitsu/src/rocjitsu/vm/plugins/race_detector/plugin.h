@@ -99,6 +99,7 @@ public:
   bool observes_register_hazards() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
+  bool supports_async_instructions() const override { return true; }
   /// Skip slots without a live race-analysis state.
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
@@ -131,6 +132,9 @@ public:
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override;
 
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;

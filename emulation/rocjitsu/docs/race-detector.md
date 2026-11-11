@@ -318,6 +318,13 @@ state contains only LDS footprints and counter progress. This state cannot be
 replaced by register readiness: a wave's wait can release a register while its
 completed LDS access still conflicts with an unsynchronized peer.
 
+The plugin supports asynchronous MMA execution. It records instruction evidence
+from the issuer's synchronous before-execute or accepted async-issue callback.
+The async callback reads no register values, and helper register accesses do not
+enter the race plugin. Core register findings precede either notification, so the
+reporter includes the current consumer when extending its trace. Memory issue
+capacity handling remains in the synchronous before-execute hook.
+
 ### LDS events and completion
 
 The plugin records an event for each observed memory issue with counter

@@ -1562,7 +1562,7 @@ TEST(ExecutionPluginTest, AsyncSupportComesFromCapabilities) {
 
   ExecutionPluginGroup consan(PluginSinkConfig{});
   ASSERT_TRUE(consan.add(std::make_unique<RaceDetectorPlugin>()));
-  EXPECT_FALSE(consan.supports_async_instructions());
+  EXPECT_TRUE(consan.supports_async_instructions());
 }
 
 std::vector<uint32_t> independent_wmma_kernel() {
@@ -1622,6 +1622,7 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
   auto sync_observer = std::make_unique<OrderingPlugin>();
   auto *sync_events = sync_observer.get();
   ASSERT_TRUE(f.plugin_group_->add(std::move(sync_observer)));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
   const auto code = independent_wmma_kernel();

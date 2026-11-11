@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "execution_plugin_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bit>
 #include <functional>
 #include <map>
 #include <sstream>
@@ -76,6 +79,10 @@ public:
     phases.emplace_back(pc, "async");
   }
   void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed; }
+  void onAmdgpuWavefrontHalted(Wavefront &wave) override {
+    if (halt)
+      halt(wave);
+  }
   void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
                                    std::span<Wavefront *> waves) override {
     if (dispatch)
@@ -89,6 +96,7 @@ public:
   std::vector<std::pair<uint64_t, std::string>> phases;
   std::function<void(uint64_t)> before;
   std::function<void(std::span<Wavefront *>)> dispatch;
+  std::function<void(Wavefront &)> halt;
 };
 
 struct DiagnosticHarness {
@@ -98,9 +106,9 @@ struct DiagnosticHarness {
   HazardProbe *probe = nullptr;
 
   void initialize(bool warnings = false, bool probe_first = false, std::string_view arch = "cdna4",
-                  bool observe_hazards = true) {
+                  bool observe_hazards = true, uint32_t async_helpers = 0) {
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, arch, arch == "cdna4" ? 64 : 32,
-                                               arch == "cdna4" ? 104 : 128, 256, 1, 0,
+                                               arch == "cdna4" ? 104 : 128, 256, 1, async_helpers,
                                                warnings ? "warn" : "off"));
     PluginSinkConfig sinks;
     sink = &sinks.emplace<StringSink>();
@@ -476,6 +484,8 @@ TEST(RegisterHazardPluginTest, RaceAloneEnablesCoreCheckingWithWarningsOff) {
 }
 
 TEST(RegisterHazardPluginTest, FindingsPrecedeActualAsyncIssueNotification) {
+  if (!async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, 4, "off"));
   fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -522,6 +532,115 @@ TEST(RegisterHazardPluginTest, FindingsPrecedeActualAsyncIssueNotification) {
   ASSERT_TRUE(finding->consumer_instruction);
   EXPECT_EQ(finding->consumer_instruction->pc(), issued->first);
   EXPECT_EQ(fixture.cu()->memory_wait_diagnostic_count(), 0u);
+}
+
+TEST(RegisterHazardPluginTest, RaceReportsAndTraceSurviveMmaWithRequestedHelpers) {
+  constexpr uint32_t packed_ones = 0x22222222; // Eight FP4 values of 1.0.
+  for (uint64_t exec : {0xffffffffULL, 0x80ULL, 0ULL})
+    for (bool waited : {false, true}) {
+      Program program;
+      const uint64_t producer = program.emit(cdna5::build_vglobal(
+          cdna5::kGlobalLoadB32Vglobal, {.saddr = 124, .vdst = 0, .vaddr = 120}));
+      if (waited)
+        program.emit(cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
+      // Offload requires full EXEC. The load keeps its original lane mask,
+      // so the following MMA can still consume a partially pending source.
+      program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 193, .sdst = 126}));
+      std::array<uint64_t, 3> consumers;
+      for (unsigned i = 0; i < 2; ++i) {
+        const uint8_t dst = i ? 96 : 64;
+        consumers[i] = program.emit(cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
+                                                       {.vdst = dst,
+                                                        .src0 = 256,
+                                                        .src1 = 288,
+                                                        .src2 = static_cast<uint16_t>(256 + dst),
+                                                        .opsel_hi = 3}));
+      }
+      consumers[2] =
+          program.emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 256, .vdst = 150}));
+      program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+
+      std::vector<std::string> reference_traces;
+      for (uint32_t helpers : {0, 4})
+        for (bool probe_first : {false, true}) {
+          SCOPED_TRACE(std::format("exec={:#x} waited={} helpers={} probe_first={}", exec, waited,
+                                   helpers, probe_first));
+          DiagnosticHarness h;
+          ASSERT_NO_FATAL_FAILURE(h.initialize(false, probe_first, "cdna5", true, helpers));
+          h.fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&packed_ones),
+                                    sizeof(packed_ones), 0x2000);
+          h.probe->dispatch = [exec](std::span<Wavefront *> waves) {
+            ASSERT_EQ(waves.size(), 1u);
+            auto &wave = *waves.front();
+            wave.set_exec(exec);
+            const RegisterAccess registers(wave);
+            for (uint32_t reg = 0; reg < 256; ++reg)
+              for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
+                registers.write_vgpr(wave.vgpr_alloc().base + reg, lane,
+                                     reg < 48     ? packed_ones
+                                     : reg == 120 ? 0x2000
+                                                  : 0);
+          };
+          bool halted = false;
+          h.probe->halt = [&](Wavefront &wave) {
+            halted = true;
+            // Halt follows helper completion; instruction-issue callbacks cannot
+            // safely inspect these registers while an async job may write them.
+            const RegisterAccess registers(wave);
+            for (uint32_t base : {64, 96})
+              for (uint32_t reg = base; reg < base + 16; ++reg)
+                for (uint32_t lane = 0; lane < wave.wf_size(); ++lane)
+                  EXPECT_EQ(registers.read_vgpr(wave.vgpr_alloc().base + reg, lane),
+                            std::bit_cast<uint32_t>(128.0f))
+                      << "reg=" << reg << " lane=" << lane;
+          };
+          ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
+          ASSERT_TRUE(halted);
+          const auto async_issues = std::ranges::count(h.probe->phases, "async",
+                                                       &std::pair<uint64_t, std::string>::second);
+          if (helpers && async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+            EXPECT_GT(async_issues, 0);
+          else
+            EXPECT_EQ(async_issues, 0);
+          EXPECT_EQ(h.fixture.cu()->memory_wait_diagnostic_count(), 0u);
+
+          const auto output = reports(h.sink->str());
+          ASSERT_EQ(output.size(), !waited && exec ? 3u : 0u) << h.sink->str();
+          EXPECT_EQ(h.probe->hazards.size(), output.size());
+          for (size_t i = 0; i < output.size(); ++i) {
+            const auto &report = output[i];
+            EXPECT_EQ(report.fields.at("producer_pc"), std::format("{:#x}", producer));
+            EXPECT_EQ(report.fields.at("consumer_pc"), std::format("{:#x}", consumers[i]));
+            EXPECT_EQ(report.fields.at("type"), "VGPR");
+            EXPECT_EQ(report.fields.at("access"), "read");
+            EXPECT_EQ(report.fields.at("reg"), "0");
+            EXPECT_EQ(report.fields.at("width"), "1");
+            EXPECT_EQ(report.fields.at("lanes"), std::format("{:#x}", exec));
+            EXPECT_EQ(report.fields.at("bytes"), "0xf");
+            EXPECT_EQ(report.fields.at("counter"), "loadcnt");
+            EXPECT_EQ(report.fields.at("required_wait"), "0");
+            const auto first = std::ranges::find(h.probe->phases, consumers[i],
+                                                 &std::pair<uint64_t, std::string>::first);
+            ASSERT_NE(first, h.probe->phases.end());
+            EXPECT_EQ(first->second, "hazard");
+            ASSERT_NE(first + 1, h.probe->phases.end());
+            EXPECT_EQ((first + 1)->first, consumers[i]);
+            EXPECT_TRUE((first + 1)->second == "before" || (first + 1)->second == "async");
+            if (!helpers && !probe_first)
+              reference_traces.push_back(report.trace);
+            else
+              EXPECT_EQ(report.trace, reference_traces.at(i));
+          }
+          if (!output.empty())
+            for (unsigned i = 0; i < 2; ++i) {
+              const auto line = std::format("{:#x}  v_wmma_f32_", consumers[i]);
+              const auto &trace = output.back().trace;
+              const auto pos = trace.find(line);
+              ASSERT_NE(pos, std::string::npos) << trace;
+              EXPECT_EQ(trace.find(line, pos + line.size()), std::string::npos) << trace;
+            }
+        }
+    }
 }
 
 TEST(RegisterHazardPluginTest, TraceEvictionAndCodeMutationPreserveOwnedProducerEvidence) {
