@@ -23,3 +23,6 @@ matrix-ubuntu:
   # Strix Halo
   - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { test-label: 'standard', timeout-minutes: 30 } }
+  # Navi4 (gfx1201). arch gfx120X resolves to linux-gfx120X-gpu-rocm.
+  - { os-release: '22.04', gpu: 'navi48', arch: 'gfx120X', gfx-target: 'gfx1201', runner: 'linux-gfx120X-gpu-rocm', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'navi48', arch: 'gfx120X', gfx-target: 'gfx1201', runner: 'linux-gfx120X-gpu-rocm', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
