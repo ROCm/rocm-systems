@@ -2,8 +2,8 @@
 
 //! Native host allocation lifetime through the production frontend-facing DDI.
 
-use rocddi::memory::host_page_size;
-use rocddi::session::{Session, SessionLifetime};
+use rocddi::memory::host::{HostAllocation, host_page_size};
+use rocddi::session::{DriverContextLifetime, Session};
 use std::error::Error;
 
 fn require(condition: bool, detail: &str) -> Result<(), Box<dyn Error>> {
@@ -17,13 +17,16 @@ fn require(condition: bool, detail: &str) -> Result<(), Box<dyn Error>> {
 #[allow(unsafe_code)]
 fn host_allocation_contract() -> Result<(), Box<dyn Error>> {
     let page = host_page_size()?;
-    for lifetime in [SessionLifetime::Process, SessionLifetime::Session] {
+    for lifetime in [
+        DriverContextLifetime::Process,
+        DriverContextLifetime::Session,
+    ] {
         let mut session = Session::new(lifetime)?;
         require(
-            session.allocate_host(0, page).is_err(),
+            HostAllocation::allocate(0, page).is_err(),
             "zero extent accepted",
         )?;
-        let mut allocation = session.allocate_host(page * 2, page * 16)?;
+        let mut allocation = HostAllocation::allocate(page * 2, page * 16)?;
         let info = allocation.info();
         require(
             info.host_address != 0,
@@ -38,8 +41,8 @@ fn host_allocation_contract() -> Result<(), Box<dyn Error>> {
         // must leave this allocation writable until its explicit free.
         session.destroy()?;
         require(
-            session.allocate_host(page, page).is_err(),
-            "destroyed session accepted an allocation",
+            session.topology_graph_snapshot().is_err(),
+            "destroyed session accepted topology discovery",
         )?;
         {
             // SAFETY: The production allocation owns this nonempty mapped range.

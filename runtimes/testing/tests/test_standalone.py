@@ -73,7 +73,15 @@ class StandaloneTests(unittest.TestCase):
             cls.builds[family] = build
         # The API executable was already built before this producer existed.
         cls.runtime = cls.root / "separate runtime"
-        cls.configure(SOURCE, cls.runtime, "-DBUILD_TESTING=OFF")
+        cargo_home = Path(
+            os.environ.get("CARGO_HOME", Path.home() / ".cargo")
+        ).resolve()
+        cls.configure(
+            SOURCE,
+            cls.runtime,
+            "-DBUILD_TESTING=OFF",
+            f"-DROCM_RUNTIMES_CARGO_HOME={cargo_home}",
+        )
         cls.command(CMAKE, "--build", cls.runtime)
 
     def run_suite(
