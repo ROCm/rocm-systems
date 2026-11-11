@@ -19,23 +19,18 @@
     },
     "gfx1201": {
       "files": {
-        "0000_top_stats.yaml": "0145275418b15c8181c4f0f62f283a1c",
-        "0100_system_info.yaml": "db3a432b260267a1c3dba0daf4f15e65",
-        "0200_system_speed_of_light.yaml": "9ac2bc94eb3259b3cc503ec3c2943028",
-        "0300_memory_chart.yaml": "60a078c5aa96709a48a3c55b4d718679",
-        "0500_command_processor_cpc.yaml": "1d4e06be6ad3c355eafe24f563ab8335",
-        "0600_workgroup_manager_spi.yaml": "5a571ae94ab1b32eff2abc8690c89463",
-        "0700_workgroup_processor_wgp.yaml": "18fb3ba90667d9a8d26b48fc859b952a",
-        "0800_gl0_texture_addresser_txa.yaml": "fe8d114b7930f3d017909cb1157e56fe",
-        "0900_gl0_cache_and_lds.yaml": "a41e233c070a11a106aef9d37fbe34a0",
-        "1000_gl0_texture_data_txd.yaml": "a7260148cabb44426d28c79a14166a1b",
-        "1100_gl1_cache.yaml": "74a9e9dbc68151ec1641c3d33e830438",
-        "1200_graphics_level_arbiter_glarb.yaml": "aa8d89c14bf632b02c140a34dd8e38ac",
-        "1300_gl2_cache.yaml": "85d5fcadaf3bdbb04a67e7d503ce2e2a",
-        "1400_efficiency_arbiter_ea.yaml": "eb1d327e4c185ee70a5b4da981bc11ae",
-        "1500_central_hub_ch.yaml": "583fe9e63f31b1706da14071d14bfd9c",
-        "1600_translation_cache_l1_utcl1.yaml": "d20848c3817c5c21b54c1bbbad2884fd",
-        "1700_graphics_register_bus_manager_grbm.yaml": "c04093a6b0c1740cbf82dccdaf70a255"
+        "0000_top_stats.yaml": "8ff5ddd12ffcd2015ab184bbeefef3a3",
+        "0100_system_info.yaml": "690a3492daf91b89479a8929828f5061",
+        "0200_system_speed_of_light.yaml": "46e27d0cc2f0673b5ab8e2effd51b256",
+        "0300_memory_chart.yaml": "67944bf3b3d5997e3a9e6c928bceddc6",
+        "0500_command_processor_cpc.yaml": "7a15bb04d12bfbc317b492e2ab28247c",
+        "0600_workgroup_manager_spi.yaml": "30c969d2c948138e78cc73a694ce00ae",
+        "0700_workgroup_processor_wgp.yaml": "3e4efec04c65fe1003a0340d6aa49ad1",
+        "0900_gl0_cache_and_lds.yaml": "d69355a35f6eb99f502b380cf5711653",
+        "1100_gl1_cache.yaml": "f5bc28fdb8212c6877a647f37001cc60",
+        "1300_gl2_cache.yaml": "8bbeff976e6809b27a810afad8573ebe",
+        "1400_efficiency_arbiter_ea.yaml": "0ec4e79f3610e162910e77c8a1cb31e2",
+        "1700_graphics_register_bus_manager_grbm.yaml": "dc66c450b288ad9b703b7e26ff2d8460"
       }
     },
     "gfx1250": {

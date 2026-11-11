@@ -3,117 +3,132 @@ Panel Config:
   alias: gl1
   title: GL1 Cache (L1)
   data source:
-    - metric_table:
-        id: 1101
-        title: GL1A Processing
-        header: &id001
-          metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: Unit
-        metric:
-          Hit Rate:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-    - metric_table:
-        id: 1102
-        title: GL1 Cache Utilization
-        header: *id001
-        metric:
-          GL1 Cache Busy:
-            avg: 100 * SUM(GL1C_BUSY) / SUM(GL1C_CYCLE)
-            min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
-            max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
-            unit: Percent
-          GL1 Cache Starve:
-            avg: 100 * SUM(GL1C_STARVE) / SUM(GL1C_CYCLE)
-            min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
-            max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
-            unit: Percent
-          GL2 Request Credit Stall:
-            avg: SUM(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum) / SUM($denom)
-            min: MIN(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
-            max: MAX(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
-            unit: (Cycles + $normUnit)
-          GL2 Data Credit Stall:
-            avg: SUM(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum) / SUM($denom)
-            min: MIN(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
-            max: MAX(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
-            unit: (Cycles + $normUnit)
-    - metric_table:
-        id: 1103
-        title: GL1 Cache Request Statistics
-        header: *id001
-        metric:
-          Total Requests:
-            avg: SUM(GL1C_REQ_sum) / SUM($denom)
-            min: MIN(GL1C_REQ_sum / $denom)
-            max: MAX(GL1C_REQ_sum / $denom)
-            unit: (Count + $normUnit)
-          Read Requests:
-            avg: SUM(GL1C_REQ_READ_sum) / SUM($denom)
-            min: MIN(GL1C_REQ_READ_sum / $denom)
-            max: MAX(GL1C_REQ_READ_sum / $denom)
-            unit: (Count + $normUnit)
-          Write Requests:
-            avg: SUM(GL1C_REQ_WRITE_sum) / SUM($denom)
-            min: MIN(GL1C_REQ_WRITE_sum / $denom)
-            max: MAX(GL1C_REQ_WRITE_sum / $denom)
-            unit: (Count + $normUnit)
-          Miss Requests:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 1104
-        title: GL1 Cache Request Bandwidth
-        header: *id001
-        metric:
-          Read Bytes:
-            avg: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-              * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM($denom)
-            min: MIN((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-              * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
-            max: MAX((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-              * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
-            unit: (Bytes + $normUnit)
-          Write Bytes:
-            avg: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-              * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM($denom)
-            min: MIN((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-              * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
-            max: MAX((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-              * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
-            unit: (Bytes + $normUnit)
-    - metric_table:
-        id: 1105
-        title: GL1C Multicast
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1106
-        title: GL1-GL2 Interface
-        header: *id001
-        metric:
-          GL2 Read Requests:
-            avg: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
-            min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
-            max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
-            unit: (Count + $normUnit)
-          GL2 Read 128B Requests:
-            avg: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
-            min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
-            max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
-            unit: (Count + $normUnit)
-          GL2 Write Requests:
-            avg: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
-            min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
-            max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
-            unit: (Count + $normUnit)
+  - metric_table:
+      id: 1101
+      title: GL1A Processing
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Hit Rate:
+          avg: None
+          min: None
+          max: None
+          unit: Percent
+  - metric_table:
+      id: 1102
+      title: GL1 Cache Utilization
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL1 Cache Busy:
+          avg: 100 * SUM(GL1C_BUSY) / SUM(GL1C_CYCLE)
+          min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
+          max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
+          unit: Percent
+        GL1 Cache Starve:
+          avg: 100 * SUM(GL1C_STARVE) / SUM(GL1C_CYCLE)
+          min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
+          max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
+          unit: Percent
+        GL2 Request Credit Stall:
+          avg: SUM(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum) / SUM($denom)
+          min: MIN(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
+          max: MAX(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
+          unit: (Cycles + $normUnit)
+        GL2 Data Credit Stall:
+          avg: SUM(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum) / SUM($denom)
+          min: MIN(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
+          max: MAX(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
+          unit: (Cycles + $normUnit)
+  - metric_table:
+      id: 1103
+      title: GL1 Cache Request Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(GL1C_REQ_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_sum / $denom)
+          max: MAX(GL1C_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Read Requests:
+          avg: SUM(GL1C_REQ_READ_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_READ_sum / $denom)
+          max: MAX(GL1C_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Requests:
+          avg: SUM(GL1C_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_WRITE_sum / $denom)
+          max: MAX(GL1C_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+        Miss Requests:
+          avg: None
+          min: None
+          max: None
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 1104
+      title: GL1 Cache Request Bandwidth
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Read Bytes:
+          avg: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
+            * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM($denom)
+          min: MIN((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
+            * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
+          max: MAX((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
+            * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
+          unit: (Bytes + $normUnit)
+        Write Bytes:
+          avg: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
+            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM($denom)
+          min: MIN((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
+            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
+          max: MAX((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
+            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
+          unit: (Bytes + $normUnit)
+  - metric_table:
+      id: 1106
+      title: GL1-GL2 Interface
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Read Requests:
+          avg: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Read 128B Requests:
+          avg: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Write Requests:
+          avg: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
   metrics_description:
     GL1 Cache Busy: >-
       Percentage of GL1 counted cycles marked busy. GL1 combines writes

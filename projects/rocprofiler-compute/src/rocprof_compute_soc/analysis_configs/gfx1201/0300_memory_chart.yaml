@@ -6,7 +6,7 @@ Panel Config:
   - metric_table:
       id: 301
       title: Instruction Cache
-      header: &id001
+      header:
         metric: Metric
         value: Value
         unit: Unit
@@ -24,7 +24,10 @@ Panel Config:
   - metric_table:
       id: 302
       title: Scalar Data Cache
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         DCache Requests:
           value: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
@@ -42,7 +45,10 @@ Panel Config:
   - metric_table:
       id: 303
       title: GL0 Cache (Vector L0)
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         GL0 Read Requests:
           value: SUM(TCP_REQ_READ_sum) / SUM($denom)
@@ -57,7 +63,10 @@ Panel Config:
   - metric_table:
       id: 304
       title: LDS (Local Data Share)
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         LDS Req:
           value: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
@@ -76,7 +85,10 @@ Panel Config:
   - metric_table:
       id: 305
       title: GL0-GL1 Interface
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         GL0-GL1 Read Bandwidth:
           value: SUM(TCP_GL1_REQ_READ_128B_sum * 128 + TCP_GL1_REQ_READ_64B_sum * 64) / (SUM(End_Timestamp
@@ -89,7 +101,10 @@ Panel Config:
   - metric_table:
       id: 306
       title: GL1 Cache (L1)
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         GL1 Utilization:
           value: 100 * SUM(GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
@@ -107,7 +122,10 @@ Panel Config:
   - metric_table:
       id: 307
       title: GL1-GL2 Interface
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         GL1-GL2 Read Bandwidth:
           value: 32 * SUM(GL1C_GL2_RET_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
@@ -120,7 +138,10 @@ Panel Config:
   - metric_table:
       id: 308
       title: GL2 Cache (L2)
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         GL2 Utilization:
           value: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
@@ -140,7 +161,10 @@ Panel Config:
   - metric_table:
       id: 309
       title: EA to DRAM
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         DRAM Read Requests:
           value: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
@@ -158,7 +182,10 @@ Panel Config:
   - metric_table:
       id: 310
       title: Workgroup Processors (WGPs)
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         Wavefront Occupancy:
           value: ROUND(100 * SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE * $cu_per_gpu * $max_waves_per_cu),
@@ -183,7 +210,10 @@ Panel Config:
   - metric_table:
       id: 311
       title: Infinity Cache and GDDR6
-      header: *id001
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
       metric:
         Infinity Cache Hit Rate:
           value: None

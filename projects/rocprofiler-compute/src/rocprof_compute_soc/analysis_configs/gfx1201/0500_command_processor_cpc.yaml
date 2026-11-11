@@ -3,101 +3,101 @@ Panel Config:
   alias: cpc
   title: CPC (Command Processor - Compute)
   data source:
-    - metric_table:
-        id: 501
-        title: CPC Utilizations
-        header:
-          metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: Unit
-        metric:
-          CPC Busy:
-            avg: 100 * SUM(CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
-            unit: Percent
-          CPC Idle:
-            avg: 100 * SUM(CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
-            unit: Percent
-          CPC Stalled:
-            avg: 100 * SUM(CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
-            unit: Percent
-          TCIU Busy:
-            avg: 100 * SUM(CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
-            unit: Percent
-          UTCL2 Busy:
-            avg: 100 * SUM(CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
-            unit: Percent
-          GCRIU Busy:
-            avg: 100 * SUM(CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
-            min: MIN(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
-            max: MAX(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
-            unit: Percent
-          ME1 Stall on RCIU Ready:
-            avg: SUM(CPC_ME1_STALL_WAIT_ON_RCIU_READY) / SUM($denom)
-            min: MIN(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
-            max: MAX(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
-            unit: (Cycles + $normUnit)
-          ME1 Stall on Memory Read:
-            avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_READ) / SUM($denom)
-            min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
-            max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
-            unit: (Cycles + $normUnit)
-          ME1 Stall on Memory Write:
-            avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_WRITE) / SUM($denom)
-            min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
-            max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
-            unit: (Cycles + $normUnit)
-          ME1 Stall on ROQ Data:
-            avg: SUM(CPC_ME1_STALL_ON_DATA_FROM_ROQ) / SUM($denom)
-            min: MIN(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
-            max: MAX(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
-            unit: (Cycles + $normUnit)
-          TCIU Read Requests:
-            avg: SUM(CPC_TCIU_READ_REQUEST_SENT_sum) / SUM($denom)
-            min: MIN(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
-            max: MAX(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
-            unit: (Count + $normUnit)
-          TCIU Write Requests:
-            avg: SUM(CPC_TCIU_WRITE_REQUEST_SENT_sum) / SUM($denom)
-            min: MIN(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
-            max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
-            unit: (Count + $normUnit)
-          GUS Read Requests:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
-          GUS Write Requests:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
-          Instruction Cache Hits:
-            avg: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)
-            min: MIN(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
-            max: MAX(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
-            unit: (Count + $normUnit)
-          Instruction Cache Misses:
-            avg: SUM(CPC_MEC_INSTR_CACHE_MISS_sum) / SUM($denom)
-            min: MIN(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
-            max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
-            unit: (Count + $normUnit)
-          Instruction Cache Hit Rate:
-            avg: 100 * SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
-            min: MIN(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
-            max: MAX(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
-            unit: Percent
+  - metric_table:
+      id: 501
+      title: CPC Utilizations
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        CPC Busy:
+          avg: 100 * SUM(CPC_STAT_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        CPC Idle:
+          avg: 100 * SUM(CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_IDLE / CPC_ALWAYS_COUNT)
+          unit: Percent
+        CPC Stalled:
+          avg: 100 * SUM(CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_STAT_STALL / CPC_ALWAYS_COUNT)
+          unit: Percent
+        TCIU Busy:
+          avg: 100 * SUM(CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_TCIU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        UTCL2 Busy:
+          avg: 100 * SUM(CPC_UTCL2IU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_UTCL2IU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        GCRIU Busy:
+          avg: 100 * SUM(CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
+          min: MIN(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
+          max: MAX(100 * CPC_GCRIU_BUSY / CPC_ALWAYS_COUNT)
+          unit: Percent
+        ME1 Stall on RCIU Ready:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_RCIU_READY) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_RCIU_READY / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on Memory Read:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_READ) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_READ / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on Memory Write:
+          avg: SUM(CPC_ME1_STALL_WAIT_ON_MEM_WRITE) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_WRITE / $denom)
+          unit: (Cycles + $normUnit)
+        ME1 Stall on ROQ Data:
+          avg: SUM(CPC_ME1_STALL_ON_DATA_FROM_ROQ) / SUM($denom)
+          min: MIN(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
+          max: MAX(CPC_ME1_STALL_ON_DATA_FROM_ROQ / $denom)
+          unit: (Cycles + $normUnit)
+        TCIU Read Requests:
+          avg: SUM(CPC_TCIU_READ_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+        TCIU Write Requests:
+          avg: SUM(CPC_TCIU_WRITE_REQUEST_SENT_sum) / SUM($denom)
+          min: MIN(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          unit: (Count + $normUnit)
+        GUS Read Requests:
+          avg: None
+          min: None
+          max: None
+          unit: (Count + $normUnit)
+        GUS Write Requests:
+          avg: None
+          min: None
+          max: None
+          unit: (Count + $normUnit)
+        Instruction Cache Hits:
+          avg: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          unit: (Count + $normUnit)
+        Instruction Cache Misses:
+          avg: SUM(CPC_MEC_INSTR_CACHE_MISS_sum) / SUM($denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+        Instruction Cache Hit Rate:
+          avg: 100 * SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
+          min: MIN(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          max: MAX(100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum))
+          unit: Percent
   metrics_description:
     CPC Busy: >-
       Percentage of CPC counted cycles marked busy processing commands.

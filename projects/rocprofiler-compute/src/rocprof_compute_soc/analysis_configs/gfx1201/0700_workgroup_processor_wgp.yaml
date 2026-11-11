@@ -3,284 +3,302 @@ Panel Config:
   alias: wgp
   title: Workgroup Processor (WGP)
   data source:
-    - metric_table:
-        id: 701
-        title: Utilization
-        header: &id001
-          metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: Unit
-        metric:
-          WGP Utilization:
-            avg: AVG(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
-            min: MIN(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
-            max: MAX(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
-            unit: Percent
-    - metric_table:
-        id: 702
-        title: Wavefront Launch Stats
-        header: *id001
-        metric:
-          Grid Size:
-            avg: AVG(Grid_Size)
-            min: MIN(Grid_Size)
-            max: MAX(Grid_Size)
-            unit: Work-items
-          Workgroup Size:
-            avg: AVG(Workgroup_Size)
-            min: MIN(Workgroup_Size)
-            max: MAX(Workgroup_Size)
-            unit: Work-items
-          VGPRs:
-            avg: AVG(Arch_VGPR)
-            min: MIN(Arch_VGPR)
-            max: MAX(Arch_VGPR)
-            unit: Registers
-          SGPRs:
-            avg: AVG(SGPR)
-            min: MIN(SGPR)
-            max: MAX(SGPR)
-            unit: Registers
-          LDS Allocation:
-            avg: AVG(LDS_Per_Workgroup)
-            min: MIN(LDS_Per_Workgroup)
-            max: MAX(LDS_Per_Workgroup)
-            unit: Bytes
-          Scratch Allocation:
-            avg: AVG(Scratch_Per_Workitem)
-            min: MIN(Scratch_Per_Workitem)
-            max: MAX(Scratch_Per_Workitem)
-            unit: Bytes per Work-item
-    - metric_table:
-        id: 703
-        title: Wavefront Dispatch
-        header: *id001
-        metric:
-          Dispatched Waves:
-            avg: AVG(SQ_WAVES_sum)
-            min: MIN(SQ_WAVES_sum)
-            max: MAX(SQ_WAVES_sum)
-            unit: Waves
-          Dispatched Threads:
-            avg: AVG(SQ_ITEMS_sum)
-            min: MIN(SQ_ITEMS_sum)
-            max: MAX(SQ_ITEMS_sum)
-            unit: Threads
-    - metric_table:
-        id: 704
-        title: Wavefront Life
-        header: *id001
-        metric:
-          Wave Life:
-            avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
-            min: MIN(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
-            max: MAX(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
-            unit: Cycles
-    - metric_table:
-        id: 705
-        title: Wavefront Instruction Mix
-        header: *id001
-        metric:
-          Total Instructions:
-            avg: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_ALL_sum / $denom)
-            max: MAX(SQ_INSTS_ALL_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - Internal:
-            avg: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
-            max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - VALU:
-            avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_VALU_sum / $denom)
-            max: MAX(SQ_INSTS_VALU_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - SALU:
-            avg: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_SALU_sum / $denom)
-            max: MAX(SQ_INSTS_SALU_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - SMEM:
-            avg: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_SMEM_sum / $denom)
-            max: MAX(SQ_INSTS_SMEM_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - Transcendental:
-            avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
-            max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - VMEM:
-            avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_TEX_sum / $denom)
-            max: MAX(SQ_INSTS_TEX_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - LDS:
-            avg: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_LDS_sum / $denom)
-            max: MAX(SQ_INSTS_LDS_sum / $denom)
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 706
-        title: VMEM Instruction Mix
-        header: *id001
-        metric:
-          Instructions - VMEM Flat:
-            avg: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_FLAT_sum / $denom)
-            max: MAX(SQ_INSTS_FLAT_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - TEX Load:
-            avg: SUM(SQ_INSTS_TEX_LOAD_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_TEX_LOAD_sum / $denom)
-            max: MAX(SQ_INSTS_TEX_LOAD_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - TEX Store:
-            avg: SUM(SQ_INSTS_TEX_STORE_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_TEX_STORE_sum / $denom)
-            max: MAX(SQ_INSTS_TEX_STORE_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - Flat Load:
-            avg: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
-            max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
-            unit: (Count + $normUnit)
-          Instructions - Flat Store:
-            avg: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
-            max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 707
-        title: LDS Instruction Mix
-        header: *id001
-        metric:
-          LDS Direct Load Instructions:
-            avg: SUM(SQ_INSTS_LDS_DIRECT_LOAD_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
-            max: MAX(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
-            unit: (Count + $normUnit)
-          LDS Parameter Load Instructions:
-            avg: SUM(SQ_INSTS_LDS_PARAM_LOAD_sum) / SUM($denom)
-            min: MIN(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
-            max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
-            unit: (Count + $normUnit)
-          WAVE32 LDS Parameter Load Instructions:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 708
-        title: VALU Instruction Mix
-        header: &id002
-          metric: Metric
-          value: Avg
-          unit: Unit
-        metric:
-          SQ_INSTS_VALU:
-            value: ROUND(SUM(SQ_INSTS_VALU_sum), 0)
-            unit: Instructions
-            peak: None
-            pct_of_peak: false
-          SQ_INST_CYCLES_VALU:
-            value: ROUND(SUM(SQ_INST_CYCLES_VALU_sum), 0)
-            unit: Cycles
-            peak: None
-            pct_of_peak: false
-    - metric_table:
-        id: 709
-        title: VALU FLOPs and IOPs Counting
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 710
-        title: WMMA Instruction FLOPs and IOPs Counting
-        header: *id002
-        metric:
-          SQ_WMMA_VALU_INSTS:
-            value: ROUND(SUM(SQ_WMMA_VALU_INSTS_sum), 0)
-            unit: Instructions
-            peak: None
-            pct_of_peak: false
-          SQ_INST_CYCLES_VALU_WMMA:
-            value: ROUND(SUM(SQ_INST_CYCLES_VALU_WMMA_sum), 0)
-            unit: Cycles
-            peak: None
-            pct_of_peak: false
-    - metric_table:
-        id: 711
-        title: Instruction Issue Stalls
-        header: *id001
-        metric:
-          Wait for Any:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-          Wait for Instruction Fetch:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-          Wait for Barrier:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-          Wait for Counter:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-    - metric_table:
-        id: 712
-        title: Compute Pipeline Utilization
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 713
-        title: WGP Latencies
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 714
-        title: WGP-TXA Interface
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 715
-        title: WGP-TXD Interface
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 716
-        title: Instruction Cache
-        header: *id001
-        metric:
-          Icache Hit Rate:
-            avg: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
-            min: MIN(100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum)
-            max: MAX(100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum)
-            unit: Percent
-    - metric_table:
-        id: 717
-        title: Scalar Data Cache
-        header: *id001
-        metric:
-          Dcache Hit Rate:
-            avg: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
-            min: MIN(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
-            max: MAX(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
-            unit: Percent
-    - metric_table:
-        id: 718
-        title: SQC-GL1 Interface
-        header: *id001
-        metric: {}
+  - metric_table:
+      id: 701
+      title: Utilization
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        WGP Utilization:
+          avg: AVG(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
+          min: MIN(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
+          max: MAX(100 * SQ_BUSY_CYCLES_avr / GRBM_GUI_ACTIVE)
+          unit: Percent
+  - metric_table:
+      id: 702
+      title: Wavefront Launch Stats
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Grid Size:
+          avg: AVG(Grid_Size)
+          min: MIN(Grid_Size)
+          max: MAX(Grid_Size)
+          unit: Work-items
+        Workgroup Size:
+          avg: AVG(Workgroup_Size)
+          min: MIN(Workgroup_Size)
+          max: MAX(Workgroup_Size)
+          unit: Work-items
+        VGPRs:
+          avg: AVG(Arch_VGPR)
+          min: MIN(Arch_VGPR)
+          max: MAX(Arch_VGPR)
+          unit: Registers
+        SGPRs:
+          avg: AVG(SGPR)
+          min: MIN(SGPR)
+          max: MAX(SGPR)
+          unit: Registers
+        LDS Allocation:
+          avg: AVG(LDS_Per_Workgroup)
+          min: MIN(LDS_Per_Workgroup)
+          max: MAX(LDS_Per_Workgroup)
+          unit: Bytes
+        Scratch Allocation:
+          avg: AVG(Scratch_Per_Workitem)
+          min: MIN(Scratch_Per_Workitem)
+          max: MAX(Scratch_Per_Workitem)
+          unit: Bytes per Work-item
+  - metric_table:
+      id: 703
+      title: Wavefront Dispatch
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Dispatched Waves:
+          avg: AVG(SQ_WAVES_sum)
+          min: MIN(SQ_WAVES_sum)
+          max: MAX(SQ_WAVES_sum)
+          unit: Waves
+        Dispatched Threads:
+          avg: AVG(SQ_ITEMS_sum)
+          min: MIN(SQ_ITEMS_sum)
+          max: MAX(SQ_ITEMS_sum)
+          unit: Threads
+  - metric_table:
+      id: 704
+      title: Wavefront Life
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Wave Life:
+          avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
+          min: MIN(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
+          max: MAX(SQG_WAVE_CYCLES_sum / SQ_WAVES_sum)
+          unit: Cycles
+  - metric_table:
+      id: 705
+      title: Wavefront Instruction Mix
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Instructions:
+          avg: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_ALL_sum / $denom)
+          max: MAX(SQ_INSTS_ALL_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - Internal:
+          avg: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_INTERNAL_sum / $denom)
+          max: MAX(SQ_INSTS_INTERNAL_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - VALU:
+          avg: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_VALU_sum / $denom)
+          max: MAX(SQ_INSTS_VALU_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - SALU:
+          avg: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_SALU_sum / $denom)
+          max: MAX(SQ_INSTS_SALU_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - SMEM:
+          avg: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_SMEM_sum / $denom)
+          max: MAX(SQ_INSTS_SMEM_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - Transcendental:
+          avg: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_VALU_TRANS_sum / $denom)
+          max: MAX(SQ_INSTS_VALU_TRANS_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - VMEM:
+          avg: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_TEX_sum / $denom)
+          max: MAX(SQ_INSTS_TEX_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - LDS:
+          avg: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 706
+      title: VMEM Instruction Mix
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Instructions - VMEM Flat:
+          avg: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_FLAT_sum / $denom)
+          max: MAX(SQ_INSTS_FLAT_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - TEX Load:
+          avg: SUM(SQ_INSTS_TEX_LOAD_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_TEX_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_TEX_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - TEX Store:
+          avg: SUM(SQ_INSTS_TEX_STORE_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_TEX_STORE_sum / $denom)
+          max: MAX(SQ_INSTS_TEX_STORE_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - Flat Load:
+          avg: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_FLAT_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_FLAT_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        Instructions - Flat Store:
+          avg: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_FLAT_STORE_sum / $denom)
+          max: MAX(SQ_INSTS_FLAT_STORE_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 707
+      title: LDS Instruction Mix
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        LDS Direct Load Instructions:
+          avg: SUM(SQ_INSTS_LDS_DIRECT_LOAD_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_DIRECT_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        LDS Parameter Load Instructions:
+          avg: SUM(SQ_INSTS_LDS_PARAM_LOAD_sum) / SUM($denom)
+          min: MIN(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
+          unit: (Count + $normUnit)
+        WAVE32 LDS Parameter Load Instructions:
+          avg: None
+          min: None
+          max: None
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 708
+      title: VALU Instruction Mix
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        SQ_INSTS_VALU:
+          value: ROUND(SUM(SQ_INSTS_VALU_sum), 0)
+          unit: Instructions
+          peak: None
+          pct_of_peak: false
+        SQ_INST_CYCLES_VALU:
+          value: ROUND(SUM(SQ_INST_CYCLES_VALU_sum), 0)
+          unit: Cycles
+          peak: None
+          pct_of_peak: false
+  - metric_table:
+      id: 710
+      title: WMMA Instruction FLOPs and IOPs Counting
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        SQ_WMMA_VALU_INSTS:
+          value: ROUND(SUM(SQ_WMMA_VALU_INSTS_sum), 0)
+          unit: Instructions
+          peak: None
+          pct_of_peak: false
+        SQ_INST_CYCLES_VALU_WMMA:
+          value: ROUND(SUM(SQ_INST_CYCLES_VALU_WMMA_sum), 0)
+          unit: Cycles
+          peak: None
+          pct_of_peak: false
+  - metric_table:
+      id: 711
+      title: Instruction Issue Stalls
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Wait for Any:
+          avg: None
+          min: None
+          max: None
+          unit: Percent
+        Wait for Instruction Fetch:
+          avg: None
+          min: None
+          max: None
+          unit: Percent
+        Wait for Barrier:
+          avg: None
+          min: None
+          max: None
+          unit: Percent
+        Wait for Counter:
+          avg: None
+          min: None
+          max: None
+          unit: Percent
+  - metric_table:
+      id: 716
+      title: Instruction Cache
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Icache Hit Rate:
+          avg: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+          min: MIN(100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum)
+          max: MAX(100 * SQC_ICACHE_HITS_sum / SQC_ICACHE_REQ_sum)
+          unit: Percent
+  - metric_table:
+      id: 717
+      title: Scalar Data Cache
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Dcache Hit Rate:
+          avg: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+          min: MIN(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
+          max: MAX(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
+          unit: Percent
   metrics_description:
     Dcache Hit Rate: >-
       Percentage of scalar data-cache requests that hit.

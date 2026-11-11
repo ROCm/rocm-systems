@@ -3,116 +3,91 @@ Panel Config:
   alias: gl2
   title: GL2 Cache (L2)
   data source:
-    - metric_table:
-        id: 1301
-        title: GL2A Processing
-        header: &id001
-          metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: Unit
-        metric: {}
-    - metric_table:
-        id: 1310
-        title: GL2 Cache Request Statistics
-        header: *id001
-        metric:
-          Total Requests:
-            avg: SUM(GL2C_REQ_sum) / SUM($denom)
-            min: MIN(GL2C_REQ_sum / $denom)
-            max: MAX(GL2C_REQ_sum / $denom)
-            unit: (Count + $normUnit)
-          Read Requests:
-            avg: SUM(GL2C_READ_sum) / SUM($denom)
-            min: MIN(GL2C_READ_sum / $denom)
-            max: MAX(GL2C_READ_sum / $denom)
-            unit: (Count + $normUnit)
-          Write Requests:
-            avg: SUM(GL2C_WRITE_sum) / SUM($denom)
-            min: MIN(GL2C_WRITE_sum / $denom)
-            max: MAX(GL2C_WRITE_sum / $denom)
-            unit: (Count + $normUnit)
-          Atomic Requests:
-            avg: SUM(GL2C_ATOMIC_sum) / SUM($denom)
-            min: MIN(GL2C_ATOMIC_sum / $denom)
-            max: MAX(GL2C_ATOMIC_sum / $denom)
-            unit: (Count + $normUnit)
-          EA Read Requests (DRAM):
-            avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
-            min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
-            max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
-            unit: (Count + $normUnit)
-          EA Write Requests (DRAM):
-            avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
-            min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
-            max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 1311
-        title: GL2 Cache Performance
-        header: *id001
-        metric:
-          GL2 Cache Hit Rate:
-            avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
-            min: MIN(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
-            max: MAX(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
-            unit: Percent
-          GL2 Cache Hits:
-            avg: SUM(GL2C_HIT_sum) / SUM($denom)
-            min: MIN(GL2C_HIT_sum / $denom)
-            max: MAX(GL2C_HIT_sum / $denom)
-            unit: (Count + $normUnit)
-          GL2 Cache Misses:
-            avg: SUM(GL2C_MISS_sum) / SUM($denom)
-            min: MIN(GL2C_MISS_sum / $denom)
-            max: MAX(GL2C_MISS_sum / $denom)
-            unit: (Count + $normUnit)
-    - metric_table:
-        id: 1302
-        title: GL2C-EA Stalls
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1303
-        title: GL2C-EA Interface - Latencies
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1304
-        title: GL2 Cache Bandwidth
-        header: *id001
-        metric:
-          GL2 Cache Read BW:
-            avg: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
-            min: MIN((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
-            max: MAX((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
-            unit: Bytes/s
-          GL2 Cache Write BW:
-            avg: SUM(GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
-            min: MIN((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
-            max: MAX((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
-            unit: Bytes/s
-    - metric_table:
-        id: 1305
-        title: GL2C-EA Interface - Host CPU Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1306
-        title: GL2C-EA Interface - PCIe Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1307
-        title: GL2C-EA Interface - Remote Node Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1308
-        title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
-        header: *id001
-        metric: {}
+  - metric_table:
+      id: 1310
+      title: GL2 Cache Request Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(GL2C_REQ_sum) / SUM($denom)
+          min: MIN(GL2C_REQ_sum / $denom)
+          max: MAX(GL2C_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Read Requests:
+          avg: SUM(GL2C_READ_sum) / SUM($denom)
+          min: MIN(GL2C_READ_sum / $denom)
+          max: MAX(GL2C_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Requests:
+          avg: SUM(GL2C_WRITE_sum) / SUM($denom)
+          min: MIN(GL2C_WRITE_sum / $denom)
+          max: MAX(GL2C_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+        Atomic Requests:
+          avg: SUM(GL2C_ATOMIC_sum) / SUM($denom)
+          min: MIN(GL2C_ATOMIC_sum / $denom)
+          max: MAX(GL2C_ATOMIC_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Read Requests (DRAM):
+          avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+          min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+        EA Write Requests (DRAM):
+          avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+          min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 1311
+      title: GL2 Cache Performance
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Cache Hit Rate:
+          avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          min: MIN(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          max: MAX(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+          unit: Percent
+        GL2 Cache Hits:
+          avg: SUM(GL2C_HIT_sum) / SUM($denom)
+          min: MIN(GL2C_HIT_sum / $denom)
+          max: MAX(GL2C_HIT_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Cache Misses:
+          avg: SUM(GL2C_MISS_sum) / SUM($denom)
+          min: MIN(GL2C_MISS_sum / $denom)
+          max: MAX(GL2C_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+  - metric_table:
+      id: 1304
+      title: GL2 Cache Bandwidth
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Cache Read BW:
+          avg: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          min: MIN((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          max: MAX((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
+        GL2 Cache Write BW:
+          avg: SUM(GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          min: MIN((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          max: MAX((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+          unit: Bytes/s
   metrics_description:
     Total Requests: >-
       L2 requests, normalized by the chosen unit.

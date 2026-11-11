@@ -3,119 +3,119 @@ Panel Config:
   alias: sol
   title: System Speed-of-Light
   data source:
-    - metric_table:
-        id: 201
-        title: System Speed-of-Light
-        header:
-          metric: Metric
-          value: Avg
-          unit: Unit
-          peak: Peak
-          pct_of_peak: Percent of Peak
-        metric:
-          VALU Issue Rate:
-            value: SUM(SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)
-            unit: GInstr/s
-            peak: None
-            pct_of_peak: false
-          WMMA FLOPs (F16->F32 16x16x16):
-            value: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
-            unit: GFLOP/s
-            peak: $max_sclk * $cu_per_gpu * 1024 / 1000
-            pct_of_peak: true
-          FP64 VALU Issue Rate:
-            value: SUM(SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
-            unit: GInstr/s
-            peak: None
-            pct_of_peak: false
-          IPC:
-            value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
-            unit: Instr/cycle
-            peak: 5
-            pct_of_peak: true
-          Wavefront Occupancy:
-            value: SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE)
-            unit: Wavefronts
-            peak: $max_waves_per_cu * $cu_per_gpu
-            pct_of_peak: true
-          GL2 Cache Hit Rate:
-            value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          GL2-Fabric Read BW:
-            value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_128B_sum
-              * 128 + GL2C_EA_RDREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-            unit: Bytes/s
-            peak: None
-            pct_of_peak: false
-          GL2-Fabric Write BW:
-            value: SUM(GL2C_EA_WRREQ_32B_sum * 32 + GL2C_EA_WRREQ_64B_sum * 64 + GL2C_EA_WRREQ_128B_sum
-              * 128 + GL2C_EA_WRREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-            unit: Bytes/s
-            peak: None
-            pct_of_peak: false
-          LDS Bank Conflicts:
-            value: AVG(SQC_LDS_BANK_CONFLICT_sum)
-            unit: Cycles
-            peak: None
-            pct_of_peak: false
-          Wave Dependency Wait:
-            value: 100 * SUM(SQ_WAIT_ANY_sum) / SUM(SQG_WAVE_CYCLES_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          Wave Issue Wait:
-            value: 100 * SUM(SQ_WAIT_INST_ANY_sum) / SUM(SQG_WAVE_CYCLES_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          GL0 Cache Hit Rate (TCP Cache):
-            value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          GL0 Cache BW (TCP Cache):
-            value: None
-            unit: Bytes/s
-            peak: None
-            pct_of_peak: false
-          GL1 Cache Hit Rate:
-            value: None
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          GL1 Cache Read BW:
-            value: 32 * SUM(GL1C_GL1_RET_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-            unit: Bytes/s
-            peak: $num_gl1c * 128 * $max_sclk * 1e6
-            pct_of_peak: true
-          GL2 Cache BW:
-            value: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum *
-              128 + GL2C_READ_256_REQ_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-            unit: Bytes/s
-            peak: $total_l2_chan * 128 * $max_sclk * 1e6
-            pct_of_peak: true
-          Scalar Data Cache Hit Rate:
-            value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          Scalar Data Cache BW:
-            value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
-            unit: Bytes/s
-            peak: $sqc_per_gpu * 64 * $max_sclk * 1e6
-            pct_of_peak: true
-          Instruction Cache Hit Rate:
-            value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
-            unit: Percent
-            peak: 100
-            pct_of_peak: true
-          Instruction Cache BW:
-            value: None
-            unit: Bytes/s
-            peak: None
-            pct_of_peak: false
+  - metric_table:
+      id: 201
+      title: System Speed-of-Light
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pct_of_peak: Percent of Peak
+      metric:
+        VALU Issue Rate:
+          value: SUM(SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GInstr/s
+          peak: None
+          pct_of_peak: false
+        WMMA FLOPs (F16->F32 16x16x16):
+          value: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: $max_sclk * $cu_per_gpu * 1024 / 1000
+          pct_of_peak: true
+        FP64 VALU Issue Rate:
+          value: SUM(SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GInstr/s
+          peak: None
+          pct_of_peak: false
+        IPC:
+          value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          unit: Instr/cycle
+          peak: 5
+          pct_of_peak: true
+        Wavefront Occupancy:
+          value: SUM(SQG_WAVE_CYCLES_sum) / SUM(GRBM_GUI_ACTIVE)
+          unit: Wavefronts
+          peak: $max_waves_per_cu * $cu_per_gpu
+          pct_of_peak: true
+        GL2 Cache Hit Rate:
+          value: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        GL2-Fabric Read BW:
+          value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_128B_sum
+            * 128 + GL2C_EA_RDREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: None
+          pct_of_peak: false
+        GL2-Fabric Write BW:
+          value: SUM(GL2C_EA_WRREQ_32B_sum * 32 + GL2C_EA_WRREQ_64B_sum * 64 + GL2C_EA_WRREQ_128B_sum
+            * 128 + GL2C_EA_WRREQ_256B_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: None
+          pct_of_peak: false
+        LDS Bank Conflicts:
+          value: AVG(SQC_LDS_BANK_CONFLICT_sum)
+          unit: Cycles
+          peak: None
+          pct_of_peak: false
+        Wave Dependency Wait:
+          value: 100 * SUM(SQ_WAIT_ANY_sum) / SUM(SQG_WAVE_CYCLES_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        Wave Issue Wait:
+          value: 100 * SUM(SQ_WAIT_INST_ANY_sum) / SUM(SQG_WAVE_CYCLES_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        GL0 Cache Hit Rate (TCP Cache):
+          value: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        GL0 Cache BW (TCP Cache):
+          value: None
+          unit: Bytes/s
+          peak: None
+          pct_of_peak: false
+        GL1 Cache Hit Rate:
+          value: None
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        GL1 Cache Read BW:
+          value: 32 * SUM(GL1C_GL1_RET_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $num_gl1c * 128 * $max_sclk * 1e6
+          pct_of_peak: true
+        GL2 Cache BW:
+          value: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum *
+            128 + GL2C_READ_256_REQ_sum * 256) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $total_l2_chan * 128 * $max_sclk * 1e6
+          pct_of_peak: true
+        Scalar Data Cache Hit Rate:
+          value: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        Scalar Data Cache BW:
+          value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: $sqc_per_gpu * 64 * $max_sclk * 1e6
+          pct_of_peak: true
+        Instruction Cache Hit Rate:
+          value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+          unit: Percent
+          peak: 100
+          pct_of_peak: true
+        Instruction Cache BW:
+          value: None
+          unit: Bytes/s
+          peak: None
+          pct_of_peak: false
   metrics_description:
     VALU Issue Rate: >-
       Billions of VALU instruction issues per second. The counter includes
