@@ -137,3 +137,70 @@ gating is documented for Navi3x and Navi4x.
 For the workaround, see `Setting GPU performance level for PMC profiling
 <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling>`_
 in the ROCprofiler-SDK documentation.
+
+Why is a per-wave or per-cycle result ``N/A``?
+==============================================
+
+The default normalization unit is ``per_kernel``. ``-n`` / ``--normal-unit``
+sets the unit for a profile that was already collected, and it does not
+supply a divisor the profile does not contain. See
+:ref:`normalization-units`. The divisor and the metric's other counters must
+be in the same pass.
+
+``per_wave`` divides by ``SQ_WAVES``, and ``per_cycle`` divides by
+``GRBM_GUI_ACTIVE`` through ``$GRBM_GUI_ACTIVE_PER_XCD``, which is
+``GRBM_GUI_ACTIVE / $num_xcd``.
+
+A single-pass metric is read from one pass. If that pass lacks ``SQ_WAVES``
+or ``GRBM_GUI_ACTIVE``, the metric has no value and the report shows ``N/A``.
+A divisor collected on another pass stays on that pass. A multi-pass metric
+is separated into parts that each fit one pass, and a part that needs the
+divisor follows the same rule.
+
+How do I collect the divisor in the same pass?
+----------------------------------------------
+
+``$denom`` is replaced at analyze time. An expression that contains only
+``$denom`` does not put ``SQ_WAVES`` or ``GRBM_GUI_ACTIVE`` in the metric's
+pass. Name the divisor in the metric expression so the profile command
+collects it with the other counters for that metric.
+
+Build the config from the
+`panel config template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
+``--config-dir`` is the parent of the architecture directory, such as
+``gfx942`` or ``gfx115x``. Use the same layout as the shipped
+``analysis_configs`` directory, and pass ``--config-dir`` to both
+``profile`` and ``analyze``.
+
+For a per-wave result, name ``SQ_WAVES``:
+
+.. code-block:: yaml
+
+   VALU:
+     avg: SUM(SQ_INSTS_VALU) / SUM(SQ_WAVES)
+     min: MIN(SQ_INSTS_VALU / SQ_WAVES)
+     max: MAX(SQ_INSTS_VALU / SQ_WAVES)
+     unit: Instructions per wave
+
+For a per-cycle result, name ``$GRBM_GUI_ACTIVE_PER_XCD``:
+
+.. code-block:: yaml
+
+   VALU:
+     avg: SUM(SQ_INSTS_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+     min: MIN(SQ_INSTS_VALU / $GRBM_GUI_ACTIVE_PER_XCD)
+     max: MAX(SQ_INSTS_VALU / $GRBM_GUI_ACTIVE_PER_XCD)
+     unit: Instructions per cycle
+
+When do I need to profile again?
+--------------------------------
+
+Profile again when the divisor is in a different pass from the other
+counters for that metric. Name the divisor in the metric expression so the
+next profile collects the divisor in the same pass.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --config-dir /path/to/my_configs --name vcopy -- ./vcopy -n 1048576 -b 256
+
+   $ rocprof-compute analyze -p workloads/vcopy/MI200 --config-dir /path/to/my_configs -k 0

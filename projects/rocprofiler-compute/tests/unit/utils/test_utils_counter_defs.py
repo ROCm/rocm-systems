@@ -9,6 +9,7 @@ from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
     metric_expressions,
+    pmc_slot_cost,
 )
 
 # =============================================================================
@@ -151,3 +152,79 @@ class TestMetricExpressions:
         }
         metric = {"expr": "TCC_HIT[::_1]", "unit": "Hits"}
         assert metric_expressions(table, metric) == ["TCC_HIT[::_1]"]
+
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.pmc_slot_cost
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("counter", "present", "cost"),
+    [
+        ("SQ_WAVES", None, 1),
+        ("SQ_INST_LEVEL_SMEM_ACCUM", None, 2),
+        ("SQ_INST_LEVEL_SMEM_ACCUM", {"SQ_INST_LEVEL_SMEM"}, 2),
+        ("SQ_INST_LEVEL_SMEM", {"SQ_INST_LEVEL_SMEM_ACCUM"}, 1),
+        ("SQC_DCACHE_INFLIGHT_LEVEL_ACCUM", None, 2),
+        ("SQ_INST_LEVEL_VMEM_ACCUM[0]", None, 2),
+        ("SQ_ACCUM_PREV_HIRES", None, 1),
+    ],
+)
+def test_pmc_slot_cost(counter, present, cost):
+    assert pmc_slot_cost(counter, present=present) == cost
+
+
+@pytest.mark.parametrize(
+    ("counters", "cost"),
+    [
+        ({"SQ_INST_LEVEL_SMEM_ACCUM"}, 2),
+        ({"SQ_INST_LEVEL_SMEM", "SQ_INST_LEVEL_SMEM_ACCUM"}, 3),
+        ({"SQ_INST_LEVEL_SMEM"}, 1),
+        (
+            {
+                "SQ_INST_LEVEL_SMEM",
+                "SQ_INST_LEVEL_SMEM_ACCUM",
+                "SQ_INST_LEVEL_VMEM_ACCUM",
+            },
+            5,
+        ),
+        (
+            {
+                "SQ_LEVEL_WAVES",
+                "SQ_LEVEL_WAVES_ACCUM",
+                "SQ_BUSY_CU_CYCLES",
+                "SQ_INSTS_LDS",
+                "SQC_DCACHE_REQ_READ_1",
+                "SQC_DCACHE_REQ_READ_2",
+                "SQC_DCACHE_REQ_READ_4",
+                "SQC_DCACHE_REQ_READ_8",
+            },
+            9,
+        ),
+    ],
+)
+def test_pmc_bucket_slot_cost(counters, cost):
+    from utils.utils_counter_defs import pmc_bucket_slot_cost
+
+    assert pmc_bucket_slot_cost(counters) == cost
+
+
+def test_level_waves_accum_pair_does_not_fill_sq_bucket() -> None:
+    """BASE+ACCUM plus six other SQ names must not fit an 8-deep SQ bucket."""
+    from rocprof_compute_soc.counter_file import CounterFile
+
+    bucket = CounterFile("trial", {"SQ": 8})
+    assert bucket.add("SQ_LEVEL_WAVES")
+    assert bucket.add("SQ_LEVEL_WAVES_ACCUM")
+    others = [
+        "SQ_BUSY_CU_CYCLES",
+        "SQ_INSTS_LDS",
+        "SQC_DCACHE_REQ_READ_1",
+        "SQC_DCACHE_REQ_READ_2",
+        "SQC_DCACHE_REQ_READ_4",
+        "SQC_DCACHE_REQ_READ_8",
+    ]
+    for name in others[:5]:
+        assert bucket.add(name)
+    assert not bucket.add(others[5])
