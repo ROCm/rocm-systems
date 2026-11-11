@@ -252,7 +252,6 @@ fn export_owns_the_returned_descriptor_on_success_and_failure() {
 
     for errno in [None, Some(errno::EIO)] {
         let (mut observer, returned_stream) = UnixStream::pair().unwrap();
-        observer.set_nonblocking(true).unwrap();
         let returned = returned_stream.into_raw_fd();
         let kfd = endpoint(Arc::new(move |call| {
             let Call::ExportDmaBuf(args) = call else {
@@ -271,8 +270,8 @@ fn export_owns_the_returned_descriptor_on_success_and_failure() {
         } else {
             assert_eq!(result.unwrap_err().raw_os_error(), errno);
         }
-        // Observe closure of the underlying socket. Another test may reopen
-        // the same integer fd immediately after it is released.
+        // EOF observes closure independently of descriptor-number reuse.
+        // Concurrent forks can retain a peer copy until their child exits.
         let mut byte = [0];
         assert_eq!(observer.read(&mut byte).unwrap(), 0);
     }
