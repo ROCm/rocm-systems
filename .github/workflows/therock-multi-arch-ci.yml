@@ -118,6 +118,7 @@ jobs:
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -135,6 +136,7 @@ jobs:
             build_tools/project_mappings.json
             build_tools/artifact_subprojects.json
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Configure CI for pull request or push
         id: configure-pr
@@ -164,10 +166,13 @@ jobs:
       # project is disabled on Windows in the topology.
       - name: Compute build-stage allowlist
         id: build_stages
+        env:
+          CHANGED_PROJECTS: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+          RUN_ALL_TESTS: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
-            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --changed-projects "${CHANGED_PROJECTS}" \
+            --run-all-tests "${RUN_ALL_TESTS}" \
             --therock-path "_therock"
 
   setup:
@@ -242,7 +247,7 @@ jobs:
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     permissions:
@@ -266,7 +271,7 @@ jobs:
       test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      changed_projects: ${{ needs.configure.outputs.run_all_tests != 'true' && needs.configure.outputs.changed_projects || '' }}
       repository: ROCm/TheRock
       ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     permissions:
@@ -290,6 +295,7 @@ jobs:
           ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:

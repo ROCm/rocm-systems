@@ -121,6 +121,7 @@ jobs:
           ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:

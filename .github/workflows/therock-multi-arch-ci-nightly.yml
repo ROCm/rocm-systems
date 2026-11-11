@@ -77,8 +77,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Surface locked TheRock ref
+        env:
+          SETUP_REF: ${{ needs.setup.outputs.ref }}
         run: |
-          RESOLVED_REF="${{ needs.setup.outputs.ref }}"
+          RESOLVED_REF="${SETUP_REF}"
           COMMIT_URL="https://github.com/ROCm/TheRock/commit/${RESOLVED_REF}"
           echo "Locked TheRock ref for this run: ${RESOLVED_REF} (${COMMIT_URL})"
           {
@@ -152,6 +154,7 @@ jobs:
           ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
+          persist-credentials: false
 
       - name: Evaluate workflow results
         env:
