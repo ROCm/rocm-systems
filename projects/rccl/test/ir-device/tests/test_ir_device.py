@@ -22,6 +22,7 @@ those would misleadingly show as PASSED.
 """
 
 import re
+import subprocess
 
 import pytest
 
@@ -153,3 +154,27 @@ def test_composite_barrier_session_functional_mpi(run_gin_mpi_gtest):
         "ir_composite_barrier_mpi.log",
     )
     _summarize_gtest(proc, log, "composite barrier functional (2-rank)")
+
+
+@pytest.mark.ir_device
+def test_b128_accesses_use_upstream_builtins(ir_bitcode, paths):
+    """The device API's 128-bit system-scope accesses (GIN proxy descriptors, LL
+    all-to-all lines) use __builtin_amdgcn_av_{store,load}_b128 when the compiler
+    has them. The AMD-only llvm.amdgcn.global.{store,load}.b128 they replace abort
+    upstream-LLVM consumers of this bitcode, such as Triton, while AMD's LLVM
+    lowers both to the same instructions, so only the IR can tell them apart.
+    """
+    probe = subprocess.run(
+        [paths.AMDCLANGPP, "-x", "hip", "--cuda-device-only", f"--offload-arch={paths.ARCH}", "-E", "-"],
+        input="#if __has_builtin(__builtin_amdgcn_av_store_b128) && __has_builtin(__builtin_amdgcn_av_load_b128)\n"
+        "RCCL_AV_B128_AVAILABLE\n#endif\n",
+        capture_output=True, text=True, check=True,
+    )
+    if "RCCL_AV_B128_AVAILABLE" not in probe.stdout:
+        pytest.skip(f"compiler lacks __builtin_amdgcn_av_{{store,load}}_b128 for {paths.ARCH}")
+
+    ir = subprocess.run([paths.LLVM_DIS, ir_bitcode, "-o", "-"], capture_output=True, text=True, check=True).stdout
+    legacy = sorted(set(re.findall(r"@llvm\.amdgcn\.global\.(?:store|load)\.b128\b", ir)))
+    assert not legacy, f"{ir_bitcode} still calls the AMD-only {legacy}; prefer RCCL_STORE_B128_SYS / RCCL_LOAD_B128_SYS"
+    # Guard against a vacuous pass: the GIN barrier's proxy descriptor writes are 128-bit stores.
+    assert re.search(r"@llvm\.amdgcn\.av\.store\.b128", ir), f"no 128-bit system-scope store in {ir_bitcode}"

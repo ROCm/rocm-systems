@@ -74,13 +74,8 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
 
-// System-scope 128-bit global load/store for the device-API headers below.
-// __builtin_amdgcn_global_{load,store}_b128 lower to llvm.amdgcn.global.{load,store}.b128, which exist only in
-// AMD's LLVM. Upstream LLVM has the same operation as llvm.amdgcn.av.{load,store}.b128, from
-// __builtin_amdgcn_av_{load,store}_b128 (llvm/llvm-project#199176). Device code built from these headers is also
-// compiled by upstream-LLVM consumers -- Triton kernels that link RCCL's GIN device API -- which abort on the AMD-only
-// intrinsics ("Unknown type!"). So prefer the av builtins where the compiler has them; on gfx942/gfx950 both lower to
-// the same global_store_dwordx4 / global_load_dwordx4 ... sc0 sc1.
+// System-scope 128-bit load/store for the device-API headers. Prefer the av builtins: upstream LLVM (e.g.
+// Triton) lacks the AMD-only global_{load,store}_b128 intrinsics. Both lower to the same instructions.
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && \
   __has_builtin(__builtin_amdgcn_av_load_b128) && __has_builtin(__builtin_amdgcn_av_store_b128) && \
