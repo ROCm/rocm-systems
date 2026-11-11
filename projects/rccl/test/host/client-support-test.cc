@@ -1770,6 +1770,31 @@ TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_NonFinite_ReturnsError) {
   FreeClient(client);
 }
 
+// Accepted timeouts are capped at INT64_MAX/4 ns (2^61 ns, ~2305843009.2 s) so the int64 conversion is
+// defined and collectives.cc can add them to timestamps without overflow.
+TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_AboveCap_ReturnsErrorAndKeepsTimeout) {
+  for (const char* value : {"1e10", "2305843010"}) {
+    struct rasClient* client = MakeClient();
+    const int64_t before = client->timeout;
+    ScriptRecvData(std::string("timeout ") + value + "\n");
+    SetRevents(client, POLLIN);
+    rasClientEventLoop(client, client->pfd);
+    EXPECT_EQ(DrainSendQueue(client), std::string("ERROR: Invalid timeout value ") + value + "\n");
+    EXPECT_EQ(client->timeout, before) << value;
+    FreeClient(client);
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, EventLoop_Timeout_AtCap_Accepted) {
+  struct rasClient* client = MakeClient();
+  ScriptRecvData("timeout 2305843009\n");
+  SetRevents(client, POLLIN);
+  rasClientEventLoop(client, client->pfd);
+  EXPECT_EQ(DrainSendQueue(client), "OK\n");
+  EXPECT_EQ(client->timeout, 2305843009000000000LL);
+  FreeClient(client);
+}
+
 TEST_F(RasClientSupportMicrotest, EventLoop_SetFormatText_Ok) {
   struct rasClient* client = MakeClient();
   client->outputFormat = RAS_OUTPUT_JSON;
