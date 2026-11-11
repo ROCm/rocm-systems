@@ -761,8 +761,8 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_FailedSignalResolution
   scene.receivers[1].buffer = staging.data();
   ScopedHook progress(g_ncclSocketProgress, [&](int operation, ncclSocket* socket, void* buffer,
                                                int size, int* offset, bool* closed) {
-    EXPECT_EQ(NCCL_SOCKET_RECV, operation);
-    EXPECT_EQ(&scene.receivers[1].sock, socket);
+    EXPECT_EQ(operation, NCCL_SOCKET_RECV);
+    EXPECT_EQ(socket, &scene.receivers[1].sock);
     auto* message = static_cast<ncclRmaSocketProxyHeader*>(buffer);
     message->type = ncclRmaSocketProxyMsgTypeIput;
     message->status = ncclSuccess;
@@ -775,12 +775,12 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_FailedSignalResolution
     return ncclSuccess;
   });
 
-  EXPECT_EQ(ncclInvalidUsage, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
-  EXPECT_EQ(1, progress.calls);
-  EXPECT_EQ(0, handle.recvActiveOps);
-  EXPECT_EQ(nullptr, scene.receivers[1].dataHandle);
-  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, scene.receivers[1].recvState);
-  EXPECT_EQ(0, scene.receivers[1].controlMsgOffset);
+  EXPECT_EQ(ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1), ncclInvalidUsage);
+  EXPECT_EQ(progress.calls, 1);
+  EXPECT_EQ(handle.recvActiveOps, 0);
+  EXPECT_EQ(scene.receivers[1].dataHandle, nullptr);
+  EXPECT_EQ(scene.receivers[1].recvState, ncclRmaSocketProxyRecvStateControlMsg);
+  EXPECT_EQ(scene.receivers[1].controlMsgOffset, 0);
 }
 
 TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalReadFailureStopsWriteAndReleasesBothReferences) {
@@ -799,21 +799,21 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalReadFailureStops
   receiver.signalDelta = 7;
   receiver.hasSignal = 1;
   ScopedHook read(g_wrapGdrCopyFromMapping, [&](gdr_mh_t mapping, void*, const void* source, size_t size) {
-    EXPECT_EQ(51u, mapping.h);
-    EXPECT_EQ(bar.data() + 8, source);
-    EXPECT_EQ(sizeof(uint64_t), size);
+    EXPECT_EQ(mapping.h, 51u);
+    EXPECT_EQ(source, bar.data() + 8);
+    EXPECT_EQ(size, sizeof(uint64_t));
     return ncclSystemError;
   });
   ScopedHook write(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) { return ncclSuccess; });
 
-  EXPECT_EQ(ncclSystemError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
-  EXPECT_EQ(1, read.calls);
-  EXPECT_EQ(0, write.calls);
-  EXPECT_EQ(0, handle.recvActiveOps);
-  EXPECT_EQ(nullptr, receiver.dataHandle);
-  EXPECT_EQ(nullptr, receiver.signalHandle);
-  EXPECT_EQ(0, receiver.hasSignal);
-  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
+  EXPECT_EQ(ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1), ncclSystemError);
+  EXPECT_EQ(read.calls, 1);
+  EXPECT_EQ(write.calls, 0);
+  EXPECT_EQ(handle.recvActiveOps, 0);
+  EXPECT_EQ(receiver.dataHandle, nullptr);
+  EXPECT_EQ(receiver.signalHandle, nullptr);
+  EXPECT_EQ(receiver.hasSignal, 0);
+  EXPECT_EQ(receiver.recvState, ncclRmaSocketProxyRecvStateControlMsg);
 }
 
 TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailurePropagatesWithoutCompletingRequest) {
@@ -836,19 +836,19 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailureProp
     return ncclSuccess;
   });
   ScopedHook write(g_wrapGdrCopyToMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
-    EXPECT_EQ(53u, mapping.h);
-    EXPECT_EQ(&bar, destination);
-    EXPECT_EQ(sizeof(uint64_t), size);
-    EXPECT_EQ(4u, *static_cast<const uint64_t*>(source));
+    EXPECT_EQ(mapping.h, 53u);
+    EXPECT_EQ(destination, &bar);
+    EXPECT_EQ(size, sizeof(uint64_t));
+    EXPECT_EQ(*static_cast<const uint64_t*>(source), 4u);
     return ncclRemoteError;
   });
 
-  EXPECT_EQ(ncclRemoteError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
-  EXPECT_EQ(1, read.calls);
-  EXPECT_EQ(1, write.calls);
-  EXPECT_EQ(0, handle.recvActiveOps);
-  EXPECT_EQ(73u, receiver.lastCompletedRequestGlobalId);
-  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
+  EXPECT_EQ(ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1), ncclRemoteError);
+  EXPECT_EQ(read.calls, 1);
+  EXPECT_EQ(write.calls, 1);
+  EXPECT_EQ(handle.recvActiveOps, 0);
+  EXPECT_EQ(receiver.lastCompletedRequestGlobalId, 73u);
+  EXPECT_EQ(receiver.recvState, ncclRmaSocketProxyRecvStateControlMsg);
 }
 
 TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SocketErrorResetsPayloadWithoutPublishingCompletion) {
@@ -871,14 +871,14 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SocketErrorResetsPaylo
     return ncclSystemError;
   });
 
-  EXPECT_EQ(ncclSystemError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
-  EXPECT_EQ(1, progress.calls);
-  EXPECT_EQ(0, handle.recvActiveOps);
-  EXPECT_EQ(79u, receiver.lastCompletedRequestGlobalId);
-  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
-  EXPECT_EQ(0, receiver.recvChunkSize);
-  EXPECT_EQ(0, receiver.recvChunkOffset);
-  EXPECT_EQ(0u, receiver.recvPayloadOffset);
+  EXPECT_EQ(ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1), ncclSystemError);
+  EXPECT_EQ(progress.calls, 1);
+  EXPECT_EQ(handle.recvActiveOps, 0);
+  EXPECT_EQ(receiver.lastCompletedRequestGlobalId, 79u);
+  EXPECT_EQ(receiver.recvState, ncclRmaSocketProxyRecvStateControlMsg);
+  EXPECT_EQ(receiver.recvChunkSize, 0);
+  EXPECT_EQ(receiver.recvChunkOffset, 0);
+  EXPECT_EQ(receiver.recvPayloadOffset, 0u);
 }
 
 }  // namespace
