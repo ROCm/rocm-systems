@@ -2021,4 +2021,210 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 }
 
+// ============================================================================
+// Category 14: Enabled-Metrics Gating Tests
+//
+// get_metrics() must read a metric only when it is both enabled by the user
+// (ROCPROFSYS_AMD_SMI_METRICS) and supported by the hardware.
+// ============================================================================
+
+namespace
+{
+// Hardware reports every metric as supported; used so that any metric left at its
+// default value in the result can only be explained by the enabled mask.
+constexpr std::uint64_t k_memory_usage_bytes = 8589934592ULL;
+}  // namespace
+
+/**
+ * TC14.1: Nothing enabled collects nothing
+ *
+ * Objective: With every metric supported but none enabled, no field is populated and
+ * the backend is only queried by the support probe in the constructor.
+ */
+TEST_F(DeviceTest, nothing_collected_when_no_metrics_enabled)
+{
+    EXPECT_CALL(*mock_backend, get_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(CreateValidMetrics()));
+
+    // One call from the constructor's support probe; none from get_metrics().
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(1)
+        .WillOnce(Return(k_memory_usage_bytes));
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+        .Times(1)
+        .WillOnce(Return(std::int64_t{ 75 }));
+    EXPECT_CALL(*mock_backend, get_edge_temperature())
+        .Times(1)
+        .WillOnce(Return(std::int64_t{ 70 }));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    ASSERT_TRUE(dev.get_supported_metrics().bits.current_socket_power);
+    ASSERT_TRUE(dev.get_supported_metrics().bits.memory_usage);
+
+    const auto collected = dev.get_metrics(enabled_metrics{ .value = 0 }, 1000000000ULL);
+
+    EXPECT_EQ(collected.current_socket_power, 0U);
+    EXPECT_EQ(collected.average_socket_power, 0U);
+    EXPECT_EQ(collected.gfx_activity, 0U);
+    EXPECT_EQ(collected.umc_activity, 0U);
+    EXPECT_EQ(collected.mm_activity, 0U);
+    EXPECT_EQ(collected.xcp_stats[0].vcn_busy[0], 0U);
+    EXPECT_EQ(collected.xcp_stats[0].jpeg_busy[0], 0U);
+    EXPECT_EQ(collected.xgmi.link.width, 0U);
+    EXPECT_EQ(collected.pcie.link.width, 0U);
+    EXPECT_EQ(collected.gfx_clock_mhz, 0U);
+    EXPECT_EQ(collected.mem_clock_mhz, 0U);
+    EXPECT_EQ(collected.memory_usage, 0U);
+    EXPECT_EQ(collected.hotspot_temperature, 0);
+    EXPECT_EQ(collected.edge_temperature, 0);
+}
+
+/**
+ * TC14.2: Only the enabled subset is collected
+ *
+ * Objective: With every metric supported, only the enabled metrics are populated.
+ */
+TEST_F(DeviceTest, only_enabled_metrics_collected)
+{
+    EXPECT_CALL(*mock_backend, get_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(CreateValidMetrics()));
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(k_memory_usage_bytes));
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 75 }));
+    EXPECT_CALL(*mock_backend, get_edge_temperature())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(std::int64_t{ 70 }));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    enabled_metrics enabled{};
+    enabled.bits.current_socket_power = 1;
+    enabled.bits.gfx_clock            = 1;
+    enabled.bits.pcie                 = 1;
+
+    const auto collected = dev.get_metrics(enabled, 1000000000ULL);
+
+    // Enabled and supported: collected.
+    EXPECT_EQ(collected.current_socket_power, 150U);
+    EXPECT_EQ(collected.gfx_clock_mhz, 1500U);
+    EXPECT_EQ(collected.pcie.link.width, 16U);
+
+    // Supported but not enabled: not collected.
+    EXPECT_EQ(collected.average_socket_power, 0U);
+    EXPECT_EQ(collected.gfx_activity, 0U);
+    EXPECT_EQ(collected.umc_activity, 0U);
+    EXPECT_EQ(collected.mm_activity, 0U);
+    EXPECT_EQ(collected.xcp_stats[0].vcn_busy[0], 0U);
+    EXPECT_EQ(collected.xgmi.link.width, 0U);
+    EXPECT_EQ(collected.mem_clock_mhz, 0U);
+    EXPECT_EQ(collected.memory_usage, 0U);
+    EXPECT_EQ(collected.hotspot_temperature, 0);
+    EXPECT_EQ(collected.edge_temperature, 0);
+}
+
+/**
+ * TC14.3: Enabled but unsupported is not collected
+ *
+ * Objective: Enabling a metric the hardware does not report must not populate it.
+ */
+TEST_F(DeviceTest, enabled_but_unsupported_metrics_not_collected)
+{
+    metrics met      = CreateSentinelMetrics();
+    met.gfx_activity = 85;  // only gfx_activity is supported
+
+    EXPECT_CALL(*mock_backend, get_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(met));
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Throw(std::runtime_error("not supported")));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    ASSERT_TRUE(dev.get_supported_metrics().bits.gfx_activity);
+    ASSERT_FALSE(dev.get_supported_metrics().bits.umc_activity);
+
+    enabled_metrics enabled{};
+    enabled.bits.gfx_activity = 1;
+    enabled.bits.umc_activity = 1;
+
+    const auto collected = dev.get_metrics(enabled, 1000000000ULL);
+
+    EXPECT_EQ(collected.gfx_activity, 85U);
+    EXPECT_EQ(collected.umc_activity, 0U);
+}
+
+/**
+ * TC14.4: Memory usage is read only when enabled
+ *
+ * Objective: get_memory_usage() is a separate backend call; it must be skipped when
+ * memory_usage is not enabled and made when it is.
+ */
+TEST_F(DeviceTest, memory_usage_read_only_when_enabled)
+{
+    EXPECT_CALL(*mock_backend, get_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(CreateValidMetrics()));
+
+    // Constructor probe + the one get_metrics() call that enables memory_usage.
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(2)
+        .WillRepeatedly(Return(k_memory_usage_bytes));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    enabled_metrics other{};
+    other.bits.gfx_activity = 1;
+    EXPECT_EQ(dev.get_metrics(other, 1000000000ULL).memory_usage, 0U);
+
+    enabled_metrics memory{};
+    memory.bits.memory_usage = 1;
+    EXPECT_EQ(dev.get_metrics(memory, 2000000000ULL).memory_usage, k_memory_usage_bytes);
+}
+
+/**
+ * TC14.5: Edge temperature is read when only edge is enabled
+ *
+ * Objective: With both sensors supported, enabling only edge must read edge and skip
+ * hotspot.
+ */
+TEST_F(DeviceTest, edge_temperature_read_when_only_edge_enabled)
+{
+    EXPECT_CALL(*mock_backend, get_metrics())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Return(CreateSentinelMetrics()));
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(AtLeast(1))
+        .WillRepeatedly(Throw(std::runtime_error("not supported")));
+
+    // Hotspot: constructor probe only. Edge: constructor probe + one read.
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature())
+        .Times(1)
+        .WillOnce(Return(std::int64_t{ 75 }));
+    EXPECT_CALL(*mock_backend, get_edge_temperature())
+        .Times(2)
+        .WillRepeatedly(Return(std::int64_t{ 70 }));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+
+    enabled_metrics enabled{};
+    enabled.bits.edge_temperature = 1;
+
+    const auto collected = dev.get_metrics(enabled, 1000000000ULL);
+
+    EXPECT_EQ(collected.edge_temperature, 70);
+    EXPECT_EQ(collected.hotspot_temperature, 0);
+}
+
 }  // namespace rocprofsys::pmc::collectors::gpu::testing
