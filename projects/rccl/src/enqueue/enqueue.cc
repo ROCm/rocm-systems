@@ -3097,7 +3097,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
       // to be least preferred.
       if (a == NCCL_ALGO_RING && rcclPenalizeFp8Ring(info->datatype, info->func, comm->nRanks, comm->nNodes, nBytes,
-                                                    comm->archName)) {
+                                                    rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName)) {
         table[a][p] *= 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
       }
     }

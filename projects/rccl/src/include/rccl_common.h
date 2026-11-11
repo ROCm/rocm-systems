@@ -532,13 +532,14 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
 
-// FP8 ring reductions with more than 8 ranks take a 1024x cost penalty.
-// Exempt a 16-rank, single-node gfx1250 allreduce from 256 MiB up: there the
-// intra-node tree is a chain of the same depth as the ring.
+// FP8 rings with more than 8 ranks get a 1024x cost penalty. Exempt single-node
+// gfx1250 allreduce with 16+ ranks at or above the DDA LL128 ceiling. Callers
+// pass rcclDdaLL128Threshold(), so the ceiling follows the arch table and
+// RCCL_DDA_LL128_THRESHOLD.
 static inline bool rcclPenalizeFp8Ring(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes, size_t nBytes,
-                                       const char* arch) {
+                                       size_t ddaLl128Ceiling, const char* arch) {
   if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= 8) return false;
-  const bool exempt = func == ncclFuncAllReduce && nRanks == 16 && nNodes == 1 && nBytes >= (256ull << 20) &&
+  const bool exempt = func == ncclFuncAllReduce && nRanks >= 16 && nNodes == 1 && nBytes >= ddaLl128Ceiling &&
                       IsArchMatch(arch, "gfx1250");
   return !exempt;
 }

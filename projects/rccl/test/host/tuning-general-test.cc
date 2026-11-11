@@ -365,17 +365,35 @@ TEST_F(TuningGeneralMicrotest, RingModelInitMultiNodeNetOverheadAndInterLatency)
 }
 
 TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRing) {
-  ncclTuningInput_t input = MakeTimeInput(256ULL << 20, 1, ncclFloat8e4m3);
-  input.func = ncclFuncAllReduce;
-  comm_->nRanks = 16;
+  rcclArchThresholds table{};
+  table.ddaLL128Max[ncclFuncAllReduce] = 256ULL << 20;
+  comm_->archThresholds = &table;
   comm_->nNodes = 1;
   comm_->archName = const_cast<char*>("gfx1250");
-  float latency = 1.0f, bandwidth = 1.0f;
-  const float base = latency + static_cast<float>(input.nBytes) / (1000.0f * bandwidth);
-  EXPECT_FLOAT_EQ(base, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
+  const size_t ceiling = rcclDdaLL128Threshold(comm_.get(), ncclFuncAllReduce);
+  ASSERT_EQ(256ULL << 20, ceiling);
 
+  float latency = 1.0f, bandwidth = 1.0f;
+  for (int nRanks : {16, 32}) {
+    comm_->nRanks = nRanks;
+    ncclTuningInput_t atCeiling = MakeTimeInput(ceiling, 1, ncclFloat8e4m3);
+    atCeiling.func = ncclFuncAllReduce;
+    const float base = latency + static_cast<float>(atCeiling.nBytes) / (1000.0f * bandwidth);
+    EXPECT_FLOAT_EQ(base, ncclTuningGetTime(&atCeiling, NCCL_ALGO_RING, &latency, &bandwidth)) << "nRanks=" << nRanks;
+
+    ncclTuningInput_t below = MakeTimeInput(ceiling - 1, 1, ncclFloat8e4m3);
+    below.func = ncclFuncAllReduce;
+    const float belowBase = latency + static_cast<float>(below.nBytes) / (1000.0f * bandwidth);
+    EXPECT_FLOAT_EQ(belowBase * 1024.0f, ncclTuningGetTime(&below, NCCL_ALGO_RING, &latency, &bandwidth))
+        << "nRanks=" << nRanks;
+  }
+
+  comm_->nRanks = 32;
   comm_->archName = const_cast<char*>("gfx950");
-  EXPECT_FLOAT_EQ(base * 1024.0f, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
+  ncclTuningInput_t otherArch = MakeTimeInput(ceiling, 1, ncclFloat8e4m3);
+  otherArch.func = ncclFuncAllReduce;
+  const float otherBase = latency + static_cast<float>(otherArch.nBytes) / (1000.0f * bandwidth);
+  EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
 }
 
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {

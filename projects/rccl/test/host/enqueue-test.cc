@@ -1875,16 +1875,26 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) 
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_RingNotPenalised) {
-  for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
-    ResetEnqueueTestDeps();
-    CostComm big(/*nRanks=*/16);
-    big.get()->archName = const_cast<char*>("gfx1250");
-    CostTable tbl;
-    auto task = CostTask(ncclFuncAllReduce, dt);
-    ScriptAllTimes(2.0f);
-    ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 256ULL << 20, 0, 0, 1, 0, tbl.ptr()));
-    EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]) << "dtype=" << int(dt);
-    EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE]) << "dtype=" << int(dt);
+  // At the DDA LL128 ceiling the ring is exempt; one byte below it is penalized.
+  constexpr size_t kCeiling = 256ULL << 20;
+  for (int nRanks : {16, 32}) {
+    for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+      for (size_t nBytes : {kCeiling, kCeiling - 1}) {
+        ResetEnqueueTestDeps();
+        g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return kCeiling; };
+        CostComm big(nRanks);
+        big.get()->archName = const_cast<char*>("gfx1250");
+        CostTable tbl;
+        auto task = CostTask(ncclFuncAllReduce, dt);
+        ScriptAllTimes(2.0f);
+        ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, nBytes, 0, 0, 1, 0, tbl.ptr()));
+        const float ring = nBytes >= kCeiling ? 2.0f : 2.0f * 1024.0f;
+        EXPECT_FLOAT_EQ(ring, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE])
+            << "nRanks=" << nRanks << " dtype=" << int(dt) << " nBytes=" << nBytes;
+        EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE])
+            << "nRanks=" << nRanks << " dtype=" << int(dt) << " nBytes=" << nBytes;
+      }
+    }
   }
 }
 
