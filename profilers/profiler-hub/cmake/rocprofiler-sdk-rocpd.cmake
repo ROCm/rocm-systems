@@ -36,12 +36,20 @@ set(rocpd_symbol_rocpd_summary_views SUMMARY_VIEWS)
 function(ROCPD_PARSE_VERSIONS_YML YML_FILE)
     file(READ "${YML_FILE}" _yml)
     string(REGEX REPLACE "(^|\n)[ \t]*#[^\n]*" "\\1" _yml "${_yml}")
-    string(REPLACE "\n    - version:" "\n@@BLOCK@@- version:" _yml "${_yml}")
+    string(
+        REGEX REPLACE
+        "\n[ \t]*-[ \t]*version:"
+        "\n@@BLOCK@@- version:"
+        _yml
+        "${_yml}"
+    )
     string(REPLACE "@@BLOCK@@" ";" _blocks "${_yml}")
 
     set(_versions "")
     foreach(_block IN LISTS _blocks)
-        if(NOT _block MATCHES "version: \"([0-9]+)\\.([0-9]+)\\.([0-9]+)\"")
+        if(
+            NOT _block MATCHES "version:[ \t]*\"([0-9]+)\\.([0-9]+)\\.([0-9]+)\""
+        )
             continue()
         endif()
         set(_major "${CMAKE_MATCH_1}")
@@ -87,6 +95,12 @@ function(
     if(NOT EXISTS "${_sql_path}")
         message(FATAL_ERROR "Schema file not found: ${_sql_path}")
     endif()
+    # Editing a schema .sql file re-runs configure and regenerates its header.
+    set_property(
+        DIRECTORY
+        APPEND
+        PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sql_path}"
+    )
 
     file(READ "${_sql_path}" SQL_CONTENT)
     string(REPLACE "\\" "\\\\" SQL_CONTENT "${SQL_CONTENT}")

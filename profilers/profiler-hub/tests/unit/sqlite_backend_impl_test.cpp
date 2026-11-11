@@ -463,6 +463,75 @@ TEST(sqlite_backend_impl_test, storage_3_0_2_is_rejected)
     EXPECT_THROW(backend->initialize_schema(requested), std::runtime_error);
 }
 
+TEST(sqlite_backend_impl_test,
+     write_statement_resets_and_clears_bindings_after_failed_step)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    const std::string uuid = "writetest";
+    const auto        db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_write_failed.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    ::testing::NiceMock<mock_sqlite_api> sqlite;
+    const sqlite_mock_guard              guard{ sqlite };
+    auto                                 backend =
+        mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+
+    auto insert = backend->create_write_statement_executor<int32_t>(
+        "INSERT INTO t(val) VALUES (?);");
+
+    // Any non-ok, non-done code stands in for a real constraint violation; the
+    // mock never touches a real database.
+    constexpr int kConstraintViolation = 19;
+    {
+        ::testing::InSequence sequence;
+        EXPECT_CALL(sqlite, bind_int(_, 1, 42))
+            .WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_CALL(sqlite, step(_)).WillOnce(Return(kConstraintViolation));
+        EXPECT_CALL(sqlite, reset(_)).WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_CALL(sqlite, clear_bindings(_))
+            .WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_THROW(insert(42), std::runtime_error);
+    }
+    ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
+}
+
+TEST(sqlite_backend_impl_test,
+     write_statement_resets_and_clears_bindings_after_successful_step)
+{
+    using ::testing::_;
+    using ::testing::Return;
+
+    const std::string uuid = "writetest";
+    const auto        db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_write_ok.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    ::testing::NiceMock<mock_sqlite_api> sqlite;
+    const sqlite_mock_guard              guard{ sqlite };
+    auto                                 backend =
+        mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+
+    auto insert = backend->create_write_statement_executor<int32_t>(
+        "INSERT INTO t(val) VALUES (?);");
+
+    {
+        ::testing::InSequence sequence;
+        EXPECT_CALL(sqlite, bind_int(_, 1, 7))
+            .WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_CALL(sqlite, step(_)).WillOnce(Return(gmock_sqlite_policy::result_done));
+        EXPECT_CALL(sqlite, reset(_)).WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_CALL(sqlite, clear_bindings(_))
+            .WillOnce(Return(gmock_sqlite_policy::result_ok));
+        EXPECT_NO_THROW(insert(7));
+    }
+    ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
+}
+
 TEST(sqlite_backend_impl_test, supported_writable_schemas_lists_writer_versions)
 {
     EXPECT_EQ(supported_writable_schemas(), "3.0.0, 3.0.1");
@@ -485,25 +554,27 @@ TEST(sqlite_backend_impl_test, latest_schema_version_matches_newest_embedded_sch
                                                 schema.patch };
         EXPECT_FALSE(latest < embedded);
     }
-    EXPECT_TRUE(latest.is_latest(latest));
-    EXPECT_FALSE(profiler_hub::version_t{}.is_latest(latest));
-    EXPECT_FALSE((profiler_hub::version_t{ 3, 0, 1 }.is_latest(latest)));
 }
 
-class is_latest_schema_test : public ::testing::TestWithParam<profiler_hub::version_t>
+class latest_schema_version_test
+: public ::testing::TestWithParam<profiler_hub::version_t>
 {};
 
-TEST_P(is_latest_schema_test, is_true_only_for_the_newest_versions_yml_entry)
+TEST_P(latest_schema_version_test, equals_only_the_newest_versions_yml_entry)
 {
     const profiler_hub::version_t version = GetParam();
     const profiler_hub::version_t latest =
         rocpd::data_storage::schema::latest_schema_version();
 
-    EXPECT_EQ(version.is_latest(latest), version == latest);
+    const profiler_hub::version_t newest_in_versions_yml{ 3, 0, 5 };
+
+    EXPECT_NE(latest, profiler_hub::version_t{});
+    EXPECT_FALSE(latest < version);
+    EXPECT_EQ(latest == version, version == newest_in_versions_yml);
 }
 
 INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
-                         is_latest_schema_test,
+                         latest_schema_version_test,
                          ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
                                            profiler_hub::version_t{ 3, 0, 1 },
                                            profiler_hub::version_t{ 3, 0, 2 },
