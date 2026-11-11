@@ -35,7 +35,7 @@
 
 #include <cassert>
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
 #include <cstdlib>
 #include <string>
 #include <hip/hip_runtime_api.h>
@@ -73,7 +73,7 @@ __host__ HostContextWindowInfo::~HostContextWindowInfo() {
 }
 
 WindowInfo* HostInterface::acquire_window_context() {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (verbs_host_) {
     WindowInfo* w = verbs_host_->acquire();
     assert(w != nullptr);
@@ -92,7 +92,7 @@ WindowInfo* HostInterface::acquire_window_context() {
 }
 
 __host__ void HostInterface::release_window_context(WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     verbs_host_->release(w);
     return;
@@ -163,7 +163,7 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   create_hdp_window();
 #endif  // defined(USE_HDP_FLUSH) && !defined(USE_SINGLE_NODE)
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   maybe_setup_verbs_host(heap);
 #endif
 }
@@ -213,12 +213,12 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   LOG_ERROR_ABORT("Non-mpi use-cases only supported with coherent heap at the moment");
 #endif
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   maybe_setup_verbs_host(heap);
 #endif
 }
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
 __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
   const char* sel = getenv("ROCSHMEM_HOST_TRANSPORT");
   if (!sel || std::string(sel) != "verbs") {
@@ -260,7 +260,7 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
                     "setup failed");
   }
 }
-#endif  // USE_VERBS
+#endif  // USE_HOST_VERBS
 
 __host__ HostInterface::~HostInterface() {
 #if defined USE_HDP_FLUSH
@@ -286,7 +286,7 @@ __host__ HostInterface::~HostInterface() {
 __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
                                         size_t nelems, int pe,
                                         WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->put_nbi(dest, source, nelems, pe);
     return;
@@ -302,7 +302,7 @@ __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
 __host__ void HostInterface::getmem_nbi(void* dest, const void* source,
                                         size_t nelems, int pe,
                                         WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->get_nbi(dest, source, nelems, pe);
     return;
@@ -318,7 +318,7 @@ __host__ void HostInterface::getmem_nbi(void* dest, const void* source,
 __host__ void HostInterface::putmem(void* dest, const void* source,
                                     size_t nelems, int pe,
                                     WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->put_bytes(dest, source, nelems, pe);
     return;
@@ -336,7 +336,7 @@ __host__ void HostInterface::putmem(void* dest, const void* source,
 __host__ void HostInterface::getmem(void* dest, const void* source,
                                     size_t nelems, int pe,
                                     WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->get_bytes(dest, source, nelems, pe);
     return;
@@ -358,7 +358,7 @@ __host__ void HostInterface::getmem(void* dest, const void* source,
 }
 
 __host__ void HostInterface::fence(WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->fence();
     return;
@@ -386,7 +386,7 @@ __host__ void HostInterface::fence(WindowInfo* window_info) {
 }
 
 __host__ void HostInterface::quiet(WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->quiet();
     return;
