@@ -11,10 +11,40 @@
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 #if defined(NCCL_OS_LINUX)
 #pragma weak ncclAlltoAll
+#endif
+
+// Hierarchical alltoall (-D 5): one DevComm per GIN backend on the same communicator.
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,29,2) && defined(NCCL_OS_LINUX)
+#define ALLTOALL_HIER_GIN 1
+#include "alltoall_hier_policy.h"
+enum { hierSdmaDevComm = 0, hierNetDevComm = 1, hierDevCommCount = 2 };
+static_assert(hierDevCommCount <= testMaxDevComms, "raise testMaxDevComms");
+
+// RCCL_TESTS_A2A_HIER_GROUP_SIZE=g splits the LSA team into groups of g consecutive
+// ranks and sends to LSA peers in another group over the network DevComm, so a
+// single node moves data on both backends. Unset or 0: all LSA peers use SDMA.
+static int hierGroupSize() {
+  static const int value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_HIER_GROUP_SIZE");
+    return s ? (int)strtol(s, nullptr, 0) : 0;
+  }();
+  return value;
+}
+
+// RCCL_TESTS_A2A_HIER_NET_GIN_TYPE: backend of the network DevComm
+// (default NCCL_GIN_TYPE_PROXY).
+static int hierNetGinType() {
+  static const int value = [] {
+    const char* s = getenv("RCCL_TESTS_A2A_HIER_NET_GIN_TYPE");
+    return s ? (int)strtol(s, nullptr, 0) : (int)NCCL_GIN_TYPE_PROXY;
+  }();
+  return value;
+}
 #endif
 
 void AlltoAllGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -77,13 +107,16 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
     #if defined(NCCL_OS_LINUX)
-    case 3: // GinAlltoAllKernel: all CTAs participate
+    case 3: // GinAlltoAllKernel: all GIN confined to CTA 0 (barrier/signal index 0)
       if (commProperties.ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
-      reqs->barrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
+      reqs->barrierCount = 1;
+      reqs->ginSignalCount = 1;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -99,6 +132,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // barrierCount provisions per-CTA hybrid world barriers (LSA+rail+world) used
       // by HybridAlltoAllTimedKernel to join CTA 0 (GIN) with LSA CTAs each iter.
       // The production body still uses barrier index 0 on CTA 0 and lsaBarrier on
@@ -129,9 +165,9 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-    case 3: // GinAlltoAllKernel: all CTAs participate
-      reqs->barrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+    case 3: // GinAlltoAllKernel: all GIN confined to CTA 0 (barrier/signal index 0)
+      reqs->barrierCount = 1;
+      reqs->ginSignalCount = 1;
       return true;
     case 4: // HybridAlltoAllKernel: CTA 0 = GIN, CTAs 1..N = LSA
       if (deviceCtaCount < 2) return false;
@@ -143,6 +179,93 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
     default:
       return false;
   }
+}
+#endif
+
+#ifdef ALLTOALL_HIER_GIN
+// HierAlltoAllKernel: an Anvil SDMA DevComm for LSA peers and a network DevComm
+// (PROXY by default) for the rest, both on this communicator.
+testResult_t AlltoAllGetMultiDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm) {
+  if (deviceImpl != 5) return testNotImplemented;
+  if (!reqs || !nReqs || !comm) return testInternalError;
+
+  if (test_ncclVersion < NCCL_VERSION(2,29,2)) {
+    fprintf(stderr, "HierAlltoAllKernel requires NCCL 2.29.2 or later; running with %d.\n", test_ncclVersion);
+    return testInvalidUsage;
+  }
+  if (deviceCtaCount < 2) {
+    fprintf(stderr, "HierAlltoAllKernel requires at least 2 CTAs.\n");
+    return testInvalidUsage;
+  }
+  const int groupSize = hierGroupSize();
+  if (groupSize < 0) {
+    fprintf(stderr, "RCCL_TESTS_A2A_HIER_GROUP_SIZE must be >= 0 (got %d).\n", groupSize);
+    return testInvalidUsage;
+  }
+  const int netType = hierNetGinType();
+  if (netType <= (int)NCCL_GIN_TYPE_NONE || netType >= NCCL_GIN_MAX_TYPES || netType == (int)NCCL_GIN_TYPE_ANVIL_SDMA) {
+    fprintf(stderr, "RCCL_TESTS_A2A_HIER_NET_GIN_TYPE must name a GIN backend other than Anvil SDMA (%d); got %d.\n",
+            (int)NCCL_GIN_TYPE_ANVIL_SDMA, netType);
+    return testInvalidUsage;
+  }
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  if (ncclCommQueryProperties(comm, &props) != ncclSuccess) return testNcclError;
+  const bool sdmaActive = props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA];
+  const bool netActive = props.ginSupport[netType];
+  if (!sdmaActive || !netActive) {
+    if (is_main_proc) {
+      printf("# SKIP: hierarchical alltoall (-D 5) needs GIN backends %d (Anvil SDMA) and %d active on this "
+             "communicator; backend %d is %s and backend %d is %s. NCCL_GIN_TYPE keeps only one backend "
+             "active, and Anvil SDMA may be disabled on multi-node communicators.\n",
+             (int)NCCL_GIN_TYPE_ANVIL_SDMA, netType,
+             (int)NCCL_GIN_TYPE_ANVIL_SDMA, sdmaActive ? "active" : "not active",
+             netType, netActive ? "active" : "not active");
+    }
+    *nReqs = 0;
+    return testSuccess;
+  }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+  TESTCHECK(testCheckGinBackendCompiled(NCCL_GIN_TYPE_ANVIL_SDMA));
+  TESTCHECK(testCheckGinBackendCompiled((ncclGinType_t)netType));
+#endif
+
+  const int netCtas = alltoall_hier::netCtas;
+  const int sdmaCtas = deviceCtaCount - netCtas;
+
+  ncclDevCommRequirements* sdma = &reqs[hierSdmaDevComm];
+  sdma->ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  sdma->lsaBarrierCount = sdmaCtas;
+  sdma->ginSignalCount = sdmaCtas;
+
+  ncclDevCommRequirements* net = &reqs[hierNetDevComm];
+  net->ginType = (ncclGinType_t)netType;
+  net->barrierCount = netCtas;
+  net->ginSignalCount = netCtas;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
+  sdma->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  net->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+#else
+  sdma->ginForceEnable = true;
+  net->ginForceEnable = true;
+#endif
+  *nReqs = hierDevCommCount;
+  return testSuccess;
+}
+
+// A library that ignores reqs.ginType would put both DevComms on its default
+// backend, and the run would still pass while exercising only one backend.
+static testResult_t hierCheckDevCommBackends(ncclDevComm const* devComms) {
+  const int want[hierDevCommCount] = { (int)NCCL_GIN_TYPE_ANVIL_SDMA, hierNetGinType() };
+  for (int k = 0; k < hierDevCommCount; k++) {
+    const int got = devComms[k].ginConnectionCount > 0 ? (int)devComms[k].ginNetDeviceTypes[0] : (int)NCCL_GIN_TYPE_NONE;
+    if (got != want[k]) {
+      fprintf(stderr, "HierAlltoAllKernel: DevComm %d requested GIN backend %d but uses %d.\n", k, want[k], got);
+      return testInternalError;
+    }
+  }
+  return testSuccess;
 }
 #endif
 
@@ -265,16 +388,22 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 // complete, correct alltoalls with no external bookkeeping.
 template <typename T>
 __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  // Confine all GIN work to CTA 0. THREAD mode elides the SQ lock, which is only
+  // safe when each peer QP has a single poster across the whole grid -- the rail
+  // barrier signals/flushes qps[peer] too, so a multi-CTA barrier would race it.
+  // CTAs 1..N have no non-GIN work here, so they simply drop out.
+  if (blockIdx.x != 0) return;
+
   int ginContext = 0;
-  unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+  unsigned int signalIndex = 0;
+  ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
-  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
+  int tid = threadIdx.x;
+  int nthreads = blockDim.x;
 
   /* send to all peers via GIN; the Anvil-SDMA backend segments large puts
    * internally (<=128 MiB per SDMA copy) so a single gin.put() is safe at any
@@ -284,12 +413,10 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + devComm.rank * size,
         sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
+        size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
 
-  int receivingCta = (devComm.rank % nthreads) / blockDim.x;
-  if (blockIdx.x == receivingCta)
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
@@ -308,7 +435,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 // lsaBarrier (blockIdx.x - 1). DevComm barrierCount == deviceCtaCount also
 // provisions per-CTA hybrid world barriers for HybridAlltoAllTimedKernel joins.
 template <typename T>
-__device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, ncclGinResourceSharingMode mode) {
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int startLsa = world.rank - lsa.rank;
@@ -320,7 +447,12 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
     /* CTA 0: remote peers via GIN */
     int ginContext = 0;
     unsigned int signalIndex = 0;
-    ncclGin gin { devComm, ginContext };
+    // Only CTA 0 communicates, one thread per peer QP (single-owner), so THREAD
+    // mode drops the SQ lock. The caller picks the mode: the production kernel
+    // passes the CLI selection; the timed kernel forces GPU so CTA 0's rail posts
+    // are locked against the multi-CTA join that overlaps it (no grid barrier
+    // separates body and join -- see HybridAlltoAllTimedKernel).
+    ncclGin gin { devComm, ginContext, mode };
     uint64_t signalValue = gin.readSignal(signalIndex);
 
     ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
@@ -332,13 +464,13 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
     for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
       gin.put(world, r,
           recvwin, recvoffset + world.rank * size,
           sendwin, sendoffset + r * size,
-          size, ncclGin_SignalInc{signalIndex});
+          size, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
     }
 
     if (numRemotePeers > 0)
@@ -370,7 +502,7 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
 // device-timed kernel and the production path share identical code.
 template <typename T>
 __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+  hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, ginResourceSharingModeDev());
 }
 
 // Join all CTAs (GIN CTA 0 + LSA CTAs 1..N) in the timed-kernel loop. The
@@ -379,7 +511,11 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
 // alltoall example). Requires barrierCount == gridDim.x in devComm setup.
 __device__ inline void hybridTimedGridJoin(struct ncclDevComm devComm) {
   int ginContext = 0;
-  ncclGin gin { devComm, ginContext };
+  // GPU-locked, NOT --gin_resource_sharing: this join (device_timing only) posts
+  // the world barrier from EVERY CTA, so qps[peer] is multi-poster and THREAD's
+  // lock elision would race. A lock on one poster gives no exclusion against an
+  // unlocked one, so the mode must be GPU here regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 }
@@ -401,15 +537,18 @@ __device__ inline void hybridTimedGridJoin(struct ncclDevComm devComm) {
 // no extra signal bookkeeping.
 template <typename T>
 __global__ void GinAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int loop, int skip, long long* start_time, long long* end_time) {
+  // ginAlltoAllBody confines all work to CTA 0; CTAs 1..N return immediately and
+  // would otherwise stamp start_time at launch (before CTA 0's skip warmups).
+  const bool timing = (blockIdx.x == 0);
   for (int i = 0; i < skip + loop; i++) {
     if (i == skip) {
       __syncthreads();
-      if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
+      if (timing && threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
     ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
   }
   __syncthreads();
-  if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
+  if (timing && threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 
 template <typename T>
@@ -420,13 +559,84 @@ __global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffse
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
-    hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+    // GPU-locked (not the CLI mode): the join overlaps CTA 0's body on the same
+    // rail QP with no grid barrier between them, so CTA 0 must also lock its posts.
+    hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, NCCL_GIN_RESOURCE_SHARING_GPU);
   }
   hybridTimedGridJoin(devComm);
   __syncthreads();
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 #endif
+#endif
+
+#ifdef ALLTOALL_HIER_GIN
+// Each CTA signals its own index, and the barriers are per CTA index. Every put to
+// a given rank comes from the same CTA index on all senders, so the receiving CTA
+// with that index reads signalBase before its barrier admits any of those puts.
+template <typename T>
+__device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase, int lsaSize, int groupSize,
+                            ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
+                            size_t count, int groupCta, int groupCtas, int nPeers, uint64_t signalBase) {
+  const size_t size = count * sizeof(T);
+  int tid = threadIdx.x + groupCta * blockDim.x;
+  int nthreads = blockDim.x * groupCtas;
+  for (int r = tid; r < world.nRanks; r += nthreads) {
+    if (alltoall_hier::peerUsesNet(r, world.rank, lsaBase, lsaSize, groupSize) != net) continue;
+    gin.put(world, r,
+        recvwin, recvoffset + world.rank * size,
+        sendwin, sendoffset + r * size,
+        size, TEST_GIN_WEAK_SIGNAL_INC((unsigned int)groupCta));
+  }
+
+  const int receivingCta = (world.rank % nthreads) / blockDim.x;
+  if (groupCta == receivingCta && nPeers > 0)
+    gin.waitSignal(ncclCoopCta(), (unsigned int)groupCta, signalBase + nPeers);
+  gin.flush(ncclCoopCta());
+}
+
+// Hierarchical alltoall: CTA 0 puts to network peers on netComm and synchronizes
+// with a world barrier; the remaining CTAs put to LSA peers on sdmaComm (Anvil
+// SDMA) and synchronize with an LSA barrier. Only the network ncclGin takes the
+// --gin_resource_sharing mode: the SDMA CTAs all flush every peer, so they stay
+// GPU-locked.
+template <typename T>
+__device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count,
+                                 struct ncclDevComm const& sdmaComm, struct ncclDevComm const& netComm, int groupSize) {
+  const int netCtas = alltoall_hier::netCtas;
+  const bool net = blockIdx.x < netCtas;
+  struct ncclDevComm const& devComm = net ? netComm : sdmaComm;
+  const int groupCta = net ? blockIdx.x : blockIdx.x - netCtas;
+  const int groupCtas = net ? netCtas : gridDim.x - netCtas;
+
+  ncclTeam world = ncclTeamWorld(devComm);
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int lsaBase = world.rank - lsa.rank;
+  const int nPeers = alltoall_hier::peerCount(net, world.rank, world.nRanks, lsaBase, lsa.nRanks, groupSize);
+
+  ncclGin gin { devComm, 0, net ? ginResourceSharingModeDev() : NCCL_GIN_RESOURCE_SHARING_GPU };
+  const uint64_t signalBase = gin.readSignal(groupCta);
+
+  if (net) {
+    ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, (uint32_t)groupCta };
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
+    hierPutWait<T>(gin, world, true, lsaBase, lsa.nRanks, groupSize, sendwin, sendoffset, recvwin, recvoffset,
+                   count, groupCta, groupCtas, nPeers, signalBase);
+    bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+  } else {
+    ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, (uint32_t)groupCta };
+    bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+    hierPutWait<T>(gin, world, false, lsaBase, lsa.nRanks, groupSize, sendwin, sendoffset, recvwin, recvoffset,
+                   count, groupCta, groupCtas, nPeers, signalBase);
+    bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  }
+}
+
+template <typename T>
+__global__ void HierAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root,
+                                   struct ncclDevComm sdmaComm, struct ncclDevComm netComm, int groupSize) {
+  hierAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, sdmaComm, netComm, groupSize);
+}
 #endif
 
 testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int deviceImpl, void* bias = nullptr) {
@@ -468,13 +678,24 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(NvlAlltoAllKernelOptimized, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
+#endif
+#ifdef ALLTOALL_HIER_GIN
+      case 5: {
+        auto kernel = SPECIALIZE_KERNEL(HierAlltoAllKernel, type, op);
+        if (kernel == nullptr) return testNotImplemented;
+        ncclDevComm* devComms = (ncclDevComm*)comm;
+        TESTCHECK(hierCheckDevCommBackends(devComms));
+        kernel<<<deviceCtaCount, 512, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff, recvoffset, count, root,
+                                                    devComms[hierSdmaDevComm], devComms[hierNetDevComm], hierGroupSize());
+        return testSuccess;
+      }
 #endif
       default:
         return testNotImplemented;
@@ -540,7 +761,7 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)args->sendRegHandles[i];
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         kernel<<<gridCtas, 512, 0, args->streams[i]>>>(
@@ -613,6 +834,12 @@ void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int
 
 testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &alltoAllTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
@@ -640,6 +867,9 @@ NCCL_WEAK struct testEngine ncclTestEngine = {
   /* .initCommConfig = */ nullptr,
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) || (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0))
-  /* .getDevCommRequirements = */ AlltoAllGetDevCommRequirements
+  /* .getDevCommRequirements = */ AlltoAllGetDevCommRequirements,
+#endif
+#ifdef ALLTOALL_HIER_GIN
+  /* .getMultiDevCommRequirements = */ AlltoAllGetMultiDevCommRequirements,
 #endif
 };

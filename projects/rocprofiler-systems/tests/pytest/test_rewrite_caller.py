@@ -6,6 +6,7 @@ rewrite caller tests
 """
 
 from __future__ import annotations
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -20,30 +21,30 @@ pytestmark = [pytest.mark.rewrite_caller]
 @pytest.mark.caller_include
 @pytest.mark.class_name("rewrite-caller")
 class TestRewriteCaller(RocprofsysTest):
-    BINARY_REWRITE_ARGS = [
-        "-e",
-        "-i",
-        "256",
-        "--caller-include",
-        "^inner",
-        "-v",
-        "2",
-        "--print-instrumented",
-        "functions",
-    ]
-    BASELINE_PASS_REGEX = ["number of calls made = 17"]
-    BINARY_REWRITE_PASS_REGEX = [
+    BASELINE_PASS_REGEX = ("number of calls made = 17",)
+    BINARY_REWRITE_PASS_REGEX = (
         r"\[function\]\[Forcing\] caller-include-regex :: 'outer'",
         r">>> ._outer ([ \|]+) 17",
-    ]
+    )
 
     @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
     def test(self, mode):
+        binary_rewrite_args = [
+            "-e",
+            "-i",
+            "256",
+            "--caller-include",
+            "^inner",
+            "-v",
+            "2",
+            "--print-instrumented",
+            "functions",
+        ]
         result = self.run_test(
             mode,
             "rewrite-caller",
             env={"ROCPROFSYS_COUT_OUTPUT": "ON"},
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
             run_args=["17"],
         )
         self.assert_regex(

@@ -444,8 +444,12 @@ private:
 const StaticInstructionInfo &classify_instruction(uint64_t pc, const Instruction &inst,
                                                   const std::array<uint32_t, 4> &encoding,
                                                   uint32_t encoding_dwords) {
-  static thread_local StaticInstructionCache cache;
-  return cache.classify(pc, inst, encoding, encoding_dwords);
+  // The cache is 448 KiB; glibc carves static TLS out of every thread's stack,
+  // so it lives on the heap rather than in a binary that links this plugin.
+  static thread_local std::unique_ptr<StaticInstructionCache> cache;
+  if (!cache)
+    cache = std::make_unique<StaticInstructionCache>();
+  return cache->classify(pc, inst, encoding, encoding_dwords);
 }
 
 struct DispatchState {
@@ -989,7 +993,9 @@ struct PerfsimPlugin::Impl {
       reject_wave(wave, access.dispatch_id, "memory route or decoded address space is unknown");
       return;
     }
-    if (access.wavefront_size != 32 || access.addresses.size() != access.wavefront_size ||
+    if (access.wavefront_size != 32 ||
+        (access.image_sample_footprints.empty() &&
+         access.addresses.size() != access.wavefront_size) ||
         (!access.pre_routing_addresses.empty() &&
          access.pre_routing_addresses.size() != access.wavefront_size) ||
         (!access.secondary_addresses.empty() &&
@@ -1033,6 +1039,25 @@ struct PerfsimPlugin::Impl {
       }
     }
 
+    if (!access.image_sample_footprints.empty()) {
+      if (access.route != amdgpu::MemoryRoute::GLOBAL ||
+          access.decoded_space != amdgpu::DecodedMemorySpace::GLOBAL || !access.is_load ||
+          !access.addresses.empty() || !access.secondary_addresses.empty()) {
+        reject_wave(wave, access.dispatch_id, "image sample has inconsistent routing");
+        return;
+      }
+      for (const auto &footprint : access.image_sample_footprints) {
+        if (footprint.addresses.size() != access.wavefront_size ||
+            (footprint.lane_mask & ~access.request_lane_mask) != 0) {
+          reject_wave(wave, access.dispatch_id, "image sample has an invalid footprint");
+          return;
+        }
+        if (footprint.lane_mask)
+          record_memory(*wave, access, footprint.lane_mask, FFM_RESOURCE_GLOBAL,
+                        footprint.addresses);
+      }
+      return;
+    }
     const uint64_t requests = access.request_lane_mask;
     if (requests == 0)
       return;
@@ -1082,20 +1107,19 @@ struct PerfsimPlugin::Impl {
         return;
       }
       {
-        const uint32_t first_lane = static_cast<uint32_t>(std::countr_zero(requests));
         const uint64_t flat_shared_lane_mask =
             access.flat_local_lane_mask | access.flat_dds_lane_mask;
-        const bool first_lane_is_shared =
-            (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0;
+        const bool all_lanes_are_shared = (requests & ~flat_shared_lane_mask) == 0;
+        const bool has_original_addresses =
+            access.pre_routing_addresses.size() == access.wavefront_size;
         if (access.route == amdgpu::MemoryRoute::LOCAL) {
-          if (!access.normalized_to_local || !first_lane_is_shared ||
-              access.pre_routing_addresses.size() != access.wavefront_size) {
+          if (!access.normalized_to_local || !all_lanes_are_shared || !has_original_addresses) {
             reject_wave(wave, access.dispatch_id,
                         "FLAT local route lacks consistent per-lane aperture metadata");
             return;
           }
-        } else if (access.normalized_to_local || first_lane_is_shared ||
-                   !access.pre_routing_addresses.empty()) {
+        } else if (access.normalized_to_local || all_lanes_are_shared ||
+                   has_original_addresses != (flat_shared_lane_mask != 0)) {
           reject_wave(wave, access.dispatch_id,
                       "FLAT global route has inconsistent aperture metadata");
           return;
@@ -1321,9 +1345,8 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
 
   // Wavefront slots are reused and plugin state deliberately survives the
-  // generic Wavefront::reset(). A terminal dispatch fault resets the wave
-  // without a halt callback, so retire that incarnation while its state still
-  // owns the raw pointer recorded in physical_waves.
+  // generic Wavefront::reset(). If an incarnation missed both terminal hooks,
+  // retire it while its state still owns the raw pointer in physical_waves.
   if (wf.has_plugin_state(slot_index())) {
     auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
     const uint32_t previous_dispatch = static_cast<uint32_t>(
@@ -1341,7 +1364,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
         dispatch != impl_->dispatches.end()) {
       if (dispatch->second.live_waves != 0)
         --dispatch->second.live_waves;
-      impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
+      impl_->reject(previous_dispatch, "wavefront slot was reset without a terminal callback");
     }
     wf.clear_plugin_state(slot_index());
   } else if (const auto existing = impl_->physical_waves.find(physical_key);
@@ -1383,6 +1406,14 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  retire_wavefront(wf, /*cancelled=*/false);
+}
+
+void PerfsimPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  retire_wavefront(wf, /*cancelled=*/true);
+}
+
+void PerfsimPlugin::retire_wavefront(amdgpu::Wavefront &wf, bool cancelled) {
   if (impl_->intentionally_unselected(wf.dispatch_id()))
     return;
   if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
@@ -1391,7 +1422,8 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
   const auto wave_iter = impl_->physical_waves.find(physical_key);
   if (wave_iter == impl_->physical_waves.end()) {
-    impl_->reject(wf.dispatch_id(), "halted wavefront has no Perfsim identity");
+    impl_->reject(wf.dispatch_id(), cancelled ? "cancelled wavefront has no Perfsim identity"
+                                              : "halted wavefront has no Perfsim identity");
     return;
   }
 
@@ -1403,8 +1435,14 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   if (dispatch_iter != impl_->dispatches.end()) {
     DispatchState &dispatch = dispatch_iter->second;
     if (wf.instruction_execution_failed())
-      impl_->reject(dispatch_id, "wavefront halted after an instruction execution failure");
-    if (!wave.saw_instruction || !wave.last_instruction_terminates)
+      impl_->reject(dispatch_id, cancelled
+                                     ? "wavefront cancelled after an instruction failure"
+                                     : "wavefront halted after an instruction execution failure");
+    // A committed setup rollback has no recorded instructions to discard.
+    // Retire its physical identity so a retry can observe the same logical wave.
+    if (cancelled && wave.saw_instruction)
+      impl_->reject(dispatch_id, "wavefront cancelled before dispatch completion");
+    else if (!cancelled && (!wave.saw_instruction || !wave.last_instruction_terminates))
       impl_->reject(dispatch_id, "wavefront halted without a terminating instruction");
     if (dispatch.live_waves != 0)
       --dispatch.live_waves;
@@ -1452,6 +1490,8 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
                        "instruction callback could not be matched to its wavefront");
     return;
   }
+  // The FFM event holds four DWORDs. A five-DWORD GFX10 NSA instruction
+  // exceeds that event format even though the CU hook supplies the full window.
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {

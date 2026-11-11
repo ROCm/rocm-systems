@@ -195,5 +195,28 @@ void TestConcurrentInit::Run(void) {
 
   IF_VERB(STANDARD) {
     std::cout << "Concurrent amdsmi_init() followed by amdsmi_shut_down() passed." << std::endl;
+    std::cout << "Testing sequential, single-threaded amdsmi_init()/amdsmi_shut_down() cycles..."
+              << std::endl;
+  }
+  // Repeated single-threaded init/shutdown cycles, matching how a short-lived
+  // CLI process (e.g. amd-smi static) uses the API.
+  for (int Id = 0; Id < NumOfThreads; ++Id) {
+    DISPLAY_AMDSMI_API("amdsmi_init", "id=" + std::to_string(Id), VERB(STANDARD));
+    amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
+
+    DISPLAY_AMDSMI_API("amdsmi_shut_down", "id=" + std::to_string(Id), VERB(STANDARD));
+    err = amdsmi_shut_down();
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
+  }
+
+  refcnt = rsmi_test_refcount(0);
+  ASSERT_EQ(0, refcnt);
+  ASSERT_EQ(AMDSMI_STATUS_NOT_INIT, amdsmi_get_socket_handles(&socket_count, nullptr));
+
+  IF_VERB(STANDARD) {
+    std::cout << "Sequential amdsmi_init()/amdsmi_shut_down() cycles passed." << std::endl;
   }
 }

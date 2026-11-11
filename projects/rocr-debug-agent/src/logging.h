@@ -52,7 +52,8 @@ enum class log_level_t
 
 extern log_level_t log_level;
 
-extern std::ofstream agent_out;
+/* The agent's output stream, constructed on first use.  */
+std::ofstream &agent_out ();
 
 namespace detail
 {
@@ -74,8 +75,6 @@ extern void log (log_level_t level, const char *format, ...)
         amd::debug_agent::detail::log (level, format, ##__VA_ARGS__);         \
     }                                                                         \
   while (0)
-
-void set_log_level (log_level_t level);
 
 } /* namespace amd::debug_agent */
 

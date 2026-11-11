@@ -5,19 +5,17 @@
 
 use super::*;
 use crate::Error;
-use crate::host_storage::{Allocator, Owned, Shared};
-use crate::memory::{
-    AllocationInfo, DeviceAccess, DriverAllocation, HostCacheability, MemoryKind, OwnedMemoryKind,
-};
+use crate::memory::storage::{Owned, Shared};
+use crate::memory::{AllocationInfo, DeviceAccess, DriverAllocation, HostCacheability, MemoryKind};
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointKind, TopologyKey};
+use crate::topology::{Endpoint, EndpointKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const ID: [u8; 16] = [0x42; 16];
 
 struct FakeDriver {
-    instance: u64,
+    instance: DriverInstanceId,
     allocation_drops: Arc<AtomicUsize>,
     fail_activation: bool,
     fail_allocation: bool,
@@ -63,6 +61,7 @@ impl FakeDriver {
         Endpoint {
             id: ID,
             name,
+            product_name: None,
             pci: None,
             kind: EndpointKind::Cpu,
             local_memory_bytes: 0,
@@ -73,12 +72,6 @@ impl FakeDriver {
             minimum_address: 0,
             maximum_address: u64::MAX,
             supported_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
-            caches: None,
-            memory_links: None,
-            topology_key: TopologyKey {
-                group: 0,
-                member: 0,
-            },
             driver_instance: self.instance,
             selector: EndpointSelector::Opaque(7),
         }
@@ -101,11 +94,7 @@ impl CachedInfo for FakeAllocation {
 impl Driver for FakeDriver {
     type DeviceState = FakeDevice;
 
-    fn allocator(&self) -> Allocator {
-        Allocator::system()
-    }
-
-    fn driver_instance(&self) -> u64 {
+    fn driver_instance(&self) -> DriverInstanceId {
         self.instance
     }
 
@@ -217,13 +206,13 @@ impl AllocationOperations for FakeDriver {
         &self,
         device: &FakeDevice,
         peers: &[&FakeDevice],
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<FakeAllocation>, Error> {
         if !peers.is_empty()
-            || kind.get() != MemoryKind::System
+            || kind != MemoryKind::System
             || size != 4096
             || alignment != 4096
             || !permissions.contains(DeviceAccess::READ)
@@ -239,15 +228,12 @@ impl AllocationOperations for FakeDriver {
                 "injected allocation failure",
             ));
         }
-        Ok(Owned::new(
-            FakeAllocation {
-                device_id: device.id,
-                drops: self.allocation_drops.clone(),
-                fail_free: true,
-                released: false,
-            },
-            Allocator::system(),
-        )?)
+        Ok(Owned::new(FakeAllocation {
+            device_id: device.id,
+            drops: self.allocation_drops.clone(),
+            fail_free: true,
+            released: false,
+        })?)
     }
 }
 
@@ -255,17 +241,20 @@ impl AllocationOperations for FakeDriver {
 fn non_gpu_allocation_owner_preserves_cleanup_retry() -> Result<(), Error> {
     let fake = FakeDriver::new();
     let allocation_drops = fake.allocation_drops.clone();
-    let driver = Shared::new(fake, Allocator::system())?;
+    let driver = Shared::new(fake)?;
     let device_state = driver.activate(&driver.endpoint())?;
 
-    let mut allocation = DriverAllocation::<FakeDriver>::new(driver.allocate_owned(
-        &device_state,
-        &[],
-        OwnedMemoryKind::try_from(MemoryKind::System)?,
-        4096,
-        4096,
-        DeviceAccess::READ,
-    )?);
+    let mut allocation = DriverAllocation::<FakeDriver>::new(
+        driver.clone(),
+        driver.allocate_owned(
+            &device_state,
+            &[],
+            MemoryKind::System,
+            4096,
+            4096,
+            DeviceAccess::READ,
+        )?,
+    );
     assert_eq!(allocation.info().device_address, 0x10000);
     allocation.check()?;
     assert_eq!(allocation.device_address(&device_state)?, 0x10000);
@@ -275,6 +264,25 @@ fn non_gpu_allocation_owner_preserves_cleanup_retry() -> Result<(), Error> {
     allocation.free()?;
     drop(allocation);
     assert_eq!(allocation_drops.load(Ordering::Relaxed), 1);
+    Ok(())
+}
+
+#[test]
+fn failed_allocation_drop_retains_the_driver_for_native_quarantine() -> Result<(), Error> {
+    let driver = Shared::new(FakeDriver::new())?;
+    let allocation = DriverAllocation::<FakeDriver>::new(
+        driver.clone(),
+        Owned::new(FakeAllocation {
+            device_id: ID,
+            drops: driver.allocation_drops.clone(),
+            fail_free: true,
+            released: false,
+        })?,
+    );
+
+    drop(allocation);
+    assert_eq!(Shared::strong_count(&driver), 2);
+    assert_eq!(driver.allocation_drops.load(Ordering::Relaxed), 1);
     Ok(())
 }
 
@@ -290,7 +298,6 @@ fn non_gpu_driver_contract_covers_discovery_activation_and_failed_cleanup() -> R
     let endpoint = driver.open_endpoint(ID)?;
     assert!(endpoint.pci.is_none());
     assert!(endpoint.gpu().is_none());
-    assert!(endpoint.linux_kfd_drm_info().is_none());
     assert!(!driver.supports_host_registration(&endpoint));
     assert!(driver.activate(&FakeDriver::new().endpoint()).is_err());
 
@@ -306,7 +313,7 @@ fn non_gpu_driver_contract_covers_discovery_activation_and_failed_cleanup() -> R
             .allocate_owned(
                 &device,
                 &[],
-                OwnedMemoryKind::try_from(MemoryKind::System)?,
+                MemoryKind::System,
                 4096,
                 4096,
                 DeviceAccess::READ
@@ -318,7 +325,7 @@ fn non_gpu_driver_contract_covers_discovery_activation_and_failed_cleanup() -> R
     let mut allocation = driver.allocate_owned(
         &device,
         &[],
-        OwnedMemoryKind::try_from(MemoryKind::System)?,
+        MemoryKind::System,
         4096,
         4096,
         DeviceAccess::READ,

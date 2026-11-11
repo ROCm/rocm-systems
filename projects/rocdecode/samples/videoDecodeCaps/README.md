@@ -35,10 +35,8 @@ cmake --build . --config Release
 ```
 
 > [!NOTE]
-> Before running, add the rocDecode and VA-API DLL directories to your PATH:
-> ```bat
-> set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
-> ```
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

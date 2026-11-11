@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Shared by sym-kernels-index-test.cc and sym-kernels-test.cc: both #include the generated
-// sym_kernels_host.cc, which declares 84 kernels as __global__ -- a real definition needs
+// sym_kernels_host.cc, which declares 86 kernels as __global__ -- a real definition needs
 // hipLaunchKernel/__hipRegisterFunction, unavailable under -no-hip-rt. Include this AFTER
 // neutering __global__ (#undef/#define empty) and BEFORE #include SYM_KERNELS_HOST_CC_PATH.
 // The two callers compile into separate binaries, so including this from both is not an ODR
@@ -17,6 +17,8 @@
 #define RCCL_SYMK_TEST_KERNEL_IDS(X) \
   X(ncclSymkDevKernel_AllGather_LL) \
   X(ncclSymkDevKernel_AllGather_ST) \
+  X(ncclSymkDevKernel_AllGather_RailRing_LsaST) \
+  X(ncclSymkDevKernel_AllGather_HierLsaST) \
   X(ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_RSxLD_AGxST_sum_f32) \
   X(ncclSymkDevKernel_ReduceScatter_LL_sum_f32) \
@@ -63,6 +65,7 @@
 // elsewhere they are simply unreferenced and --gc-sections drops them.
 #define RCCL_SYMK_TEST_TMA_KERNEL_IDS(X) \
   X(ncclSymkDevKernel_AllGather_TmaST) \
+  X(ncclSymkDevKernel_AllGather_HierLsaTmaST) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f16) \
   X(ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_bf16) \

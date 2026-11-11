@@ -111,13 +111,16 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
                                    /*abortFlag*/ nullptr, /*asyncFlag*/ 1),
                     ret, fail);
       NCCLCHECKGOTO(ncclSocketListen(&rasNetListeningSocket), ret, fail);
-      INFO(NCCL_RAS, "RAS network listening socket at %s", ncclSocketToString(&rasNetListeningSocket.addr, rasLine));
+      INFO(NCCL_RAS, "RAS network listening socket at %s",
+           ncclSocketToString(&rasNetListeningSocket.addr, rasLine, sizeof(rasLine)));
 
       (void)rasClientInitSocket();
 
       NCCLCHECKGOTO(ncclOsSocketPairCreate(rasNotificationPipe), ret, fail);
 
       rasDiagnosticsInit();
+      if (ncclParamRasDiagnostics()) rasDiagnosticsGpuInit();
+
       rasThread = std::thread(rasThreadMain, nullptr);
       ncclSetThreadName(rasThread, "NCCL RAS");
 
@@ -352,7 +355,7 @@ void rasConnEnqueueMsg(struct rasConnection* conn, struct rasMsg* msg, size_t ms
     INFO(NCCL_RAS,
          "RAS enqueued message type %d on a non-ready connection with %s "
          "(experiencingDelays %d, startRetryTime %.2fs, socket status %d)",
-         msg->type, ncclSocketToString(&conn->addr, rasLine), conn->experiencingDelays,
+         msg->type, ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)), conn->experiencingDelays,
          (conn->startRetryTime ? (double)(clockNano() - conn->startRetryTime) / CLOCK_UNITS_PER_SEC : 0.0),
          (conn->sock ? conn->sock->status : -1));
   }
@@ -389,6 +392,50 @@ ncclResult_t rasConnSendMsg(struct rasConnection* conn, bool* closed, bool* allS
   return ncclSuccess;
 }
 
+// Extends wantLength by a variable-length tail of count elements, rejecting a negative count supplied by the peer
+// as well as any arithmetic overflow.
+static ncclResult_t rasMsgAddTailLength(size_t* wantLength, int count, size_t eleSize) {
+  if (count < 0) return ncclRemoteError;
+  if ((size_t)count > (SIZE_MAX - *wantLength) / eleSize) return ncclRemoteError;
+  *wantLength += (size_t)count * eleSize;
+  return ncclSuccess;
+}
+
+static ncclResult_t rasMsgCheckBodyLength(const struct rasMsg* msg, int recvLength) {
+  rasCollectiveType collType = RAS_MSG_NONE;
+  if (msg->type == RAS_MSG_COLLREQ) {
+    // The collective type determines the length, so it must itself be within what we received before we may read it.
+    if ((size_t)recvLength < offsetof(struct rasMsg, collReq) + offsetof(struct rasCollRequest, type) +
+                             sizeof(collType))
+      return ncclRemoteError;
+    collType = msg->collReq.type;
+  }
+  // A zero length means an unrecognized type; rasMsgHandle rejects those, so leave that diagnosis to it.
+  size_t wantLength = rasMsgLength(msg->type, collType);
+  if (wantLength == 0) return ncclSuccess;
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
+
+  // The fixed part is all there, so the element counts it holds can be read.  They are peer-supplied, so the
+  // variable-length tails they describe must fit in what we received before the handlers may index into them.
+  if (msg->type == RAS_MSG_PEERSUPDATE) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nPeers, sizeof(msg->peersUpdate.peers[0])));
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nDeadPeers, sizeof(union ncclSocketAddress)));
+  } else if (msg->type == RAS_MSG_COLLREQ && collType == RAS_COLL_COMMS) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collReq.comms.nSkipMissingRanksComms,
+                                  sizeof(msg->collReq.comms.skipMissingRanksComms[0])));
+  } else if (msg->type == RAS_MSG_COLLRESP) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nPeers, sizeof(msg->collResp.peers[0])));
+    if (msg->collResp.nData < 0) return ncclRemoteError;
+    if (msg->collResp.nData > 0) {
+      // The sender aligns the data that follows the peers array (see rasConnSendCollResp).
+      ALIGN_SIZE(wantLength, alignof(int64_t));
+      NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nData, 1));
+    }
+  }
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
+  return ncclSuccess;
+}
+
 // Attempts to receive a message through a RAS socket.
 ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, bool* closed) {
   *closed = false;
@@ -397,12 +444,27 @@ ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, bool* close
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, &sock->recvLength, sizeof(sock->recvLength),
                                  &sock->recvOffset, closed));
     if (*closed || sock->recvOffset < sizeof(sock->recvLength)) return ncclSuccess;
+    if (sock->recvLength < RAS_MSG_MINLEN || sock->recvLength > RAS_MSG_MAXLEN) {
+      INFO(NCCL_RAS, "RAS received an out-of-range message length (%d) from %s", sock->recvLength,
+           ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
+      sock->recvOffset = sock->recvLength = 0;
+      return ncclRemoteError;
+    }
     NCCLCHECK(ncclCallocQuiet((char**)&sock->recvMsg, sock->recvLength));
   }
   // Receive the body of the message.
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, ((char*)sock->recvMsg) - sizeof(sock->recvLength),
                                sock->recvLength + sizeof(sock->recvLength), &sock->recvOffset, closed));
   if (*closed || sock->recvOffset < sock->recvLength + sizeof(sock->recvLength)) return ncclSuccess;
+
+  if (rasMsgCheckBodyLength(sock->recvMsg, sock->recvLength) != ncclSuccess) {
+    INFO(NCCL_RAS, "RAS received a message of type %d that is too short (%d) from %s", sock->recvMsg->type,
+         sock->recvLength, ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
+    free(sock->recvMsg);
+    sock->recvMsg = nullptr;
+    sock->recvOffset = sock->recvLength = 0;
+    return ncclRemoteError;
+  }
 
   *msg = sock->recvMsg;
   sock->recvMsg = nullptr;
@@ -430,7 +492,8 @@ ncclResult_t rasMsgHandle(struct rasMsg* msg, struct rasSocket* sock) {
   } else if (msg->type == RAS_MSG_COLLRESP) {
     NCCLCHECK(rasMsgHandleCollResp(msg, sock));
   } else {
-    WARN("RAS received unknown message type (%d) from %s", msg->type, ncclSocketToString(&sock->sock.addr, rasLine));
+    WARN("RAS received unknown message type (%d) from %s", msg->type,
+         ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
     return ncclInternalError;
   }
 
@@ -448,14 +511,15 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
   char versionLocal[16], versionRemote[16];
 
   INFO(NCCL_RAS, "RAS handling connInit from %s (version %s, listeningAddr %s, peersHash 0x%lx, deadPeersHash 0x%lx)",
-       ncclSocketToString(&sock->sock.addr, rasLine),
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
        ncclVersionToString(msg->connInit.ncclVersion, versionRemote, sizeof(versionRemote)),
-       ncclSocketToString(&msg->connInit.listeningAddr, line), msg->connInit.peersHash, msg->connInit.deadPeersHash);
+       ncclSocketToString(&msg->connInit.listeningAddr, line, sizeof(line)), msg->connInit.peersHash,
+       msg->connInit.deadPeersHash);
 
   if (msg->connInit.ncclVersion != NCCL_VERSION_CODE) {
     // Close any such sockets immediately!  This is basically unrecoverable...
     WARN("NCCL version mismatch with remote peer %s (local: %s, remote %s)",
-         ncclSocketToString(&sock->sock.addr, rasLine),
+         ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
          ncclVersionToString(NCCL_VERSION_CODE, versionLocal, sizeof(versionLocal)),
          ncclVersionToString(msg->connInit.ncclVersion, versionRemote, sizeof(versionRemote)));
     rasNetSendNack(sock);
@@ -467,7 +531,7 @@ static ncclResult_t rasMsgHandleConnInit(const struct rasMsg* msg, struct rasSoc
   if (rasPeerIsDead(&msg->connInit.listeningAddr)) {
     // A peer long declared dead is suddenly alive again?!
     INFO(NCCL_RAS, "RAS connection from peer %s that is considered dead!",
-         ncclSocketToString(&msg->connInit.listeningAddr, rasLine));
+         ncclSocketToString(&msg->connInit.listeningAddr, rasLine, sizeof(rasLine)));
     rasNetSendNack(sock);
     rasSocketTerminate(sock, /*finalize*/ true);
     goto exit;
@@ -554,8 +618,8 @@ exit:
 
 // Handles the second message sent over a RAS socket as part of the handshake.
 static ncclResult_t rasMsgHandleConnInitAck(const struct rasMsg* msg, struct rasSocket* sock) {
-  INFO(NCCL_RAS, "RAS handling connInitAck from %s (nack %d)", ncclSocketToString(&sock->sock.addr, rasLine),
-       msg->connInitAck.nack);
+  INFO(NCCL_RAS, "RAS handling connInitAck from %s (nack %d)",
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)), msg->connInitAck.nack);
 
   if (msg->connInitAck.nack) {
     // The remote peer doesn't want to talk to us.  The easiest way to prevent it is by declaring it dead.
@@ -576,7 +640,8 @@ static ncclResult_t rasMsgHandleConnInitAck(const struct rasMsg* msg, struct ras
 
 // Handles the deadPeer broadcast.
 void rasMsgHandleBCDeadPeer(struct rasCollRequest** pReq, size_t* pReqLen, bool* pDone) {
-  INFO(NCCL_RAS, "RAS handling deadPeer (addr %s)", ncclSocketToString(&(*pReq)->deadPeer.addr, rasLine));
+  INFO(NCCL_RAS, "RAS handling deadPeer (addr %s)",
+       ncclSocketToString(&(*pReq)->deadPeer.addr, rasLine, sizeof(rasLine)));
 
   *pReqLen = rasCollDataLength(RAS_BC_DEADPEER);
   if (!rasPeerIsDead(&(*pReq)->deadPeer.addr)) {
@@ -610,7 +675,7 @@ static ncclResult_t rasNetSendNack(struct rasSocket* sock) {
   bool closed = false;
   int offset;
 
-  INFO(NCCL_RAS, "RAS sending NACK to %s", ncclSocketToString(&sock->sock.addr, rasLine));
+  INFO(NCCL_RAS, "RAS sending NACK to %s", ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
 
   memset(&msg, '\0', sizeof(msg));
   msg.type = RAS_MSG_CONNINITACK;

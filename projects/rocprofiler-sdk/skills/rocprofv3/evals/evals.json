@@ -1,0 +1,125 @@
+{
+  "evaluations": [
+    {
+      "id": "rocprofv3-trace-hip-app-where-time-goes",
+      "skill_should_trigger": true,
+      "note": "The fixture has pageable 64 MiB copies, 600 tiny launches, and one strided kernel, so a correct report names at least two of them.",
+      "prompt": "Profile the HIP app in this directory with rocprofv3 (build it with make, run ./app) and tell me where the time goes and what to fix first. Save your summary to profile_summary.md.",
+      "workspace": "evals/files/hip-app",
+      "expected_behavior": [
+        "Run rocprofv3 with a tracing option such as --runtime-trace or --kernel-trace on ./app, keeping the default rocpd database output",
+        "Summarize the resulting results.db with the skill's analyze_trace.py script instead of hand-parsing CSV files",
+        "Report the hot kernels and at least two of: slow pageable host-to-device copies, the launch-bound tiny_kernel, or GPU idle time, each with a concrete code change"
+      ],
+      "unexpected_behavior": [
+        "Use the deprecated direct --output-format csv as the only output",
+        "Report timings or findings that did not come from an actual profiling run"
+      ],
+      "logs_contain": [
+        "rocprofv3",
+        "analyze_trace.py"
+      ],
+      "files_exist": [
+        "profile_summary.md"
+      ]
+    },
+    {
+      "id": "rocprofv3-pmc-strided-copy-bound",
+      "skill_should_trigger": true,
+      "note": "strided_copy reads with stride 33, so the counters show about 4 KiB of DRAM traffic per memory instruction, a 3% L2 hit rate, and near-peak bandwidth spent on over-fetch.",
+      "prompt": "Use hardware performance counters to find out whether the strided_copy kernel in this HIP app is memory-bound or compute-bound, and why. Build it with make and run ./app. Put your conclusions in counters_report.md.",
+      "workspace": "evals/files/hip-app",
+      "expected_behavior": [
+        "Run rocprofv3 with several --pmc groups restricted to strided_copy (for example with --kernel-include-regex), keeping FETCH_SIZE and WRITE_SIZE in separate groups",
+        "Summarize the pass_N databases with the skill's analyze_counters.py script",
+        "Conclude that strided_copy is memory-bound because of uncoalesced, over-fetching accesses (low L2 hit rate, DRAM bytes per memory instruction far above the coalesced ideal) and recommend making consecutive threads read consecutive addresses"
+      ],
+      "unexpected_behavior": [
+        "Put FETCH_SIZE and WRITE_SIZE in the same --pmc group",
+        "Report GRBM_GUI_ACTIVE / GRBM_COUNT from the counter run as the GPU utilization"
+      ],
+      "logs_contain": [
+        "--pmc",
+        "analyze_counters.py"
+      ],
+      "files_exist": [
+        "counters_report.md"
+      ]
+    },
+    {
+      "id": "rocprofv3-trace-slowest-kernels",
+      "skill_should_trigger": true,
+      "prompt": "Which kernels in my HIP program take the most GPU time? rocprofv3 is installed on this MI300X box."
+    },
+    {
+      "id": "rocprofv3-trace-perfetto-timeline",
+      "skill_should_trigger": true,
+      "prompt": "I have run_results.db from rocprofv3. How do I turn it into a timeline I can open in the Perfetto UI?"
+    },
+    {
+      "id": "rocprofv3-trace-mpi-imbalance",
+      "skill_should_trigger": true,
+      "prompt": "Trace my 8-rank MPI application on AMD GPUs with rocprofv3 and check whether some ranks keep their GPU busier than others."
+    },
+    {
+      "id": "rocprofv3-trace-attach-running-service",
+      "skill_should_trigger": true,
+      "prompt": "My ROCm inference service is already running and I can't restart it. Can rocprofv3 attach to it for a few seconds and capture the kernels it launches?"
+    },
+    {
+      "id": "rocprofv3-trace-pytorch-script",
+      "skill_should_trigger": true,
+      "prompt": "Run rocprofv3 on my PyTorch training script on an MI300X and show me which GPU kernels and memory copies dominate one training step."
+    },
+    {
+      "id": "rocprofv3-pmc-occupancy-cache",
+      "skill_should_trigger": true,
+      "prompt": "What is the wave occupancy and L2 cache hit rate of my HIP gemm kernel on MI300X? I'd like actual hardware counter numbers."
+    },
+    {
+      "id": "rocprofv3-pmc-exceeds-hardware",
+      "skill_should_trigger": true,
+      "prompt": "rocprofv3 --pmc SQ_WAVES FETCH_SIZE WRITE_SIZE TCC_HIT_sum TCC_MISS_sum fails with 'Request exceeds the capabilities of the hardware to collect'. How do I get all of these counters?"
+    },
+    {
+      "id": "rocprofv3-pmc-list-supported",
+      "skill_should_trigger": true,
+      "prompt": "Which performance counters can rocprofv3 collect on my AMD Radeon PRO W7900, and how do I check that two of them fit in one pass?"
+    },
+    {
+      "id": "rocprofv3-rocpd-query-db",
+      "skill_should_trigger": true,
+      "prompt": "I have a rocprofv3 results.db from last week's run. List the ten longest kernels and how much time went to host-to-device copies."
+    },
+    {
+      "id": "rocprofv3-legacy-rocprof-migration",
+      "skill_should_trigger": true,
+      "prompt": "Our scripts still call rocprof --hip-trace --stats from ROCm 5. What is the rocprofv3 equivalent and where do the CSV files go now?"
+    },
+    {
+      "id": "rocprofv3-not-pytorch-profiler-json",
+      "skill_should_trigger": false,
+      "prompt": "Analyze this PyTorch profiler trace JSON from my training run and write a report on GPU kernel efficiency."
+    },
+    {
+      "id": "rocprofv3-not-nsight-systems",
+      "skill_should_trigger": false,
+      "prompt": "Capture an Nsight Systems timeline of my CUDA application on an NVIDIA H100."
+    },
+    {
+      "id": "rocprofv3-not-ncu",
+      "skill_should_trigger": false,
+      "prompt": "Run Nsight Compute on my CUDA kernel and tell me its achieved occupancy on an A100."
+    },
+    {
+      "id": "rocprofv3-not-pytorch-memory",
+      "skill_should_trigger": false,
+      "prompt": "My PyTorch training job runs out of GPU memory after a few steps. How do I reduce memory usage?"
+    },
+    {
+      "id": "rocprofv3-not-cpu-perf",
+      "skill_should_trigger": false,
+      "prompt": "Use perf to find the hottest functions in my C++ program running on an AMD EPYC CPU."
+    }
+  ]
+}

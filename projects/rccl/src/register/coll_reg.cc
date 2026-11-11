@@ -463,7 +463,7 @@ ncclResult_t ncclRegisterCollBuffers(
         info->sendNetHandles = sendNetHandles;
         info->recvNetHandles = recvNetHandles;
         info->srecvNetHandles = srecvNetHandles;
-        if (comm->isOneRPN && (info->func == ncclFuncAllGather || info->func == ncclFuncBroadcast)) {
+        if (comm->isOneRPN && ncclUseOneRpnNetRegChannelCap(info->func)) {
           info->nMaxChannels = std::max(comm->config.minCTAs, std::min(comm->config.maxCTAs, comm->minNetCount));
         }
       } else {

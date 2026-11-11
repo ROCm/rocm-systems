@@ -292,17 +292,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 update_env(_data, env_vars::TRACE, p.get<bool>("trace"));
             });
 
-        _parser
-            .add_argument({ "-L", "--trace-legacy" },
-                          "Use legacy direct mode for tracing instead of deferred trace "
-                          "generation (higher overhead)")
-            .max_count(1)
-            .action([&](parser_t& p) {
-                update_env(_data, env_vars::TRACE_LEGACY, p.get<bool>("trace-legacy"));
-            });
-
         _data.reg.processed_environs.emplace("trace");
-        _data.reg.processed_environs.emplace("trace_legacy");
     }
 
     if(_data.reg.environ_filter("profile", _data))
@@ -452,8 +442,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument({ "--periods" },
                           "Similar to specifying delay and/or duration except in "
-                          "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
-                          "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>")
+                          "the form <DELAY>:<DURATION> or <DELAY>:<DURATION>:<REPEAT>")
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
@@ -695,12 +684,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     if(_data.reg.environ_filter("trace_wait", _data))
     {
         _parser
-            .add_argument(
-                { "--trace-wait" },
-                "Set the wait time (in seconds) "
-                "before collecting trace and/or profiling data"
-                "(in seconds). By default, the duration is in seconds of realtime "
-                "but that can changed via --trace-clock-id.")
+            .add_argument({ "--trace-wait" },
+                          "Set the wait time (in seconds) "
+                          "before collecting trace and/or profiling data. "
+                          "By default, the duration is in seconds of realtime "
+                          "but that can be changed via --trace-clock-id.")
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
@@ -717,7 +705,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 { "--trace-duration" },
                 "Set the duration of the trace and/or profile data collection (in "
                 "seconds). By default, the duration is in seconds of realtime but "
-                "that can changed via --trace-clock-id.")
+                "that can be changed via --trace-clock-id.")
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
@@ -734,9 +722,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument(
                 { "--trace-periods" },
                 "More powerful version of specifying trace delay and/or duration. Format "
-                "is one or more groups of: <DELAY>:<DURATION>, "
-                "<DELAY>:<DURATION>:<REPEAT>, "
-                "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>.")
+                "is one or more groups of: <DELAY>:<DURATION> or "
+                "<DELAY>:<DURATION>:<REPEAT>.")
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
@@ -771,7 +758,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument(
                 { "--trace-clock-id" },
-                "Set the default clock ID for for trace delay/duration. Note: "
+                "Set the default clock ID for trace delay/duration. Note: "
                 "\"cputime\" is "
                 "the *process* CPU time and might need to be scaled based on the number "
                 "of "
@@ -973,6 +960,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("sampling_gpus");
     }
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
     if(_data.reg.environ_filter("ai-nics", _data))
     {
         _parser
@@ -985,8 +973,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             });
 
         _data.reg.processed_environs.emplace("ai-nics");
-        _data.reg.processed_environs.emplace("sampling_ai-nics");
+        _data.reg.processed_environs.emplace("sampling_ainics");
     }
+#endif
 
     _parser.start_group("GENERAL SAMPLING OPTIONS",
                         "General options for timer-based sampling per-thread");

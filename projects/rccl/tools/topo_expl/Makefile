@@ -108,6 +108,9 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
+# rccl_wrap.cc's rcclRingTreeTable() calls rcclGetArchThresholds(), and
+# enqueue.cc keeps that function live. The definition is in
+# rccl_arch_thresholds.cc; without it the gfx90a topo_expl link fails.
 RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rings.cc \
 			hipify_rccl/graph/paths.cc \
@@ -122,6 +125,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
 			hipify_rccl/rccl_wrap.cc \
+			hipify_rccl/rccl_arch_thresholds.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
 			hipify_rccl/enqueue.cc
@@ -152,6 +156,8 @@ hipify:
 	mkdir -p hipify_rccl/include
 	(cd ../../src && find algorithms -name '*.h' \
 	    -exec cp --parents -t ../tools/topo_expl/hipify_rccl/include/ {} +)
+	mkdir -p hipify_rccl/include/device/tdm
+	cp -a ../../src/device/tdm/*.h hipify_rccl/include/device/tdm/
 	cp -a ../../src/device/*.h hipify_rccl/src/device/include
 	cp -a ../../src/device/network/unpack/*.h hipify_rccl/include/network/unpack
 	# src/include/sym_kernels.h includes "../device/symmetric/gin_scratch.h"
@@ -161,6 +167,7 @@ hipify:
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
 	cp -a ../../src/rccl_wrap.cc hipify_rccl/
+	cp -a ../../src/rccl_arch_thresholds.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP).
 	# Walk every subdirectory under hipify_rccl/include/ recursively so that
@@ -186,6 +193,11 @@ hipify:
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
 	cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
+	# Stand in for cmake's configure_file (no GIN backend here): turn the .in's
+	# '#cmakedefine01 X' into '#define X 0'.
+	sed 's|#cmakedefine01 \(.*\)|#define \1 0|' \
+	    hipify_rccl/include/nccl_device/gin/rccl_gin_config.h.in \
+	    > hipify_rccl/include/nccl_device/gin/rccl_gin_config.h
 	# PATCH 3b: The param/ headers (param.h, common.h, utils.h) collide in basename
 	# with include/{param,utils}.h and device/common.h, so the main RCCL build's
 	# add_file_unique() renames the staged copies to *_tmp.h. Sources reference the

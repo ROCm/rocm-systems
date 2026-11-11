@@ -152,6 +152,9 @@ typedef enum abce_status_t {
   ABCE_STATUS_RING_UNAVAILABLE,
   // Submit was handed a plan that did not map, or one already submitted.
   ABCE_STATUS_INVALID_PLAN,
+  // A non-blocking submit found the ring full or its dependency unmet; nothing
+  // was queued.
+  ABCE_STATUS_NOT_READY,
 } abce_status_t;
 
 static inline bool abce_status_is_ok(abce_status_t status) {
@@ -185,6 +188,8 @@ static inline const char* abce_status_name(abce_status_t status) {
       return "RING_UNAVAILABLE";
     case ABCE_STATUS_INVALID_PLAN:
       return "INVALID_PLAN";
+    case ABCE_STATUS_NOT_READY:
+      return "NOT_READY";
   }
   return "UNKNOWN";
 }

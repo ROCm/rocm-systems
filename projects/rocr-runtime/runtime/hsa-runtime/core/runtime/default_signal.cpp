@@ -42,6 +42,11 @@
 
 #include "core/inc/default_signal.h"
 
+#include <chrono>
+
+#include "core/util/os.h"
+#include "core/util/poll_backoff.h"
+
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
 #define MWAITX_ECX_TIMER_ENABLE 0x2  // BIT(1)
@@ -67,11 +72,11 @@ hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
 }
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_release);
 }
 
 hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
@@ -89,6 +94,30 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   const timer::fast_clock::time_point start_time = timer::fast_clock::now();
   const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
+  // A BusyWaitSignal has no interrupt event to sleep on, so this loop can only
+  // poll.  Polling flat-out pegs a CPU core for the whole wait - and a
+  // host<->device copy's completion signal (a GPU-only signal, i.e. a
+  // BusyWaitSignal) can go unsatisfied for tens of seconds under host-memory
+  // pressure (ROCm/TheRock#7832): the core spins at 100% the entire time while
+  // the GPU is idle and the process barely responds.  clr's WaitForSignal()
+  // re-arms this in a loop with HSA_WAIT_STATE_ACTIVE, so the active hint
+  // cannot be taken here to mean "spin without bound".
+  //
+  // With HSA_ENABLE_YIELDING_POLL=1, use the same polling-fallback shape as
+  // AsyncEventsLoop's no-interrupt path (core/util/poll_backoff.h): spin hot for
+  // a short window so a wait that completes quickly keeps its latency, then nap
+  // between scans, doubling kPollNapFloorUs -> kPollNapCeilingUs, so a long wait
+  // costs almost no CPU.  The signal value is still checked every iteration.
+  // An explicit HSA_WAIT_STATE_ACTIVE hint widens the hot-spin window but still
+  // backs off.  Opt-in because earlier sleep/yield attempts here regressed
+  // latency-sensitive workloads; by default the loop spins as before.  The
+  // nap is only reached if the caller's wait outlasts the hot window: clr's
+  // kTimeout4Secs re-arms every 4 ms instead of the intended 4 s until
+  // ROCm/rocm-systems#13513.
+  const timer::fast_clock::duration kHotPoll =
+      std::chrono::microseconds(HotPollUs(wait_hint == HSA_WAIT_STATE_ACTIVE));
+  unsigned int poll_nap_us = kPollNapFloorUs;
+
   while (true) {
     if (!IsValid()) return 0;
 
@@ -98,16 +127,30 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
       return value;
     }
 
-    if (timer::fast_clock::now() - start_time > fast_timeout) {
+    const timer::fast_clock::time_point now = timer::fast_clock::now();
+    if (now - start_time > fast_timeout) {
       return value;
     }
 
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
-    if (g_use_mwaitx) {
+    if (!g_use_yielding_poll || now - start_time < kHotPoll) {
       // Use timer-enabled mwaitx for busy waiting
-      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
+      WaitForValueChange(value, 60000);
+      continue;
     }
+
+    // Past the hot-spin window: nap between scans instead of burning the core.
+    // Never nap past the caller's deadline: clamp to the remaining timeout
+    // (rounded up, so the next scan lands at or just after it).
+    const timer::fast_clock::duration remaining = fast_timeout - (now - start_time);
+    unsigned int nap_us = poll_nap_us;
+    if (remaining < std::chrono::microseconds(nap_us)) {
+      nap_us = static_cast<unsigned int>(
+          std::chrono::ceil<std::chrono::microseconds>(remaining).count());
+    }
+    os::uSleep(nap_us);
+    poll_nap_us = NextPollNapUs(poll_nap_us);
   }
 }
 
@@ -121,131 +164,119 @@ hsa_signal_value_t BusyWaitSignal::WaitAcquire(hsa_signal_condition_t condition,
 }
 
 void BusyWaitSignal::AndRelaxed(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::AndAcquire(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::AndRelease(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::AndAcqRel(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::OrRelaxed(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::OrAcquire(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::OrRelease(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::OrAcqRel(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::XorRelaxed(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::XorAcquire(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::XorRelease(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::XorAcqRel(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::AddRelaxed(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::AddAcquire(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::AddRelease(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::AddAcqRel(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::SubRelaxed(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::SubAcquire(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::SubRelease(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::SubAcqRel(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acq_rel);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelaxed(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_relaxed));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_relaxed);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcquire(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acquire));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_acquire);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelease(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_release));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_release);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcqRel(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acq_rel));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_acq_rel);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelaxed(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_relaxed));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_relaxed, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcquire(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acquire));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_acquire, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelease(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_release));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_release, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcqRel(hsa_signal_value_t expected,
                                              hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acq_rel));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_acq_rel, expected);
 }
 
 }  // namespace core

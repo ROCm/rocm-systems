@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -23,21 +24,14 @@ constexpr bool supported(rj_code_arch_t arch) {
 }
 
 inline bool candidate(std::string_view name) {
-  if (((name.starts_with("v_wmma_f32_16x16x64_") || name.starts_with("v_wmma_f32_16x16x128_")) &&
-       (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
-        name.ends_with("bf8_bf8"))) ||
-      name == "v_wmma_f32_32x16x128_f4" || name == "v_wmma_scale_f32_16x16x128_f8f6f4" ||
-      name == "v_wmma_f32_16x16x32_f16" || name == "v_wmma_f32_16x16x32_bf16")
+  if (name == "v_wmma_f32_32x16x128_f4" || name == "v_wmma_scale_f32_16x16x128_f8f6f4")
     return true;
   if (name == "v_mfma_scale_f32_16x16x128_f8f6f4" || name == "v_mfma_scale_f32_32x32x64_f8f6f4" ||
       name == "v_mfma_f32_16x16x128_f8f6f4" || name == "v_mfma_f32_32x32x64_f8f6f4")
     return true;
-  if ((name.starts_with("v_mfma_f32_16x16x32_") || name.starts_with("v_mfma_f32_32x32x16_")) &&
-      (name.ends_with("fp8_fp8") || name.ends_with("fp8_bf8") || name.ends_with("bf8_fp8") ||
-       name.ends_with("bf8_bf8")))
-    return true;
-  return name == "v_mfma_f32_32x32x8_f16" || name == "v_mfma_f32_16x16x16_f16" ||
-         name == "v_mfma_f32_32x32x16_f16" || name == "v_mfma_f32_16x16x32_f16";
+  // Migrated rj-arith handlers consult the issuer's per-instruction error state.
+  // Keep them on the issuer until helpers return errors with their issuing PC.
+  return false;
 }
 
 // Reject non-MFMA encodings on CDNA4, and non-candidates in the CDNA5 allowlist.
@@ -50,14 +44,9 @@ inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word) {
     return true;
   const uint32_t opcode = word >> 16;
   constexpr uint32_t encoding = 0xcc00;
-  return (opcode >= encoding + cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p &&
-          opcode <= encoding + cdna5::kVWmmaF3216x16x64Bf8Bf8Vop3p) ||
-         (opcode >= encoding + cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p &&
-          opcode <= encoding + cdna5::kVWmmaF3216x16x128Bf8Bf8Vop3p) ||
-         opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p ||
+  return opcode == encoding + cdna5::kVWmmaF3232x16x128F4Vop3p ||
          // The scale prefix needs full decoding to check its paired WMMA.
-         opcode == encoding + 0x35 || opcode == encoding + cdna5::kVWmmaF3216x16x32F16Vop3p ||
-         opcode == encoding + cdna5::kVWmmaF3216x16x32Bf16Vop3p;
+         opcode == encoding + 0x35;
 }
 
 class Access {
@@ -75,6 +64,12 @@ inline bool ordinary_memory(std::string_view name) {
 inline bool safe_inline(const Instruction &inst) {
   if (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR |
                       BARRIER | WRITES_EXEC))
+    return false;
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  // DPP execution temporarily narrows the wave's VGPR write mask. Keep that
+  // wave-wide state stable while an asynchronous MMA may still consult it.
+  if (modifiers.dpp)
     return false;
   const auto name = inst.mnemonic();
   if (name == "s_delay_alu" || name == "s_nop" || name == "v_nop")

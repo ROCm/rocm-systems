@@ -1,0 +1,291 @@
+<IsaAdditions Id="cdna2-legacy-math" BaseArchitecture="AMD CDNA 2" BaseSchemaVersion="1.1.1">
+  <!--
+    Provenance: the shared record in amdgpu_isa_cdna1_legacy_math.xml pins
+    the public LLVM definitions/vectors and base-XML revision, and derives
+    every field and identifier for all four additions. This file uses the
+    V_EXP_F32/V_LOG_F32 templates in amdgpu_isa_cdna2.xml at that revision
+    and the local unique Id cdna2-legacy-math.
+  -->
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP1</EncodingName>
+      <Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">01111110000000001001011000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_INST_LITERAL</EncodingName>
+      <Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001011000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_VOP_DPP</EncodingName>
+      <Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001011000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_VOP_SDWA</EncodingName>
+      <Opcode>75</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001011000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3</EncodingName>
+      <Opcode>395</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011010001100010110000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP1</EncodingName>
+      <Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">01111110000000001001100000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_INST_LITERAL</EncodingName>
+      <Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001100000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_VOP_DPP</EncodingName>
+      <Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001100000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>VOP1_VOP_SDWA</EncodingName>
+      <Opcode>76</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000001111110000000001001100000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_VOP3</EncodingName>
+      <Opcode>396</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011010001100011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_EXP_LEGACY_F32</InstructionName>
+      <Description>Calculate 2 raised to the power of the single-precision float input and store the result into a vector register.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP1</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_INST_LITERAL</EncodingName>
+          <EncodingCondition>has_lit</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_VOP_DPP</EncodingName>
+          <EncodingCondition>has_dpp</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>VSRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_VOP_SDWA</EncodingName>
+          <EncodingCondition>has_sdwa</EncodingCondition>
+          <Opcode Radix="10">75</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>VSRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC_SIMPLE</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">395</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC_NOLIT</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>TRANSCENDENTAL</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>V_LOG_LEGACY_F32</InstructionName>
+      <Description>Calculate the base 2 logarithm of the single-precision float input and store the result into a vector register.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP1</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_INST_LITERAL</EncodingName>
+          <EncodingCondition>has_lit</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>LITERAL</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_VOP_DPP</EncodingName>
+          <EncodingCondition>has_dpp</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>VSRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>VOP1_VOP_SDWA</EncodingName>
+          <EncodingCondition>has_sdwa</EncodingCondition>
+          <Opcode Radix="10">76</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>VSRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC_SIMPLE</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+        <InstructionEncoding>
+          <EncodingName>ENC_VOP3</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">396</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>VDST</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_VGPR</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SRC0</FieldName>
+              <DataFormatName>FMT_NUM_F32</DataFormatName>
+              <OperandType>OPR_SRC_NOLIT</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>VALU</Name>
+        <FunctionalSubgroups>
+          <Subgroup>TRANSCENDENTAL</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>

@@ -4,10 +4,13 @@
 //! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{CachedInfo, Driver};
-use crate::host_storage::Allocator;
+use crate::driver::{
+    AddressSpaceInfo, CachedInfo, Driver, DriverInstanceId, VirtualMemoryOperations,
+};
+use crate::memory::storage::{Owned, Shared};
 use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
+use crate::{Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -73,15 +76,19 @@ struct Mapping {
     fail_once: bool,
 }
 
+static MAPPING_DROP_LOCK: Mutex<()> = Mutex::new(());
+
+impl Drop for Mapping {
+    fn drop(&mut self) {
+        let _held = MAPPING_DROP_LOCK.lock().unwrap();
+    }
+}
+
 impl Driver for FakeDriver {
     type DeviceState = State;
 
-    fn allocator(&self) -> Allocator {
-        Allocator::system()
-    }
-
-    fn driver_instance(&self) -> u64 {
-        1
+    fn driver_instance(&self) -> DriverInstanceId {
+        DriverInstanceId::TEST
     }
 
     fn context_lifetime(&self) -> DriverContextLifetime {
@@ -127,17 +134,14 @@ impl VirtualMemoryOperations for FakeDriver {
         address: u64,
     ) -> Result<Owned<Address>, Error> {
         let address = if address == 0 { bounds.0 } else { address };
-        Ok(Owned::new(
-            Address {
-                info: VirtualAddressInfo {
-                    address,
-                    size,
-                    mapping_granularity: alignment,
-                },
-                drops: self.drops.clone(),
+        Ok(Owned::new(Address {
+            info: VirtualAddressInfo {
+                address,
+                size,
+                mapping_granularity: alignment,
             },
-            Allocator::system(),
-        )?)
+            drops: self.drops.clone(),
+        })?)
     }
 
     fn free_virtual_address(_address: &mut Address) -> Result<(), Error> {
@@ -147,22 +151,19 @@ impl VirtualMemoryOperations for FakeDriver {
     fn create_virtual_memory(
         &self,
         _device: &State,
-        _kind: OwnedMemoryKind,
+        _kind: MemoryKind,
         size: u64,
-        _pinned: bool,
-        _uncached: bool,
+        _options: VirtualMemoryOptions,
     ) -> Result<Owned<Backing>, Error> {
-        Ok(Owned::new(
-            Backing {
-                info: VirtualMemoryInfo {
-                    size,
-                    mapping_granularity: 0x1000,
-                    physical_backing_id: [1, 2],
-                },
-                drops: self.drops.clone(),
+        Ok(Owned::new(Backing {
+            info: VirtualMemoryInfo {
+                size,
+                mapping_granularity: 0x1000,
+                physical_backing_id: [1, 2],
+                placement: None,
             },
-            Allocator::system(),
-        )?)
+            drops: self.drops.clone(),
+        })?)
     }
 
     fn free_virtual_memory(_memory: &mut Backing) -> Result<(), Error> {
@@ -178,10 +179,7 @@ impl VirtualMemoryOperations for FakeDriver {
         _size: u64,
         _permissions: DeviceAccess,
     ) -> Result<Owned<Mapping>, Error> {
-        Ok(Owned::new(
-            Mapping { fail_once: false },
-            Allocator::system(),
-        )?)
+        Ok(Owned::new(Mapping { fail_once: false })?)
     }
 
     fn free_virtual_device_mapping(_mapping: &mut Mapping) -> Result<(), Error> {
@@ -195,9 +193,15 @@ impl VirtualMemoryOperations for FakeDriver {
         _offset: u64,
         _size: u64,
         _permissions: DeviceAccess,
-        allocator: Allocator,
     ) -> Result<Owned<Mapping>, Error> {
-        Ok(Owned::new(Mapping { fail_once: true }, allocator)?)
+        Ok(Owned::new(Mapping { fail_once: true })?)
+    }
+
+    fn set_virtual_host_mapping_permissions(
+        _mapping: &mut Mapping,
+        _permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {
@@ -221,23 +225,161 @@ fn owners(
     ),
     Error,
 > {
-    let allocator = Allocator::system();
     let reservation = driver.reserve_virtual_address((0x1000, u64::MAX), 0x4000, 0x1000, 0)?;
     let address = DriverVirtualAddress::new(
         driver.clone(),
-        Shared::new(reservation, allocator)?,
-        Shared::new(HostIntervals::new(allocator), allocator)?,
-        Shared::new(DeviceIntervals::new(allocator), allocator)?,
+        Shared::new(reservation)?,
+        Shared::new(HostIntervals::new())?,
+        Shared::new(DeviceIntervals::new())?,
+        crate::os::ProcessIdentity::capture().map_err(|source| {
+            crate::os::native_error("test virtual reservation process identity", source)
+        })?,
     );
     let backing = driver.create_virtual_memory(
         &State(1),
-        OwnedMemoryKind::try_from(MemoryKind::System)?,
+        MemoryKind::System,
         0x4000,
-        false,
-        false,
+        VirtualMemoryOptions::default(),
     )?;
-    let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing, allocator)?);
+    let process = crate::os::ProcessIdentity::capture().map_err(|source| {
+        crate::os::native_error("test virtual backing process identity", source)
+    })?;
+    let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing)?, process);
     Ok((address, memory))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+#[allow(unsafe_code, clippy::unwrap_used)]
+fn fork_child_drops_unmapped_virtual_owners_without_callbacks() -> Result<(), Error> {
+    let drops = Arc::new(Mutex::new(Vec::new()));
+    let driver = Shared::new(FakeDriver {
+        drops: drops.clone(),
+    })?;
+    let (address, memory) = owners(&driver)?;
+    let held_owner = drops.lock().unwrap();
+    // SAFETY: The child drops only copied owners and exits without running
+    // test-harness destructors. The held lock exposes inherited callbacks.
+    let child = unsafe { libc::syscall(libc::SYS_fork) };
+    assert!(child >= 0);
+    if child == 0 {
+        // SAFETY: Bound a regression if a copied callback lock is entered.
+        unsafe { libc::alarm(3) };
+        drop(memory);
+        drop(address);
+        drop(driver);
+        // SAFETY: _exit avoids inherited test-harness state.
+        unsafe { libc::_exit(0) }
+    }
+    let pid = i32::try_from(child).unwrap();
+    let mut status = 0;
+    // SAFETY: This waits only for the child created above.
+    assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+    assert_eq!(status, 0);
+    drop(held_owner);
+    Ok(())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+#[allow(unsafe_code, clippy::unwrap_used)]
+fn fork_child_drops_virtual_owners_without_inherited_callbacks() -> Result<(), Error> {
+    let drops = Arc::new(Mutex::new(Vec::new()));
+    let driver = Shared::new(FakeDriver {
+        drops: drops.clone(),
+    })?;
+    let (mut address, mut memory) = owners(&driver)?;
+    let mut host = memory.map_host(&address, 0x1000, 0, 0x1000, DeviceAccess::READ)?;
+    let mut device = memory.map_device(
+        &driver,
+        &State(1),
+        &address,
+        VirtualMapRequest {
+            address: 0x1000,
+            offset: 0,
+            size: 0x1000,
+            permissions: DeviceAccess::READ,
+        },
+    )?;
+    let held_mapping = MAPPING_DROP_LOCK.lock().unwrap();
+    let held_owner = drops.lock().unwrap();
+    // SAFETY: The child checks copied owners and exits without running test
+    // harness destructors. Held locks expose any inherited cleanup callback.
+    let child = unsafe { libc::syscall(libc::SYS_fork) };
+    assert!(child >= 0);
+    if child == 0 {
+        // SAFETY: Bound a regression if a copied callback lock is entered.
+        unsafe { libc::alarm(3) };
+        let rejected = host
+            .set_permissions(DeviceAccess::READ)
+            .err()
+            .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument)
+            && host
+                .free()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument)
+            && device
+                .free()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument)
+            && memory
+                .free()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument)
+            && address
+                .free()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument);
+        drop(host);
+        drop(device);
+        drop(memory);
+        drop(address);
+        drop(driver);
+        // SAFETY: _exit avoids inherited test-harness state.
+        unsafe { libc::_exit(i32::from(!rejected)) }
+    }
+    let pid = i32::try_from(child).unwrap();
+    let mut status = 0;
+    // SAFETY: This waits only for the child created above.
+    assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+    assert_eq!(status, 0);
+    drop(held_owner);
+    drop(held_mapping);
+    Ok(())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+#[allow(unsafe_code, clippy::unwrap_used)]
+fn fork_child_rejects_virtual_mapping_before_inherited_interval_lock() -> Result<(), Error> {
+    let driver = Shared::new(FakeDriver {
+        drops: Arc::new(Mutex::new(Vec::new())),
+    })?;
+    let (mut address, memory) = owners(&driver)?;
+    address.with_locked_host_intervals_for_test(|| {
+        // SAFETY: The child only checks the inherited owner and exits without
+        // dropping the fake driver or entering a test-harness lock.
+        let child = unsafe { libc::syscall(libc::SYS_fork) };
+        assert!(child >= 0);
+        if child == 0 {
+            // SAFETY: Bound a regression if the copied interval mutex is entered.
+            unsafe { libc::alarm(3) };
+            let base = address.info().address;
+            let rejected = memory
+                .map_host(&address, base, 0, 0x1000, DeviceAccess::READ)
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::InvalidArgument);
+            // SAFETY: _exit leaves copied owners and mutexes untouched.
+            unsafe { libc::_exit(i32::from(!rejected)) }
+        }
+        let pid = i32::try_from(child).unwrap();
+        let mut status = 0;
+        // SAFETY: This waits only for the child created above.
+        assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+        assert_eq!(status, 0);
+    });
+    address.free()?;
+    Ok(())
 }
 
 #[test]
@@ -247,19 +389,13 @@ fn owners(
 )]
 fn fake_driver_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
-    let driver = Shared::new(
-        FakeDriver {
-            drops: drops.clone(),
-        },
-        Allocator::system(),
-    )?;
+    let driver = Shared::new(FakeDriver {
+        drops: drops.clone(),
+    })?;
     let (mut address, mut memory) = owners(&driver)?;
-    let other_driver = Shared::new(
-        FakeDriver {
-            drops: Arc::new(Mutex::new(Vec::new())),
-        },
-        Allocator::system(),
-    )?;
+    let other_driver = Shared::new(FakeDriver {
+        drops: Arc::new(Mutex::new(Vec::new())),
+    })?;
     let (_, foreign_memory) = owners(&other_driver)?;
     let base = address.info().address;
     assert_eq!(

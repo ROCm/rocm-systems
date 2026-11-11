@@ -2,24 +2,26 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Bare amd-smi driver version row tests."""
+"""Bare amd-smi missing-driver tests."""
 
 import importlib.util
-import io
+import os
+import sys
 import types
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 
-from common.common import stub_modules_at_import
+from common.common import cli_search_order, find_cli_dir, stub_modules_at_import
+
+# default.py imports the CLI's own exception module, so the CLI dir must be importable
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+if _CLI_DIR and _CLI_DIR not in sys.path:
+    sys.path.append(_CLI_DIR)
 
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
-    "driver_kernel_version": "6.19.14",
     "driver_version": "6.19.14.31400000",
-    "driver_build_version": "2370381",
-    "driver_full_version": "6.19.14.31400000-2370381",
 }
 
 
@@ -111,29 +113,17 @@ def _run_default() -> dict:
     return commands.logger.output
 
 
-def _load_logger_module() -> types.ModuleType:
-    helpers_module = types.ModuleType("amdsmi_helpers")
-    helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
-    restore = stub_modules_at_import({"amdsmi_helpers": helpers_module})
-    try:
-        return _load_module("amdsmi_cli/amdsmi_logger.py", "logger_driver_under_test")
-    finally:
-        restore()
-
-
-def _banner_payload() -> dict:
-    return {
-        "version_info": {
-            "amd-smi": "27.1.0",
-            "amdgpu version": _DRIVER_INFO,
-            "kernel version": "6.8.0-124-generic",
-            "fw pldm version": "N/A",
-            "vbios version": "N/A",
-            "rocm version": (True, "10.1.0"),
-        },
-        "gpu_info_list": [],
-        "processes": [],
-    }
+def _run_default_without_amdgpu(gpus_without_driver: list) -> dict:
+    module = _load_default_module()
+    commands = object.__new__(module.DefaultCommands)
+    commands.logger = types.SimpleNamespace(format="human_readable", output={})
+    commands.helpers = types.SimpleNamespace(
+        is_amdgpu_initialized=lambda: False,
+        get_devices_without_driver=lambda _driver: gpus_without_driver,
+    )
+    commands.group_check_printed = True
+    commands.default(types.SimpleNamespace())
+    return commands.logger.output
 
 
 class TestDefaultDriverHeader(unittest.TestCase):
@@ -149,38 +139,12 @@ class TestDefaultDriverHeader(unittest.TestCase):
         self.assertEqual(output["version_info"]["amdgpu version"], _DRIVER_INFO)
         self.assertNotIn("amdgpu dkms version", output["version_info"])
 
-    def test_banner_prints_driver_rows_in_order(self) -> None:
-        module = _load_logger_module()
-        logger = module.AMDSMILogger(
-            helpers=types.SimpleNamespace(os_info=lambda: "Linux Baremetal")
-        )
-        stdout = io.StringIO()
-        with redirect_stdout(stdout):
-            logger.print_default_output(_banner_payload())
+    def test_missing_amdgpu_with_a_gpu_present_names_the_driver(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            _run_default_without_amdgpu(gpus_without_driver=["0001:01:00.0"])
 
-        lines = stdout.getvalue().splitlines()
-        amdgpu_index = next(
-            i for i, line in enumerate(lines) if line.startswith("| amdgpu Version:")
-        )
-        self.assertIn("6.19.14.31400000-2370381", lines[amdgpu_index])
-        self.assertTrue(lines[amdgpu_index + 1].startswith("| ROCm Version:"))
-        self.assertFalse(any(line.startswith("| Kernel Version:") for line in lines))
-        self.assertFalse(any(line.startswith("| Driver Version:") for line in lines))
-        self.assertFalse(any(line.startswith("| Build Version:") for line in lines))
+        self.assertEqual(type(ctx.exception).__name__, "AmdSmiDriverNotLoadedException")
+        self.assertIn("requires the amdgpu driver", str(ctx.exception))
 
-    def test_banner_uses_os_kernel_when_driver_info_is_unavailable(self) -> None:
-        module = _load_logger_module()
-        logger = module.AMDSMILogger(
-            helpers=types.SimpleNamespace(os_info=lambda: "Linux Baremetal")
-        )
-        payload = _banner_payload()
-        payload["version_info"]["amdgpu version"] = "N/A"
-        stdout = io.StringIO()
-
-        with redirect_stdout(stdout):
-            logger.print_default_output(payload)
-
-        lines = stdout.getvalue().splitlines()
-        os_kernel_line = next(line for line in lines if line.startswith("| OS kernel Version:"))
-        self.assertIn("6.8.0-124-generic", os_kernel_line)
-        self.assertFalse(any(line.startswith("| amdgpu Version:") for line in lines))
+    def test_missing_amdgpu_without_a_gpu_prints_nothing(self) -> None:
+        self.assertEqual(_run_default_without_amdgpu(gpus_without_driver=[]), {})

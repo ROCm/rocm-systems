@@ -821,10 +821,9 @@ static uint64_t watchdogDeadlineTicks() {
   return 2000ULL * static_cast<uint64_t>(std::max(rateKhz, 1));
 }
 
-// Watchdog for one block: until state[0] reaches nDone, after ticks it records a rescue in state[1] and keeps
-// cis[pe] at pis[pe], so a wait that ignores abortFlag ends as a test failure instead of a hang.
+// Until state[0] hits nDone; after ticks it sets state[1], drains cis[pe] and raises abortFlag, so stuck waits fail.
 static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe, uint32_t nDone, uint64_t ticks,
-                                          uint32_t* state) {
+                                          uint32_t* state, uint32_t* abortFlag = nullptr) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> done(state[0]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[pe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[pe]);
@@ -833,6 +832,9 @@ static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe
     if (wall_clock64() - startTick >= ticks) {
       state[1] = 1u;
       ci.store(pi.load(cuda::memory_order_acquire), cuda::memory_order_release);
+      if (abortFlag != nullptr) {
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(*abortFlag).store(1u, cuda::memory_order_release);
+      }
     }
   }
 }
@@ -2131,6 +2133,174 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
     << "a no-timeout flush returned before the first abort poll (or testAbort's poll interval shrank); ready="
     << cycles[0] << " pending=" << cycles[1];
   queues.ExpectUnchanged();
+}
+
+// Busy-waits ticks of wall_clock64 (constant rate on every arch, unlike clock64 on gfx11).
+static __device__ void spinWallTicks(uint64_t ticks) {
+  const uint64_t startTick = wall_clock64();
+  while (wall_clock64() - startTick < ticks) {
+  }
+}
+
+// Block 1 posts a GFD after flush read pi, then sets ci to the old pi; state is {returned, rescued, entered, early}.
+__global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint32_t pe, bool timed,
+                                                 uint64_t timeoutCycles, uint64_t graceTicks, uint64_t watchdogTicks,
+                                                 uint32_t* abortFlag, ncclResult_t* outResult, uint32_t* state) {
+  if (threadIdx.x != 0) {
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> entered(state[2]);
+  if (blockIdx.x == 0) {
+    entered.store(1u, cuda::memory_order_release);
+    if (timed) {
+      *outResult = nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag, clock64(), timeoutCycles);
+    } else {
+      nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag);
+    }
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).store(1u, cuda::memory_order_release);
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(ctx->pis[pe]);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(ctx->cis[pe]);
+  const uint64_t startTick = wall_clock64();
+  while (entered.load(cuda::memory_order_acquire) == 0u && wall_clock64() - startTick < watchdogTicks) {
+  }
+  // The pi read is the first thing flush does, so a grace of 1 ms after entry orders the post after the snapshot.
+  spinWallTicks(graceTicks);
+  const uint32_t snapshot = pi.fetch_add(1u, cuda::memory_order_acq_rel);
+  // A second grace lets the post become visible first, so a re-reading flush cannot pair the old pi with the new ci.
+  spinWallTicks(graceTicks);
+  // A flush that returned before ci reached its snapshot did not wait at all.
+  state[3] = cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).load(cuda::memory_order_acquire);
+  ci.store(snapshot, cuda::memory_order_release);
+  drainAfterDeadline(ctx, static_cast<int>(pe), /*nDone=*/1u, watchdogTicks, state, abortFlag);
+}
+
+TEST_F(GinDeviceTest, ProxyFlush_IgnoresGfdPostedAfterPiSnapshot) {
+  constexpr uint32_t kPe = 1;
+  constexpr uint32_t kSnapshot = 0xFFFFFFFFu; // The later post wraps pi to 0, so the wait also crosses the uint32 wrap.
+  int rateKhz = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0), hipSuccess);
+  const uint64_t graceTicks = static_cast<uint64_t>(std::max(rateKhz, 1)); // 1 ms
+  for (bool timed : {false, true}) {
+    SCOPED_TRACE(testing::Message() << (timed ? "timeout overload" : "blocking overload"));
+    if (timed && clock64Wraps()) {
+      continue; // A 20-bit clock64 would fire the production timeout during the grace periods.
+    }
+    // Peer 0 is a decoy with one GFD pending; peer 1 has one GFD in flight at the snapshot.
+    ProxyFlushQueues queues({4u, kSnapshot}, {3u, kSnapshot - 1u});
+    DeviceBuffer<ncclResult_t> d_result(1);
+    DeviceBuffer<uint32_t> d_state(4);
+    DeviceBuffer<uint32_t> d_abort(1);
+    d_result.upload(ncclInProgress);
+    d_state.zero();
+    d_abort.zero();
+
+    kernelProxyFlushIgnoresLaterPost<<<2, 1>>>(queues.d_ctx.ptr, kPe, timed, kProxyFlushLongTimeoutCycles, graceTicks,
+                                               watchdogDeadlineTicks(), d_abort.ptr, d_result.ptr, d_state.ptr);
+    syncAndCheck();
+    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u, 1u, 0u}))
+      << "{returned, rescued, entered, early}: rescued=1: flush outlived the watchdog; early=1: it never waited";
+    if (timed) {
+      EXPECT_EQ(d_result.download(), ncclSuccess) << "flush must return once ci reaches the pi it read on entry";
+    }
+    EXPECT_EQ(queues.d_pis.copyTo(), (std::vector<uint32_t>{4u, kSnapshot + 1u})) << "exactly the one later post";
+    EXPECT_EQ(queues.d_cis.copyTo(), (std::vector<uint32_t>{3u, kSnapshot})) << "ci consumed only up to the snapshot";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DescriptorSmem: a caller-provided ncclGinDescriptorSmem (ncclGin_DescriptorSmem)
+//   is where the proxy builds its 128-byte GFD before posting it. NCCL 2.32.3
+//   (052c879fed) grew the storage from alignas(16) char[64] to alignas(64)
+//   char[128]; before that the GFD overran the storage into the caller's
+//   neighbouring shared memory. Checked at runtime rather than with static_assert,
+//   so the file still builds against headers without the fix.
+// ---------------------------------------------------------------------------
+
+TEST_F(GinDeviceTest, DescriptorSmem_FitsProxyGfd) {
+  EXPECT_LE(sizeof(ncclGinProxyGfd_t), sizeof(ncclGinDescriptorSmem));
+  EXPECT_LE(alignof(ncclGinProxyGfd_t), alignof(ncclGinDescriptorSmem));
+}
+
+constexpr int kDescriptorGuardWords = 16;
+
+struct DescriptorSmemWithGuard {
+  ncclGinDescriptorSmem descriptor;
+  uint64_t guard[kDescriptorGuardWords];
+};
+
+// The leaf that ncclGin::putValue(..., ncclGin_DescriptorSmem{&smem}) dispatches to.
+__global__ void kernelPutValueSmemDescriptor(ncclGinCtx ctx, int peer, uint64_t value,
+                                             uint64_t guardInit, uint64_t* guardOut, uint64_t* descOut) {
+  __shared__ DescriptorSmemWithGuard smem;
+  // __shared__ is not zero-initialised: seed the descriptor's first qword with bit 0 clear, so that its flag bit
+  // afterwards shows whether the GFD was built here rather than in the leaf's own scratch.
+  *reinterpret_cast<uint64_t*>(&smem.descriptor) = guardInit;
+  for (int i = 0; i < kDescriptorGuardWords; i++) smem.guard[i] = guardInit;
+  __syncthreads();
+  ncclGinSignalDescriptor noSignal{};
+  noSignal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY>::call(
+      ctx, ncclCoopThread{}, peer, reinterpret_cast<ncclGinWindow_t>(0x1000), /*dstOff=*/0, value,
+      noSignal, ncclGinSignalInc, /*signalOpArg=*/0, /*hasDescriptor=*/true, &smem.descriptor,
+      cuda::thread_scope_device, cuda::thread_scope_thread);
+  __syncthreads();
+  *descOut = *reinterpret_cast<const volatile uint64_t*>(&smem.descriptor);
+  const volatile uint64_t* guard = smem.guard;
+  for (int i = 0; i < kDescriptorGuardWords; i++) guardOut[i] = guard[i];
+}
+
+TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
+  constexpr uint32_t kNranks    = 2;
+  constexpr uint32_t kQueueSize = 4;
+  constexpr uint32_t kPeer      = 1;
+  constexpr uint64_t kValue     = 0x0123456789ABCDEFULL;
+  // Bit 0 clear: buildGfd sets the flag bit (bit 0) of every one of the 16 GFD qwords.
+  constexpr uint64_t kGuard     = 0xC0FFEE00C0FFEE00ULL;
+
+  DeviceBuffer<ncclGinProxyGfd_t>    d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t>             d_pis(kNranks);
+  DeviceBuffer<uint32_t>             d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<uint64_t>             d_guard(kDescriptorGuardWords);
+  DeviceBuffer<uint64_t>             d_desc(1);
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_guard.zero();
+  d_desc.zero();
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks    = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize = kQueueSize;
+  hostProxyCtx.queues    = d_queues.ptr;
+  hostProxyCtx.pis       = d_pis.ptr;
+  hostProxyCtx.cis       = d_cis.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.nRanks  = static_cast<int>(kNranks);
+  ctx.handle  = d_proxyCtx.ptr;
+
+  kernelPutValueSmemDescriptor<<<1, 1>>>(ctx, kPeer, kValue, kGuard, d_guard.ptr, d_desc.ptr);
+  syncAndCheck();
+
+  // The GFD was built in the descriptor and posted to the peer's queue.
+  EXPECT_EQ(d_desc.copyTo()[0] & 1u, 1u) << "the GFD was not built in the caller's ncclGinDescriptorSmem";
+  EXPECT_EQ(d_pis.copyTo()[kPeer], 1u);
+  const ncclGinProxyGfd_t posted = d_queues.copyTo()[kPeer * kQueueSize];
+  EXPECT_EQ(static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2) << 32) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh) << 48),
+            kValue);
+
+  // Shared memory right after the descriptor storage must be left alone.
+  const std::vector<uint64_t> guard = d_guard.copyTo();
+  for (int i = 0; i < kDescriptorGuardWords; i++) {
+    EXPECT_EQ(guard[i], kGuard) << "shared-memory word " << i << " after ncclGinDescriptorSmem was overwritten";
+  }
 }
 
 } // namespace RcclUnitTesting

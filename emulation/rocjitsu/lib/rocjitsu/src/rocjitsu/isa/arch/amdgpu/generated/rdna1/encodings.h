@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -704,6 +704,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
   bool has_encoded_literal32() const;
@@ -711,7 +712,7 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
-                                         vop3_encoded_source_count(), false);
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
@@ -844,11 +845,32 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+      // VDATA is the first source. Assembly includes the status slot;
+      // the source dependency includes only the atomic payload.
+      const auto first = operand->encoding_value();
+      const auto last = first + operand->size_bits() / 32;
+      out += first == last ? "v" + std::to_string(first)
+                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {

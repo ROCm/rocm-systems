@@ -30,6 +30,7 @@ The RCCL public repository is located within the rocm-systems repo at `<https://
     * :doc:`Using the RCCL RMA plugin API <./how-to/using-rccl-rma-plugin-api>`
     * :doc:`Using the RCCL GIN plugin API <./how-to/using-rccl-gin-plugin-api>`
     * :doc:`Using the RCCL Tuner plugin <./how-to/using-rccl-tuner-plugin-api>`
+    * :doc:`The RCCL unified cost model <./how-to/rccl-cost-model>`
     * :doc:`Using the RCCL environment plugin <./how-to/using-rccl-env-plugin-api>`
     * :doc:`Using the NCCL Net plugin <./how-to/using-nccl>`
     * :doc:`Using the RCCL Inspector plugin <./how-to/using-rccl-inspector-plugin>`

@@ -9,7 +9,6 @@
 #include <cassert>
 #include <chrono>
 #include <exception>
-#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -36,19 +35,22 @@ SimulationEngine::~SimulationEngine() {
     shutdown();
 }
 
-void SimulationEngine::create() {
+util::Result SimulationEngine::create(util::DiagnosticEmitter emit_error) {
   assert(!created_ && "create() called twice without shutdown()");
-  if (config_.num_threads == 0)
-    throw std::invalid_argument("SimulationEngine requires at least one worker thread");
+  if (config_.num_threads == 0) {
+    return emit_error.emit() << "SimulationEngine requires at least one worker thread";
+  }
 
   if (topology_.partitions().empty()) {
     if (config_.num_threads > 1) {
-      throw std::invalid_argument(
-          "multi-threaded SimulationEngine requires an explicit topology partition policy");
+      return emit_error.emit()
+             << "multi-threaded SimulationEngine requires an explicit topology partition policy";
     }
-    topology_.partition_balanced(1);
+    if (topology_.partition_balanced(1, emit_error).failed())
+      return util::Result::failure();
   }
-  setup_partitions();
+  if (setup_partitions(emit_error).failed())
+    return util::Result::failure();
 
   done_.store(false, std::memory_order_release);
   startup_complete_.store(false, std::memory_order_release);
@@ -63,17 +65,18 @@ void SimulationEngine::create() {
 
   initialize_components();
   created_ = true;
+  return util::Result::success();
 }
 
 void SimulationEngine::shutdown() {
   if (!created_)
     return;
 
-  // Signal done. Workers will see this after the next barrier and exit.
+  // Lifecycle cleanup requires run() to have returned. A foreign thread stops
+  // an active engine through request_exit(), then joins its runner first.
   done_.store(true, std::memory_order_release);
 
-  // In single-threaded mode, wake idle CV. In multi-threaded mode,
-  // threads will see done_ after their current barrier epoch completes.
+  // Preserve the terminal publication while the contexts are still alive.
   wake_partition(0);
 
   workers_.clear();
@@ -98,23 +101,23 @@ void SimulationEngine::shutdown() {
   report_component_failure(component_failure, "engine shutdown");
 }
 
-void SimulationEngine::setup_partitions() {
+util::Result SimulationEngine::setup_partitions(util::DiagnosticEmitter emit_error) {
   const uint32_t num_threads = config_.num_threads;
   if (topology_.partitions().size() != num_threads) {
-    throw std::invalid_argument(
-        "SimulationEngine topology partition count must match the worker thread count");
+    return emit_error.emit()
+           << "SimulationEngine topology partition count must match the worker thread count";
   }
 
   // Validate cross-partition link constraints.
   for (auto &link : topology_.links()) {
     if (link->is_cross_partition()) {
       if (link->latency() == 0) {
-        throw std::invalid_argument("SimulationEngine cross-partition link " +
-                                    link_endpoints(*link) + " requires positive latency");
+        return emit_error.emit() << "SimulationEngine cross-partition link "
+                                 << link_endpoints(*link) << " requires positive latency";
       }
       if (dynamic_cast<QueuedLink *>(link.get()) != nullptr) {
-        throw std::invalid_argument("SimulationEngine QueuedLink " + link_endpoints(*link) +
-                                    " must not cross partition boundaries");
+        return emit_error.emit() << "SimulationEngine QueuedLink " << link_endpoints(*link)
+                                 << " must not cross partition boundaries";
       }
     }
   }
@@ -132,6 +135,7 @@ void SimulationEngine::setup_partitions() {
     for (auto *comp : part.components)
       comp->set_engine(this);
   }
+  return util::Result::success();
 }
 
 ExitStatus SimulationEngine::run() {
@@ -180,7 +184,7 @@ ExitStatus SimulationEngine::run() {
 
   if (config_.max_ticks > 0 && num_threads == 1) {
     max_ticks_event_.set_handler([this](Tick ts, Message *) {
-      set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
+      set_exit(ExitCause::MAX_TICKS, ts, "max ticks reached");
       done_.store(true, std::memory_order_release);
     });
     contexts_[0]->event_queue.push(
@@ -290,7 +294,7 @@ bool SimulationEngine::step() {
 
     if (config_.max_ticks > 0) {
       max_ticks_event_.set_handler([this](Tick ts, Message *) {
-        set_exit(ExitReason::COMPLETED, ts, "max ticks reached");
+        set_exit(ExitCause::MAX_TICKS, ts, "max ticks reached");
         done_.store(true, std::memory_order_release);
       });
       contexts_[0]->event_queue.push(
@@ -311,6 +315,22 @@ bool SimulationEngine::step() {
       return false;
     }
     return true;
+  }
+
+  // The max-ticks sentinel is a horizon, not simulated work. If it is the only
+  // queued event before that horizon, first classify the drained state at the
+  // real current time. This keeps finite runs consistent with the partitioned
+  // engine, which publishes TICK_MAX when no work remains.
+  if (config_.max_ticks > 0 && ctx.event_queue.current_tick() < config_.max_ticks &&
+      ctx.event_queue.contains_only(&max_ticks_event_)) {
+    current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
+    if (check_termination(TICK_MAX)) {
+      running_ = false;
+      return false;
+    }
+    drain_async_events();
+    if (ctx.event_queue.contains_only(&max_ticks_event_))
+      return true;
   }
 
   Tick step_tick = ctx.event_queue.next_event_time();
@@ -353,6 +373,24 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
         Tick next_tick = ctx.event_queue.next_event_time();
+        // A lone max-ticks sentinel means the finite simulation has drained
+        // before its horizon. Classify that state without processing the
+        // sentinel, then wait if await_primaries keeps the engine alive.
+        if (config_.max_ticks > 0 && ctx.event_queue.current_tick() < config_.max_ticks &&
+            ctx.event_queue.contains_only(&max_ticks_event_)) {
+          current_time_.store(ctx.event_queue.current_tick(), std::memory_order_release);
+          if (check_termination(TICK_MAX))
+            return;
+          drain_async_events();
+          if (ctx.event_queue.contains_only(&max_ticks_event_)) {
+            pacer_.pause();
+            idle_wait_quiescent();
+            pacer_.resume();
+            if (done_.load(std::memory_order_acquire))
+              return;
+          }
+          continue;
+        }
         if (next_tick > last_drained_tick) {
           last_drained_tick = next_tick;
           drain_async_events();
@@ -384,7 +422,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
       // proportionally to elapsed wall time during idle periods. Without
-      // pacing, use atomic::wait() for an efficient unbounded wait.
+      // pacing, block on the publication flag until a producer changes it.
       pacer_.pause();
       {
         auto timeout = pacer_.idle_wait_duration();
@@ -395,19 +433,25 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
             std::this_thread::sleep_for(timeout);
           }
         } else {
-          // Unbounded idle wait with periodic done_ check. Using a short
-          // sleep loop instead of atomic::wait avoids lost-notification races
-          // between request_exit() and the wait entry point.
-          using namespace std::chrono_literals;
+          // All foreign-thread exit paths publish a wake after storing done_.
+          // A publication before wait() changes its expected value; a later
+          // publication notifies the waiter. Only this worker consumes the
+          // flag, so it cannot change true->false while this thread waits.
           while (!ctx.idle_wakeup_.load(std::memory_order_acquire) &&
                  !done_.load(std::memory_order_acquire)) {
-            std::this_thread::sleep_for(1ms);
+            ctx.idle_wakeup_.wait(false, std::memory_order_acquire);
           }
         }
       }
       if (done_.load(std::memory_order_acquire))
         break;
-      ctx.idle_wakeup_.store(false, std::memory_order_release);
+      // Consume the notification atomically with respect to producers. A plain
+      // store can overwrite a concurrent wake without acquiring the producer's
+      // preceding writes (async work or a primary-count decrement), leaving the
+      // event or termination checks stale and the worker asleep. An exchange
+      // either acquires those writes or leaves a later producer's notification
+      // set for the next idle wait.
+      ctx.idle_wakeup_.exchange(false, std::memory_order_acq_rel);
 
       // After waking from idle, resume the pacing clock.
       pacer_.resume();
@@ -479,11 +523,25 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
 }
 
 void SimulationEngine::barrier_completion() {
-  // Compute global LBTS = min of all partitions' local_next.
+  // Workers have published their local and outgoing bounds. Include buffered
+  // callbacks before advancing the bound, which would floor their timestamps.
   Tick new_lbts = TICK_MAX;
   for (auto &ctx : contexts_) {
-    Tick ln = ctx->local_next.load(std::memory_order_relaxed);
-    new_lbts = std::min(new_lbts, ln);
+    drain_async_for_partition(*ctx);
+    new_lbts = std::min({new_lbts, ctx->local_next.load(std::memory_order_relaxed),
+                         ctx->event_queue.next_event_time()});
+  }
+
+  // A nonempty partition can have its next event at TICK_MAX itself.
+  if (config_.max_ticks > 0 && new_lbts >= config_.max_ticks &&
+      (new_lbts != TICK_MAX || !is_fully_quiescent())) {
+    // A producer can still post work after its partition's drain.
+    if (any_async_pending())
+      return;
+    current_time_.store(config_.max_ticks, std::memory_order_release);
+    set_exit(ExitCause::MAX_TICKS, config_.max_ticks, "max ticks reached");
+    done_.store(true, std::memory_order_release);
+    return;
   }
 
   // Update global LBTS and current time.
@@ -508,21 +566,21 @@ void SimulationEngine::idle_wait_quiescent() {
   // doorbell, so a run that is merely idle never becomes busy again.
   //
   // This runs in the barrier's completion function, which means every other
-  // worker is already parked inside the barrier -- so one bounded sleep here
-  // idles the whole engine, with no wakeup to lose and no peer left waiting on a
-  // partition that decided to sleep on its own.
+  // worker is already parked inside the barrier. Thus only its completion can
+  // consume the engine's idle publication flag (stored in context zero), even
+  // when different partitions complete successive epochs.
   //
-  // Bounded rather than unbounded: the loop must come back often enough to keep
-  // re-checking termination, and the exit paths that set done_ do not all post an
-  // async event. A 1ms cap costs an idle engine a thousand near-empty epochs a
-  // second, and the 50us poll keeps the added doorbell latency well inside the
-  // 100us cadence the command processor's own poll thread already runs at.
-  using namespace std::chrono_literals;
-  const auto deadline = std::chrono::steady_clock::now() + 1ms;
+  // Async insertion into ANY partition, the last primary release and request_exit all
+  // publish here. Internal done_ stores run on this thread or before workers start,
+  // so cannot leave a completion asleep. Return on even a
+  // stale publication: its acquire exchange orders the next epoch's event and
+  // termination checks after the producer. Clearing and then continuing to wait
+  // without those checks could strand a last-primary release.
+  auto &wakeup = contexts_[0]->idle_wakeup_;
   while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (wakeup.exchange(false, std::memory_order_acq_rel))
       return;
-    std::this_thread::sleep_for(50us);
+    wakeup.wait(false, std::memory_order_acquire);
   }
 }
 
@@ -593,49 +651,52 @@ bool SimulationEngine::is_fully_quiescent() const {
       if (!q->empty())
         return false;
     }
-    // Check for any processable local events.
-    if (!ctx->event_queue.empty())
+    // A lone max-ticks sentinel is only a finite horizon. Before reaching it,
+    // it does not prevent an otherwise drained simulation from terminating.
+    const bool only_pre_horizon_sentinel = config_.max_ticks > 0 &&
+                                           ctx->event_queue.current_tick() < config_.max_ticks &&
+                                           ctx->event_queue.contains_only(&max_ticks_event_);
+    if (!ctx->event_queue.empty() && !only_pre_horizon_sentinel)
       return false;
   }
   return true;
 }
 
-bool SimulationEngine::all_primaries_done() const {
-  return has_primaries_.load(std::memory_order_acquire) &&
-         active_primaries_.load(std::memory_order_acquire) == 0;
-}
-
 bool SimulationEngine::check_termination(Tick lbts) {
-  if (all_primaries_done()) {
-    // All primaries have signaled done. Enter draining phase: continue
-    // processing until the system is fully quiescent (all incoming queues
-    // empty and all event queues drained). This ensures in-flight
-    // cross-partition messages are fully delivered before termination.
-    if (!is_fully_quiescent())
+  if (any_async_pending())
+    return false;
+  const bool has_primaries = has_primaries_.load(std::memory_order_acquire);
+  const uint32_t active_primaries = active_primaries_.load(std::memory_order_acquire);
+  if (has_primaries && active_primaries == 0) {
+    // The last primary may have posted a callback after the first pending
+    // check. Recheck after acquiring its release before declaring completion.
+    if (!is_fully_quiescent() || any_async_pending())
       return false;
-    set_exit(ExitReason::COMPLETED, lbts, "all primaries completed");
+    const Tick completion_tick =
+        lbts == TICK_MAX ? current_time_.load(std::memory_order_acquire) : lbts;
+    set_exit(ExitCause::ALL_PRIMARIES_COMPLETED, completion_tick, "all primaries completed");
     done_.store(true, std::memory_order_release);
     return true;
   }
-  // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
-  if (config_.max_ticks > 0 && config_.num_threads > 1) {
-    if (lbts >= config_.max_ticks) {
-      set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
-      done_.store(true, std::memory_order_release);
-      return true;
-    }
+  // A TICK_MAX horizon means every partition is quiescent. Report an active
+  // primary stall separately from simulated budget exhaustion.
+  if (config_.max_ticks > 0 && lbts == TICK_MAX && active_primaries > 0) {
+    set_exit(ExitCause::ACTIVE_PRIMARY_STALL, current_time_.load(std::memory_order_acquire),
+             "active primaries quiescent");
+    done_.store(true, std::memory_order_release);
+    return true;
   }
   if (lbts == TICK_MAX) {
     // If primaries are still active, they are promising future work
     // (via async events). Don't terminate.
-    if (active_primaries_.load(std::memory_order_acquire) > 0)
+    if (active_primaries > 0)
       return false;
     // If await_primaries is set (e.g., KFD driver mode), don't terminate on
     // quiescence until at least one primary has registered. This keeps the
     // engine alive while waiting for external stimuli (doorbells).
-    if (config_.await_primaries && !has_primaries_.load(std::memory_order_acquire))
+    if (config_.await_primaries && !has_primaries)
       return false;
-    set_exit(ExitReason::COMPLETED, current_time_.load(std::memory_order_acquire),
+    set_exit(ExitCause::QUIESCENCE, current_time_.load(std::memory_order_acquire),
              "all partitions quiescent");
     done_.store(true, std::memory_order_release);
     return true;
@@ -644,10 +705,14 @@ bool SimulationEngine::check_termination(Tick lbts) {
 }
 
 void SimulationEngine::wake_partition_locked(PartitionID pid) {
-  if (config_.num_threads != 1 || pid >= contexts_.size())
+  if (pid >= contexts_.size())
     return;
-  PartitionContext &ctx = *contexts_[pid];
-  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  // Multi-threaded quiescence has one waiter: the barrier completion, which may
+  // run on any partition. Route all async/exit/primary publications to one flag.
+  PartitionContext &ctx = *contexts_[0];
+  // Keep concurrent producers in one release sequence so consuming the wake
+  // acquires every publication, including one followed by a delayed older wake.
+  ctx.idle_wakeup_.exchange(true, std::memory_order_release);
   ctx.idle_wakeup_.notify_one();
 }
 
@@ -670,11 +735,9 @@ void SimulationEngine::request_exit(std::string reason, int code) {
     done_.store(true, std::memory_order_release);
   }
 
-  // In single-threaded mode, wake the idle wait. Guarded: the engine thread may be
-  // inside shutdown() destroying the contexts while the host thread requests exit.
+  // Wake the idle wait. Guarded: the engine thread may be inside shutdown()
+  // destroying the contexts while the host thread requests exit.
   wake_partition(0);
-  // In multi-threaded mode, done_ is checked after each barrier epoch.
-  // No explicit wake needed since threads will see it at the next barrier.
 }
 
 void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
@@ -702,9 +765,9 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
     aq.pending.store(true, std::memory_order_release);
   }
 
-  // Wake the target partition so idle workers pick up the new event.
+  // Publish to context zero so the single worker or quiescent barrier completion
+  // resumes event processing, regardless of the event's target partition.
   wake_partition_locked(pid);
-  // In multi-threaded mode, async events are drained at each barrier epoch.
 }
 
 void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message> message) {
@@ -738,12 +801,12 @@ void SimulationEngine::drain_async_events() {
   }
 }
 
-void SimulationEngine::set_exit(ExitReason reason, Tick tick, std::string message, int code) {
+void SimulationEngine::set_exit(ExitCause cause, Tick tick, std::string message) {
   std::lock_guard<std::mutex> lock(exit_mutex_);
   // First writer wins. Use an explicit flag rather than message.empty() to
   // avoid false negatives when the message string happens to be empty.
   if (!exit_set_) {
-    exit_status_ = ExitStatus(reason, tick, std::move(message), code);
+    exit_status_ = ExitStatus(ExitReason::COMPLETED, tick, std::move(message), 0, cause);
     exit_set_ = true;
   }
 }
@@ -818,12 +881,9 @@ std::exception_ptr SimulationEngine::shutdown_components() noexcept {
 Tick SimulationEngine::compute_async_floor(const PartitionContext &ctx) const {
   if (config_.num_threads == 1)
     return 0;
-  // Floor at the global LBTS, clamped to at least the partition's current tick.
-  Tick floor = ctx.event_queue.current_tick();
-  Tick lbts = global_lbts_.load(std::memory_order_acquire);
-  if (lbts != TICK_MAX)
-    floor = std::max(floor, lbts);
-  return floor;
+  // Keep the last committed simulation tick as the floor even when the
+  // global LBTS is TICK_MAX because the partitions have gone idle.
+  return std::max(ctx.event_queue.current_tick(), current_time_.load(std::memory_order_acquire));
 }
 
 void SimulationEngine::drain_async_for_partition(PartitionContext &ctx) {

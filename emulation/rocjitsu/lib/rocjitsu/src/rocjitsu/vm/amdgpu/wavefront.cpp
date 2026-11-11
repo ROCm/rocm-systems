@@ -9,6 +9,8 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
+#include <algorithm>
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -25,6 +27,18 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
     return;
   const bool active = !is_halted();
   const bool runnable = active && !debug_paused();
+  if (active != was_active) {
+    if (active) {
+      cu_.active_slot_limit_ = std::max(cu_.active_slot_limit_, wf_id_ + 1);
+    } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
+      while (cu_.active_slot_limit_ != 0) {
+        const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
+        if (last && !last->is_halted())
+          break;
+        --cu_.active_slot_limit_;
+      }
+    }
+  }
   const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
                          ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
   const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
@@ -33,10 +47,6 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   assert((runnable || !was_runnable || (previous >> 32) != 0) && "runnable wave count underflow");
   (void)previous;
 }
-
-Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
-
-const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
@@ -53,7 +63,7 @@ uint64_t Wavefront::realtime_timestamp() const {
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   if (vm_access_)
-    return *vm_access_;
+    return vm_access_->value;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -64,7 +74,7 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->read(
+      return vm_access_->value.read(
           addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
@@ -80,7 +90,7 @@ VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->write(
+      return vm_access_->value.write(
           addr,
           std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
@@ -111,6 +121,20 @@ void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barri
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
+void Wavefront::gws_init(uint32_t rid, uint32_t count) { cu_.gws_init(*this, rid, count); }
+
+void Wavefront::gws_barrier_arrive(uint32_t rid, uint32_t count) {
+  cu_.gws_barrier_arrive(*this, rid, count);
+}
+
+void Wavefront::gws_sema_v(uint32_t rid) { cu_.gws_sema_v(*this, rid); }
+
+void Wavefront::gws_sema_p(uint32_t rid) { cu_.gws_sema_p(*this, rid); }
+
+void Wavefront::gws_sema_br(uint32_t rid, uint32_t count) { cu_.gws_sema_br(*this, rid, count); }
+
+void Wavefront::gws_sema_release_all(uint32_t rid) { cu_.gws_sema_release_all(*this, rid); }
+
 bool Wavefront::fail_pm4_submission() {
   if (!pm4_failure_)
     return false;
@@ -128,6 +152,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
   //       first because reset() zeroes them,
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
+  // The halt hook also completes race events before release_wf can resolve a barrier.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;

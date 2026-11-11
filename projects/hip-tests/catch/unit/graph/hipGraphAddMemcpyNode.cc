@@ -97,7 +97,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Positive_Basic) {
  *        -# A node is duplicated in pDependencies
  *        -# srcArray and srcPtr.ptr are both nullptr
  *        -# dstArray and dstPtr.ptr are both nullptr
- *        -# srcArray and dstArray use incompatible extents
+ *        -# dstArray does not contain the copy extent
  *        -# dst is nullptr
  *        -# src is nullptr
  *        -# kind is an invalid enum value
@@ -293,7 +293,6 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative_Parameters) {
     const hipExtent array_extent = make_hipExtent(width, height, depth);
     constexpr size_t host_size = width * height * depth * sizeof(int);
 
-    ArrayAllocGuard<int> src_array(array_extent);
     ArrayAllocGuard<int> dst_array(array_extent);
     LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, host_size);
 
@@ -319,12 +318,12 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative_Parameters) {
       HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params), hipErrorInvalidValue);
     }
 
-    SECTION("srcArray and dstArray use different extents") {
-      const hipExtent mismatched_extent = make_hipExtent(width + 1, height + 1, depth + 1);
-      ArrayAllocGuard<int> mismatched_dst_array(mismatched_extent);
-      auto params = GetMemcpy3DParms(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
+    SECTION("dstArray does not contain the copy extent") {
+      ArrayAllocGuard<int> src_array(array_extent);
+      const hipExtent small_extent = make_hipExtent(width - 1, height, depth);
+      ArrayAllocGuard<int> small_dst_array(small_extent);
+      auto params = GetMemcpy3DParms(small_dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
                                      make_hipPos(0, 0, 0), array_extent, hipMemcpyDeviceToDevice);
-      params.dstArray = mismatched_dst_array.ptr();
 
       HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params), hipErrorInvalidValue);
     }

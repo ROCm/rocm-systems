@@ -3,12 +3,14 @@
 
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -17,6 +19,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <rocprofiler-sdk-rocattach/rocattach.h>
@@ -25,7 +28,8 @@ namespace
 {
 struct attach_options
 {
-    int                      pid = -1;
+    int                      pid          = -1;
+    int                      detach_after = -1;  // seconds; -1 = wait for stdin ENTER
     std::string              output_path;
     std::vector<std::string> profile_format;
 };
@@ -33,24 +37,29 @@ struct attach_options
 void
 print_usage(const char* prog_name)
 {
-    std::cout << "Usage: " << prog_name << " -p <pid> [OPTIONS]\n"
-              << "\n"
-              << "Attach to a running process for profiling.\n"
-              << "\n"
-              << "Options:\n"
-              << "  -p <pid>             Process ID to attach to (required)\n"
-              << "  -o, --output PATH    Output path for profiling results\n"
-              << "  -F, --format FORMAT[,FORMAT,...]\n"
-              << "                       Output format(s): perfetto, rocpd\n"
-              << "  -h, --help           Show this help message\n"
-              << "\n"
-              << "Environment variables:\n"
-              << "  ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data\n"
-              << "  ROCPROFSYS_TRACE             Enable perfetto trace output\n"
-              << "  ROCPROFSYS_USE_ROCPD         Enable rocpd database output\n"
-              << "  ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library\n"
-              << "\n"
-              << "Once attached, press ENTER to detach from the process.\n";
+    std::cout
+        << "Usage: " << prog_name << " -p <pid> [OPTIONS]\n"
+        << "\n"
+        << "Attach to a running process for profiling.\n"
+        << "\n"
+        << "Options:\n"
+        << "  -p <pid>             Process ID to attach to (required)\n"
+        << "  -o, --output PATH    Output path for profiling results\n"
+        << "  -F, --format FORMAT[,FORMAT,...]\n"
+        << "                       Output format(s): perfetto, rocpd\n"
+        << "  -d, --detach-after SECONDS\n"
+        << "                       Detach automatically after SECONDS "
+           "(non-interactive).\n"
+        << "                       When omitted, waits for ENTER on stdin.\n"
+        << "  -h, --help           Show this help message\n"
+        << "\n"
+        << "Environment variables:\n"
+        << "  ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data\n"
+        << "  ROCPROFSYS_TRACE             Enable perfetto trace output\n"
+        << "  ROCPROFSYS_USE_ROCPD         Enable rocpd database output\n"
+        << "  ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library\n"
+        << "\n"
+        << "Once attached, press ENTER to detach from the process (interactive mode).\n";
 }
 
 void
@@ -174,19 +183,35 @@ consume_arg(int& i, int argc, char* argv[], const char* opt_name)
 void
 parse_pid(attach_options& opts, const char* arg)
 {
-    try
+    auto const pid = rocprofsys::utility::string::safe_stoi(arg);
+    if(pid.is_error())
     {
-        opts.pid = std::stoi(arg);
-        if(opts.pid <= 0)
-        {
-            LOG_ERROR("PID must be a positive integer.");
-            std::exit(EXIT_FAILURE);
-        }
-    } catch(const std::exception&)
-    {
-        LOG_ERROR("Invalid PID '{}'.", arg);
+        LOG_ERROR("Invalid PID '{}': {}.", arg, pid.error());
         std::exit(EXIT_FAILURE);
     }
+    if(pid.value() <= 0)
+    {
+        LOG_ERROR("PID must be a positive integer.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.pid = pid.value();
+}
+
+void
+parse_detach_after(attach_options& opts, const char* arg)
+{
+    auto const detach_after = rocprofsys::utility::string::safe_stoi(arg);
+    if(detach_after.is_error())
+    {
+        LOG_ERROR("Invalid --detach-after value '{}': {}.", arg, detach_after.error());
+        std::exit(EXIT_FAILURE);
+    }
+    if(detach_after.value() < 0)
+    {
+        LOG_ERROR("--detach-after must be non-negative.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.detach_after = detach_after.value();
 }
 
 void
@@ -238,6 +263,12 @@ parse_args(int argc, char* argv[])
         if(is_option(arg, "-F", "--format"))
         {
             parse_formats(opts, consume_arg(i, argc, argv, "-F/--format"));
+            continue;
+        }
+
+        if(is_option(arg, "-d", "--detach-after"))
+        {
+            parse_detach_after(opts, consume_arg(i, argc, argv, "-d/--detach-after"));
             continue;
         }
 
@@ -307,8 +338,17 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    LOG_INFO("Attached to process {}. Press ENTER to detach.", pid);
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    if(opts.detach_after >= 0)
+    {
+        LOG_INFO("Attached to process {}. Detaching after {} second(s).", pid,
+                 opts.detach_after);
+        std::this_thread::sleep_for(std::chrono::seconds(opts.detach_after));
+    }
+    else
+    {
+        LOG_INFO("Attached to process {}. Press ENTER to detach.", pid);
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
 
     result = rocattach_detach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)
