@@ -30,7 +30,8 @@ def first_column_ids(output: str) -> list[str]:
 
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute([
-        "--list-metrics-gfx-id",
+        "--list-metrics",
+        "--debug-list-metrics-gfx-id",
         "gfx90a",
     ])
     assert return_code == 0
@@ -131,7 +132,7 @@ def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, ca
         "--list-metrics",
         "sol",
         "l2_per_channel",
-        "--list-metrics-gfx-id",
+        "--debug-list-metrics-gfx-id",
         "gfx950",
     ])
     assert return_code == 0
