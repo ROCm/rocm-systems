@@ -4,7 +4,7 @@
 // Tests for FP64 rounding to integral values and FRACT.
 
 #include "fp/loose_unary_f64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <algorithm>
 #include <cmath>

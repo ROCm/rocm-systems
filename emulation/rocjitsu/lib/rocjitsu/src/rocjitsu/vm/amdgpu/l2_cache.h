@@ -8,12 +8,14 @@
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/l2_maintenance_mutex.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
+
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -120,7 +122,10 @@ public:
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
 
   /// Diagnostic totals are exact at quiescence. Concurrent queries sample
@@ -222,11 +227,7 @@ public:
   /// @brief Select local VM backing before acquiring the device coherence boundary.
   /// @details Take a fresh snapshot for each attempt, including retries. VMID-zero
   /// physical accesses and transport-backed atomics do not need a local snapshot.
-  [[nodiscard]] std::optional<GpuVmAccess> snapshot_atomic_access(uint32_t vmid) const {
-    if (!backing_memory_ || vmid == 0 || !gpu_vm_)
-      return std::nullopt;
-    return gpu_vm_->snapshot_vmid(vmid);
-  }
+  [[nodiscard]] std::optional<GpuVmAccess> snapshot_atomic_access(uint32_t vmid) const;
 
   /// @brief Perform one backing atomic within an existing device boundary.
   /// @details A vector instruction can prepare the cache hierarchy once for all

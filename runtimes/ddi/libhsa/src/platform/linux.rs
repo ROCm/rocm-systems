@@ -3,6 +3,9 @@
 
 //! Linux KFD and descriptor translation for the HSA frontend.
 
+mod fork;
+pub(crate) use fork::{bind_process, process_is_current};
+
 pub(crate) use rocddi::device::gpu::event::linux as event;
 pub(crate) use rocddi::memory::interop::linux as memory;
 use rocddi::topology::platform::linux::kfd_drm_info;

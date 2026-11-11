@@ -8,10 +8,10 @@
 
 #include "common/bits.h"
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_integer.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -55,14 +55,19 @@ inline uint16_t half_fma_narrow(uint64_t bits, bool saturate, unsigned rounding 
   return sign | uint16_t(rounded);
 }
 
+// Whether an unrounded value, rounded to FP16 precision in the guest mode with an unbounded
+// exponent range, lies below the power of two limit. With limit 2^-14 this is IEEE tininess
+// after rounding. NaNs and infinities are never below.
+inline bool half_rounds_below(double value, double limit, unsigned rounding) {
+  bool away = rounding == (__builtin_signbit(value) ? 2u : 1u);
+  double threshold = limit - (rounding == 0 ? limit * 0x1p-12 : away ? limit * 0x1p-11 : 0.0);
+  return __builtin_fabs(value) < threshold || (away && __builtin_fabs(value) == threshold);
+}
+
 // Classify the unrounded value using the guest-rounding-dependent FP16 tininess boundary.
 inline bool half_fma_tiny(double value, uint16_t rounded, unsigned rounding) {
-  bool away = rounding == ((rounded & 0x8000) ? 2u : 1u);
-  double threshold = 0x1p-14 - (rounding == 0 ? 0x1p-26 : away ? 0x1p-25 : 0.0);
   uint16_t magnitude = rounded & 0x7fff;
-  return magnitude < 0x400 ||
-         (magnitude == 0x400 &&
-          (__builtin_fabs(value) < threshold || (away && __builtin_fabs(value) == threshold)));
+  return magnitude < 0x400 || (magnitude == 0x400 && half_rounds_below(value, 0x1p-14, rounding));
 }
 
 // Clamp an FP16 encoding to [0,1], mapping NaNs to zero.

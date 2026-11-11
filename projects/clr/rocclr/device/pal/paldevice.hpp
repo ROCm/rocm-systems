@@ -563,7 +563,8 @@ class Device : public NullDevice {
                      const uint* addressMode,              //!< Address modes in X, Y and Z
                      uint32_t mipFilter = CL_FILTER_NONE,  //!< Mip filter
                      float minLod = 0.f,                   //!< Min level of detail
-                     float maxLod = CL_MAXFLOAT            //!< Max level of detail
+                     float maxLod = CL_MAXFLOAT,           //!< Max level of detail
+                     uint32_t maxAnisotropy = 0            //!< Max anisotropy, 0/1 = isotropic
   ) const;
 
   //! host memory alloc
@@ -616,6 +617,9 @@ class Device : public NullDevice {
 
   //! Allow access for peer device
   bool deviceAllowAccess(void* dst) const;
+
+  //! Latches a GPU error if PAL reports the device as faulted or lost
+  void CheckExecutionState() const;
 
   //! Returns a handle to the capture manager (RGP or UberTrace)
   ICaptureMgr* captureMgr() const { return captureMgr_; }

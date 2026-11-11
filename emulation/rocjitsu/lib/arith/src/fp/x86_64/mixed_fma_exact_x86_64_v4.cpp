@@ -3,7 +3,8 @@
 
 // AVX-512 bit-exact mixed-precision FMA with per-lane scalar repair.
 
-#include "common/internal.h"
+#include "common/compiler.h"
+#include "common/validation.h"
 #include "fp/mixed_fma.h"
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"
@@ -21,6 +22,7 @@ void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags,
   for (int lane = 0; lane < 32; lane += 16) {
     __m512 values[3];
     __mmask16 bad = 0;
+    RJ_ARITH_UNROLL(3)
     for (int operand = 0; operand < 3; ++operand) {
       auto bits = _mm512_loadu_si512(inputs[operand] + lane);
       uint32_t source_mode = mode >> operand;

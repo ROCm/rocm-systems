@@ -6,8 +6,8 @@
 // callers handle operand decoding and result packing.
 
 #include "wmma/swmmac_float.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 #include <stdint.h>
 

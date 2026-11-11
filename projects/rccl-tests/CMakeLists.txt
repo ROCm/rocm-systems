@@ -211,57 +211,11 @@ endif()
 
 if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
-    add_definitions(-DENABLE_ROCSHMEM_GIN)
-
-    # Auto-detect paths from mono-repo layout
+    # Factory test reaches gin_rocshmem_gda_factory.h (not yet installed) via RCCL_SOURCE_DIR.
     get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
-    if (NOT ROCSHMEM_INSTALL_DIR)
-        if(EXISTS "${_mono_root}/projects/rccl/ext/rocshmem/lib/librocshmem.a")
-            set(ROCSHMEM_INSTALL_DIR "${_mono_root}/projects/rccl/ext/rocshmem")
-            message(STATUS "rccl-tests: found rocshmem install at ${ROCSHMEM_INSTALL_DIR}")
-        else()
-            message(FATAL_ERROR "ENABLE_ROCSHMEM_GIN is ON but ROCSHMEM_INSTALL_DIR is not set "
-                    "and no install found at ${_mono_root}/projects/rccl/ext/rocshmem")
-        endif()
-    endif()
     if (NOT RCCL_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
         set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
     endif()
-    if (NOT ROCSHMEM_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rocshmem/CMakeLists.txt")
-        set(ROCSHMEM_SOURCE_DIR "${_mono_root}/projects/rocshmem")
-    endif()
-    # Installed rocshmem headers (rocshmem_config.h) are needed globally:
-    # RCCL's public nccl_device.h → gin_anvil_sdma.h → anvil_device.hpp
-    # → log.hpp → rocshmem/rocshmem_config.h.  Must come before source
-    # includes so the generated config is found first.
-    include_directories(BEFORE ${ROCSHMEM_INSTALL_DIR}/include)
-    # Internal rocshmem headers (sdma/anvil_device.hpp) needed globally.
-    if (ROCSHMEM_SOURCE_DIR)
-        include_directories(${ROCSHMEM_SOURCE_DIR}/src)
-    endif()
-
-    find_package(rocshmem REQUIRED CONFIG
-        PATHS ${ROCSHMEM_INSTALL_DIR}/lib/cmake/rocshmem NO_DEFAULT_PATH)
-    # hsakmtTargets.cmake bakes in RHEL CI paths (/usr/lib64/libc.so,
-    # -L/__w/rockrel/...) that don't exist on Ubuntu.  Scrub them and
-    # re-add the correct libdrm search path — same fix as rocshmem's
-    # own CMakeLists.txt.
-    if(TARGET hsakmt::hsakmt)
-        get_target_property(_hsakmt_iface_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)
-        if(_hsakmt_iface_libs)
-            list(FILTER _hsakmt_iface_libs EXCLUDE REGEX "(/libc\\.so|/__w/)")
-            find_library(_DRM_LIB drm HINTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-            if(_DRM_LIB)
-                get_filename_component(_drm_dir "${_DRM_LIB}" DIRECTORY)
-                list(PREPEND _hsakmt_iface_libs "-L${_drm_dir}")
-                unset(_drm_dir)
-            endif()
-            set_target_properties(hsakmt::hsakmt PROPERTIES
-                INTERFACE_LINK_LIBRARIES "${_hsakmt_iface_libs}")
-            unset(_hsakmt_iface_libs)
-        endif()
-    endif()
-    message(STATUS "rocshmem: roc::rocshmem from ${ROCSHMEM_INSTALL_DIR}")
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component

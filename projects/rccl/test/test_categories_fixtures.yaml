@@ -31,6 +31,7 @@ test_categories:
       - "DdaLL128PollWire.*"
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
+      - "ProfilerOverhead.*"
       - "PackRoundtripTest.LdStVolatileGlobalPtr"
       - "PackRoundtripTest.LdStRelaxedSysGlobal"
       - "PackRoundtripTest.LdStAcquireReleaseSysGlobal"
@@ -70,6 +71,7 @@ test_categories:
       - "Fp8ReduceTest.*"
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
+      - "ProfilerOverhead.*"
       - "BitOpsTemplateAllIntTestsFixture.*"
       - "BitOpsTemplateUnsignedTestsFixture.*"
       - "PackRoundtripTest.*"
@@ -94,6 +96,8 @@ test_categories:
       - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "DeviceApi.RejectedCreate*"
+      - "GinDeviceTest.*"
     exclude_windows:
       - "*"
     labels:

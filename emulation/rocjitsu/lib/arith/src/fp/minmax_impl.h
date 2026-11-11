@@ -8,7 +8,7 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/minmax.h"
 #include "fp/selection_bits.h"
 

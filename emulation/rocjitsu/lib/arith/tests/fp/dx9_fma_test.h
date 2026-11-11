@@ -12,7 +12,7 @@
 #include "fp/elementwise.h"
 #include "fp/fma_simd_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cmath>

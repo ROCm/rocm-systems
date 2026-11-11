@@ -106,6 +106,7 @@ public:
   decltype(&::epoll_wait) epoll_wait = nullptr;
   decltype(&::accept4) accept4 = nullptr;
   decltype(&::getsockopt) getsockopt = nullptr;
+  decltype(&::setsockopt) setsockopt = nullptr;
   decltype(&::socket) socket = nullptr;
   decltype(&::connect) connect = nullptr;
   decltype(&::listen) listen = nullptr;
@@ -132,6 +133,18 @@ private:
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
 
+/// @brief Call the resolved host function, falling back to libc before interposition is active.
+template <typename Function, typename Fallback, typename... Args>
+decltype(auto) host_call(Function resolved, Fallback fallback, Args... args) {
+  return (resolved ? resolved : fallback)(args...);
+}
+
+/// @brief Close an optional host descriptor, including before pass-through is resolved.
+inline void host_close_fd(int fd) {
+  if (fd >= 0)
+    host_call(libc_passthrough().close, ::close, fd);
+}
+
 /// @brief Compatibility entry points for operations absent from older libc releases.
 /// @details Prefer the resolved libc wrapper. If unavailable, use the syscall
 /// entry point; callers retain typed arguments and errno. Standalone callers
@@ -155,14 +168,7 @@ struct PassthroughFdTraits {
 
   static handle_type invalid() noexcept { return -1; }
   static bool is_valid(handle_type fd) noexcept { return fd >= 0; }
-  static void close(handle_type fd) noexcept {
-    // The table is unresolved until resolve() runs. These traits are reachable from
-    // any driver TU, so fall back to ::close rather than calling a null pointer;
-    // that path can only be taken before the interposer is live, so it cannot
-    // re-enter the hook this type exists to avoid.
-    auto *real_close = libc_passthrough().close;
-    static_cast<void>(real_close ? real_close(fd) : ::close(fd));
-  }
+  static void close(handle_type fd) noexcept { host_close_fd(fd); }
 };
 
 using UniqueDriverFd = util::BasicUniqueHandle<PassthroughFdTraits>;

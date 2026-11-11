@@ -4,6 +4,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.3.0
+
+### Resolved Issues
+
+- **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
+  - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
@@ -73,6 +80,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           IDENTIFIER_KIND: cuid
           CUID_METADATA_STATUS: available
   ```
+
+- **Added `amdsmi_get_gpu_enumeration_info()` to the Rust API**.  
+  - Returns the DRM render node and card, HSA and HIP IDs, HIP UUID, OAM ID and physical accelerator ID; the HIP UUID is read with `hip_uuid()`.
+  - IDs the library cannot determine are `0xFFFFFFFF`, as in the C API.
 
 ### Changed
 
@@ -174,6 +185,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
+- **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
+  - Copied into site-packages, the module could not load `libamd_smi.so.27` unless `torch` was imported first. It now loads the library from the `_rocm_sdk_core` package on `sys.path` when no usable system library is found, and reuses the copy PyTorch already loaded instead of mapping a second one.
+  - The copy TheRock ships in `rocm-sdk-core` loads only that wheel's library, never a system `libamd_smi.so` from another ROCm release.
+  - The module refuses a library newer than itself, whose structures can be larger than the module allocates, and warns about an older one. `AMDSMI_LIB_OVERRIDE` still loads any library.
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
@@ -260,6 +276,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
+  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
 
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.

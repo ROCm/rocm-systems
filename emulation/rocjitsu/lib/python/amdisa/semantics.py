@@ -702,6 +702,10 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP2 (Scalar ALU Two-operand) instruction."""
     if name == 'S_CBRANCH_G_FORK':
         return InstructionSemantics(name, 'cbranch_fork', operation='indirect')
+    # The legacy trap return. The MR ISA gives it no pseudocode; the generator
+    # emits the S_RFE_B64 body for it (see _TRAP_RETURN_NAMES).
+    if name == 'S_RFE_RESTORE_B64':
+        return InstructionSemantics(name, 'true_nop')
 
     # CSELECT
     if name.startswith('S_CSELECT_'):
@@ -765,7 +769,7 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
-    # Unrecognized SOP2 instructions (S_RFE_RESTORE, …)
+    # Unrecognized SOP2 instructions
     return InstructionSemantics(name, 'nop')
 
 
@@ -1612,7 +1616,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # 64-bit shift/add (VOP3-only)
     if name == 'V_LSHL_ADD_U64':
         return InstructionSemantics(
-            name, 'vector_ternary', operation='lshl_add', data_type='u64'
+            name, 'vector_ternary', operation='lshl_add_u64', data_type='u64'
         )
     if name == 'V_LSHLREV_B64':
         return InstructionSemantics(
@@ -1877,23 +1881,24 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
-# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
-# Other flat atomic operations stay 'nop' even when the flat tables know them.
+# S_ATOMIC_* and S_BUFFER_ATOMIC_* operations the CDNA ISAs define and the
+# scalar pipeline supports, spelled as in the mnemonic without _X2. Any other
+# scalar atomic derives nop, even when the flat tables know its operation.
 _SMEM_ATOMIC_OPS = frozenset(
     {
-        'swap',
-        'cmpswap',
-        'add',
-        'sub',
-        'smin',
-        'umin',
-        'smax',
-        'umax',
-        'and',
-        'or',
-        'xor',
-        'inc',
-        'dec',
+        'SWAP',
+        'CMPSWAP',
+        'ADD',
+        'SUB',
+        'SMIN',
+        'UMIN',
+        'SMAX',
+        'UMAX',
+        'AND',
+        'OR',
+        'XOR',
+        'INC',
+        'DEC',
     }
 )
 
@@ -1928,23 +1933,20 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if '_ATOMIC_' in upper:
-        if upper.startswith('S_ATOMIC_'):
-            suffix = upper[len('S_ATOMIC_') :]
-            is_x2 = suffix.endswith('_X2')
-            if is_x2:
-                suffix = suffix[:-3]
-            info = _derive_flat_atomic_info(suffix, is_x2)
-            if info and info[0] in _SMEM_ATOMIC_OPS:
-                op, elem_size, data_dw_actual = info
-                return InstructionSemantics(
-                    name,
-                    'smem_atomic',
-                    operation=op,
-                    elem_size=elem_size,
-                    num_elems=data_dw_actual,
-                )
-        # Scalar buffer atomics are not currently simulated.
+    if upper.startswith(('S_ATOMIC_', 'S_BUFFER_ATOMIC_')):
+        suffix = upper.partition('_ATOMIC_')[2]
+        is_x2 = suffix.endswith('_X2')
+        if is_x2:
+            suffix = suffix[:-3]
+        if suffix in _SMEM_ATOMIC_OPS:
+            op, elem_size, data_dw_actual = _derive_flat_atomic_info(suffix, is_x2)
+            return InstructionSemantics(
+                name,
+                'smem_atomic',
+                operation=op,
+                elem_size=elem_size,
+                num_elems=data_dw_actual,
+            )
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
@@ -2151,6 +2153,11 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
+    if upper in ('GLOBAL_LOAD_LDS_DWORDX3', 'GLOBAL_LOAD_LDS_DWORDX4'):
+        size, count, _ = _FLAT_DATA_MAP[upper.removeprefix('GLOBAL_LOAD_LDS_')]
+        return InstructionSemantics(
+            name, 'global_load_lds', elem_size=size, num_elems=count
+        )
     if upper.startswith('SCRATCH_LOAD_LDS_'):
         suffix = upper.removeprefix('SCRATCH_LOAD_LDS_')
         info = _FLAT_DATA_MAP.get(suffix)
@@ -2161,6 +2168,23 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 'scratch_load_lds',
                 elem_size=size,
                 num_elems=1,
+                sign_extend=signed,
+            )
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
+        if suffix in (
+            'UBYTE',
+            'SBYTE',
+            'USHORT',
+            'SSHORT',
+            'DWORD',
+        ):
+            size, count, signed = _FLAT_DATA_MAP[suffix]
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=size,
+                num_elems=count,
                 sign_extend=signed,
             )
     if upper == 'GLOBAL_INV':
