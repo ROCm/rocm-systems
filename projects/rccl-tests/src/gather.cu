@@ -176,13 +176,18 @@ static inline int GatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshol
 
 // Each rank stores its chunk into root's recv slice. `root` is a world rank;
 // ncclGetPeerPointer maps it into the LSA window. Non-root recv buffers stay untouched.
-template <typename T>
-__device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int root, int tid, int nthreads) {
-  T* src = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, count);
-  T* dst = (T*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
-  for (size_t i = tid; i < count; i += nthreads) {
-    dst[i] = src[i];
+// Gather only moves bytes, so the copy is 16 bytes per thread whatever the element
+// type; a chunk or window offset that is not 16-byte aligned falls back to a byte copy.
+__device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int rank, int root, int tid, int nthreads) {
+  const char* src = (const char*)ncclGetLocalPointer(sendwin, sendoffset);
+  const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, chunkBytes);
+  char* dst = (char*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
+  if ((((uintptr_t)src | (uintptr_t)dst | chunkBytes) & 15) == 0) {
+    const uint4* s = (const uint4*)src;
+    uint4* d = (uint4*)dst;
+    for (size_t i = tid; i < chunkBytes / 16; i += nthreads) d[i] = s[i];
+  } else {
+    for (size_t i = tid; i < chunkBytes; i += nthreads) dst[i] = src[i];
   }
 }
 
@@ -194,10 +199,7 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 //     put, so root's signal[root % gridDim.x] advances by nRanks and only that
 //     CTA on root waits. The exit barrier holds every rank until that wait
 //     completes, which is what makes back-to-back launches safe.
-template <typename T>
-__device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
-  const size_t chunkBytes = count * sizeof(T);
-
+__device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
     const int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -205,7 +207,7 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
 
     ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, lsa, devComm.lsaBarrier, blockIdx.x };
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
-    GatherLsaDirect<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm.rank, root, tid, nthreads);
+    GatherLsaDirect(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, devComm.rank, root, tid, nthreads);
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
   }
@@ -236,22 +238,19 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
-template <typename T>
-__global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, size_t sdmaThreshold, struct ncclDevComm devComm) {
-  ginGatherBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, devComm);
+__global__ void GinHybridGatherKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, struct ncclDevComm devComm) {
+  ginGatherBody(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, devComm);
 }
 
-template <typename F>
-static testResult_t GatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
-                                             void* recvbuff, size_t recvoffset, size_t count,
+static testResult_t GatherLaunchDeviceKernel(void* sendbuff, size_t sendoffset,
+                                             void* recvbuff, size_t recvoffset, size_t chunkBytes,
                                              int root, ncclComm_t comm, cudaStream_t stream,
                                              size_t sdmaThreshold, int gridCtas) {
-  if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
-  kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
+  GinHybridGatherKernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, chunkBytes, root, sdmaThreshold, *devComm);
   return testSuccess;
 }
 #endif
@@ -291,7 +290,7 @@ testResult_t GatherRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
         const int gridCtas = GatherResolveLaunchCtas(
             chunkBytes, sdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
-        TESTCHECK(GatherLaunchDeviceKernel(SPECIALIZE_KERNEL(GinHybridGatherKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, root, comm, stream, sdmaThreshold, gridCtas));
+        TESTCHECK(GatherLaunchDeviceKernel(sendbuff, sendoffset, recvbuff, recvoffset, chunkBytes, root, comm, stream, sdmaThreshold, gridCtas));
         return testSuccess;
       }
 #endif
