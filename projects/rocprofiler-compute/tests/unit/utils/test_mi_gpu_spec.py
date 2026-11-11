@@ -335,6 +335,11 @@ def test_get_gpu_model_invalid_chip_id():
 
 
 @pytest.mark.misc
+def test_get_gpu_model_navi48_chip_id():
+    assert MIGPUSpecs.get_gpu_model("gfx1201", "30032") == "RDNA4_NAVI48"
+
+
+@pytest.mark.misc
 def test_get_gpu_model_invalid_arch():
     """Test get_gpu_model with invalid architecture - covers lines 243-244"""
     result = MIGPUSpecs.get_gpu_model("gfx999", "12345")
