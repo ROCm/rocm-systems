@@ -3,6 +3,12 @@ module:
   Unit_StatCO_ManagedVarForkAfterRegister_InChildProcess:
     <<: *level_2
     tags: [module]
+  Unit_StatCO_ManagedVarAfterDeviceReset_DeferredLoading:
+    <<: *level_2
+    tags: [module]
+  Unit_StatCO_ManagedVarAfterDeviceReset_EagerLoading:
+    <<: *level_2
+    tags: [module]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_default
     disabled:
@@ -148,6 +154,18 @@ module:
     <<: *level_default
     tags: [launch]
   Unit_hipDrvLaunchKernelEx_StreamCapture_ClusterDim:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_OversizedCluster:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_OverflowClusterDim:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipDrvLaunchKernelEx_Negative_NonClusterDevice:
+    <<: *level_default
+    tags: [launch]
+  Unit_hipLaunchKernelExC_Negative_NonClusterDevice:
     <<: *level_default
     tags: [launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Functional:

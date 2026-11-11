@@ -21,8 +21,6 @@
 
 namespace hip {
 hipError_t ihipFree(void* ptr);
-// forward declaration of methods required for managed variables
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
                                  std::vector<char>* image_storage) {
@@ -191,7 +189,8 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
+  status = ihipMallocManaged(&pointer, mem->getSize(), 0, /*use_host_ptr=*/false,
+                             ManagedMemOwner::kModuleVariable);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
