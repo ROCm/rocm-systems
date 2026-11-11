@@ -208,6 +208,16 @@ class GinHostProxyMicrotest : public ::testing::Test {
   ScopedHook<hipError_t(void*)> hostFree_{g_hipHostFree, [](void* ptr) {
     return g_mem.Free(ptr, {"hostMalloc"}) == ncclSuccess ? hipSuccess : hipErrorInvalidValue;
   }};
+  // The host arm exchanges the thread's capture mode around hipHostMalloc and
+  // hipHostFree. The default fake returns g_hipAsyncOpsResult, which is
+  // hipErrorInvalidValue, so Create() would fail before the allocation.
+  hipStreamCaptureMode threadCaptureMode_ = hipStreamCaptureModeGlobal;
+  ScopedHook<hipError_t(hipStreamCaptureMode*)> exchange_{
+      g_hipThreadExchangeStreamCaptureMode, [this](hipStreamCaptureMode* mode) {
+        if (mode == nullptr) return hipErrorInvalidValue;
+        std::swap(*mode, threadCaptureMode_);
+        return hipSuccess;
+      }};
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
   ScopedHook<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)> export_{
       g_hipMemGetHandleForAddressRange,
@@ -227,6 +237,7 @@ class GinHostProxyMicrotest : public ::testing::Test {
 #endif
 
   void SetUp() override {
+    threadCaptureMode_ = hipStreamCaptureModeGlobal;
     FakeRmaVtable::setCurrent(&rma_);
     g_mem.Reset();
     ncclGdrCopy = nullptr;
