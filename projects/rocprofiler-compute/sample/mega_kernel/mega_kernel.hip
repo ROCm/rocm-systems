@@ -2244,14 +2244,11 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
 // ------------------------
 // 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950), gfx1250:
 //    - Single instruction encodes two VALU operations (X and Y opcodes)
-//    - X opcode executes on Core MACC, Y opcode executes on Side MACC
 //    - Example: VOPD encoding packs v_add_f32 + v_mul_f32 in one instruction
 //    - VOPD3 extends this with 3 source operands per instruction
 //
 // 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950), gfx1250 ONLY:
 //    - Two waves each contribute one VALU instruction
-//    - Instructions execute simultaneously on different MACC units
-//    - One instruction uses DP-MACC (Arbiter-B), other uses Core/Side-MACC (Arbiter-A)
 //    - Requires dual VALU arbiters (new hardware in gfx950+)
 //
 // DUAL-ISSUE REQUIREMENTS:
@@ -2259,14 +2256,13 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
 // For cross-wave co-issue to occur, BOTH instructions must satisfy:
 //   - Both waves must be Wave32 (NOT Wave64)
 //   - Both must be single-cycle VALU instructions
-//   - One uses DP-MACC (FP64/DGEMM), other uses Core/Side MACC
 //   - Neither instruction uses DPP (Data-Parallel Primitives)
 //   - Non-DPFP instruction is NOT VOPD or VOPD3
 //   - Neither is a Transcendental (sin, cos, exp, log, etc.) or WMMA instruction
 //   - Source operands must not conflict (no register bank conflicts)
 //
-// INSTRUCTIONS THAT CAN CO-EXECUTE WITH DP-MACC (Arbiter-B):
-// ----------------------------------------------------------
+// INSTRUCTIONS THAT CAN CO-EXECUTE:
+// ---------------------------------
 //   - Single-cycle FP32/FP16/BF16 operations (v_add_f32, v_mul_f32, v_fma_f32, etc.)
 //   - Single-cycle integer operations (v_add_i32, v_mul_lo_u32, etc.)
 //   - Comparison operations
@@ -2278,7 +2274,6 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
 //   - DPP instructions (data-parallel primitives)
 //   - DGEMM/SGEMM (matrix multiply)
 //   - XDL/WMMA instructions
-//   - TMACC instructions
 //   - Multi-cycle instructions (V_SWAP*, V_MQSAD*, V_MUL_U64, etc.)
 //   - Transcendental operations (v_sin_f32, v_cos_f32, v_exp_f32, etc.)
 //   - PIPEFLUSH operations
@@ -2314,7 +2309,6 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // ========================================================================
     // PATTERN 1: FP64 + FP32 Co-execution
     // ========================================================================
-    // FP64 ops use DP-MACC (Arbiter-B), FP32 ops use Core MACC (Arbiter-A)
     // These can potentially co-execute with FP64 ops from another wave
 
     double dp_accum = 1.0;
@@ -2324,8 +2318,8 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // When wave A executes FP64 FMA, wave B's FP32 add can co-execute
     #pragma unroll 4
     for (int i = 0; i < 4; i++) {
-        dp_accum = dp_accum * 1.00001 + 0.00001;  // DP-MACC (Arbiter-B)
-        sp_accum = sp_accum * 1.001f + 0.001f;    // Core MACC (Arbiter-A)
+        dp_accum = dp_accum * 1.00001 + 0.00001;
+        sp_accum = sp_accum * 1.001f + 0.001f;
     }
 
     // ========================================================================
@@ -2338,8 +2332,8 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
 
     #pragma unroll 4
     for (int i = 0; i < 4; i++) {
-        int_accum = int_accum * 3 + 1;           // Integer MACC
-        fp_accum = fp_accum * 1.5f + 0.5f;       // FP32 MACC
+        int_accum = int_accum * 3 + 1;
+        fp_accum = fp_accum * 1.5f + 0.5f;
     }
 
     // ========================================================================
@@ -2354,9 +2348,9 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // BETTER PATTERN (allows some dual-issue):
     float x = (float)lane_id * 0.1f;
     float s = sinf(x);          // Trans pipe - no co-execute
-    float y = x * 2.0f + 1.0f;  // Core MACC - might co-execute with other wave
+    float y = x * 2.0f + 1.0f;
     float c = cosf(x);          // Trans pipe - no co-execute
-    float z = y * 0.5f - 0.5f;  // Core MACC - might co-execute with other wave
+    float z = y * 0.5f - 0.5f;
 
     // Use results to prevent optimization
     volatile float sink = (float)dp_accum + sp_accum + (float)int_accum + fp_accum + s + c + y + z;
@@ -2367,7 +2361,7 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // MI300 (gfx942): Same-Wave Co-Issue via VOPD/VOPD3
     // ========================================================================
     // MI300 supports VOPD encoding which executes 2 operations from the SAME
-    // wave in parallel. X instruction uses Core MACC, Y instruction uses Side MACC.
+    // wave in parallel.
     //
     // VOPD Operations (executed as dual ops in one instruction):
     // - V_DUAL_FMAC_F32, V_DUAL_MUL_F32, V_DUAL_ADD_F32, V_DUAL_SUB_F32
@@ -2387,8 +2381,8 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     #pragma unroll 4
     for (int i = 0; i < 4; i++) {
         // Pair 1: Two independent FMAs - potential VOPD
-        c = c * a + 0.001f;  // V_DUAL_FMAC_F32 (X op - Core MACC)
-        d = d * b + 0.002f;  // V_DUAL_FMAC_F32 (Y op - Side MACC)
+        c = c * a + 0.001f;  // V_DUAL_FMAC_F32 (X op)
+        d = d * b + 0.002f;  // V_DUAL_FMAC_F32 (Y op)
     }
 
     // Pattern: Mixed integer and FP32 - potential VOPD
