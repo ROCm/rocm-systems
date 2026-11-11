@@ -252,6 +252,7 @@ std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 
 // RCCL_CHEAP_POST_SEND_FENCE_OFF: 0 = arch-tuned auto (default; cheap fence on for gfx942/gfx1250, off for gfx950),
 //   1 = force cheap fence off (__threadfence_system), 2 = force cheap fence on (override auto, e.g. re-enable on gfx950)
+//   Applies to Simple. LL128 honors it only on gfx1250 and otherwise always uses the full fence.
 RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 
 #if ENABLE_TDM_SIMPLE
@@ -374,9 +375,15 @@ static ncclResult_t ncclInit() {
   NCCLCHECK(ncclOsTopoGetStrFromSys("/proc", "version", strValue, sizeof(strValue)));
   char *verStr, *state;
   verStr = strtok_r(strValue, " ", &state);
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 2 && verStr != NULL; i++) {
     verStr = strtok_r(NULL, " ", &state);
-    if (verStr == NULL) break;
+  }
+  // A failed read is reported as "" and ncclSuccess. Fewer than three tokens also leaves
+  // verStr NULL, and strstr(NULL) would SIGSEGV. This runs before call_once, so the failure
+  // is not latched.
+  if (verStr == NULL) {
+    WARN("Could not read kernel version from /proc/version");
+    return ncclSystemError;
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
@@ -2369,7 +2376,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 #else
                                                                  false);
 #endif
-  INFO(NCCL_INIT, "Cheap post-send fence is %s", comm->cheapPostSendFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "Cheap post-send fence is %s (Simple%s)", comm->cheapPostSendFenceOff ? "OFF" : "ON",
+       comm->cudaArch == 1250 ? " and LL128" : "; LL128 always uses the full fence");
 #if ENABLE_TDM_SIMPLE
   // gfx1250 only; the mover entry points are deleted elsewhere.
   comm->tdmSimpleEnable =

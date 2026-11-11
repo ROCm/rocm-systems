@@ -161,9 +161,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
-    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
-    collection and summaries, including failed NVML queries and bounded
-    driver-version strings.
+    the AMD SMI arm against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`:
+    GPU inventory, HIP and AMD GPU driver versions, ECC, and XGMI collection and
+    summaries, including failed queries, bounded driver-version strings, AMD SMI
+    unavailable on some or all nodes, the corrected-error threshold, down and
+    missing XGMI links, and partition bus IDs (CPX, DPX) that fall back to the
+    physical GPU. Also checks that `rasDiagnosticsGpuInit` loads AMD SMI up front.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
@@ -364,7 +367,27 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   so a fake tests this binary's own error-propagation logic just as well
   without pulling in that file's dependency floor. See
   `test_categories_micro_scheduler.yaml`.
+- **`rccl-UnitTestsMicroEnqueue-warpspeed`** — the `enqueue.cc` host
+  microtests compiled binary-wide with `ENABLE_WARP_SPEED`. It exercises the
+  emitted plan count, packing mode, and launch mode that the macro-off enqueue
+  binary cannot represent. See `test_categories_micro_enqueue.yaml`.
 
+- **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
+  `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
+  `ncclMemTrack` and `ncclMemTrackImportFromPeer`, and `collective_stubs.cc` defines
+  `ncclCommMemSuspend`; `mem_manager.cc` defines all three. Its other externals are in
+  `fakes/mem_manager_micro_fakes.cc`. See `test_categories_micro_mem_manager.yaml`.
+- **`rccl-UnitTestsMicroAllocator`** — `allocator.cc` (via `ALLOCATOR_CC_PATH`, from
+  `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
+  needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead. See
+  `test_categories_micro_allocator.yaml`.
+- **`rccl-UnitTestsMicroMnnvl`** — `mnnvl.cc` (via `MNNVL_CC_PATH`, from `mnnvl-test.cc`);
+  suite `Mnnvl*`. Its own binary: `nccl_stubs.cc`, which most targets link, defines
+  `ncclMnnvlCheck`, and `mnnvl.cc` defines it too. See `test_categories_micro_mnnvl.yaml`.
+- **`rccl-UnitTestsMicroAlloc`** — header-only `include/alloc.h` (from `alloc-test.cc`); suite
+  `Alloc*`. Its own binary: `alloc.h`'s inline side-stream map and shutdown and skip-free state
+  would be shared with every other unit in `rccl-UnitTestsMicro`. See
+  `test_categories_micro_alloc.yaml`.
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
@@ -576,6 +599,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `coll_net.cc` (`COLL_NET_CC_PATH`, from `coll-net-test.cc`); suites `CollNet*`,
     driven through a fake `ncclCollNet_t`. `RCCL_TRANSPORT_STUBS_OMIT_COLL_NET` drops
     the stub copies of its entry points.
+  - `generic.cc` (`GENERIC_CC_PATH`, from `generic-test.cc`); suites
+    `GenericPatConnectMicrotest.*`. It links no shared fakes: `fakes/transport_stubs.cc`
+    defines fail-loud copies of `generic.cc`'s connect functions, so the test TU fakes
+    `ncclPatEnable`, `ncclTransportP2pConnect` and `ncclTransportP2pSetup` itself.
   - `net_ib/common.cc` and host helpers in `net_ib/common.h`
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
@@ -828,6 +855,7 @@ symbol.
 | `src/init.cc` comm lifecycle, CTA/channel params, `allocTracker` | `fakes/comm_fakes.cc`; `rccl-UnitTestsMicroRmaProxy` keeps a local `allocTracker` because that isolated target does not link the broader comm fake |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc`; `ncclMemTrack*` / `ncclMemUntrack*` in `fakes/nccl_fakes.cc` |
+| externals `src/mem_manager.cc` reaches (`rccl-UnitTestsMicroMemManager`, which compiles it) | `fakes/mem_manager_micro_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
 | `src/misc/argcheck.cc` | `fakes/argcheck_fakes.cc` |
@@ -1373,7 +1401,7 @@ not reconstruct.
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
-`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
@@ -1425,6 +1453,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroEnqueue-warpspeed  # same, ENABLE_WARP_SPEED arm
 ./build/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
 ./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
 ./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
@@ -1435,6 +1464,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
+./build/rccl-UnitTestsMicroMemManager         # src/mem_manager.cc tests
+./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
+./build/rccl-UnitTestsMicroMnnvl              # src/mnnvl.cc tests
+./build/rccl-UnitTestsMicroAlloc              # src/include/alloc.h tests
 ./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
