@@ -1351,6 +1351,7 @@ TEST_F(GpuDeviceMes, ResetReturnsFailureWhileGartBindingIsRetained) {
   EXPECT_EQ(soc_.gpu_vm().lookup(gart)->translation_epoch, translation_epoch);
   EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
   EXPECT_NE(device_.transport_session_generation(), generation);
+  EXPECT_NE(device_.transport_session_generation(), 0u);
   binding.reset();
   EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(read_register_at(kScratchRegister), 0u);
@@ -1372,6 +1373,7 @@ TEST_F(GpuDeviceMes, ResetReturnsFailureAfterPartialQueueTeardown) {
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
   EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
   EXPECT_NE(device_.transport_session_generation(), generation);
+  EXPECT_NE(device_.transport_session_generation(), 0u);
   EXPECT_TRUE(soc_.gpu_vm().release_queue(*address_space));
 }
 

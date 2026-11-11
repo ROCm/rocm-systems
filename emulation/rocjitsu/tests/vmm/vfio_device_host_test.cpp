@@ -1656,8 +1656,12 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
 TEST(VfioServer, ReturnsFailureWhenRelativeSocketPathCannotBeNormalized) {
   rocjitsu::test::ScopedTempDirectory runtime;
   ASSERT_TRUE(runtime.initialize("rj-vfu-missing-cwd-"));
+  testing::internal::CaptureStderr();
   const pid_t child = ::fork();
-  ASSERT_GE(child, 0);
+  if (child < 0) {
+    (void)testing::internal::GetCapturedStderr();
+    FAIL() << "fork failed: " << std::strerror(errno);
+  }
   if (child == 0) {
     if (::chdir(runtime.path().c_str()) != 0 || ::rmdir(runtime.path().c_str()) != 0)
       ::_exit(2);
@@ -1665,10 +1669,12 @@ TEST(VfioServer, ReturnsFailureWhenRelativeSocketPathCannotBeNormalized) {
   }
   ChildProcessGuard child_guard(child);
   const std::optional<int> status = wait_for_child_bounded(child, std::chrono::seconds(15));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
   ASSERT_TRUE(status);
   child_guard.release();
   ASSERT_TRUE(WIFEXITED(*status));
   EXPECT_EQ(WEXITSTATUS(*status), 1);
+  EXPECT_NE(diagnostic.find("cannot normalize socket path gpu.sock"), std::string::npos);
 }
 
 // A server that cannot serve must say so and exit, not hang. The engine runs on
