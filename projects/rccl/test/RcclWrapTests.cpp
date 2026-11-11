@@ -3206,8 +3206,8 @@ TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
     EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)128 * 1024);
     EXPECT_EQ(dpx->ddaLLMax[ncclFuncBroadcast], (size_t)16 * 1024);
     EXPECT_EQ(dpx->ddaLL128Max[ncclFuncBroadcast], (size_t)128 * 1024);
-    EXPECT_EQ(spx->ddaLLMax[ncclFuncBroadcast], (size_t)0);
-    EXPECT_EQ(spx->ddaLL128Max[ncclFuncBroadcast], (size_t)0);
+    EXPECT_EQ(spx->ddaLLMax[ncclFuncBroadcast], (size_t)16 * 1024);
+    EXPECT_EQ(spx->ddaLL128Max[ncclFuncBroadcast], (size_t)128 * 1024);
     EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
     // DPX sets total-byte broadcast ceilings. SPX leaves them 0.
     EXPECT_EQ(dpx->bcRingLLMaxBytes, (size_t)16 * 1024);
