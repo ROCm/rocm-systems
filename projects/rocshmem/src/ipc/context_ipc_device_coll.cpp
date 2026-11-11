@@ -283,8 +283,8 @@ __device__ void IPCContext::alltoallmem_wg_linear_thread_puts(rocshmem_team_t te
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -457,8 +457,8 @@ __device__ void IPCContext::broadcastmem_wg_linear_thread_puts(
   long expected = static_cast<long>(team_obj->bcast_sequence_number + 1);
 
   int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Root: each lane puts src to its assigned subset of dest PEs, then signals.
   if (my_pe == pe_root_world) {
@@ -715,8 +715,8 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
   size_t fcollect_pSync_offset = (team_obj->fcollect_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Each lane puts this PE's src to its assigned subset of dest PEs.
   // Unlike alltoall, src is the same for every dest (no per-PE offset).

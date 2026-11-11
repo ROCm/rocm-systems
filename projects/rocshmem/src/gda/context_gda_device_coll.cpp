@@ -423,8 +423,8 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -674,7 +674,8 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  // Workgroup variant: every thread in the block takes a distinct dest PE.
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
