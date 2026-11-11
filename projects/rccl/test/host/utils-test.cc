@@ -522,8 +522,8 @@ TEST_F(UtilsMicrotest, MemoryStack_ReusesTheEmptyHunkLeftAboveByPop) {
   EXPECT_EQ(Addr(above) + above->size, stack_.topFrame.end);
 }
 
-// A new hunk replaces a too-small empty hunk above in the chain, and the old one is never freed; a fix flips this pin.
-TEST_F(UtilsMicrotest, MemoryStack_KnownBug_ReplacingAnUnusableHunkAboveLeaksIt) {
+// A new hunk goes in below a too-small empty hunk above, so the old one stays in the chain and Destruct frees it.
+TEST_F(UtilsMicrotest, MemoryStack_UnusableHunkAboveStaysChainedAboveTheNewHunk) {
   Alloc(100);
   FillTo(8);
   ncclMemoryStackPush(&stack_);  // the frame itself spills into a second hunk
@@ -532,11 +532,12 @@ TEST_F(UtilsMicrotest, MemoryStack_KnownBug_ReplacingAnUnusableHunkAboveLeaksIt)
 
   void* obj = Alloc(200000);
   EXPECT_EQ((std::vector<size_t>{kHunk, 2 * kHunk, 2 * kHunk, 200000}), g_mallocSizes);
-  EXPECT_NE(above, stack_.stub.above->above);
+  ncclMemoryStack::Hunk* added = stack_.stub.above->above;
+  EXPECT_NE(above, added);
+  EXPECT_EQ(above, added->above);
   EXPECT_EQ(obj, stack_.topFrame.unhunks->obj);
   DestructStack();
-  EXPECT_EQ((std::set<void*>{above}), g_live);
-  std::free(above);
+  EXPECT_TRUE(g_live.empty());
 }
 
 TEST_F(UtilsMicrotest, MemoryStack_DestructFreesOutOfHunkObjectsOfEveryFrame) {
