@@ -381,9 +381,16 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   oss << "]: " << hazard << ".\n";
   oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
       << access_pc << std::dec << ".\n";
-  const Transfer transfer = event_transfer(type);
-  oss << "  Conflict: transfer from " << transfer.source << " into " << transfer.destination
-      << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
+  oss << "  Conflict: ";
+  if (v.space == RaceViolation::Space::VGPR) {
+    // A FLAT event can combine lanes from different memory spaces; its type
+    // does not identify the source of the reported register lane.
+    oss << "load into VGPRs";
+  } else {
+    const Transfer transfer = event_transfer(type);
+    oss << "transfer from " << transfer.source << " into " << transfer.destination;
+  }
+  oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   if (events.status(event) == EventStatus::ACTIVE) {
     oss << "  Completion for wave " << owner << " is not guaranteed; pending counters: ";

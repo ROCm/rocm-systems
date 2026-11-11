@@ -3866,6 +3866,10 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
               waited == Wait::Result && shared_lanes != 0 && shared_lanes != 3;
           EXPECT_EQ(sink.str().find("RACE ") != std::string::npos,
                     missing_wait || known_false_positive);
+          if (missing_wait || known_false_positive)
+            EXPECT_NE(sink.str().find("  Conflict: load into VGPRs at PC 0x100, wave 0.\n"),
+                      std::string::npos)
+                << sink.str();
         }
       }
     }
@@ -4021,6 +4025,10 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             const bool missing = exec && (space == Space::Lds ? lgkmcnt != 0 : vmcnt != 0);
             EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, missing);
             EXPECT_EQ(!hazards.empty(), missing);
+            if (missing)
+              EXPECT_NE(sink.str().find("  Conflict: load into VGPRs at PC 0x100, wave 0.\n"),
+                        std::string::npos)
+                  << sink.str();
           }
         }
       }
