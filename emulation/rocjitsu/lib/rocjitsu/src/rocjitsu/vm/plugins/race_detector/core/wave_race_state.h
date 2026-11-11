@@ -3,9 +3,9 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/instruction_snapshot.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
-#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "util/result.h"
 #include <cstdint>

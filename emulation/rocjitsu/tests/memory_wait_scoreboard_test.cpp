@@ -109,6 +109,95 @@ TEST_F(MemoryWaitScoreboardTest, CancellingTheLatestIssuePreservesOlderCounterPo
   EXPECT_EQ(hazards[0].reg.index, 6u);
 }
 
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsPreserveDependenciesUntilAWait) {
+  load(5, WaitCounterKind::Load, 0b110, 0b0111);
+  for (uint64_t pc : {0x200, 0x204}) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain);
+    read(5, 0b101, 0b1110);
+    ASSERT_EQ(state.events().size(), 1u);
+    EXPECT_FALSE(state.events().front().reported);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  }
+  ASSERT_EQ(hazards.size(), 2u);
+  EXPECT_EQ(hazards[0].consumer_pc, 0x200u);
+  EXPECT_EQ(hazards[1].consumer_pc, 0x204u);
+  for (const auto &hazard : hazards) {
+    EXPECT_EQ(hazard.producer.pc, 0x100u);
+    EXPECT_EQ(hazard.lanes, 0b100u);
+    EXPECT_EQ(hazard.bytes, 0b0110u);
+    EXPECT_EQ(hazard.required_wait, 0u);
+  }
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 2u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, DefaultRecoveryDoesNotProveCounterCompletion) {
+  load(5);
+  read(5);
+  ASSERT_EQ(hazards.size(), 1u);
+  EXPECT_TRUE(state.empty());
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 1u);
+  read(5);
+  EXPECT_EQ(hazards.size(), 1u);
+  state.wait(WaitCounterKind::Load, 0);
+  EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, RetainedFindingsOwnInstructionEvidenceAndExactRegisterOverlap) {
+  std::array<uint32_t, 2> words{0x11111111, 0x22222222};
+  const auto bind = [&](uint64_t pc) {
+    state.bind(
+        pc, &hazards,
+        [](void *p, const auto &hazard) { static_cast<decltype(hazards) *>(p)->push_back(hazard); },
+        MemoryWaitScoreboard::Recovery::Retain, InstructionSnapshot(pc, words));
+  };
+  bind(0x100);
+  state.add({state.issue(WaitCounterKind::Load),
+             0x100,
+             0b110,
+             {RegClass::VGPR, 4, 4},
+             WaitCounterKind::Load,
+             0x3});
+  words = {0x33333333, 0x44444444};
+  bind(0x200);
+  state.access({RegClass::VGPR, 6, 4}, 0b101, 0xf, true);
+  words.fill(0);
+  state.clear();
+  ASSERT_EQ(hazards.size(), 1u);
+  const auto &hazard = hazards.front();
+  EXPECT_EQ(hazard.reg, (RegisterRef{RegClass::VGPR, 6, 2}));
+  EXPECT_EQ(hazard.lanes, 0b100u);
+  EXPECT_EQ(hazard.bytes, 0x3u);
+  ASSERT_TRUE(hazard.producer.instruction);
+  EXPECT_EQ(hazard.producer.instruction->pc(), 0x100u);
+  EXPECT_EQ(hazard.producer.instruction->encoding()[0], 0x11111111u);
+  ASSERT_TRUE(hazard.consumer_instruction);
+  EXPECT_EQ(hazard.consumer_instruction->pc(), 0x200u);
+  EXPECT_EQ(hazard.consumer_instruction->encoding()[0], 0x33333333u);
+}
+
+TEST_F(MemoryWaitScoreboardTest, InstructionEvidenceIsNotBorrowedFromAnotherPcOrClearedWave) {
+  const std::array<uint32_t, 1> words{0xbf800000};
+  state.bind(0x300, nullptr, nullptr, MemoryWaitScoreboard::Recovery::Retain,
+             InstructionSnapshot(0x300, words));
+  load(5);
+  EXPECT_FALSE(state.events().front().instruction);
+  state.clear();
+  state.add({state.issue(WaitCounterKind::Load),
+             0x300,
+             1,
+             {RegClass::VGPR, 5, 1},
+             WaitCounterKind::Load,
+             0xf});
+  EXPECT_FALSE(state.events().front().instruction);
+}
+
 TEST_F(MemoryWaitScoreboardTest, CancellationRestoresACoalescedProducerAtTheSamePc) {
   load(5);
   const auto older = state.events().front();
@@ -3576,7 +3665,7 @@ util::FailureOr<std::array<uint64_t, 2>> run_xcnt_kernel(std::vector<uint32_t> c
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
   if (wait_checking == "off" ||
       (wait_checking.empty() && memory_setting == "off" && xcnt_setting != "warn")) {
-    EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
+    EXPECT_FALSE(sim.cu()->config().memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
   return std::array<uint64_t, 2>{sim.cu()->xcnt_diagnostic_count(),
@@ -7414,7 +7503,10 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
         0x200,
         {RegClass::VGPR, 0, 1},
         false,
-        0};
+        0,
+        1,
+        0xf,
+        std::nullopt};
     testing::internal::CaptureStderr();
     for (unsigned report = 0; report < 20; ++report)
       ComputeUnitCore::report_memory_wait(wf, hazard);

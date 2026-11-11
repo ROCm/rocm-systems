@@ -8,7 +8,7 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `RaceDetectorPlugin` | `race_detector/` | Checks register and LDS dependencies, with an opt-in core-backed register checker. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
@@ -409,6 +409,35 @@ The older `onAmdgpuReadSgpr` hook continues to expose physical SGPR indices for
 compatibility. New consumers that need architectural identity should use the
 typed scalar-register hooks. Scalar writes have only the typed callback.
 
+### Core register findings
+
+`observes_register_hazards()` defaults to false. Opting in requests ordinary
+core register-dependency checking even when `memory_wait_diagnostics` or the
+global `wait_checking` setting disables stderr warnings. It does not enable
+register-access hooks. XCNT replay-source checking still requires its existing
+explicit setting; when enabled, its findings use the same hook.
+
+`onAmdgpuRegisterHazard(observation, wave)` runs on the issuer before the
+consumer executes, including before its before-execute or async-issue callback.
+The `RegisterHazardObservation` owns the producer and consumer instruction
+encodings when available and gives their PCs, overlapping register range, lane
+and byte masks, read/overwrite kind, counter, and sufficient wait threshold.
+Register indices are wave-relative physical indices, including selected VGPR
+banks. Scalar findings use an all-ones lane mask. An encoding can be absent for
+a synthetic producer or a dependency recorded before observer attachment;
+reporters must not invent bytes or discard the finding for that reason. The
+wave reference supplies current dispatch/workgroup context and is borrowed only
+for the callback.
+
+The core retains dependencies after reporting while any register-finding observer
+is attached. Waits and other architectural guarantees still retire them. The
+observer owns deduplication and output limits; it receives findings independently
+of the core stderr warning budget. It must not mutate the scoreboard or execute
+or replay an instruction from the callback. This is a finding interface, not a
+complete register-access stream: shadow-negative checks do not enumerate accesses.
+Eager memory writeback is not a wait proof, and register readiness does not prove
+cross-wave LDS synchronization. See [memory wait diagnostics](memory-wait-diagnostics.md).
+
 ### Dispatch threading
 
 Callback policy is derived from the plugins contained by an
@@ -422,7 +451,7 @@ group divides hooks by frequency and synchronization cost:
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
 - Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
-  memory, and register-access callbacks are high-frequency and run concurrently
+  memory, register-finding, and register-access callbacks use the hot-hook policy and run concurrently
   with both other high-frequency callbacks and infrequent callbacks by default.
   Each callback is scoped to a wavefront below the simulation's shader-engine
   partition granularity. During the before-instruction callback, a memory
@@ -447,7 +476,8 @@ Plugins can opt out of individual high-frequency hooks by overriding
 `observes_memory_instruction_routing()`, `observes_vgpr_reads()`,
 `observes_vgpr_writes()`, `observes_sgpr_reads()`,
 `observes_scalar_register_writes()`, `observes_memory_routing()`,
-`observes_tensor_dma_memory_access()`, or `observes_tensor_dma_issue()`. The
+`observes_tensor_dma_memory_access()`, `observes_tensor_dma_issue()`, or
+`observes_register_hazards()`. The
 group samples these stable flags when the plugin is added and avoids both
 fanout and upstream observation work when no contained plugin consumes a hook.
 

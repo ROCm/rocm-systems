@@ -8,7 +8,7 @@
 #include <dlfcn.h>
 
 int main(int argc, char **argv) {
-  if (argc != 3)
+  if (argc != 3 && argc != 4)
     return 2;
   // Load without core objects or librocjitsu.so so unresolved simulator
   // helpers cannot be supplied accidentally by the host process.
@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     ::dlclose(module);
     return 1;
   }
-  rocjitsu::PluginHandle plugin = create("{}");
+  rocjitsu::PluginHandle plugin = create(argc == 4 ? argv[3] : "{}");
   if (!plugin) {
     std::fprintf(stderr, "standalone plugin creation failed\n");
     ::dlclose(module);

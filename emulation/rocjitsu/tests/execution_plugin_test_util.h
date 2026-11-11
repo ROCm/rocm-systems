@@ -689,7 +689,8 @@ struct PluginFixture {
 
   void initialize(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
                   uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
-                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0) {
+                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0,
+                  std::string_view memory_wait_diagnostics = "warn") {
     util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
@@ -716,7 +717,7 @@ struct PluginFixture {
               {{"key":"num_wf_slots","value":"{}"}},
               {{"key":"sgprs_per_wf","value":"{}"}},
               {{"key":"vgprs_per_wf","value":"{}"}},
-              {{"key":"memory_wait_diagnostics","value":"warn"}},
+              {{"key":"memory_wait_diagnostics","value":"{}"}},
               {{"key":"lds_size_kb","value":"64"}}
             ]}}
           ]}}
@@ -724,7 +725,7 @@ struct PluginFixture {
       ]}},"links":[{}]}}}}
     )",
                                    async_helpers, arch, wavefront_size, cu_range, num_wf_slots,
-                                   sgprs_per_wf, vgprs_per_wf, links);
+                                   sgprs_per_wf, vgprs_per_wf, memory_wait_diagnostics, links);
     config::LoadedConfig loaded;
     ASSERT_TRUE(load_valid_config_from_string(json, loaded));
     soc = loaded.soc();

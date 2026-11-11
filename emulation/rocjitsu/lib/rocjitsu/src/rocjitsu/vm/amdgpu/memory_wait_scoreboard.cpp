@@ -1089,6 +1089,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
 }
 
 void MemoryWaitScoreboard::clear() {
+  instruction_.reset();
   events_.clear();
   superseded_.clear();
   pending_scalar_ = false;
@@ -1310,6 +1311,8 @@ void MemoryWaitScoreboard::add(Event event) {
   if (!event.lanes || !event.bytes || !event.reg.width)
     return;
   event.reg = pending_.canonical(event.reg);
+  if (!event.instruction && instruction_ && event.pc == instruction_->pc())
+    event.instruction = instruction_;
   stamp_order(event);
   // A newer result covering the entire old destination is the stronger
   // dependency within the same FIFO class. Discard the superseded record rather
@@ -1516,14 +1519,17 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;
-    event.reported = true;
+    event.reported = recovery_ == Recovery::FirstConflict;
     if (reporter_) {
       const auto first = std::max(reg.index, event.reg.index);
       const auto end = std::min(reg.index + reg.width, event.reg.index + event.reg.width);
       const RegisterRef overlap{reg.cls, first, static_cast<uint8_t>(end - first)};
-      reporter_(context_, {event, pc_, overlap, write, required_wait(event)});
+      reporter_(context_, {event, pc_, overlap, write, required_wait(event), event.lanes & lanes,
+                           static_cast<uint8_t>(event.bytes & bytes), instruction_});
     }
   }
+  if (recovery_ == Recovery::Retain)
+    return;
   const auto size = events_.size();
   std::erase_if(events_, [&](const Event &event) {
     if (event.reported)

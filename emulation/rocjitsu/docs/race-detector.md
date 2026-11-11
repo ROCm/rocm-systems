@@ -90,7 +90,7 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 You should see output:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown producer_pc=0x7f6a1e801010 consumer_pc=0x7f6a1e80101c checker=plugin
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
   ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
        0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
@@ -158,6 +158,60 @@ scripted workflows), add a `sinks` section to your config:
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
+
+### Core-backed register reports
+
+The default `register_checker: "plugin"` retains the plugin's existing register
+checker. To use the emulator's issue-time register checker instead, configure:
+
+```json
+{ "plugins": { "race": { "register_checker": "core" } } }
+```
+
+Both modes keep the plugin's LDS checks, sinks, kernel names, and owned instruction
+traces. Core mode unsubscribes from register-access hooks and does not attach
+register dependencies to the plugin's memory events. Those events still occupy
+counter positions needed by LDS partial waits. The core checker runs once for
+both warnings and plugin reports; selecting core mode requests ordinary register
+checking even when stderr warnings are off. XCNT findings are included only when
+XCNT checking is explicitly enabled. See [memory wait diagnostics](memory-wait-diagnostics.md)
+for its target and replay-mode coverage.
+
+`RACE` records in either mode include `producer_pc`, `consumer_pc`, and `checker`.
+Core register records additionally include:
+
+| Field | Meaning |
+|---|---|
+| `counter`, `required_wait` | Counter and sufficient maximum wait threshold for this dependency. |
+| `reg`, `width` | First overlapping wave-relative physical register and number of dwords. |
+| `lanes`, `bytes` | Actual overlapping lane mask and byte mask within a dword, in hexadecimal. Scalar lanes are all ones. |
+| `lane` | First overlapping vector lane, or -1 for a scalar/special register. |
+
+The trace uses the instruction encodings captured at execution, not code reread
+at a saved PC. The issuer reports before the consumer's normal instruction hook;
+the reporter includes the consumer's owned encoding in the displayed trace. If
+either encoding is unavailable, the report keeps both PCs and prints explicit
+`encoding unavailable` witnesses instead of a reconstructed trace.
+
+Core mode emits one representative finding per dispatch, producer/consumer PC
+pair, register class/index, access kind, and counter. Repeated visits to that site
+are counted but suppressed, including visits with different lanes or widths. A
+different producer or consumer is not suppressed just because it shares a PC
+with an earlier report. Reporting does not retire the dependency; only a wait
+or another architectural guarantee does. Core warnings keep their separate
+per-CU budget. LDS and default-mode register reporting retain their existing
+broader PC-based suppression. The final summary counts emitted records, not
+the PCs used for suppression, and core mode also reports its suppressed count.
+Neither a clean nor an interrupted run proves complete coverage.
+
+This option is a migration boundary, not a promise of identical findings. The
+core tracks readiness separately for the global and LDS lanes of mixed FLAT
+loads; the default plugin can report a false positive for a lane group already
+made ready by its wait. The core also applies embedded waits before operand
+checks and covers inline and special-register producers beyond the default
+plugin's register coverage. Positive and sufficient-wait controls compare common
+report fields and instruction witnesses in `execution_plugin_register_hazard_test.cpp`;
+`wait_hazard_test.cpp` records shared target semantics and known differences.
 
 ## What is a race?
 
@@ -508,6 +562,9 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
   tensor DMA transfers and async copies on gfx1250.
+- `execution_plugin_register_hazard_test.cpp` — compares the two register
+  checkers through the issuer, report fields, owned witnesses, suppression,
+  LDS controls, and known coverage differences.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
@@ -551,7 +608,7 @@ this source tree. The original
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
 
-- **Embedded waits**: the plugin handles explicit wait instructions, including
+- **Embedded waits (default register checker)**: the plugin handles explicit wait instructions, including
   `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
   embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
   `wait_exp:0` retires pending EXPCNT results in the core checker, while the

@@ -16,6 +16,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -87,12 +88,16 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// register_checker selects "plugin" (default) or the core's register findings.
+  /// LDS checking is performed by this plugin in either mode.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_vgpr_reads() const override { return !core_registers_; }
+  bool observes_vgpr_writes() const override { return !core_registers_; }
+  bool observes_sgpr_reads() const override { return !core_registers_; }
+  bool observes_scalar_register_writes() const override { return !core_registers_; }
+  bool observes_register_hazards() const override { return core_registers_; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
   /// Skip waves without race state, including slots between a halt and the
@@ -100,6 +105,9 @@ public:
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
+
+  void onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation &hazard,
+                              const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
@@ -165,6 +173,21 @@ private:
     std::string symbol;
   };
 
+  struct ReportLocation {
+    std::string_view space;
+    int index;
+    int wave;
+    int lane;
+    bool write;
+    Dim3d workgroup;
+    uint64_t producer_pc;
+    uint64_t consumer_pc;
+    rj_code_arch_t arch;
+  };
+  // Called with report_mutex_ held, after selecting a report for emission.
+  void emit_report(uint32_t dispatch, const ReportLocation &location, std::string_view details,
+                   const amdgpu::RegisterHazardObservation *hazard = nullptr);
+
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
     return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
   }
@@ -176,8 +199,14 @@ private:
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  std::mutex report_mutex_;
+  const bool core_registers_;
+  mutable std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
+  using RegisterSite =
+      std::tuple<uint32_t, uint64_t, uint64_t, RegClass, uint16_t, bool, amdgpu::WaitCounterKind>;
+  std::set<RegisterSite> observed_register_races_;
+  uint64_t reported_races_ = 0;
+  uint64_t repeated_register_races_ = 0;
   std::unordered_map<uint32_t, KernelNames> dispatch_kernel_names_;
 };
 

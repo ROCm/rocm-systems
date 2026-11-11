@@ -21,8 +21,11 @@
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 
+#include "flatbuffers/idl.h"
+
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <format>
 #include <limits>
@@ -41,6 +44,55 @@ namespace {
 void report_plugin_failure(const amdgpu::Wavefront &wf, const char *detail) {
   if (!wf.instruction_execution_failed())
     wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure, detail);
+}
+
+bool use_core_register_checker(const char *config_json) {
+  if (!config_json || !*config_json)
+    return false;
+  flexbuffers::Builder builder;
+  flatbuffers::Parser parser;
+  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
+    throw std::invalid_argument("race plugin configuration is not valid JSON");
+  const auto root = flexbuffers::GetRoot(builder.GetBuffer());
+  if (!root.IsMap())
+    throw std::invalid_argument("race plugin configuration must be an object");
+  const auto checker = root.AsMap()["register_checker"];
+  if (checker.IsNull())
+    return false;
+  if (checker.IsString()) {
+    const std::string_view name(checker.AsString().c_str(), checker.AsString().size());
+    if (name == "plugin")
+      return false;
+    if (name == "core")
+      return true;
+  }
+  throw std::invalid_argument("race plugin 'register_checker' must be 'plugin' or 'core'");
+}
+
+std::string_view register_space(RegClass cls) {
+  switch (cls) {
+  case RegClass::VGPR:
+    return "VGPR";
+  case RegClass::SGPR:
+    return "SGPR";
+  case RegClass::TTMP:
+    return "TTMP";
+  case RegClass::ACC_VGPR:
+    return "ACC_VGPR";
+  case RegClass::EXEC:
+    return "EXEC";
+  case RegClass::VCC:
+    return "VCC";
+  case RegClass::SCC:
+    return "SCC";
+  case RegClass::M0:
+    return "M0";
+  case RegClass::FLAT_SCRATCH:
+    return "FLAT_SCRATCH";
+  case RegClass::PC:
+    return "PC";
+  }
+  return "UNKNOWN";
 }
 
 util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Instruction &inst,
@@ -256,21 +308,62 @@ util::FailureOr<std::string> formatTrace(
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json)
+    : ExecutionPlugin("race"), core_registers_(use_core_register_checker(config_json)) {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
 std::string RaceDetectorPlugin::getSummary() const {
+  std::lock_guard lock(report_mutex_);
   const char *banner = "\n========================================\n"
                        " ROCJITSU RACE DETECTION SUMMARY\n"
                        "========================================\n";
-  if (!observed_races_.empty()) {
-    return std::string(banner) + "  " + std::to_string(observed_races_.size()) +
-           " race(s) detected\n"
-           "========================================\n";
+  std::string summary = banner;
+  summary += reported_races_ ? std::format("  {} race(s) detected\n", reported_races_)
+                             : "  No races detected.\n";
+  if (core_registers_)
+    summary +=
+        std::format("  {} repeated core register finding(s) suppressed (site-level reporting)\n",
+                    repeated_register_races_);
+  return summary + "========================================\n";
+}
+
+void RaceDetectorPlugin::emit_report(uint32_t dispatch, const ReportLocation &location,
+                                     std::string_view details,
+                                     const amdgpu::RegisterHazardObservation *hazard) {
+  const auto iter = dispatch_kernel_names_.find(dispatch);
+  const KernelNames names = iter == dispatch_kernel_names_.end()
+                                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
+                                : iter->second;
+  std::string fields =
+      std::format(" producer_pc={:#x} consumer_pc={:#x} checker={}", location.producer_pc,
+                  location.consumer_pc, hazard ? "core" : "plugin");
+  if (hazard)
+    fields +=
+        std::format(" counter={} required_wait={} width={} lanes={:#x} bytes={:#x}",
+                    amdgpu::wait_counter_name(location.arch, hazard->counter),
+                    hazard->required_wait, hazard->reg.width, hazard->lane_mask, hazard->byte_mask);
+  std::string target(location.space);
+  if (location.space == "LDS")
+    target += std::format(" byte {}", location.index);
+  else if (location.space == "VGPR" || location.space == "SGPR" || location.space == "TTMP" ||
+           location.space == "ACC_VGPR") {
+    const char *prefix = location.space == "VGPR"   ? "v"
+                         : location.space == "SGPR" ? "s"
+                         : location.space == "TTMP" ? "ttmp"
+                                                    : "acc";
+    target += std::format(" {}{}", prefix, location.index);
   }
-  return std::string(banner) + "  No races detected.\n"
-                               "========================================\n";
+  const auto &wg = location.workgroup;
+  sink().write(
+      std::format("RACE kernel={} symbol={} dispatch={} type={} access={} reg={} wave={} lane={} "
+                  "wg={},{},{} conflict=unknown{}\n"
+                  "Race on {} [workgroup ({}, {}, {}), wave {}{}]\n{}END_RACE\n",
+                  names.name, names.symbol, dispatch, location.space,
+                  location.write ? "write" : "read", location.index, location.wave, location.lane,
+                  wg.x, wg.y, wg.z, fields, target, wg.x, wg.y, wg.z, location.wave,
+                  location.lane >= 0 ? std::format(", lane {}", location.lane) : "", details));
+  ++reported_races_;
 }
 
 size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
@@ -290,6 +383,83 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
                            kernel_names.symbol));
 }
 
+void RaceDetectorPlugin::onAmdgpuRegisterHazard(const amdgpu::RegisterHazardObservation &hazard,
+                                                const amdgpu::Wavefront &wf) {
+  if (!core_registers_)
+    return;
+  auto *state = get_state(wf);
+  assert(state && state->race_state);
+  const uint32_t dispatch = wf.dispatch_id();
+  const RegisterSite site{dispatch,         hazard.consumer_pc, hazard.producer_pc, hazard.reg.cls,
+                          hazard.reg.index, hazard.write,       hazard.counter};
+  {
+    std::lock_guard lock(report_mutex_);
+    if (observed_register_races_.contains(site)) {
+      ++repeated_register_races_;
+      return;
+    }
+  }
+
+  const int wave = state->race_state->getWaveId().value;
+  const bool vector = hazard.reg.cls == RegClass::VGPR || hazard.reg.cls == RegClass::ACC_VGPR;
+  const int lane = vector && hazard.lane_mask ? std::countr_zero(hazard.lane_mask) : -1;
+  util::StringDiagnostic diagnostic;
+  const auto disassemble = [&wf, &diagnostic](const InstructionSnapshot &instruction) {
+    return wf.disassemble_instruction(instruction.encoding(), instruction.pc(),
+                                      diagnostic.emitter());
+  };
+  auto details = [&]() -> util::FailureOr<std::string> {
+    if (hazard.producer_instruction && hazard.consumer_instruction) {
+      // This hook precedes the consumer's before-execute notification. Copy and
+      // extend the trace only when emitting a report, not on every instruction.
+      auto trace = state->trace;
+      trace.push(*hazard.consumer_instruction);
+      return formatTrace(trace, disassemble,
+                          MarkedInstruction{*hazard.producer_instruction, wave, -1},
+                          MarkedInstruction{*hazard.consumer_instruction, wave, lane});
+    }
+    // Do not recover historical bytes by reading the code mapping at a saved PC.
+    const auto describe = [&](const std::optional<InstructionSnapshot> &instruction)
+        -> util::FailureOr<std::string> {
+      if (!instruction)
+        return std::string("(encoding unavailable)");
+      return disassemble(*instruction);
+    };
+    auto producer = describe(hazard.producer_instruction);
+    if (producer.failed())
+      return util::Result::failure();
+    auto consumer = describe(hazard.consumer_instruction);
+    if (consumer.failed())
+      return util::Result::failure();
+    return std::format("  ==>  {:#x}  {}  ; <-- producer, wave {}\n"
+                       "  ==>  {:#x}  {}  ; <-- consumer, wave {}\n",
+                       hazard.producer_pc, producer.value(), wave, hazard.consumer_pc,
+                       consumer.value(), wave);
+  }();
+  if (details.failed()) {
+    report_plugin_failure(wf, "race detector could not disassemble the instruction trace");
+    std::lock_guard lock(report_mutex_);
+    sink().write(diagnostic.message());
+    return;
+  }
+  const auto &wg = wf.wg_coord();
+  const ReportLocation location{register_space(hazard.reg.cls),
+                                hazard.reg.index,
+                                wave,
+                                lane,
+                                hazard.write,
+                                Dim3d(wg[0], wg[1], wg[2]),
+                                hazard.producer_pc,
+                                hazard.consumer_pc,
+                                wf.cu().arch()};
+  std::lock_guard lock(report_mutex_);
+  if (!observed_register_races_.insert(site).second) {
+    ++repeated_register_races_;
+    return;
+  }
+  emit_report(dispatch, location, details.value(), &hazard);
+}
+
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,
@@ -299,6 +469,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
 
   std::vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
   auto handler = [this, wf_ptrs, dispatch_id](RaceViolation v) {
+    if (core_registers_ && v.space != RaceViolation::Space::LDS)
+      return;
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
            "wave index out of range");
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
@@ -323,21 +495,6 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
     const MarkedInstruction &conflict = maybe_conflict.value();
 
-    std::ostringstream oss;
-    if (v.space == RaceViolation::Space::VGPR)
-      oss << "Race on VGPR v" << v.index;
-    else if (v.space == RaceViolation::Space::SGPR)
-      oss << "Race on SGPR s" << v.index;
-    else if (v.space == RaceViolation::Space::TTMP)
-      oss << "Race on TTMP ttmp" << v.index;
-    else
-      oss << "Race on LDS byte " << v.index;
-    oss << " [workgroup (" << v.workgroupId.x << ", " << v.workgroupId.y << ", " << v.workgroupId.z
-        << "), wave " << v.wave;
-    if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
-      oss << ", lane " << v.lane;
-    oss << "]\n";
-
     MarkedInstruction access_mark{*current, v.wave, v.lane};
     util::StringDiagnostic diagnostic;
     util::FailureOr<std::string> trace = formatTrace(
@@ -353,7 +510,6 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       sink().write(diagnostic.message());
       return;
     }
-    oss << trace.value();
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -366,19 +522,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
                                                                     : "LDS";
-        auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
-        const KernelNames kernel_names =
-            kernel_name_iter == dispatch_kernel_names_.end()
-                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
-                : kernel_name_iter->second;
-        const char *access = v.isWrite ? "write" : "read";
-        sink().write(std::format(
-            "RACE kernel={} symbol={} dispatch={} type={} access={} reg={} wave={} "
-            "lane={} "
-            "wg={},{},{} "
-            "conflict=unknown\n{}END_RACE\n",
-            kernel_names.name, kernel_names.symbol, dispatch_id, space, access, v.index, v.wave,
-            v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
+        emit_report(dispatch_id,
+                    {space, v.index, v.wave, v.lane, v.isWrite, v.workgroupId,
+                     conflict.instruction.pc(), pc, wf->cu().arch()},
+                    trace.value());
       }
     }
   };
@@ -489,7 +636,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const uint32_t perLaneBytes = d.num_elems * d.elem_size;
 
     std::vector<uint32_t> registers;
-    if (d.is_load) {
+    if (d.is_load && !core_registers_) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
         return;
@@ -560,7 +707,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         }
       }
     }
-    uint8_t byte_mask = vector_memory_byte_mask(d, wf);
+    const uint8_t byte_mask = core_registers_ ? kFullByteMask : vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
         rs->checkVgprWrite(static_cast<int>(reg), execMask, byte_mask, memoryOrder);
@@ -570,8 +717,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     rs->registerEventWithIntervals(instruction, type, std::move(registers), execMask, byte_mask,
                                    std::move(intervals), obligations, memoryOrder,
                                    /*lastRegisterByteMask=*/0, ldsAccess);
-    // A mixed instruction has one counter entry, with all register lanes but
-    // only the ordinary LDS lanes' intervals. Do not also register a global event.
+    // A mixed instruction has one counter entry and only the ordinary LDS
+    // lanes' intervals. Do not also register a global event.
     return;
   }
 
@@ -674,7 +821,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       // when no lane reads LDS.
       rs->registerLdsRangeEvent(instruction, MemoryEventType::LDS_TO_GLOBAL, ranges, obligations,
                                 memoryOrder);
-    } else if (d.is_load) {
+    } else if (d.is_load && !core_registers_) {
       auto destinations = validated_load_destinations(d, wf);
       if (!destinations)
         return;
@@ -690,21 +837,25 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers),
                         d.exec_mask, byte_mask, obligations, memoryOrder, last_byte_mask);
     } else if (!obligations.empty()) {
-      rs->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
-                        obligations, memoryOrder);
+      rs->registerEvent(instruction,
+                        d.is_load ? MemoryEventType::GLOBAL_TO_VGPR
+                                  : MemoryEventType::VGPR_TO_GLOBAL,
+                        {}, d.exec_mask, 0xF, obligations, memoryOrder);
     }
   }
 
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
-      if (const auto reg = d.dst_register.register_ref()) {
-        rs->registerScalarLoad(instruction, wf.memory_wait_shadow().canonical(*reg), wf.exec(),
-                               obligations, memoryOrder);
-      } else {
-        rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF,
-                          obligations, memoryOrder);
+      if (!core_registers_) {
+        if (const auto reg = d.dst_register.register_ref()) {
+          rs->registerScalarLoad(instruction, wf.memory_wait_shadow().canonical(*reg), wf.exec(),
+                                 obligations, memoryOrder);
+          return;
+        }
       }
+      rs->registerEvent(instruction, MemoryEventType::GLOBAL_TO_SGPR, {}, wf.exec(), 0xF,
+                        obligations, memoryOrder);
     } else {
       rs->registerEvent(instruction, MemoryEventType::SCALAR_TO_GLOBAL, {}, wf.exec(), 0xF,
                         obligations, memoryOrder);

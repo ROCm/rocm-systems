@@ -10,4 +10,6 @@
 #include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
-ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race", "{}")
+ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race",
+                       R"({"register_checker":{"type":"string","default":"plugin",
+                          "description":"Register checker: plugin or core"}})")
