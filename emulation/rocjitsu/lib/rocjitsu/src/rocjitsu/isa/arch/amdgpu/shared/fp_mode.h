@@ -676,7 +676,8 @@ enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 /// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
-                   uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
+                   uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false,
+                   bool minmax_snan_wins = false) {
   static_assert(std::is_same_v<Bits, uint32_t> || std::is_same_v<Bits, uint64_t>);
   using Float = std::conditional_t<sizeof(Bits) == 4, float, double>;
   constexpr Bits kSign = Bits{1} << (sizeof(Bits) * 8 - 1);
@@ -723,15 +724,22 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
          "unsupported scalar floating-point atomic operation");
 
-  // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
-  // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
+  // CDNA1-2 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
+  // CDNA3-5 / RDNA4 select from the flushed values instead; MI300A/MI350X
+  // still return a quieted SNaN, the data operand's first.
   const Bits old_result = legacy_minmax ? old_bits : old_input;
   const Bits source_result = legacy_minmax ? source_bits : source_input;
+  auto is_snan = [&](Bits bits) { return is_nan(bits) && !(bits & kQuiet); };
   if (legacy_minmax) {
-    if (is_nan(old_input) && !(old_input & kQuiet))
+    if (is_snan(old_input))
       return old_input | kQuiet;
-    if (is_nan(source_input) && !(source_input & kQuiet))
+    if (is_snan(source_input))
       return source_input | kQuiet;
+  } else if (minmax_snan_wins) {
+    if (is_snan(source_input))
+      return source_input | kQuiet;
+    if (is_snan(old_input))
+      return old_input | kQuiet;
   }
   if (is_nan(old_input))
     return is_nan(source_input) ? (legacy_minmax ? old_input : source_input) | kQuiet
