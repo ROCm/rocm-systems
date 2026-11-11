@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <nccl.h>
@@ -69,6 +70,29 @@ static_assert(sizeof(ncclBarrierSession_C) > 0,
               "ncclBarrierSession_C must have non-zero size");
 static_assert(alignof(ncclBarrierSession_C) >= 1,
               "ncclBarrierSession_C must have valid alignment");
+
+/* [C] ABI pin: the barrier-session Init thunks take the ncclGin_C by pointer.
+ * NCCL 2.31.2 (NVIDIA/nccl#2243, issue #2242) switched them from by-value
+ * because frontends that emit their own IR (CuTeDSL) spilled the by-value
+ * struct to an under-aligned stack slot, and the C++ side's 8-byte load of
+ * the leading `ncclDevComm const&` faulted. A C++ caller always aligns the
+ * argument correctly, so no runtime test here can reproduce that fault;
+ * pinning the exported signature is what catches a regression to by-value.
+ * decltype() is unevaluated, so naming these __device__ thunks from host
+ * scope is fine. */
+static_assert(
+    std::is_same<decltype(&ncclGinBarrierSessionInit),
+                 void (*)(ncclGinBarrierSession_C*, ncclCoopAny,
+                          ncclGin_C const*, ncclTeam, ncclGinBarrierHandle,
+                          uint32_t)>::value,
+    "ncclGinBarrierSessionInit must take ncclGin_C by pointer (IR ABI)");
+static_assert(
+    std::is_same<decltype(&ncclBarrierSessionInit),
+                 void (*)(ncclBarrierSession_C*, ncclCoopAny, ncclTeam,
+                          ncclTeam, ncclGin_C const*, ncclLsaBarrierHandle,
+                          ncclGinBarrierHandle, uint32_t, bool,
+                          ncclMultimemHandle)>::value,
+    "ncclBarrierSessionInit must take ncclGin_C by pointer (IR ABI)");
 
 /* -----------------------------------------------------------------------
  * Error checking — fail the current GTest assertion rather than exit(),

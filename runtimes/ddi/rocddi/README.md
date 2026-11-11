@@ -36,6 +36,19 @@ endpoints; rocddi has no CPU or NPU device backend yet. Host-only memory works
 without an activated GPU. Availability of GPU operations depends on the
 discovered device and driver capabilities.
 
+On Linux, sessions and native owners retain their creating-process identity.
+An owner inherited by `fork` rejects new work before entering its copied
+mutexes, issuing ioctls, or releasing its parent's mappings. The first session
+or KFD connection attempt pins the runtime image to its process. A fork child
+cannot open a GPU connection through that image, even if the parent created
+only a passive session or the connection attempt failed. The child must `exec`
+before GPU use. A new passive session may still be constructed in the child.
+Linux uses private wipe-on-fork pages for process witnesses and falls back to
+PID plus PID-namespace identity for native owners when that advice is
+unavailable.
+These checks do not make an arbitrary library call from a multithreaded fork
+child a substitute for `exec`.
+
 `topology::host::snapshot` reads CPU identity, online CPUs, NUMA domains,
 memory capacity, and cache records as passive OS facts. The reads are
 best-effort and are not one atomic topology generation. A host domain is not
