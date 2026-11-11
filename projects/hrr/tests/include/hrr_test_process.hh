@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -16,7 +17,6 @@
 #include <vector>
 
 #if defined(_WIN32)
-#include <algorithm>
 #include <windows.h>
 #else
 #include <csignal>
@@ -61,7 +61,11 @@ class SpawnProc {
                      bool capture_stderr = false)
       : exe_(std::move(exe)),
         capture_stdout_(capture_stdout),
-        capture_stderr_(capture_stderr) {}
+        capture_stderr_(capture_stderr) {
+    // The children record the tests' own workloads, so they consent to capture.
+    // A test of the consent check itself unsets or overrides this.
+    setEnv("HIP_HRR_CAPTURE_CONSENT", "yes");
+  }
 
   void setEnv(const std::string& key, const std::string& value) {
     env_.push_back({key, value});
@@ -70,7 +74,12 @@ class SpawnProc {
   // Remove a variable from the child's environment (after fork, before exec).
   // Prefer this over setEnv(key, ""): CLR's flag parser turns an empty
   // HIP_HRR_CAPTURE_OUTPUT into a single space, which still enables capture.
-  void unsetEnv(const std::string& key) { unset_env_.push_back(key); }
+  void unsetEnv(const std::string& key) {
+    env_.erase(std::remove_if(env_.begin(), env_.end(),
+                              [&](const auto& kv) { return kv.first == key; }),
+               env_.end());
+    unset_env_.push_back(key);
+  }
 
   // Exit code reported when the deadline fired and the child had to be killed.
   // 128 + SIGKILL matches the encoding run() already uses for a signalled

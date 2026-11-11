@@ -54,3 +54,11 @@ excluded. RDNA4 FP32-output `DOT2_F32_F16/BF16` accepts mode 3 and leaves flags
 unchanged, matching its documented gfx1201 behavior; true16-output DOT2 rejects
 mode 3. The 50% figure describes these two supported contracts out of four,
 not the ability to raise a flag on half of all DOT mnemonics.
+
+## CDNA and gfx1250 matrix migration
+
+The initial CDNA matrix migration covers ten gfx942 FP16/BF16 MFMA forms,
+four additional gfx950 forms, and five gfx1250 half-input WMMA forms.
+All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
+Compatibility are supported; strict bit-exact modes are not advertised.
+Other CDNA instruction families retain their existing handlers.

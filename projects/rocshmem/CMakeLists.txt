@@ -45,6 +45,7 @@ endif()
 
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
+option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})

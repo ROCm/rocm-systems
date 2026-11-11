@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -2390,8 +2391,13 @@ void VWmmaF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_f32_16x16x32_f16(cu, dst, src0_base, src1_base, s2, const_acc,
-                                     amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;
+  if (inst_.neg_hi & 4)
+    controls |= RJ_ARITH_WMMA_ABS_C;
+  uint64_t flags = cu.arithmetic_flags();
+  amdgpu::arith::exec_dense_fp_matrix<8, 8, 32>(
+      wf, rj_arith_v_wmma_f32_16x16x32_f16_w32, flags, controls, dst, src0_base, src1_base, s2,
+      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2431,7 +2437,19 @@ void VWmmaF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_f16_spec<16, 16, 32>(cu, dst, src0_base, src1_base, s2, const_acc);
+  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;
+  if (inst_.neg_hi & 4)
+    controls |= RJ_ARITH_WMMA_ABS_C;
+  if (!src2_off &&
+      (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+    const_acc = amdgpu::dot_packed16::inline_word<false>(const_acc, inst_.src2);
+  }
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::exec_dense_fp_matrix<8, 4, 32, 4, true>(
+      wf, rj_arith_v_wmma_f16_16x16x32_f16_w32, flags, controls, dst, src0_base, src1_base, s2,
+      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2471,8 +2489,13 @@ void VWmmaF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_f32_16x16x32_bf16(cu, dst, src0_base, src1_base, s2, const_acc,
-                                      amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;
+  if (inst_.neg_hi & 4)
+    controls |= RJ_ARITH_WMMA_ABS_C;
+  uint64_t flags = cu.arithmetic_flags();
+  amdgpu::arith::exec_dense_fp_matrix<8, 8, 32>(
+      wf, rj_arith_v_wmma_f32_16x16x32_bf16_w32, flags, controls, dst, src0_base, src1_base, s2,
+      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2512,7 +2535,19 @@ void VWmmaBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_bf16_spec<16, 16, 32>(cu, dst, src0_base, src1_base, s2, const_acc);
+  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;
+  if (inst_.neg_hi & 4)
+    controls |= RJ_ARITH_WMMA_ABS_C;
+  if (!src2_off &&
+      (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+    const_acc = amdgpu::dot_packed16::inline_word<true>(const_acc, inst_.src2);
+  }
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::exec_dense_fp_matrix<8, 4, 32, 4, true>(
+      wf, rj_arith_v_wmma_bf16_16x16x32_bf16_w32, flags, controls, dst, src0_base, src1_base, s2,
+      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VWmmaBf16f3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2552,8 +2587,15 @@ void VWmmaBf16f3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(cu, dst, src0_base, src1_base, s2, const_acc,
-                                          amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;
+  if (inst_.neg_hi & 4)
+    controls |= RJ_ARITH_WMMA_ABS_C;
+  uint64_t flags = cu.arithmetic_flags();
+  if (wf.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  amdgpu::arith::exec_dense_fp_matrix<8, 4, 32, 8>(
+      wf, rj_arith_v_wmma_bf16f32_16x16x32_bf16_w32, flags, controls, dst, src0_base, src1_base, s2,
+      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VSwmmacF3216x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -3140,9 +3182,12 @@ void VWmmaI3216x16x64Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_i32_16x16x64_iu8(cu, dst, src0_base, src1_base, s2,
-                                     /*a_signed=*/(inst_.neg & 0x1u) != 0,
-                                     /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp, const_acc);
+  uint64_t controls = inst_.neg & 3;
+  if (inst_.clamp)
+    controls |= RJ_ARITH_WMMA_CLAMP;
+  amdgpu::arith::exec_dense_fp_matrix<8, 8, 32>(
+      wf, rj_arith_v_wmma_i32_16x16x64_iu8_w32, cu.arithmetic_flags(), controls, dst, src0_base,
+      src1_base, s2, !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VSwmmacF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {

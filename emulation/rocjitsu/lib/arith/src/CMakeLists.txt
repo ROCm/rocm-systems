@@ -7,6 +7,9 @@
 add_library(
     rj_arith
     STATIC
+    mfma/mfma_half.cpp
+    mfma/mfma_f64.cpp
+    mfma/matrix_i8.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
     conversion/byte_conversion.cpp
@@ -28,6 +31,7 @@ add_library(
     dot/fp8_dot.cpp
     dot/half_dot.cpp
     dot/integer_dot.cpp
+    dual/dual.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
@@ -97,6 +101,7 @@ add_library(
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp
     wmma/swmmac_integer.cpp
+    wmma/wmma_gfx1250_half.cpp
     wmma/wmma.cpp
     wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp

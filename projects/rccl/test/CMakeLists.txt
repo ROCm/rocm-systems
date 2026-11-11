@@ -287,6 +287,7 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
@@ -1139,6 +1140,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
