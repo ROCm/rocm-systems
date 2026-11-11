@@ -12,11 +12,11 @@ pub(crate) mod file;
 pub(crate) mod memory;
 pub(crate) mod process_identity;
 
+pub(crate) use clock::host_clock;
 pub(crate) use libc as errno;
 pub(crate) use memory::{HostAllocation, HostReservation, host_page_size};
-pub(crate) use observation::host_clock;
 
-mod observation;
+mod clock;
 
 use crate::{Error, ErrorKind};
 use std::io;
@@ -31,6 +31,7 @@ pub(crate) fn invalid_data(_detail: impl std::fmt::Display) -> io::Error {
 pub(crate) fn native_error(operation: &'static str, source: io::Error) -> Error {
     let kind = match source.kind() {
         io::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
+        io::ErrorKind::NotFound => ErrorKind::NotFound,
         io::ErrorKind::OutOfMemory => ErrorKind::ResourceExhausted,
         io::ErrorKind::Unsupported => ErrorKind::Unsupported,
         io::ErrorKind::InvalidData => ErrorKind::DriverContract,
@@ -46,5 +47,17 @@ pub(crate) fn native_error(operation: &'static str, source: io::Error) -> Error 
         kind,
         operation,
         source,
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn vanished_native_object_has_a_portable_not_found_kind() {
+        let error = native_error("open endpoint", io::Error::from_raw_os_error(errno::ENOENT));
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert_eq!(error.native_error_code(), Some(errno::ENOENT));
     }
 }

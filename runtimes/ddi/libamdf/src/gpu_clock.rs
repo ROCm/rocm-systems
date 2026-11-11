@@ -26,6 +26,7 @@ pub(crate) unsafe extern "C" fn queue_clock_info(
     boundary(|| unsafe {
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let _family = instance::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
@@ -47,16 +48,17 @@ pub(crate) unsafe extern "C" fn clock_sample(
     boundary(|| unsafe {
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let _family = instance::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
             .gpu()
             .map_err(|error| device.native_error_status(&error))?;
-        let before = rocddi::observation::host_clock().map_err(|error| native(&error))?;
+        let before = rocddi::host::clock::read().map_err(|error| native(&error))?;
         let counters = gpu
             .clock_counters()
             .map_err(|error| device.native_error_status(&error))?;
-        let after = rocddi::observation::host_clock().map_err(|error| native(&error))?;
+        let after = rocddi::host::clock::read().map_err(|error| native(&error))?;
         let clock = clock_info(counters.gpu_frequency)?;
         out.write(amdf_observation_clock_sample_t {
             clock,

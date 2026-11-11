@@ -10,6 +10,7 @@
 #include "capability_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "net_ib_cast_inspect.h"
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -502,7 +503,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                 TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
               } else {
                 WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
-                return res;
+                // No port of this device has been recorded yet, so the context is still ours to close.
+                (void)wrap_ibv_close_device(context);
+                ret = res;
+                goto fail;
               }
             }
           }
@@ -525,6 +529,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
               IbCastDevs[IbCastNDevs].speedFromQuery = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
+            if (IbCastAinicRoce) {
+              uint8_t raw = wrap_ionicdv_ctx_get_udma_count(context);
+              IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount = ncclIbCastNormalizeUdmaCount(raw);
+            }
             IbCastDevs[IbCastNDevs].pdRefs = 0;
             IbCastDevs[IbCastNDevs].pd = NULL;
             // for dev==1 (data direct device), pciPath is given by mlx5
@@ -535,7 +543,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                           ret, fail);
             if (dev == 1) {
               snprintf(IbCastDevs[IbCastNDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX));
+              NCCLCHECKGOTO(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX), ret, fail);
               strncpy(IbCastDevs[IbCastNDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
             }
@@ -548,7 +556,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].mrCache.capacity = 0;
             IbCastDevs[IbCastNDevs].mrCache.population = 0;
             IbCastDevs[IbCastNDevs].mrCache.slots = NULL;
-            NCCLCHECK(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats));
+            NCCLCHECKGOTO(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats), ret, fail);
 
             IbCastDevs[IbCastNDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
             IbCastDevs[IbCastNDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
@@ -561,11 +569,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             NCCLCHECKGOTO(IbCastGidInfoQuery(context, port_num, &portAttr, &IbCastDevs[IbCastNDevs].gidInfo), ret,
                           fail);
 
-            INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
-                 devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
+            INFO(NCCL_NET,
+                 "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d udmaCount=%u",
+                 d, devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,
                  NCCL_IB_LLSTR(portAttr.link_layer), ibCastProviderName[IbCastDevs[IbCastNDevs].ibProvider],
                  IbCastDevs[IbCastNDevs].speed, context, IbCastDevs[IbCastNDevs].pciPath, IbCastDevs[IbCastNDevs].ar,
-                 IbCastDevs[IbCastNDevs].oooRqSize);
+                 IbCastDevs[IbCastNDevs].oooRqSize,
+                 IbCastAinicRoce ? IbCastDevs[IbCastNDevs].capsProvider.ionic.udmaCount : 0u);
 
             IbCastAsyncThread = std::thread(IbCastAsyncThreadMain, IbCastDevs + IbCastNDevs);
             ncclSetThreadName(IbCastAsyncThread.native_handle(), "NCCL IbAsync %2d", IbCastNDevs);
@@ -678,7 +688,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
 
       int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
-      if (udmaPolicy < (int64_t)ncclIbCastUDMAPolicy::First || udmaPolicy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+      if (!ncclIbCastUDMAPolicyIsValid(udmaPolicy)) {
         WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
              (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
              (int)ncclIbCastUDMAPolicy::ChannelAffinity);
@@ -785,7 +795,7 @@ ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props) {
     props->ptrSupport |= NCCL_PTR_DMABUF; // GDR support via DMA-BUF
   }
   props->forceFlush = 0;
-  if (ibDev->capsProvider.mlx5.dataDirect) {
+  if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ibDev->capsProvider.mlx5.dataDirect) {
     props->forceFlush = 1;
   }
   props->latency = 0; // Not set

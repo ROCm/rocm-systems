@@ -250,21 +250,7 @@ pub fn ais_transfer(
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct KfdIpcMemoryHandle {
     /// Opaque words carried unchanged across the KFD IPC ABI.
-    words: [u32; 8],
-}
-
-impl KfdIpcMemoryHandle {
-    /// Wraps the eight words supplied by a KFD-compatible public API.
-    #[must_use]
-    pub const fn from_words(words: [u32; 8]) -> Self {
-        Self { words }
-    }
-
-    /// Returns the eight words carried by the KFD IPC contract.
-    #[must_use]
-    pub const fn words(self) -> [u32; 8] {
-        self.words
-    }
+    pub words: [u32; 8],
 }
 
 /// Location value accepted by Linux KFD SVM attribute operations.
@@ -399,12 +385,15 @@ pub fn import_virtual_memory(
     descriptor: BorrowedFd<'_>,
 ) -> Result<VirtualMemory, Error> {
     let driver = kfd_driver(session)?;
+    let process = crate::os::ProcessIdentity::capture()
+        .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
     let owner = crate::memory::storage::Shared::try_new_uninit()?;
     let inner = driver.import_virtual_memory(descriptor)?;
     Ok(VirtualMemory::new(
         crate::driver::VirtualMemoryState::from_linux_kfd(crate::memory::DriverVirtualMemory::new(
             driver.clone(),
             owner.write(inner),
+            process,
         )),
     ))
 }
@@ -414,7 +403,7 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
-    crate::driver::KfdDriver::export_virtual_memory(memory.inner.linux_kfd().driver_state())
+    crate::driver::KfdDriver::export_virtual_memory(memory.inner.linux_kfd().driver_state()?)
 }
 
 /// Reports whether the owning `UALink` accelerator is ready to export a fabric
@@ -423,7 +412,7 @@ pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
 /// # Errors
 /// Reports a lost or invalid native owner.
 pub fn fabric_virtual_memory_ready(memory: &VirtualMemory) -> Result<bool, Error> {
-    crate::driver::KfdDriver::fabric_virtual_memory_ready(memory.inner.linux_kfd().driver_state())
+    crate::driver::KfdDriver::fabric_virtual_memory_ready(memory.inner.linux_kfd().driver_state()?)
 }
 
 /// Exports owned virtual-memory backing as a globally unique `UALink` handle.
@@ -431,7 +420,7 @@ pub fn fabric_virtual_memory_ready(memory: &VirtualMemory) -> Result<bool, Error
 /// # Errors
 /// Reports accelerator readiness, native export, or owner failures.
 pub fn export_fabric_virtual_memory(memory: &VirtualMemory) -> Result<[u8; 16], Error> {
-    crate::driver::KfdDriver::export_fabric_virtual_memory(memory.inner.linux_kfd().driver_state())
+    crate::driver::KfdDriver::export_fabric_virtual_memory(memory.inner.linux_kfd().driver_state()?)
 }
 
 /// Imports a `UALink` handle through the selected activated GPU's render file.
@@ -443,12 +432,15 @@ pub fn import_fabric_virtual_memory(
     fabric: [u8; 16],
 ) -> Result<VirtualMemory, Error> {
     let (driver, state) = device.driver_state.linux_kfd()?;
+    let process = crate::os::ProcessIdentity::capture()
+        .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
     let owner = Shared::try_new_uninit()?;
     let inner = driver.import_fabric_virtual_memory(state, fabric)?;
     Ok(VirtualMemory::new(
         crate::driver::VirtualMemoryState::from_linux_kfd(crate::memory::DriverVirtualMemory::new(
             driver.clone(),
             owner.write(inner),
+            process,
         )),
     ))
 }

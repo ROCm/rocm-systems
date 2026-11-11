@@ -15,6 +15,7 @@
 /// split lo/hi VGPR-pair read path. Inputs seed NaN/±Inf/±0/denorm (floats) and
 /// signed/extreme boundaries (ints); float compares are bit-exact in both modes.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -92,7 +93,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vopc_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vopc_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -175,6 +178,8 @@ void check_all(uint64_t exec) {
   auto run_mode = [&](bool force_scalar, const VopcCase &c, uint64_t vcc_in) -> uint64_t {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     // 64-bit operands span a VGPR pair: vsrc1 = v2:v3, else vsrc1 = v1.

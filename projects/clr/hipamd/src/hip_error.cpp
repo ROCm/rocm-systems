@@ -187,6 +187,8 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorInvalidTexture";
     case hipErrorTbd:
       return "hipErrorTbd";
+    case hipErrorInvalidClusterSize:
+      return "hipErrorInvalidClusterSize";
     default:
       return "hipErrorUnknown";
   };

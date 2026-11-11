@@ -196,6 +196,8 @@ release(bool, DEBUG_HIP_MEM_POOL_VMHEAP, true,                                \
         "Enables virtual memory for memory pools")                            \
 release(bool, PAL_HIP_IPC_FLAG, true,                                         \
         "Enable interprocess flag for device allocation in PAL HIP")          \
+release(bool, OMNICACHE_ENABLE, true,                                         \
+        "Opt the process into OmniCache VRAM<->DRAM tiering.")                \
 release(uint, PAL_FORCE_ASIC_REVISION, 0,                                     \
         "Force a specific asic revision for all devices")                     \
 release(bool, PAL_EMBED_KERNEL_MD, false,                                     \
@@ -292,6 +294,10 @@ release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "(1=enabled (default), 0=non-temporal store path)")                   \
 release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
+release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
+        "Place graph signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_DEV_SIGNALS, false,                                   \
+        "Place queue signals in device memory (large BAR only)")              \
 
 namespace amd {
 

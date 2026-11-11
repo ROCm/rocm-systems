@@ -46,6 +46,18 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType)
   return ncclSuccess;
 }
 
+bool ncclGinTypeActive(struct ncclComm* comm, ncclGinType_t ginType) {
+  if (comm == nullptr || comm->sharedRes == nullptr) return false;
+  if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
+
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  if (ginState->finalized) return false;
+  for (int i = 0; i < ginState->numActiveBackends; i++) {
+    if (ginState->backends[i].ginType == ginType) return true;
+  }
+  return false;
+}
+
 static void ginProgressWriteLock(struct ncclGinState* ginState) {
   // This logic assumes just 1 writer. That's okay for this use case.
   ginState->writePending.store(true);
@@ -286,7 +298,16 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     // TODO: check if a shared devComm in the list could match our requirements.
   }
 
-  nContextsTotal = ROUNDUP(nContextsTotal, backend->ginCommCount);
+  if (reqs->ginContextCount == 0) {
+    // ginContextCount is a hint; 0 is the documented "use a default" value (see
+    // niinInit). An active GIN connection still needs at least one context, so
+    // fall back to one context per GIN connection.
+    INFO(NCCL_INIT,
+         "devCommCreate: ginContextCount=0 with an active GIN connection; "
+         "defaulting to one context per GIN connection");
+  }
+
+  nContextsTotal = ncclGinContextCount(nContextsTotal, backend->ginCommCount);
   devComm->ginContextCount = nContextsTotal;
   int nContextsPerComm = nContextsTotal / backend->ginCommCount;
   INFO(NCCL_INIT,
@@ -430,16 +451,20 @@ end:
       if (ginStateDevComm->ginCtx[commIdx]) backend->ncclGin->destroyContext(ginStateDevComm->ginCtx[commIdx]);
     }
     free(ginStateDevComm);
-    devComm->backendIndex = 0;
-    devComm->ginConnectionCount = 0;
-    devComm->ginContextCount = 0;
-    devComm->ginConnectionStride = 0;
-    devComm->ginConnectionStride_rcp32 = 0;
-    devComm->ginContextStride = 0;
-    memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
-    memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
+    ncclGinDevCommClearFields(devComm);
   }
   return ret;
+}
+
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->backendIndex = 0;
+  devComm->ginConnectionCount = 0;
+  devComm->ginContextCount = 0;
+  devComm->ginConnectionStride = 0;
+  devComm->ginConnectionStride_rcp32 = 0;
+  devComm->ginContextStride = 0;
+  memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
@@ -469,6 +494,10 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     }
 
     if (ncclSuccess == ginDevCommSetupWithBackend(comm, reqs, devComm, deviceCodeVersion, candidate)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      INFO(NCCL_INIT, "GIN: comm %p rank %d commId 0x%llx using backend %s type %d", comm, comm->rank,
+           (unsigned long long)comm->commHash, candidate->ncclGin->name, candidate->ginType);
+#endif
       return ncclSuccess;
     }
 

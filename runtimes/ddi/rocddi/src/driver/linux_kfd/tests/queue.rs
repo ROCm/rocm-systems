@@ -14,7 +14,9 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value).unwrap()
 }
-use crate::device::gpu::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
+use crate::device::gpu::queue::{
+    QueueProducerMode, QueueRingMemory, QueueTransportExpectation, SdmaEngineSelection,
+};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -71,6 +73,7 @@ fn native_node() -> sysfs::KfdNode {
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             compute_units: 4,
             maximum_wave_count_per_compute_unit: 32,
             maximum_scratch_wave_count_per_compute_unit: 32,
@@ -586,8 +589,14 @@ impl Fixture {
                             }
                             assert_eq!(header, expected);
                         } else if args.queue_type == 0 {
-                            let cache_line =
-                                u64::from(crate::cpu_cache::cache_line_size().unwrap());
+                            let cache_line = u64::from(
+                                crate::host::cache::CacheMaintenance::qualify(
+                                    crate::host::cache::CachePolicy::WriteBack,
+                                )
+                                .unwrap()
+                                .line_size_bytes()
+                                .unwrap(),
+                            );
                             assert_eq!(args.read_pointer, pointers.va + PM4_READ_OFFSET as u64);
                             assert_eq!(args.write_pointer, pointers.va + cache_line);
                             let mut read = [1; 8];
@@ -958,6 +967,7 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         desc.priority = priority;
         let mut queue = fixture.create(desc).unwrap();
         let info = queue.info().unwrap();
+        assert!(info.valid_for(QueueTransportExpectation::new(desc)));
         assert_eq!(info.sdma_engine_id, None);
         assert_eq!(info.index_unit_bytes, unit);
         assert_eq!(info.read_index_width, read_width);
@@ -1052,6 +1062,7 @@ fn targeted_sdma_local_ring_is_mapped_and_released() {
         ErrorKind::Unsupported
     );
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     native.public_memory_bytes = 1 << 30;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
@@ -1126,7 +1137,24 @@ fn instance_aql_ring_uses_coherent_gtt_when_kfd_rejects_userptr() {
             DriverContextLifetime::Session,
         )
         .unwrap();
-    assert_eq!(queue.info().unwrap().index_unit_bytes, 64);
+    let info = queue.info().unwrap();
+    assert_eq!(info.index_unit_bytes, 64);
+    let control = info.aql_control.expect("AQL queue has a control view");
+    assert_eq!(control.host_base() % control.alignment(), 0);
+    assert_eq!(control.writable_prefix_bytes(), size_of::<AqlQueueHeader>());
+    assert_eq!(control.byte_length(), size_of::<AqlControlLayout>());
+    assert_eq!(
+        control.read_index_host_address(),
+        info.read_index_host_address
+    );
+    assert_eq!(
+        control.write_index_host_address(),
+        info.write_index_host_address
+    );
+    assert_eq!(
+        control.properties_host_address(),
+        control.host_base() + offset_of!(AqlControlLayout, queue_properties)
+    );
     queue.destroy().unwrap();
     drop(queue);
     fixture.assert_released();
@@ -1175,6 +1203,7 @@ fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
     native.public_memory_bytes = os_memory::page_size().unwrap() as u64;
     assert!(Request::validate(&native, desc).is_ok());
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
         ErrorKind::Unsupported
@@ -1491,6 +1520,7 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
     }
     let mut native = native_node();
     native.queues.gfx_target = 120_002;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Other;
     assert!(Request::validate(&native, pm4).is_err());
     assert_eq!(fixture.state.lock().unwrap().next_handle, 0);
 }
