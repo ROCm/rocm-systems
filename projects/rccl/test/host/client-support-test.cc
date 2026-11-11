@@ -861,7 +861,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_StatusDiffers_HigherBitFirs
   auto* comm = FirstComm(buf);
   struct rasAuxComm a1 = {};
   a1.comm = comm;
-  a1.status = RAS_ACS_ABORT;  // highest bit -> smallest CLZ -> sorts first
+  a1.status = RAS_ACS_ABORT;  // highest status bit sorts first
   struct rasAuxComm a2 = {};
   a2.comm = comm;
   a2.status = RAS_ACS_INIT;
@@ -886,11 +886,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_NRanksDiffers_FewerRanksFir
   // Final tiebreak is comm->nRanks ASCENDING (most-missing-ranks first), unlike every key above
   // it. commNRanks is pinned equal (and decoupled from ranks.size()) so the two comms tie on every
   // higher-priority key and control actually reaches this branch, instead of the commNRanks
-  // comparison short-circuiting first. status is pinned to a real, non-zero value (not the
-  // zero-init default): COMPILER_CLZ(status) compares the two, and __builtin_clz(0) is undefined
-  // behavior -- status==0 is not a state rasClientRunComms ever produces for a comm with
-  // nRanks>0 anyway (its per-rank loop always sets at least one RAS_ACS_* bit), so a non-zero
-  // value here also matches what this comparator is actually ever called with in production.
+  // comparison short-circuiting first.
   std::vector<char> buf1 = BuildRasCollComms({MakeCommSpec(5, {RankSpec{0, 0}})});
   std::vector<char> buf2 = BuildRasCollComms({MakeCommSpec(5, {RankSpec{0, 0}, RankSpec{1, 1}})});
   struct rasAuxComm a1 = {};
@@ -908,7 +904,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_EveryKeyEqual_Zero) {
   auto* comm = FirstComm(buf);
   struct rasAuxComm a1 = {};
   a1.comm = comm;
-  a1.status = RAS_ACS_RUNNING;  // non-zero: avoids relying on __builtin_clz(0) being well-defined
+  a1.status = RAS_ACS_RUNNING;
   EXPECT_EQ(rasAuxCommsCompareRev(&a1, &a1), 0);
 }
 
