@@ -7,8 +7,6 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include <cstdint>
 
-#include <fmt/format.h>
-
 #include <concepts>
 #include <limits>
 #include <map>
@@ -61,8 +59,6 @@ public:
     : m_backend(std::move(backend))
     , m_socket_id(socket_id)
     , m_monitored_cpus(std::move(monitored_cpus))
-    , m_device_name(fmt::format("CPU {}", socket_id))
-    , m_product_name(fmt::format("CPU {}", socket_id))
     {
         initialize_supported_metrics();
     }
@@ -78,13 +74,6 @@ public:
     }
 
     [[nodiscard]] size_t get_index() const noexcept { return m_socket_id; }
-
-    [[nodiscard]] const std::string& get_name() const noexcept { return m_device_name; }
-
-    [[nodiscard]] const std::string& get_product_name() const noexcept
-    {
-        return m_product_name;
-    }
 
     [[nodiscard]] const std::string& get_vendor_name() const noexcept
     {
@@ -318,8 +307,6 @@ private:
     std::set<size_t>              m_monitored_cpus;
     enabled_metrics               m_supported_metrics{};
     std::map<size_t, cpu_jiffies> m_prev_jiffies;
-    std::string                   m_device_name;
-    std::string                   m_product_name;
     std::string                   m_vendor_name = "AMD";
 };
 

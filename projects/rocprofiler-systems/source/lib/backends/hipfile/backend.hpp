@@ -40,7 +40,7 @@ concept wrapper_policy =
  * zero-filled struct and @c num_gpus == 0 when no GPU has performed hipFile I/O, and
  * when @c HIPFILE_STATS_LEVEL disables recording. Both are an expected steady state
  * rather than a fault: the snapshot stays zero-filled, @c is_available() reports false,
- * and the collector suppresses the sample. A stored zero means that counter was
+ * and the poller suppresses the sample. A stored zero means that counter was
  * measured and did not increase, which is only true once some GPU is active.
  *
  * @tparam Wrapper Raw hipFile C-API policy (e.g. @c wrapper).
