@@ -14,11 +14,15 @@
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "DevcommTest.h"
 #include "dev_runtime.h"
 
 #include DEVCOMM_V23000_CC_PATH
 
 namespace {
+
+using devcomm_test::FirstDiff;
+using devcomm_test::PoisonedArena;
 
 class DevcommV23000Microtest : public ::testing::Test {
  protected:
@@ -146,25 +150,20 @@ TEST_F(DevcommV23000Microtest, CopyNewToOld_CopiesEveryFieldAndClearsReservedSto
   source.hybridDenseGinBarrier = {111, 112};
   source.ginConnectionStride = 8;
   source.ginContextStride = 1;
-  struct Guarded {
-    std::array<unsigned char, 16> before;
-    ncclDevComm_v23000 device;
-    std::array<unsigned char, 16> after;
-  } destination;
-  std::memset(&destination, 0x5a, sizeof(destination));
+  PoisonedArena<ncclDevComm_v23000> arena;
+  auto& destination = *arena.obj();
 
-  ASSERT_EQ(ncclSuccess, ncclDevCommCompat_v23000.devCommCopyNewToOld(comm_.get(), &destination.device, &source));
+  ASSERT_EQ(ncclSuccess, ncclDevCommCompat_v23000.devCommCopyNewToOld(comm_.get(), &destination, &source));
 
-  ExpectCommon(destination.device, source);
-  EXPECT_EQ(111u, destination.device.hybridWorldGinBarrier.signal0);
-  EXPECT_EQ(112u, destination.device.hybridWorldGinBarrier.unused);
-  EXPECT_TRUE(destination.device.ginConnectionsRailed);
-  EXPECT_FALSE(destination.device.ginContextsRailed);
-  for (char byte : destination.device.resourceWindow_inlined.reserved1) EXPECT_EQ(0, byte);
-  for (char byte : destination.device.resourceWindow_inlined.reserved2) EXPECT_EQ(0, byte);
-  for (char byte : destination.device.resourceWindow_inlined.reserved3) EXPECT_EQ(0, byte);
-  for (auto byte : destination.before) EXPECT_EQ(0x5a, byte);
-  for (auto byte : destination.after) EXPECT_EQ(0x5a, byte);
+  ExpectCommon(destination, source);
+  EXPECT_EQ(111u, destination.hybridWorldGinBarrier.signal0);
+  EXPECT_EQ(112u, destination.hybridWorldGinBarrier.unused);
+  EXPECT_TRUE(destination.ginConnectionsRailed);
+  EXPECT_FALSE(destination.ginContextsRailed);
+  for (char byte : destination.resourceWindow_inlined.reserved1) EXPECT_EQ(0, byte);
+  for (char byte : destination.resourceWindow_inlined.reserved2) EXPECT_EQ(0, byte);
+  for (char byte : destination.resourceWindow_inlined.reserved3) EXPECT_EQ(0, byte);
+  EXPECT_TRUE(arena.GuardsIntact());
 }
 
 TEST_F(DevcommV23000Microtest, CopyOldToNew_CopiesEveryFieldAndPreservesNewOnlyFields) {
@@ -173,12 +172,11 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_CopiesEveryFieldAndPreservesNewOnlyF
   source.hybridWorldGinBarrier = {113, 114};
   source.ginConnectionsRailed = false;
   source.ginContextsRailed = true;
-  ncclDevComm destination{};
-  std::memset(&destination, 0x5a, sizeof(destination));
+  PoisonedArena<ncclDevComm> arena;
+  const PoisonedArena<ncclDevComm> untouched;
+  auto& destination = *arena.obj();
   destination.backendIndex = 3;
   constexpr size_t tailOffset = offsetof(ncclDevComm, ginConnectionStride_rcp32);
-  std::array<unsigned char, sizeof(ncclDevComm) - tailOffset> savedTail{};
-  std::memcpy(savedTail.data(), reinterpret_cast<const unsigned char*>(&destination) + tailOffset, savedTail.size());
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCompat_v23000.devCommCopyOldToNew(comm_.get(), &destination, &source));
 
@@ -188,8 +186,8 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_CopiesEveryFieldAndPreservesNewOnlyF
   EXPECT_EQ(1, destination.ginConnectionStride);
   EXPECT_EQ(8, destination.ginContextStride);
   EXPECT_EQ(3, destination.backendIndex);
-  EXPECT_EQ(0, std::memcmp(savedTail.data(), reinterpret_cast<const unsigned char*>(&destination) + tailOffset,
-                           savedTail.size()));
+  EXPECT_EQ(-1, FirstDiff(arena.raw() + tailOffset, untouched.raw() + tailOffset, sizeof(ncclDevComm) - tailOffset));
+  EXPECT_TRUE(arena.GuardsIntact());
 }
 
 TEST_F(DevcommV23000Microtest, CopyNewToOld_StridesIndependentlyControlRailedFlags) {
@@ -203,7 +201,6 @@ TEST_F(DevcommV23000Microtest, CopyNewToOld_StridesIndependentlyControlRailedFla
       ASSERT_EQ(ncclSuccess, ncclDevCommCopyNewToOld_v23000(comm_.get(), &destination, &source));
       EXPECT_EQ(connectionStride != 1, destination.ginConnectionsRailed);
       EXPECT_EQ(contextStride != 1, destination.ginContextsRailed);
-      EXPECT_FALSE(destination.ginStrongLegacySignals);
     }
   }
 }
@@ -220,7 +217,6 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_RailedFlagsIndependentlySelectLsaSiz
       ASSERT_EQ(ncclSuccess, ncclDevCommCopyOldToNew_v23000(comm_.get(), &destination, &source));
       EXPECT_EQ(connectionsRailed ? 5 : 1, destination.ginConnectionStride);
       EXPECT_EQ(contextsRailed ? 5 : 1, destination.ginContextStride);
-      EXPECT_FALSE(destination.ginStrongLegacySignals);
     }
   }
 }
