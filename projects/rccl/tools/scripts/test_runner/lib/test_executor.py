@@ -1178,6 +1178,12 @@ class TestExecutor:
             # host-test profiles in place and credit their coverage to this one.
             for profile in Path(self.rawfiles_dir).rglob("*.profraw"):
                 profile.unlink()
+            # And the tracefile the host dispatcher writes beside them: a run that
+            # does not reach the host tests would otherwise report the last run's
+            # host coverage as its own.
+            stale = Path(self.rawfiles_dir, "host-coverage.lcov")
+            if stale.is_file():
+                stale.unlink()
 
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
@@ -3200,16 +3206,23 @@ class TestExecutor:
                 print(f"WARNING: --host-coverage-lcov not found: {path}")
                 return None
             return path
-        # Otherwise, where run_host_tests.sh writes it, under the two roots this
+        # Otherwise, where it is written, most recent first. When this runner drives
+        # the host binary itself, LLVM_PROFILE_FILE points at rawfiles_dir and the
+        # dispatcher writes the tracefile beside the profiles (host_test_dispatch.cc,
+        # coverageDirectory), so that copy is this run's; the build tree's is
+        # whatever an earlier run_host_tests.sh left there. Then the two roots this
         # runner already knows: the configured workdir, and the tree the build
         # directory sits in (<root>/build/<type>). Looked for by path, never searched.
-        roots = [self.paths.get("workdir", ""),
-                 os.path.dirname(os.path.dirname(getattr(self, "build_dir", "") or ""))]
-        for root in roots:
-            if not root:
-                continue
-            candidate = os.path.join(root, "test", "host", "build", "coverage",
-                                     "host-coverage.lcov")
+        candidates = []
+        rawfiles = getattr(self, "rawfiles_dir", "")
+        if rawfiles:
+            candidates.append(os.path.join(rawfiles, "host-coverage.lcov"))
+        for root in [self.paths.get("workdir", ""),
+                     os.path.dirname(os.path.dirname(getattr(self, "build_dir", "") or ""))]:
+            if root:
+                candidates.append(os.path.join(root, "test", "host", "build", "coverage",
+                                               "host-coverage.lcov"))
+        for candidate in candidates:
             if os.path.isfile(candidate):
                 return candidate
         return None

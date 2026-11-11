@@ -101,6 +101,25 @@ class CoverageReportingTest(unittest.TestCase):
                 str(rawfiles / "rccl_tests_%h_%p_%m.profraw"),
             )
 
+    def test_a_stale_host_tracefile_is_removed_with_the_stale_profiles(self):
+        # The dispatcher writes host-coverage.lcov beside the profiles. A run that
+        # does not reach the host tests leaves it untouched, so one left from the
+        # previous run would be unioned in and reported as this run's coverage.
+        with tempfile.TemporaryDirectory() as temp_dir, _without_rccl_path_env():
+            workspace = Path(temp_dir) / "coverage-output"
+            rawfiles = workspace / "logs" / "rawfiles"
+            rawfiles.mkdir(parents=True)
+            stale_tracefile = rawfiles / "host-coverage.lcov"
+            stale_tracefile.write_text("TN:stale\nend_of_record\n")
+
+            executor = _directories_executor(
+                temp_dir, ["--debug"], output=str(workspace)
+            )
+
+            executor.setup_directories()
+
+            self.assertFalse(stale_tracefile.exists())
+
     def test_report_only_preserves_existing_profiles(self):
         with tempfile.TemporaryDirectory() as temp_dir, _without_rccl_path_env():
             workspace = Path(temp_dir) / "coverage-output"
@@ -366,6 +385,22 @@ class CoverageReportingTest(unittest.TestCase):
 
             self.assertEqual(executor._host_coverage_tracefile(),
                              str(written / "host-coverage.lcov"))
+
+    def test_host_tracefile_is_taken_from_where_this_run_wrote_it(self):
+        # When this runner drives the host binary itself, LLVM_PROFILE_FILE points at
+        # rawfiles/ and the dispatcher writes the tracefile beside the profiles. The
+        # build tree's copy is some earlier run_host_tests.sh run's, so preferring it
+        # would report stale coverage as this run's.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+            stale = Path(executor.paths["workdir"], "test", "host", "build", "coverage")
+            stale.mkdir(parents=True)
+            (stale / "host-coverage.lcov").write_text("TN:stale\nend_of_record\n")
+            fresh = Path(executor.rawfiles_dir, "host-coverage.lcov")
+            fresh.write_text("TN:fresh\nend_of_record\n")
+
+            self.assertEqual(executor._host_coverage_tracefile(), str(fresh))
 
     def test_a_missing_explicit_tracefile_is_reported_not_guessed_around(self):
         # --host-coverage-lcov names a file the caller believes in; falling back to a
