@@ -173,10 +173,28 @@ the report shows its last 16 instructions.
 The instruction table follows the reporting wave's execution order. An event
 from another wave, or one older than the trace window, is shown separately.
 
-Each wave retains 256 instruction records. An excerpt longer than 128 records
-shows the first 64 and last 64. Synchronization and control-flow instructions
-remain visible in the middle. The number of elided instructions is shown at
-each gap. Older unrecorded history is identified separately.
+Each wave retains 256 instruction records. The `trace_context` plugin option
+controls how much of an excerpt is selected before eliding its middle. It
+defaults to 128 records, split equally between the start and end. It accepts
+integers from 2 to 256; an odd value gives the extra record to the end. Setting
+it to 256 disables middle elision. For example:
+
+```json
+{ "plugins": { "race": { "trace_context": 256 } } }
+```
+
+Synchronization and control-flow instructions remain visible in the middle,
+even when they exceed the configured context. A gap of one instruction is
+shown in full. The number of elided instructions is shown at each larger gap.
+The fallback for a conflict never executed by the reporting wave remains the
+last 16 instructions, or `trace_context` if smaller. Older unrecorded history
+is identified separately; this option does not increase history storage.
+
+Consecutive identical `s_nop` instructions in the selected context share a row
+showing their execution count and final PC. Runs stop at a changed encoding,
+nonsequential PC, elision gap, or marked instruction. This is display compaction:
+context and gap counts still count individual executed instructions. Waits,
+barriers, and control-flow instructions are always shown individually.
 
 The final summary counts emitted reports and observations suppressed by the
 existing PC-based deduplication. These counts are not the number of affected

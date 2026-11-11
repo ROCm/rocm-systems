@@ -48,6 +48,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -5183,6 +5184,42 @@ TEST(RaceDetectorPluginOutputTest, TraceRowsFollowExecutedBranches) {
   EXPECT_EQ(report.find("instructions elided"), std::string::npos);
 }
 
+TEST(RaceDetectorPluginOutputTest, ConfiguredContextAndNopCompactionReachRealReports) {
+  for (const auto &[config, omitted, nops] :
+       {std::tuple{"{}", 24, 63}, std::tuple{R"({"trace_context":8})", 144, 3},
+        std::tuple{R"({"trace_context":256})", 0, 150}}) {
+    SCOPED_TRACE(config);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    std::vector<uint32_t> code{S_NOP, load[0], load[1]};
+    code.insert(code.end(), 150, S_NOP);
+    code.push_back(read[0]);
+    code.push_back(S_ENDPGM);
+    f.run_kernel(code.data(), code.size());
+    const auto report = sink.str();
+    EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
+    EXPECT_NE(report.find("  ==>  0x12a4  v_mov_b32_e32 v9, v8"), std::string::npos) << report;
+    EXPECT_NE(report.find(std::format("s_nop 0  ; {} executions, through PC", nops)),
+              std::string::npos)
+        << report;
+    if (omitted) {
+      EXPECT_NE(report.find(std::format("... {} instructions elided ...", omitted)),
+                std::string::npos)
+          << report;
+    } else {
+      EXPECT_EQ(report.find("instructions elided"), std::string::npos) << report;
+    }
+  }
+}
+
 TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveReads) {
   for (bool complete : {false, true}) {
     SCOPED_TRACE(complete);
@@ -5310,6 +5347,7 @@ TEST(RaceDetectorPluginOutputTest, PreservesWaitsBarriersAndControlFlowDuringEli
     ASSERT_TRUE(decoded.succeeded());
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *decoded.value(), *wave);
     EXPECT_TRUE(state->trace[state->trace.size() - 1].preserve_in_trace());
+    EXPECT_FALSE(state->trace[state->trace.size() - 1].is_nop());
     wave->pc += 4;
   }
   const auto nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
@@ -5317,6 +5355,7 @@ TEST(RaceDetectorPluginOutputTest, PreservesWaitsBarriersAndControlFlowDuringEli
   ASSERT_TRUE(nop.succeeded());
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
   EXPECT_FALSE(state->trace[state->trace.size() - 1].preserve_in_trace());
+  EXPECT_TRUE(state->trace[state->trace.size() - 1].is_nop());
 }
 
 TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {

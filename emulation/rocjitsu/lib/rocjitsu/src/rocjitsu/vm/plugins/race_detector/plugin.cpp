@@ -15,6 +15,8 @@
 #include "util/log.h"
 #include "util/result.h"
 
+#include "flatbuffers/idl.h"
+
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
@@ -56,7 +58,7 @@ util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Inst
       inst.is_waitcnt() || inst.has_embedded_memory_wait() || inst.is_barrier() ||
       inst.writes_pc();
   return InstructionSnapshot{pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)),
-                             preserve_in_trace};
+                             preserve_in_trace, inst.mnemonic() == "s_nop"};
 }
 
 // Before-execute records the instruction before its register or memory hooks.
@@ -169,9 +171,11 @@ util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDete
                            detector.events().waveId(event_id).value, -1};
 }
 
-util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
+util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistoryRows> &trace,
                         const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read) {
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
+                        size_t context_rows) {
+  assert(context_rows >= 2 && context_rows <= kTraceHistoryRows);
   const size_t n = trace.size();
   std::optional<size_t> read_index;
   for (size_t i = 0; i < n; ++i)
@@ -193,17 +197,17 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
   } else if (conflict) {
     // Waves usually run the same code, so start where this wave last ran the
     // conflicting instruction; that shows its own path to the access.
-    first = last - std::min(last, kOtherWaveContextRows);
+    first = last - std::min({last, kOtherWaveContextRows, context_rows});
     for (size_t i = 0; i < last; ++i)
       if (trace[i] == conflict->instruction)
         first = i;
   }
   const size_t span = last > first ? last - first : 0;
   std::vector<bool> shown(n);
-  constexpr size_t head = kTraceContextRows / 2;
-  constexpr size_t tail = kTraceContextRows - head;
+  const size_t head = context_rows / 2;
+  const size_t tail = context_rows - head;
   for (size_t i = first; i < last; ++i)
-    shown[i] = span <= kTraceContextRows || i - first < head || last - i <= tail ||
+    shown[i] = span <= context_rows || i - first < head || last - i <= tail ||
                trace[i].preserve_in_trace();
   // An elision notice takes a line, so hiding a single instruction saves nothing.
   for (size_t i = first; i < last; ++i)
@@ -247,7 +251,13 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
     } else
       oss << "       Execution trace below is for wave " << read.wave << ".\n";
   }
-  auto emit = [&](size_t i) -> util::Result {
+  auto is_marked = [&](size_t i) {
+    return (conflict_index && i == *conflict_index) || (read_index && i == *read_index);
+  };
+  auto can_compact = [&](size_t i) {
+    return trace[i].is_nop() && !trace[i].preserve_in_trace() && !is_marked(i);
+  };
+  auto emit = [&](size_t i, size_t end) -> util::Result {
     const bool is_conflict = conflict_index && i == *conflict_index;
     const bool is_read = read_index && i == *read_index;
     const InstructionSnapshot &instruction = trace[i];
@@ -260,13 +270,24 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
       annotation(*conflict);
     if (is_read)
       annotation(read);
+    if (end > i + 1)
+      oss << "  ; " << end - i << " executions, through PC "
+          << std::format("{:#x}", trace[end - 1].pc());
     oss << '\n';
     return util::Result::success();
   };
   for (size_t i = first; i < last;) {
     if (shown[i]) {
-      if (emit(i++).failed())
+      size_t end = i + 1;
+      if (can_compact(i))
+        while (end < last && shown[end] && can_compact(end) &&
+               trace[end].pc() > trace[end - 1].pc() &&
+               trace[end].pc() - trace[end - 1].pc() == trace[end - 1].encoding().size_bytes() &&
+               std::ranges::equal(trace[i].encoding(), trace[end].encoding()))
+          ++end;
+      if (emit(i, end).failed())
         return util::Result::failure();
+      i = end;
     } else {
       const size_t gap = i;
       while (i < last && !shown[i])
@@ -382,7 +403,25 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json) : ExecutionPlugin("race") {
+  if (!config_json || !*config_json)
+    return;
+  flexbuffers::Builder builder;
+  flatbuffers::Parser parser;
+  if (!parser.ParseFlexBuffer(config_json, nullptr, &builder))
+    throw std::invalid_argument("Race plugin configuration is not valid JSON");
+  const auto root = flexbuffers::GetRoot(builder.GetBuffer());
+  if (!root.IsMap())
+    throw std::invalid_argument("Race plugin configuration must be an object");
+  const auto context = root.AsMap()["trace_context"];
+  if (context.IsNull())
+    return;
+  if (!context.IsIntOrUint() || (context.IsInt() && context.AsInt64() < 2) ||
+      context.AsUInt64() < 2 || context.AsUInt64() > kTraceHistoryRows)
+    throw std::invalid_argument(std::format(
+        "Race plugin 'trace_context' must be an integer between 2 and {}", kTraceHistoryRows));
+  trace_context_ = static_cast<size_t>(context.AsUInt64());
+}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
@@ -464,7 +503,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
           return wf->disassemble_instruction(instruction.encoding(), instruction.pc(),
                                              diagnostic.emitter());
         },
-        conflict, access_mark);
+        conflict, access_mark, trace_context_);
     if (trace.failed()) {
       report_plugin_failure(*wf, "race detector could not disassemble the instruction trace");
       std::lock_guard<std::mutex> lock(report_mutex_);

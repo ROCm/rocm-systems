@@ -54,7 +54,8 @@ private:
 /// Returns failure if the detector no longer holds the conflicting event.
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
-/// Maximum trace rows printed before formatTrace elides the middle of a report.
+inline constexpr size_t kTraceHistoryRows = 256;
+/// Default instruction context before formatTrace elides the middle of a report.
 inline constexpr size_t kTraceContextRows = 128;
 
 /// Trace rows printed for another wave's conflict when the reporting wave never
@@ -66,15 +67,18 @@ inline constexpr size_t kOtherWaveContextRows = 16;
 /// producer executions are not distinguished. A conflict from another wave, or
 /// one no longer retained, is printed separately before the trace. For another
 /// wave's conflict, the trace starts at the reporting wave's latest execution of
-/// the same instruction, or shows the last kOtherWaveContextRows rows when it has
-/// none. A span longer than kTraceContextRows keeps its first and last rows,
-/// synchronization and control-flow rows.
+/// the same instruction, or shows the last min(kOtherWaveContextRows, context_rows)
+/// instructions when it has none. A span longer than context_rows keeps its
+/// first and last rows, synchronization and control-flow rows. Context counts executed instructions
+/// before consecutive identical unmarked s_nops are compacted for display.
 /// Disassemble only printed rows. Returns failure when `disassemble` fails.
 /// The callback must not throw.
 /// A same-wave conflict must not follow the current access in the trace.
-util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
+/// context_rows must be between 2 and kTraceHistoryRows, inclusive.
+util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistoryRows> &trace,
                         const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read);
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
+                        size_t context_rows = kTraceContextRows);
 
 /// Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and
@@ -89,7 +93,7 @@ struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
-  RingBuffer<InstructionSnapshot, 256> trace;
+  RingBuffer<InstructionSnapshot, kTraceHistoryRows> trace;
   WaveRaceState *race_state = nullptr;
   struct LdsOperandRead {
     uint32_t address;
@@ -103,8 +107,9 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
-  /// @param config_json Plugin configuration object as a JSON string (unused;
-  ///        this plugin takes no configuration). May be null.
+  /// @param config_json Plugin JSON with an optional integer trace_context in
+  ///        [2, kTraceHistoryRows]. Null or empty uses the default context.
+  /// @throws std::invalid_argument for malformed configuration.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
@@ -168,6 +173,8 @@ public:
   size_t retainedWorkgroupCount() const;
 
 private:
+  size_t trace_context_ = kTraceContextRows;
+
   struct WorkgroupKey {
     uint32_t dispatch_id;
     uint32_t workgroup_id;
