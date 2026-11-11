@@ -9,6 +9,7 @@
 /// registers, lanes, and bytes that the instruction architecturally accesses.
 /// Machine-level preservation below RegisterAccess must not add callbacks.
 
+#include "compute_unit_test_util.h"
 #include "execution_plugin_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -52,11 +53,21 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 
+#include <gtest/gtest.h>
+
+#include <array>
 #include <bit>
 #include <cfenv>
+#include <cstdint>
 #include <format>
+#include <functional>
 #include <map>
+#include <memory>
 #include <set>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -92,7 +103,9 @@ struct Wave32PluginFixture {
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
     cfg.memory_wait_diagnostics = wait_checks;
-    cu = amdgpu::ComputeUnitCore::create("wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
+    rocjitsu::test::initialize_compute_unit(cu, "wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
+    if (!cu)
+      return;
   }
 
   OrderingPlugin *attach_ordering_plugin() {
@@ -162,6 +175,7 @@ TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndException
   for (const auto &[arch, opcode] : targets) {
     SCOPED_TRACE(static_cast<int>(arch));
     Wave32PluginFixture f(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *plugin = f.attach_ordering_plugin();
     auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
     ASSERT_NE(wf, nullptr);
@@ -404,6 +418,7 @@ TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
 TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
   ForceScalarOverride force_simd(false);
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -457,6 +472,7 @@ TEST(ExecutionPluginTest, Dpp8FetchInactiveControlsSourceObservation) {
 // write forwarding for both physical destination dwords.
 TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHalves) {
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -506,6 +522,73 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
   }
 }
 
+TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnExtraRead) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride force_simd(false);
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t exec = 0x5;
+  wf->set_exec(exec);
+  const uint32_t base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  for (auto opcode : {rdna2::kVFmaF16Vop3, rdna2::kVDivFixupF16Vop3}) {
+    for (uint8_t dst : {0, 3}) {
+      for (bool high : {false, true}) {
+        SCOPED_TRACE(std::format("opcode={} dst={} high={}", opcode, dst, high));
+        for (unsigned lane = 0; lane < 3; ++lane) {
+          f.cu->write_vgpr(base, lane, 0xabcd4000); // 2
+          f.cu->write_vgpr(base + 1, lane, 0x4200); // 3
+          f.cu->write_vgpr(base + 2, lane, 0x4600); // 6
+          f.cu->write_vgpr(base + 3, lane, 0xcece5555);
+        }
+        const auto words = rdna2::build_vop3(opcode, {.vdst = dst,
+                                                      .op_sel = static_cast<uint8_t>(high ? 8 : 0),
+                                                      .src0 = 256,
+                                                      .src1 = 257,
+                                                      .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        plugin->events.clear();
+        amdgpu::ScopedSimdFastPathTracker tracker;
+        ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
+        const bool fma = opcode == rdna2::kVFmaF16Vop3;
+        EXPECT_TRUE(tracker.only_tracked_path_executed(
+            fma ? amdgpu::SimdFastPath::VOP3_FMA_FP16 : amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+
+        std::array<uint64_t, 3> read_lanes{};
+        for (const auto &read : vgpr_read_events(*plugin)) {
+          ASSERT_GE(read.physical_reg, base);
+          const uint32_t source = read.physical_reg - base;
+          ASSERT_LT(source, read_lanes.size());
+          EXPECT_EQ(read_lanes[source] & read.lane_mask, 0u);
+          read_lanes[source] |= read.lane_mask;
+        }
+        EXPECT_EQ(read_lanes, (std::array{exec, exec, exec}));
+        const auto writes = vgpr_write_events(*plugin);
+        ASSERT_EQ(writes.size(), 1u);
+        EXPECT_EQ(writes[0].physical_reg, base + dst);
+        EXPECT_EQ(writes[0].lane_mask, exec);
+        EXPECT_EQ(writes[0].byte_mask,
+                  high ? ExecutionPlugin::kHighHalfByteMask : ExecutionPlugin::kLowHalfByteMask);
+
+        const uint32_t old = dst == 0 ? 0xabcd4000u : 0xcece5555u;
+        const uint32_t result = fma ? 0x4a00u : 0x4000u;
+        const uint32_t expected =
+            high ? (result << 16) | (old & 0xffffu) : (old & 0xffff0000u) | result;
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 0), expected);
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 1), old);
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 2), expected);
+      }
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -513,6 +596,7 @@ TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) 
   } else {
     ForceScalarOverride force_simd(false);
     Wave32PluginFixture f;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *plugin = f.attach_ordering_plugin();
     auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
@@ -546,6 +630,7 @@ TEST(ExecutionPluginTest, DppTrue16SourceReportsSelectedHalf) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -583,6 +668,7 @@ TEST(ExecutionPluginTest, Rdna4DppTrue16SourceReportsOpSelHalf) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&rdna4::execution_backend()};
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu.get();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -728,8 +814,9 @@ TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-        amdgpu::ComputeUnitCore::create("sdwa_fp8", config, &memory, &cache);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "sdwa_fp8", config, &memory, &cache));
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
     ASSERT_NE(wave, nullptr);
@@ -1608,6 +1695,7 @@ TEST(ExecutionPluginTest, VopdIntegerSimdRejectsUnsupportedWaveAndModifiers) {
   EXPECT_FALSE(try_pair(*wide, slot, slot));
 
   Wave32PluginFixture wave32;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wf = wave32.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0);
@@ -1669,6 +1757,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
       SCOPED_TRACE(force_scalar);
       ForceScalarOverride execution_mode(force_scalar);
       Wave32PluginFixture f(arch);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       auto *plugin = f.attach_ordering_plugin();
       auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
       ASSERT_NE(wf, nullptr);
@@ -1780,6 +1869,7 @@ TEST(ExecutionPluginTest, VopdIntegerPairsPreserveMasksAliasesAndObservation) {
 
 TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPluginReplacement) {
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_CDNA5, amdgpu::MemoryWaitDiagnostics::Off);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -1794,7 +1884,7 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
     EXPECT_EQ(read.lane(0, 0), value);
     EXPECT_EQ(read.lane(1, 0), value + 1);
     const uint64_t pair = uint64_t{value} | (uint64_t{value + 1} << 32);
-    regs.write_sgpr64(sbase, pair);
+    ASSERT_TRUE(regs.write_sgpr64(sbase, pair).succeeded());
     EXPECT_EQ(regs.read_sgpr64(sbase), pair);
   };
   access(3);
@@ -1838,6 +1928,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
     unsigned snapshots = 0;
   };
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<SnapshotPlugin>();
   auto *snapshots = plugin.get();
@@ -1870,7 +1961,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
       (void)regs.read_sgpr(sbase);
       break;
     case 1:
-      regs.write_sgpr(sbase, 7);
+      ASSERT_TRUE(regs.write_sgpr(sbase, 7).succeeded());
       break;
     case 2:
       (void)regs.read_vgpr_region(vbase, 1, 1).lane(0, 0);
@@ -1900,6 +1991,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
 
 TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
   ASSERT_NE(wf, nullptr);
   const amdgpu::RegisterAccess regs(*wf);
@@ -1933,13 +2025,8 @@ public:
   }
 };
 
-// F32 MODE-aware arithmetic takes one guest FP environment for the instruction,
-// after the register views exist, so register-access callbacks see the caller's
-// rounding, exception flags and trap masks on SIMD and scalar paths alike. The
-// arithmetic helper leaves the caller's flags unchanged; V_MUL_F32's
-// instruction-level classifier is an exception, noted on its case below. MODE
-// 0xF1 rounds toward +infinity, unlike the host; 0xF0 matches it. The tracker
-// asserts the SIMD run really took the SIMD route rather than falling back.
+// Guest rounding is independent of the default host controls seen by register
+// observers. rj-arith may raise sticky flags while leaving those controls intact.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   struct Case {
     const char *name;
@@ -1948,15 +2035,11 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
     uint32_t src1;
     uint32_t round_up;
     uint32_t nearest;
-    bool preserves_flags;
   };
-  // V_MUL_F32's TRAPSTS classifier (classify_mul_f32) multiplies on the host
-  // outside any ScopedEnvironment before either path runs, so its inexact
-  // product reaches the caller's flags; callbacks still see the caller's state.
   constexpr std::array<Case, 3> cases = {{
-      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u, 0x3f800000u, true},
-      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u, 0x3f800000u, true},
-      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u, 0x3f800002u, false},
+      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u, 0x3f800000u},
+      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u, 0x3f800000u},
+      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u, 0x3f800002u},
   }};
   for (const Case &test : cases) {
     for (const uint32_t mode : {0xF1u, 0xF0u}) {
@@ -1964,6 +2047,7 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         SCOPED_TRACE(std::format("{} mode={:#x} force_scalar={}", test.name, mode, force_scalar));
         ForceScalarOverride execution_mode(force_scalar);
         Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+        ASSERT_FALSE(::testing::Test::HasFatalFailure());
         auto plugin_owner = std::make_unique<RoundingObserverPlugin>();
         auto *plugin = plugin_owner.get();
         f.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1986,8 +2070,8 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         ASSERT_NE(inst, nullptr);
         ASSERT_EQ(std::fegetround(), FE_TONEAREST);
 #if RJ_HOST_ARCH_X86
-        // A pre-existing underflow flag must stay visible to callbacks, and the
-        // inexact results here must not add the inexact flag.
+        // Default host controls must stay visible to callbacks; arithmetic may
+        // add sticky flags.
         const uint32_t saved_mxcsr = _mm_getcsr();
         _mm_setcsr((saved_mxcsr & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
         const uint32_t host_mxcsr = _mm_getcsr();
@@ -1998,23 +2082,16 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
         {
           amdgpu::ScopedSimdFastPathTracker tracker;
           succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
-          // Without this the observer gate could return and both runs would go
-          // scalar while every other assertion still held. Builds without
-          // <experimental/simd> have no fast path to take.
-          if (force_scalar || !util::has_stdx_simd)
-            EXPECT_TRUE(tracker.no_tracked_path_executed());
-          else
-            EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP2_BINARY));
+          // rj-arith does not use the legacy SIMD tracker.
+          EXPECT_TRUE(tracker.no_tracked_path_executed());
         }
 #if RJ_HOST_ARCH_X86
         const uint32_t after_mxcsr = _mm_getcsr();
         _mm_setcsr(saved_mxcsr);
-        if (test.preserves_flags) {
-          EXPECT_EQ(after_mxcsr, host_mxcsr);
-        }
+        EXPECT_EQ(after_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
         ASSERT_FALSE(plugin->read_mxcsrs.empty());
         for (const uint32_t seen : plugin->read_mxcsrs)
-          EXPECT_EQ(test.preserves_flags ? seen : seen & ~_MM_EXCEPT_INEXACT, host_mxcsr);
+          EXPECT_EQ(seen & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
 #endif
         ASSERT_TRUE(succeeded);
         EXPECT_EQ(std::fegetround(), FE_TONEAREST);
@@ -2030,9 +2107,8 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 }
 
 #if RJ_HOST_ARCH_X86
-// VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
-// detect a scope opened before operand acquisition. A sticky underflow flag is
-// cleared inside the scope and must remain visible to reads from both slots.
+// Both VOPD slots expose unchanged default host controls to register observers.
+// Migrated RDNA arithmetic may add sticky flags; legacy CDNA retains isolation.
 TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
   struct Case {
     rj_code_arch_t arch;
@@ -2059,11 +2135,15 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
+    const bool uses_arith =
+        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
           std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
       ForceScalarOverride execution_mode(force_scalar);
       Wave32PluginFixture fixture(test.arch);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       auto observer_owner = std::make_unique<RoundingObserverPlugin>();
       auto *observer = observer_owner.get();
       fixture.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -2100,8 +2180,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
               fixture.cu->execute_instruction(instruction.get(), *wave).succeeded();
           const uint32_t restored_mxcsr = _mm_getcsr();
           ASSERT_TRUE(succeeded);
-          EXPECT_EQ(restored_mxcsr, host_mxcsr);
-          if (force_scalar || !util::has_stdx_simd)
+          EXPECT_EQ(restored_mxcsr & observed_bits, host_mxcsr & observed_bits);
+          EXPECT_NE(restored_mxcsr & _MM_EXCEPT_UNDERFLOW, 0u);
+          if (uses_arith || force_scalar || !util::has_stdx_simd)
             EXPECT_TRUE(tracker.no_tracked_path_executed());
           else
             EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
@@ -2111,8 +2192,10 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
           EXPECT_EQ(
               std::set<uint32_t>(observer->read_registers.begin(), observer->read_registers.end()),
               expected_reads);
-          for (uint32_t seen : observer->read_mxcsrs)
-            EXPECT_EQ(seen, host_mxcsr);
+          for (uint32_t seen : observer->read_mxcsrs) {
+            EXPECT_EQ(seen & observed_bits, host_mxcsr & observed_bits);
+            EXPECT_NE(seen & _MM_EXCEPT_UNDERFLOW, 0u);
+          }
           for (int seen : observer->read_roundings)
             EXPECT_EQ(seen, FE_TONEAREST);
         }
@@ -2190,7 +2273,7 @@ TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) 
   EXPECT_TRUE(destination_reads().empty());
 }
 
-TEST(ExecutionPluginTest, Vop3DppSecondaryMaskObservesOnlyRequiredOldDestinationRead) {
+TEST(ExecutionPluginTest, Vop3DppCarryWritesScalarDestinationWithoutReadingIt) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
@@ -2239,23 +2322,14 @@ TEST(ExecutionPluginTest, Vop3DppSecondaryMaskObservesOnlyRequiredOldDestination
     SCOPED_TRACE(force_scalar ? "scalar" : "SIMD");
     ForceScalarOverride force_scalar_scope(force_scalar);
 
-    // BOUND_CTRL=0 preserves the invalid lane's old carry bit, so exactly one
-    // architectural read of the old scalar destination is required.
-    raw.bound_ctrl = 0;
-    f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
-    cdna5::VAddCoCiU32Vop3SdstEnc preserve(reinterpret_cast<const cdna5::MachineInst *>(&raw));
-    plugin->events.clear();
-    preserve.execute_impl(*wf);
-    EXPECT_EQ(destination_read_count(), 1);
-
-    // BOUND_CTRL=1 supplies zero for the invalid source. No old-destination
-    // merge or read is needed; the raw result is committed directly.
-    raw.bound_ctrl = 1;
-    f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
-    cdna5::VAddCoCiU32Vop3SdstEnc zero_fill(reinterpret_cast<const cdna5::MachineInst *>(&raw));
-    plugin->events.clear();
-    zero_fill.execute_impl(*wf);
-    EXPECT_EQ(destination_read_count(), 0);
+    for (uint32_t bound_ctrl : {0u, 1u}) {
+      raw.bound_ctrl = bound_ctrl;
+      f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
+      cdna5::VAddCoCiU32Vop3SdstEnc add(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+      plugin->events.clear();
+      add.execute_impl(*wf);
+      EXPECT_EQ(destination_read_count(), 0);
+    }
   }
 }
 
@@ -2534,6 +2608,7 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
 
 TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -2542,9 +2617,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       amdgpu::ACC_FROM_VGPR, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32, amdgpu::ACC_FROM_VGPR,
+      wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
@@ -2555,6 +2630,7 @@ TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
 
 TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
   Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
   auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -2563,9 +2639,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       /*const_acc=*/0, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32,
+      /*const_acc=*/0, wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S0 + 4, S0 + 5, S0 + 6, S0 + 7, S1 + 0,
@@ -2584,6 +2660,7 @@ TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
 
     ForceScalarOverride force_simd(false);
     Wave32PluginFixture f;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu.get();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2614,6 +2691,7 @@ TEST(ExecutionPluginTest, WmmaF16NativeWidthPreservesObservedReadWriteOrder) {
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
   for (uint32_t input : {0x3c00'3c00u, 0x7e11'7c33u}) {
     Wave32PluginFixture f;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *cu = f.cu.get();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
@@ -2655,6 +2733,7 @@ TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
 
     ForceScalarOverride force_simd(false);
     Wave32PluginFixture f;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu.get();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2725,6 +2804,195 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAccumulators) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride force_simd(false);
+  struct Case {
+    const char *name;
+    uint32_t source_regs, result_regs;
+    void (*run)(ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+  };
+  const Case cases[] = {
+      {"f64", 2, 8,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_f64(cu, 16, 16, 4, 1, d, a, b, c, acc);
+       }},
+      {"fp8 chunked", 8, 4,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_f32<16, 16, 128, 1>(cu, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
+       }},
+      {"i8", 4, 4,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_i32_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
+       }},
+  };
+  constexpr uint32_t A = 3, B = 19, C = 35;
+  for (const Case &test : cases)
+    for (uint32_t acc : {ACC_FROM_VGPR, 0u})
+      for (uint32_t destination : {67u, A, B, C})
+        for (uint64_t lane_mask : {~uint64_t{0}, kPartialExecMask}) {
+          SCOPED_TRACE(test.name);
+          SCOPED_TRACE(acc);
+          SCOPED_TRACE(destination);
+          SCOPED_TRACE(lane_mask);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+          auto *plugin = f.attach_ordering_plugin();
+          auto *cu = f.cu();
+          auto *wf = cu->dispatch_wf(0, 0, 104, 256);
+          ASSERT_NE(wf, nullptr);
+          const uint32_t vb = wf->vgpr_alloc().base;
+          for (uint32_t reg = 0; reg < 80; ++reg)
+            for (uint32_t lane = 0; lane < 64; ++lane)
+              cu->write_vgpr(vb + reg, lane, 0x3f800000u);
+          wf->set_exec(lane_mask);
+          plugin->events.clear();
+          test.run(*cu, vb + destination, vb + A, vb + B, vb + C, acc);
+          std::vector<uint32_t> read_regs;
+          for (uint32_t reg = 0; reg < test.source_regs; ++reg) {
+            read_regs.push_back(A + reg);
+            read_regs.push_back(B + reg);
+          }
+          if (acc == ACC_FROM_VGPR)
+            for (uint32_t reg = 0; reg < test.result_regs; ++reg)
+              read_regs.push_back(C + reg);
+          expect_vgpr_read_set(vgpr_read_events(*plugin), vb, read_regs, ~uint64_t{0});
+          const auto writes = vgpr_write_events(*plugin);
+          ASSERT_EQ(writes.size(), test.result_regs);
+          for (uint32_t reg = 0; reg < test.result_regs; ++reg) {
+            EXPECT_EQ(writes[reg].physical_reg, vb + destination + reg);
+            EXPECT_EQ(writes[reg].lane_mask, ~uint64_t{0});
+            EXPECT_EQ(writes[reg].byte_mask, ExecutionPlugin::kFullByteMask);
+          }
+          bool saw_write = false;
+          for (const auto &event : plugin->events) {
+            if (event.kind == HookEvent::WRITE_VGPR)
+              saw_write = true;
+            if (event.kind == HookEvent::READ_VGPR) {
+              EXPECT_FALSE(saw_write);
+            }
+          }
+        }
+}
+
+// Register observers, such as the race detector, must see the same (register, lane) reads and
+// writes from the snapshot path as from the per-element forced-scalar path, including when
+// cbsz/abid or blgp broadcast part of a register. The snapshot path writes each destination
+// register once.
+TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride restore(util::force_scalar());
+  constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
+  using Run = std::function<void(ComputeUnitCore &, uint32_t)>;
+  struct Case {
+    std::string name;
+    Run run;
+    bool uses_snapshot = true;
+  };
+  std::vector<Case> cases;
+  for (uint32_t acc : {ACC_FROM_VGPR, 0u}) {
+    for (const auto &[m, k, batch] : {std::tuple{16u, 4u, 1u}, std::tuple{4u, 4u, 4u}})
+      cases.push_back({std::format("f64 {}x{}x{}x{} acc={}", m, m, k, batch, acc),
+                       [=](ComputeUnitCore &cu, uint32_t vb) {
+                         exec_f64(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc, 7);
+                       }});
+    for (const auto &[m, k, batch] :
+         {std::tuple{16u, 64u, 1u}, std::tuple{32u, 32u, 1u}, std::tuple{32u, 16u, 1u},
+          std::tuple{16u, 32u, 1u}, std::tuple{16u, 16u, 1u}, std::tuple{32u, 8u, 1u},
+          std::tuple{32u, 4u, 2u}, std::tuple{16u, 4u, 4u}, std::tuple{4u, 4u, 16u}})
+      for (uint32_t cbsz = 0; (1u << cbsz) <= batch; ++cbsz)
+        for (uint32_t blgp = 0; blgp < 8; ++blgp)
+          cases.push_back({std::format("i8 {}x{}x{}x{} acc={} cbsz={} blgp={}", m, m, k, batch, acc,
+                                       cbsz, blgp),
+                           [=](ComputeUnitCore &cu, uint32_t vb) {
+                             exec_i32_i8(cu, m, m, k, batch, vb + D, vb + A, vb + B, vb + C, acc,
+                                         cbsz, (1u << cbsz) - 1, blgp);
+                           },
+                           // 32 result registers exceed the snapshot.
+                           /*uses_snapshot=*/batch != 2});
+    for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}})
+      for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz)
+        for (uint32_t blgp = 0; blgp < 8; ++blgp)
+          cases.push_back(
+              {std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
+               [=](ComputeUnitCore &cu, uint32_t vb) {
+                 if (bits == 32)
+                   exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
+                                         extract_f32, acc, cbsz, 1, blgp);
+                 else if (k == 2)
+                   exec_f32<4, 4, 2, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
+                                         extract_bf16, acc, cbsz, 1, blgp);
+                 else
+                   exec_f32<4, 4, 4, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
+                                         extract_bf16, acc, cbsz, 1, blgp);
+               }});
+    // Four blocks of 4x4 outputs use only lanes 0-15 of each result register.
+    cases.push_back({std::format("f32 4x4x4x4 acc={}", acc),
+                     [=](ComputeUnitCore &cu, uint32_t vb) {
+                       exec_f32<4, 4, 4, 4>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
+                                            extract_f32, acc);
+                     },
+                     /*uses_snapshot=*/false});
+    for (uint32_t m : {16u, 32u})
+      for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt)
+        for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt)
+          cases.push_back(
+              {std::format("f8f6f4 {}x{} acc={} a={} b={}", m, m, acc, a_fmt, b_fmt),
+               [=](ComputeUnitCore &cu, uint32_t vb) {
+                 ASSERT_TRUE(dispatch_matrix_fmt_pair(
+                     a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+                       if (m == 16)
+                         exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
+                                                        vb + C, ea, eb, acc);
+                       else
+                         exec_f32_mixed<32, 32, 64, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
+                                                       vb + C, ea, eb, acc);
+                     }));
+               }});
+  }
+  using LaneSets = std::map<uint32_t, uint64_t>;
+  using Counts = std::map<uint32_t, uint32_t>;
+  auto observe = [](const Run &run, bool force_scalar, LaneSets &reads, LaneSets &writes,
+                    Counts &write_counts) {
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+    auto *wf = f.cu()->dispatch_wf(0, 0, 104, 256);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vb = wf->vgpr_alloc().base;
+    auto *plugin = f.attach_ordering_plugin();
+    util::set_force_scalar_for_testing(force_scalar);
+    run(*f.cu(), vb);
+    for (const HookEvent &event : vgpr_read_events(*plugin))
+      reads[event.physical_reg - vb] |= event.lane_mask;
+    for (const HookEvent &event : vgpr_write_events(*plugin)) {
+      writes[event.physical_reg - vb] |= event.lane_mask;
+      ++write_counts[event.physical_reg - vb];
+    }
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.name);
+    LaneSets snapshot_reads, snapshot_writes, scalar_reads, scalar_writes;
+    Counts snapshot_write_counts, scalar_write_counts;
+    ASSERT_NO_FATAL_FAILURE(
+        observe(test.run, false, snapshot_reads, snapshot_writes, snapshot_write_counts));
+    ASSERT_NO_FATAL_FAILURE(
+        observe(test.run, true, scalar_reads, scalar_writes, scalar_write_counts));
+    EXPECT_EQ(snapshot_reads, scalar_reads);
+    EXPECT_EQ(snapshot_writes, scalar_writes);
+    ASSERT_FALSE(snapshot_write_counts.empty());
+    for (const auto &[reg, count] : snapshot_write_counts) {
+      if (test.uses_snapshot)
+        EXPECT_EQ(count, 1u) << "v" << reg;
+      else
+        EXPECT_GT(count, 1u) << "v" << reg;
+    }
+    if (::testing::Test::HasFailure())
+      return;
+  }
+}
+
 TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {
   struct Architecture {
     rj_code_arch_t arch;
@@ -2764,8 +3032,9 @@ TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 256;
       config.lds_size_kb = 64;
-      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit =
-          amdgpu::ComputeUnitCore::create("sdwa_conversion", config, &memory, &cache);
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          compute_unit, "sdwa_conversion", config, &memory, &cache));
       std::unique_ptr<Decoder> decoder = Decoder::create(architecture.arch);
       amdgpu::Wavefront *wave = compute_unit->dispatch_wf(0, 0, 106, 256);
       ASSERT_NE(wave, nullptr);

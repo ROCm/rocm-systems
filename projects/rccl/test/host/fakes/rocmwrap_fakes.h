@@ -31,6 +31,7 @@ struct CuMemExport {
   size_t size;
   unsigned long long flags;
   int fd;
+  int type;  // a hipMemRangeHandleType, which exists only alongside the export API
 };
 
 struct CuMemExportRecorder : std::vector<CuMemExport> {
@@ -38,6 +39,8 @@ struct CuMemExportRecorder : std::vector<CuMemExport> {
   void Install();
   void CloseOpen();
 };
+
+extern int g_rocmLibraryInitCalls;
 
 // Resets the dmaBufSupported gate (pfn_hsa_amd_portable_export_dmabuf) to NULL, i.e. unsupported.
 void ResetRocmWrapFakes();

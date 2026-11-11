@@ -81,9 +81,14 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
-// Counter retirement order does not imply ordered VGPR writeback on GFX12.
+// VMEM loads of the same type write their VGPR results in issue order. CDNA1-4
+// section 4.4. RDNA1/2 section 4.4 and RDNA3/3.5 section 5.6 say VGPR data can
+// be written out of order, but we follow LLVM's vmem-write-vgpr-in-order
+// feature, which covers GFX9-GFX11.
 [[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
 }
 
@@ -159,7 +164,7 @@ struct LegacyWaitcnt {
 /// - LegacyNoVscnt: VMCNT, LGKMCNT, EXPCNT.
 /// - LegacyVscnt: those tags plus VSCNT and the GFX11 internal LOADCNT,
 ///   STORECNT, DSCNT, KMCNT subsets.
-/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, and CDNA5's
+/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, SAMPLECNT, and CDNA5's
 ///   ASYNCCNT/TENSORCNT. Aggregate VMCNT/VSCNT/LGKMCNT tags are not supported.
 /// Mapping a supported tag back with memory_wait_counter_type produces a wait
 /// that covers the original event, including subsets of aggregate counters.
@@ -179,6 +184,8 @@ struct LegacyWaitcnt {
     return smem_wait_counter(model);
   case WaitCounterType::EXPCNT:
     return WaitCounterKind::Exp;
+  case WaitCounterType::SAMPLECNT:
+    return WaitCounterKind::Sample;
   case WaitCounterType::ASYNCCNT:
     return WaitCounterKind::Async;
   case WaitCounterType::TENSORCNT:
@@ -188,8 +195,8 @@ struct LegacyWaitcnt {
 }
 
 /// Returns nullopt for domains without a corresponding memory-pipeline counter.
-/// Callers must leave unrelated counters unchanged for those domains; Sample
-/// and Bvh waits must not be aliased to ordinary LOADCNT events.
+/// Callers must leave unrelated counters unchanged for those domains. Sample
+/// has a separate GFX12 counter; Bvh must not alias ordinary LOADCNT events.
 [[nodiscard]] constexpr std::optional<WaitCounterType>
 memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   switch (counter) {
@@ -210,6 +217,10 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   case WaitCounterKind::Async:
     if (model == WaitcntModel::SplitGfx12)
       return WaitCounterType::ASYNCCNT;
+    return std::nullopt;
+  case WaitCounterKind::Sample:
+    if (model == WaitcntModel::SplitGfx12)
+      return WaitCounterType::SAMPLECNT;
     return std::nullopt;
   case WaitCounterKind::Tensor:
     if (model == WaitcntModel::SplitGfx12)

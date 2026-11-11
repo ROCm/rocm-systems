@@ -2951,13 +2951,13 @@ format_version(uint32_t version)
 // versions have a different thread trace ABI (parameters, shader data layout, callbacks) and there
 // is no query for it. The asserts below fail when that ABI changes. When they do, bump VERSION and
 // raise this minimum in the same commit so the check keeps matching the ABI, then update them.
-constexpr uint32_t thread_trace_min_core_version = ROCPROFILER_SDK_COMPUTE_VERSION(1, 5, 0);
+constexpr uint32_t thread_trace_min_core_version = ROCPROFILER_SDK_COMPUTE_VERSION(1, 5, 1);
 
 #define ROCPROFV3_THREAD_TRACE_ABI_CHANGED                                                         \
     "thread-trace ABI changed: bump VERSION and raise thread_trace_min_core_version in the same "  \
     "commit, then update this assert"
 
-static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 11, ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 12, ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
 static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST == 6,
               ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
 static_assert(sizeof(rocprofiler_thread_trace_parameter_t) == 24,
@@ -3746,8 +3746,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(rename_ctx, "kernel rename");
     }
 
-    // Track stream ID information via callback service
-    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
+    // Track stream ID information via callback service. The stream stack is only read by
+    // set_kernel_rename_and_stream_correlation_id for the records below, and the tracing wraps
+    // every HIP function taking a stream, so only enable it when one of those is collected.
+    const auto& cfg              = tool::get_config();
+    const bool  needs_stream_ids = cfg.kernel_trace || cfg.memory_copy_trace ||
+                                  cfg.memory_allocation_trace || cfg.hip_runtime_api_trace ||
+                                  cfg.hip_event_trace || cfg.counter_collection ||
+                                  cfg.spm_counter_collection || cfg.kernel_replay;
+    if(needs_stream_ids && core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
     {
         auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 

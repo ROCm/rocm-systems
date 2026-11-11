@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <math.h>
 #include <sys/time.h>
 #include <algorithm>
+#include <memory>
 #include <vector>
 #include <string.h>
 #include "rome_models.h"
@@ -4634,6 +4635,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
   }
+  std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus), rdm(ngpus);
@@ -4790,8 +4792,6 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
 
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
@@ -4805,9 +4805,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   if (graph->pattern != NCCL_TOPO_PATTERN_RING && graph->pattern != NCCL_TOPO_PATTERN_BALANCED_TREE) return ncclSuccess;
 
   if (ngpus > 8) return ncclSuccess;
-  // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
+  const bool isRome = rcclTopoCpuIsRome(system);
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -4838,9 +4836,7 @@ ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* 
 
   for (i = 0; i < sizeof(romeTopoModels) / sizeof(romeTopoModels[0]); i++) {
     bool ignore_cpu = checkOption(romeTopoModels[i].options, "noCpuCheck");
-    if (!ignore_cpu &&
-        (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME))
-      continue;
+    if (!ignore_cpu && !isRome) continue;
     bool ignore_numa = checkOption(romeTopoModels[i].options, "disableNumaMatching");
     if (!ignore_numa && romeTopo.nCpus != romeTopoModels[i].nCpus) continue;
     if (romeTopo.nGpus != romeTopoModels[i].nGpus || romeTopo.nNics != romeTopoModels[i].nNics ||
@@ -4981,10 +4977,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   const int nnets = system->nodes[NET].count;
 
   // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
-  if (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    return ncclSuccess;
+  if (!rcclTopoCpuIsRome(system)) return ncclSuccess;
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -5001,6 +4994,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
   }
+  std::unique_ptr<int, void (*)(void*)> permutationsOwner(all_gpu_permutations, free);
   struct timeval tvs, tve;
   gettimeofday(&tvs, NULL);
   std::vector<int> r(ngpus), g(ngpus);
@@ -5111,8 +5105,6 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   if (graph->nChannels) {
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
@@ -5158,10 +5150,7 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
   const int nnets = system->nodes[NET].count;
 
   // only valid on Rome
-  int arch, vendor, model;
-  NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
-  if (arch != NCCL_TOPO_CPU_ARCH_X86 || vendor != NCCL_TOPO_CPU_VENDOR_AMD || model != NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    return ncclSuccess;
+  if (!rcclTopoCpuIsRome(system)) return ncclSuccess;
 
   // number of GPUs and NICs on each numa node is used as first screening pattern
   struct rcclRomeModel romeTopo;
@@ -5220,8 +5209,7 @@ ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* grap
     }
   }
   INFO(NCCL_GRAPH, "%s", line);
-  if (arch == NCCL_TOPO_CPU_ARCH_X86 && vendor == NCCL_TOPO_CPU_VENDOR_AMD && model == NCCL_TOPO_CPU_MODEL_AMD_ROME)
-    system->type |= RCCL_TOPO_4P2H_ROME;
+  system->type |= RCCL_TOPO_4P2H_ROME;
   parseOptions(system, rome_model_68.options);
   // create 4P4H based on reference and remapped ids
   NCCLCHECK(parseGraph(rome_model_68.ringBase, system, graph, rdm, n_hives.data(), false));

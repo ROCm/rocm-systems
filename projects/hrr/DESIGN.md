@@ -11,7 +11,7 @@ User-facing quick start: [README.md](README.md).
 ## Quick Start
 
 ```bash
-# Capture
+# Capture, once you have consented (README.md#capture)
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 # Replay + D2H validation
@@ -27,7 +27,7 @@ hrr-playback ./my_capture.hrr --info [--events]
 
 ### Capture overhead
 
-Capture is **not free**. When `HIP_HRR_CAPTURE_OUTPUT` is set, every HIP API call
+Capture is **not free**. When capture is enabled (see [Enable Flag](#enable-flag)), every HIP API call
 flows through a capture shim (fixed-size event header + serialized arguments), and
 selected APIs add extra work:
 
@@ -130,7 +130,7 @@ each blob write and closed after it. Every file inside the archive is created, o
 and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
 crash-path manifest included, so a directory renamed on the path after the check cannot
 redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root
-`manifest.json` in the base directory, go by path, so every directory on the path to
+`manifest.json` and `NOTICE.txt` in the base directory, go by path, so every directory on the path to
 the base should still belong to the capturing user or to root, and any that other users
 can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
@@ -246,7 +246,7 @@ kernel/code-object replay. Use the same install prefix or matching `LD_LIBRARY_P
 for both components.
 
 ```bash
-HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture
+HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture, once you have consented
 hrr-playback ./out.hrr                           # replay + D2H validation
 hrr-playback ./out.hrr --timing                  # with kernel + graph GPU timing
 hrr-playback ./out.hrr --info --events           # inspect archive (no GPU)
@@ -551,12 +551,13 @@ or direct GPU access via the mapped flag. At capture time:
 
 At playback:
 
-- `playback_hipHostRegister` allocates a fresh 64-byte-aligned host buffer (`_aligned_malloc`
-  on Windows, `posix_memalign` on Linux), restores the blob snapshot into it, calls
-  `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
+- `playback_hipHostRegister` takes the recorded address's block in `host_reg_blocks` (the
+  same block again when it is large enough), restores the blob snapshot into it, calls
+  `hipHostRegister` on it, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
-- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, and removes
+  both map entries. The block stays, charged to the host budget, until the context is
+  destroyed, since a graph node may still point into it.
 
 ### Pinned Host Snapshots
 
@@ -852,9 +853,9 @@ a child started with `exec` initialises HIP again and prints its own.
 
 ## Enable Flag
 
-Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory and the process
+Capture is enabled when `HIP_HRR_CAPTURE_OUTPUT` is set to a directory, the process
 was not started in secure-execution mode (see
-[README.md](README.md#capture-environment)). Defined as a `cstring` release flag in
+[README.md](README.md#capture-environment)), and the user has consented. Defined as a `cstring` release flag in
 `rocclr/utils/flags.hpp`. An empty or blank value leaves capture off: the flag parser
 stores an exported empty variable as a single space, and `hrr_capture_requested()` treats
 a value made only of whitespace as unset.
@@ -865,6 +866,21 @@ privileges that whoever set its environment does not, so it ignores the variable
 `secure_getenv()` would, and `hip_capture_init()` prints one line on stderr saying so.
 The check is `hrr_cap::metadata::secure_exec()` in `hip_capture_metadata.cpp`, and it is
 always false off Linux.
+
+Consent comes from `HIP_HRR_CAPTURE_CONSENT` or the per-user consent file; see
+[README.md](README.md#capture) for both and for which one decides. The file consents when
+its first line is `yes`, after any UTF-8 or UTF-16LE byte order mark and before trailing
+blanks. UTF-16LE is decoded before the line end is looked for, and a UTF-16LE unit
+outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX it counts only as a
+regular file, checked by path and again on the descriptor opened with `O_NONBLOCK` and
+`O_NOFOLLOW`, with one hard link and owned by the effective user. On Windows it is not
+checked for an owner and junctions are followed, so a redirected or shared `%APPDATA%`
+gives no per-user guarantee. The variable applies to every process that inherits the
+environment, the file to the user on every host that shares the home directory.
+Consent is read once, by `hrr_consent()`, and is part of `hip_capture_enabled()`.
+Without it `hip_capture_init()` prints one line on stderr naming what withheld it; it never
+prompts. `capture_consent` in the manifest metadata names the source, not the file's path,
+which names the user.
 
 ## Playback Tools
 
@@ -1146,7 +1162,7 @@ cmake --build hrr-build --target hrr-playback -j"$(nproc)"
 ```bash
 # Make the freshly built capture runtime win over any system ROCm copy at run time
 export LD_LIBRARY_PATH=$PWD/build/hipamd/lib:$LD_LIBRARY_PATH
-# or LD_PRELOAD the capture lib for a single app:
+# or LD_PRELOAD the capture lib for a single app (capture also needs consent, README.md#capture):
 LD_PRELOAD=$PWD/build/hipamd/lib/libamdhip64.so.7 HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app
 ```
 
@@ -1308,7 +1324,8 @@ peer access from another process), the copy will operate on uninitialised memory
 ### `hipMallocManaged` — Unified Memory Not Validated
 
 Managed memory allocations are tracked in `alloc_map` and translated like any other
-device pointer. However the capture layer does not snapshot managed memory contents
+device pointer. Because the runtime may back them from host memory, replay charges
+their padded size to `--max-host-bytes` until `hipFree`. However the capture layer does not snapshot managed memory contents
 at any point. D2H validation blobs cover only explicitly synchronised
 `hipMemcpy`-family calls; data accessed by the CPU directly through a managed pointer
 is never captured.
@@ -1650,7 +1667,9 @@ handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHos
 (finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
 Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
 dispatch before the create populates the translation map and silently
-`return hipSuccess` while skipping the mapping.
+`return hipSuccess` while skipping the mapping. `hipMemMap` and `hipMemUnmap` are
+ordered too: a host-located handle's `--max-host-bytes` charge is held until its
+last mapping goes, so the map count must follow capture order.
 
 ### Validation-Fidelity Caveats
 
