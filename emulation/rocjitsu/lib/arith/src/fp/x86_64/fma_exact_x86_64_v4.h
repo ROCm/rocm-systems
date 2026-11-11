@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v4.h"
 #include "rj_arith/rj_arith.h"
 #include <immintrin.h>
@@ -85,6 +86,7 @@ namespace {
   if (!(zeros & ~exact)) {
     return exact;
   }
+  RJ_ARITH_UNROLL(2)
   for (int half = 0; half < 2; ++half) {
     auto aa = half ? _mm512_extractf32x8_ps(a, 1) : _mm512_castps512_ps256(a);
     auto bb = half ? _mm512_extractf32x8_ps(b, 1) : _mm512_castps512_ps256(b);
