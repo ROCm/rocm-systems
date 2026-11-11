@@ -6310,7 +6310,7 @@ TEST(ArithBridgeTest, DoubleConversionsLayoutsModesAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes[2] = {}, written[2] = {};
                   for (const auto &read : fixture.recorder->reads) {
                     ASSERT_GE(read.reg, 2u);
@@ -6444,7 +6444,7 @@ TEST(ArithBridgeTest, WordConversionsRoundingSaturationAndPolicies) {
                   const bool success =
                       fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                           .succeeded();
-                  ASSERT_EQ(success, policy_kind < 2);
+                  ASSERT_EQ(success, policy_kind < 3);
                   uint64_t read_lanes = 0, written = 0;
                   for (const auto &read : fixture.recorder->reads) {
                     EXPECT_EQ(read.reg, 0u);
@@ -6664,7 +6664,7 @@ TEST(ArithBridgeTest, PackedConversionsFixedRoundingModifiersAliasesAndPolicies)
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2;
+                const bool success = policy_kind < 3;
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);
@@ -6795,7 +6795,7 @@ TEST(ArithBridgeTest, NormalizedConversionsLayoutsRoundingAndPolicies) {
                     ASSERT_TRUE(instruction.succeeded());
                     fixture.recorder->reads.clear();
                     fixture.recorder->writes.clear();
-                    const bool success = policy_kind < 2;
+                    const bool success = policy_kind < 3;
                     ASSERT_EQ(
                         fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                             .succeeded(),
@@ -6913,7 +6913,7 @@ TEST(ArithBridgeTest, BitPackingSelectorsAliasingAndPolicies) {
                 ASSERT_TRUE(instruction.succeeded());
                 fixture.recorder->reads.clear();
                 fixture.recorder->writes.clear();
-                const bool success = policy_kind < 2 || (policy_kind == 2 && half && !rdna3);
+                const bool success = policy_kind < 2 || (policy_kind == 2 && (!half || !rdna3));
                 ASSERT_EQ(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded(),
                           success);

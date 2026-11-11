@@ -116,12 +116,49 @@ int invoke_conversion(Call call, uint64_t flags, Mask exec_mask, uint64_t mode, 
   }
 }
 
+// Check one captured gfx1201 lane in Compatibility and strict exact mode on every CPU level,
+// so a faster loose path cannot change default-mode results. IEEE mode is set as on the
+// capture hardware. A may hold FP64 bits; B and C are passed only to multi-source
+// conversions; D seeds the destination bits a conversion preserves.
+template <int Operands, int OutputWords, typename Call>
+void expect_captured_conversion(Call call, uint64_t guest_flags, uint64_t a, uint32_t b, uint32_t c,
+                                uint64_t d, uint64_t expected) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : hardware_semantics()) {
+      SCOPED_TRACE(::testing::Message() << std::hex << cpu << '/' << semantics << '/' << a);
+      Registers<8, 32> r;
+      r.v[0][0] = uint32_t(a);
+      r.v[1][0] = uint32_t(a >> 32);
+      r.v[2][0] = b;
+      r.v[4][0] = c;
+      r.v[6][0] = uint32_t(d);
+      r.v[7][0] = uint32_t(d >> 32);
+      const uint32_t *const *sources[] = {r.v, r.v + 2, r.v + 4};
+      const uint64_t flags = cpu | semantics | RJ_ARITH_FP_IEEE_MODE | guest_flags;
+      int error;
+      if constexpr (Operands == 1) {
+        error = invoke_conversion(call, flags, uint32_t(1), 0, r.v + 6, nullptr, sources[0]);
+      } else if constexpr (Operands == 2) {
+        error = invoke_conversion(call, flags, uint32_t(1), 0, r.v + 6, nullptr, sources[0],
+                                  sources[1]);
+      } else {
+        error = invoke_conversion(call, flags, uint32_t(1), 0, r.v + 6, nullptr, sources[0],
+                                  sources[1], sources[2]);
+      }
+      ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0] | (OutputWords == 2 ? uint64_t(r.v[7][0]) << 32 : uint64_t(0)), expected);
+    }
+  }
+}
+
 // A narrow conversion shares this memory/semantics contract with widening and
 // packing. References return one or two words; comparators own numeric rules.
+// Exact entry points without a status parameter accept mode 3 only when status_free.
 template <int Lanes, int Operands, int InputWords, int OutputWords, bool Dpp, typename Call,
           typename Reference, typename Compare>
 void check_conversion(Call call, const Registers<8, Lanes> &input, Reference reference,
-                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0) {
+                      Compare compare, uint64_t modifiers, bool exact, uint64_t guest_flags = 0,
+                      bool status_free = true) {
   using Mask = WaveMask<Lanes>;
   using Source = const uint32_t *const *;
   constexpr bool status_parameter =
@@ -179,7 +216,8 @@ void check_conversion(Call call, const Registers<8, Lanes> &input, Reference ref
                                                    : scenario >= 5 + int(modes.size()) ? 0
                                                    : scenario % 2                      ? 0
                                                                                        : 3);
-        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && status_parameter
+        int error = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+                            (status_parameter || (exact && !status_free))
                         ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
                     : !exact && (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
                                  semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL)

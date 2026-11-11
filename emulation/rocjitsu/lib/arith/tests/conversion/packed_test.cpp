@@ -48,7 +48,7 @@ template <int Lanes, typename Call> void check_packed(Call call, PackedConversio
           }
         }
       },
-      modifiers, false,
+      modifiers, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
@@ -113,4 +113,10 @@ TEST(ConversionCvtPkU16F32W64Gfx11, Arithmetic) {
 // Check paired 16-bit conversions and packed result ordering.
 TEST(ConversionCvtPkU16F32W64Gfx12, Arithmetic) {
   check_packed<64>(rj_arith_v_cvt_pk_u16_f32_w64_gfx12, PackedConversion::Unsigned);
+}
+
+// gfx1201 capture: RTZ packing quiets a signaling NaN.
+TEST(ConversionPackedGfx12, ExactMatchesHardware) {
+  expect_captured_conversion<2, 1>(rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx12, 0, 0x7f800001, 0, 0, 0,
+                                   0x7e00);
 }

@@ -18,13 +18,13 @@ namespace {
 
 // Convert FP32 and 32-bit integers for the selected lanes. Reject invalid controls before
 // changing outputs.
-template <rocjitsu::arith::Conversion32 Op>
+template <rocjitsu::arith::Conversion32 Op, bool AcceptExact = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a) {
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Op>(flags, exec_mask, uint32_t(mode), d, source);
+          return convert<Op, AcceptExact>(flags, exec_mask, uint32_t(mode), d, source);
         });
   }
   constexpr bool to_float = Op == rocjitsu::arith::Conversion32::SignedToFloat ||
@@ -40,8 +40,14 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  // Each conversion has one model. Entry points accept exact requests once their results have
+  // been checked against hardware captures; none reports FP status.
+  if (!AcceptExact &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
@@ -73,11 +79,11 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 
 // Convert FP32 and 32-bit integers for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::Conversion32 Op>
+template <rocjitsu::arith::Conversion32 Op, bool AcceptExact = false>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = convert<Op>(flags, 0, mode, nullptr, nullptr)) {
+  if (int error = convert<Op, AcceptExact>(flags, 0, mode, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -87,8 +93,8 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     uint64_t half_instruction_flags = rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half);
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source = a[0] + half * 32;
-    if (int error = convert<Op>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
-                                &dest, &source)) {
+    if (int error = convert<Op, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
+                                             half_instruction_flags, &dest, &source)) {
       return error;
     }
   }
@@ -101,24 +107,26 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_i32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<rocjitsu::arith::Conversion32::SignedToFloat>(flags, exec_mask, instruction_flags,
-                                                               d, a);
+  return convert<rocjitsu::arith::Conversion32::SignedToFloat, true>(flags, exec_mask,
+                                                                     instruction_flags, d, a);
 }
 
 // Convert U32 to F32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_u32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<rocjitsu::arith::Conversion32::UnsignedToFloat>(flags, exec_mask,
-                                                                 instruction_flags, d, a);
+  return convert<rocjitsu::arith::Conversion32::UnsignedToFloat, true>(flags, exec_mask,
+                                                                       instruction_flags, d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
@@ -127,15 +135,16 @@ int rj_arith_v_cvt_f32_u32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cvt_i32_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert<rocjitsu::arith::Conversion32::FloatToSigned>(flags, exec_mask, instruction_flags,
-                                                               d, a);
+  return convert<rocjitsu::arith::Conversion32::FloatToSigned, true>(flags, exec_mask,
+                                                                     instruction_flags, d, a);
 }
 
 // Convert F32 to U32 for selected lanes.
@@ -144,15 +153,16 @@ int rj_arith_v_cvt_i32_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cvt_u32_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert<rocjitsu::arith::Conversion32::FloatToUnsigned>(flags, exec_mask,
-                                                                 instruction_flags, d, a);
+  return convert<rocjitsu::arith::Conversion32::FloatToUnsigned, true>(flags, exec_mask,
+                                                                       instruction_flags, d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
@@ -160,46 +170,52 @@ int rj_arith_v_cvt_u32_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cvt_nearest_i32_f32_w32(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<rocjitsu::arith::Conversion32::Nearest>(flags, exec_mask, instruction_flags, d, a);
+  return convert<rocjitsu::arith::Conversion32::Nearest, true>(flags, exec_mask, instruction_flags,
+                                                               d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_floor_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<rocjitsu::arith::Conversion32::Floor>(flags, exec_mask, instruction_flags, d, a);
+  return convert<rocjitsu::arith::Conversion32::Floor, true>(flags, exec_mask, instruction_flags, d,
+                                                             a);
 }
 
 // Convert I32 to F32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_i32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::SignedToFloat>(flags, exec_mask,
-                                                                      instruction_flags, d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::SignedToFloat, true>(
+      flags, exec_mask, instruction_flags, d, a);
 }
 
 // Convert U32 to F32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_u32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::UnsignedToFloat>(flags, exec_mask,
-                                                                        instruction_flags, d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::UnsignedToFloat, true>(
+      flags, exec_mask, instruction_flags, d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
@@ -208,15 +224,16 @@ int rj_arith_v_cvt_f32_u32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cvt_i32_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::FloatToSigned>(flags, exec_mask,
-                                                                      instruction_flags, d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::FloatToSigned, true>(
+      flags, exec_mask, instruction_flags, d, a);
 }
 
 // Convert F32 to U32 for selected lanes.
@@ -225,15 +242,16 @@ int rj_arith_v_cvt_i32_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cvt_u32_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::FloatToUnsigned>(flags, exec_mask,
-                                                                        instruction_flags, d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::FloatToUnsigned, true>(
+      flags, exec_mask, instruction_flags, d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
@@ -241,31 +259,34 @@ int rj_arith_v_cvt_u32_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cvt_nearest_i32_f32_w64(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::Nearest>(flags, exec_mask, instruction_flags,
-                                                                d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::Nearest, true>(flags, exec_mask,
+                                                                      instruction_flags, d, a);
 }
 
 // Convert F32 to I32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_floor_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<rocjitsu::arith::Conversion32::Floor>(flags, exec_mask, instruction_flags,
-                                                              d, a);
+  return convert_wave64<rocjitsu::arith::Conversion32::Floor, true>(flags, exec_mask,
+                                                                    instruction_flags, d, a);
 }
 
 // Convert I32 to F32 for selected lanes.
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -278,7 +299,8 @@ int rj_arith_v_cvt_f32_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -291,7 +313,8 @@ int rj_arith_v_cvt_f32_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -304,7 +327,8 @@ int rj_arith_v_cvt_f32_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
 // Return errors before changing outputs. Inactive destination lanes are preserved.
 int rj_arith_v_cvt_f32_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -319,7 +343,8 @@ int rj_arith_v_cvt_f32_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
 int rj_arith_v_cvt_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -335,7 +360,8 @@ int rj_arith_v_cvt_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
 int rj_arith_v_cvt_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -351,7 +377,8 @@ int rj_arith_v_cvt_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
 int rj_arith_v_cvt_u32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -367,7 +394,8 @@ int rj_arith_v_cvt_u32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
 int rj_arith_v_cvt_u32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

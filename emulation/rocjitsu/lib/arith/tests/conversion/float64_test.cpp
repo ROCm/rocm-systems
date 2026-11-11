@@ -91,9 +91,10 @@ void check_float64(Call call, Conversion64 operation) {
           conversion_float(actual, expected, OutputWords * 32);
         }
       },
-      modifiers, false,
+      modifiers, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*status_free=*/false);
 }
 
 } // namespace
@@ -259,4 +260,23 @@ TEST(ConversionRounding, GuestModes) {
       }
     }
   }
+}
+
+// gfx1201 captures: guest rounding of FP64 overflow, quieted widening NaN payloads, NaNs and
+// negative inputs to zero, saturation, and exact unsigned widening.
+TEST(ConversionFloat64Gfx12, ExactMatchesHardware) {
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_f64_w32_gfx12, 0, 0x7fefffffffffffffULL, 0, 0,
+                                   0, 0x7f800000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_f64_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x7fefffffffffffffULL, 0, 0, 0, 0x7f7fffff);
+  expect_captured_conversion<1, 2>(rj_arith_v_cvt_f64_f32_w32_gfx12, 0, 0x7f800001, 0, 0, 0,
+                                   0x7ff8000020000000ULL);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f64_w32_gfx12, 0, 0x7ff8000000000000ULL, 0, 0,
+                                   0, 0);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u32_f64_w32_gfx12, 0, 0xbff0000000000000ULL, 0, 0,
+                                   0, 0);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u32_f64_w32_gfx12, 0, 0x41f0000000000000ULL, 0, 0,
+                                   0, 0xffffffff);
+  expect_captured_conversion<1, 2>(rj_arith_v_cvt_f64_u32_w32_gfx12, 0, 0xffffffff, 0, 0, 0,
+                                   0x41efffffffe00000ULL);
 }

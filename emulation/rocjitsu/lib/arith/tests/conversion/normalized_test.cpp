@@ -74,9 +74,10 @@ void check_normalized(Call call, Normalized operation) {
         }
         return normalized_reference(op, uint32_t(a), b, d, mode);
       },
-      conversion_bits, modifiers, false,
+      conversion_bits, modifiers, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*status_free=*/false);
 }
 
 } // namespace
@@ -159,4 +160,20 @@ TEST(ConversionCvtNormI16F16W64, Arithmetic) {
 // Check normalized conversion results and destination preservation.
 TEST(ConversionCvtNormU16F16W64, Arithmetic) {
   check_normalized<64, 1>(rj_arith_v_cvt_norm_u16_f16_w64, Normalized::UnsignedHalf);
+}
+
+// gfx1201 captures: normalized results round once, saturate, and map NaNs to zero; the unary
+// form keeps the high D half.
+TEST(ConversionNormalizedGfx12, ExactMatchesHardware) {
+  constexpr uint64_t d = 0xa5a5a5a5U;
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32, 0, 0xa5fe3c00, 0, 0, d,
+                                   0xa5a57fffU);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32, 0, 0xc5e03800, 0, 0, d,
+                                   0xa5a54000U);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32, 0, 0xc7adb800, 0, 0, d,
+                                   0xa5a5c000U);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32, 0, 0xfdfe7e00, 0, 0, d,
+                                   0xa5a50000U);
+  expect_captured_conversion<2, 1>(rj_arith_v_cvt_pk_norm_u16_f32_w32, 0, 0x3f000000, 0, 0, 0,
+                                   0x8000);
 }

@@ -42,13 +42,13 @@ uint16_t narrow(uint32_t raw, uint32_t mode, uint64_t flags) {
 
 // Pack two FP32 conversions into one word for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <rocjitsu::arith::PackedConversion Op>
+template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b) {
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Op>(flags, exec_mask, uint32_t(mode), d, source, b);
+          return convert<Op, AcceptExact>(flags, exec_mask, uint32_t(mode), d, source, b);
         });
   }
   const uint32_t known =
@@ -61,8 +61,14 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
                                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  // Each conversion has one model. Entry points accept exact requests once their results have
+  // been checked against hardware captures; none reports FP status.
+  if (!AcceptExact &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
@@ -94,11 +100,11 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 
 // Pack two FP32 conversions into one word for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::PackedConversion Op>
+template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a, const uint32_t *const *b) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = convert<Op>(flags, 0, mode, nullptr, nullptr, nullptr)) {
+  if (int error = convert<Op, AcceptExact>(flags, 0, mode, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -108,8 +114,8 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     uint64_t half_instruction_flags = rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half);
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source_a = a[0] + half * 32, *source_b = b[0] + half * 32;
-    if (int error = convert<Op>(flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags,
-                                &dest, &source_a, &source_b)) {
+    if (int error = convert<Op, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
+                                             half_instruction_flags, &dest, &source_a, &source_b)) {
       return error;
     }
   }
@@ -126,15 +132,16 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert<rocjitsu::arith::PackedConversion::HalfRtz>(flags, exec_mask, instruction_flags, d,
-                                                             a, b);
+  return convert<rocjitsu::arith::PackedConversion::HalfRtz, true>(flags, exec_mask,
+                                                                   instruction_flags, d, a, b);
 }
 
 // Convert F32 to I16 and pack results with packed elements for selected lanes.
@@ -144,15 +151,16 @@ int rj_arith_v_cvt_pk_i16_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert<rocjitsu::arith::PackedConversion::Signed>(flags, exec_mask, instruction_flags, d,
-                                                            a, b);
+  return convert<rocjitsu::arith::PackedConversion::Signed, true>(flags, exec_mask,
+                                                                  instruction_flags, d, a, b);
 }
 
 // Convert F32 to U16 and pack results with packed elements for selected lanes.
@@ -162,15 +170,16 @@ int rj_arith_v_cvt_pk_u16_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert<rocjitsu::arith::PackedConversion::Unsigned>(flags, exec_mask, instruction_flags,
-                                                              d, a, b);
+  return convert<rocjitsu::arith::PackedConversion::Unsigned, true>(flags, exec_mask,
+                                                                    instruction_flags, d, a, b);
 }
 
 // Convert F32 to F16 and pack results with packed elements, round-to-zero conversion for
@@ -181,15 +190,16 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert_wave64<rocjitsu::arith::PackedConversion::HalfRtz>(flags, exec_mask,
-                                                                    instruction_flags, d, a, b);
+  return convert_wave64<rocjitsu::arith::PackedConversion::HalfRtz, true>(
+      flags, exec_mask, instruction_flags, d, a, b);
 }
 
 // Convert F32 to I16 and pack results with packed elements for selected lanes.
@@ -199,15 +209,16 @@ int rj_arith_v_cvt_pk_i16_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert_wave64<rocjitsu::arith::PackedConversion::Signed>(flags, exec_mask,
-                                                                   instruction_flags, d, a, b);
+  return convert_wave64<rocjitsu::arith::PackedConversion::Signed, true>(
+      flags, exec_mask, instruction_flags, d, a, b);
 }
 
 // Convert F32 to U16 and pack results with packed elements for selected lanes.
@@ -217,15 +228,16 @@ int rj_arith_v_cvt_pk_u16_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return convert_wave64<rocjitsu::arith::PackedConversion::Unsigned>(flags, exec_mask,
-                                                                     instruction_flags, d, a, b);
+  return convert_wave64<rocjitsu::arith::PackedConversion::Unsigned, true>(
+      flags, exec_mask, instruction_flags, d, a, b);
 }
 
 // Convert F32 to F16 and pack results with packed elements, round-to-zero conversion for
@@ -236,7 +248,8 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64
                                       uint32_t *const *d, const uint32_t *const *a,
                                       const uint32_t *const *b,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -254,7 +267,8 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64
                                       uint32_t *const *d, const uint32_t *const *a,
                                       const uint32_t *const *b,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -270,7 +284,8 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64
 int rj_arith_v_cvt_pk_i16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -286,7 +301,8 @@ int rj_arith_v_cvt_pk_i16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t m
 int rj_arith_v_cvt_pk_i16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -302,7 +318,8 @@ int rj_arith_v_cvt_pk_i16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t m
 int rj_arith_v_cvt_pk_u16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -318,7 +335,8 @@ int rj_arith_v_cvt_pk_u16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t m
 int rj_arith_v_cvt_pk_u16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

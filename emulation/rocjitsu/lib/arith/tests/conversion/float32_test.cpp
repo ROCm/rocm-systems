@@ -69,9 +69,10 @@ void check_float32(Call call, Conversion32 operation) {
           conversion_bits(actual, expected, flags, mode);
         }
       },
-      modifiers, false,
+      modifiers, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*status_free=*/false);
 }
 
 } // namespace
@@ -174,4 +175,29 @@ TEST(ConversionCvtNearestI32F32W64, Arithmetic) {
 // Check FP32/integer conversion results, modifiers, and aliasing.
 TEST(ConversionCvtFloorI32F32W64, Arithmetic) {
   check_float32<64, false>(rj_arith_v_cvt_floor_i32_f32_w64, Conversion32::Floor);
+}
+
+// gfx1201 captures: guest rounding of wide integers, saturation of infinities and finite
+// overflow, and the half-up rounding of CVT_NEAREST and the floor of CVT_FLOOR.
+TEST(ConversionFloat32Gfx12, ExactMatchesHardware) {
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_i32_w32_gfx12, 0, 0x7fffffff, 0, 0, 0,
+                                   0x4f000000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_i32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x7fffffff, 0, 0, 0, 0x4effffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_u32_w32_gfx12, 0, 0xffffffff, 0, 0, 0,
+                                   0x4f800000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_u32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0xffffffff, 0, 0, 0, 0x4f7fffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f32_w32_gfx12, 0, 0x7f7fffff, 0, 0, 0,
+                                   0x7fffffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f32_w32_gfx12, 0, 0xff800000, 0, 0, 0,
+                                   0x80000000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0x3fc00000, 0, 0, 0, 2);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0x40200000, 0, 0, 0, 3);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0xc0200000, 0, 0, 0,
+                                   0xfffffffe);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_floor_i32_f32_w32, 0, 0xbf000000, 0, 0, 0,
+                                   0xffffffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_floor_i32_f32_w32, 0, 0xc0200000, 0, 0, 0,
+                                   0xfffffffd);
 }

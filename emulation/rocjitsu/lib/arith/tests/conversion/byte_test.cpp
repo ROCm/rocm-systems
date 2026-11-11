@@ -47,7 +47,7 @@ template <int Lanes, typename Call> void check_byte_pack(Call call) {
       [](uint64_t a, uint32_t b, uint32_t c, uint32_t, uint64_t, uint32_t mode) {
         return byte_pack_reference(uint32_t(a), b, c, mode);
       },
-      conversion_bits, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP, false,
+      conversion_bits, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
@@ -172,4 +172,13 @@ TEST(ConversionCvtPkU8F32W64Gfx11, Arithmetic) {
 // Check selected-byte packing and preservation of untouched bytes.
 TEST(ConversionCvtPkU8F32W64Gfx12, Arithmetic) {
   check_byte_pack<64>(rj_arith_v_cvt_pk_u8_f32_w64_gfx12);
+}
+
+// gfx1201 captures: byte packing rounds in the guest FP32 mode before inserting at B's byte.
+TEST(ConversionBytePackGfx12, ExactMatchesHardware) {
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, 0, 0x3fc00000, 0, 0, 0, 2);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x3fc00000, 0, 0, 0, 1);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, 0, 0x3fc00000, 1, 0, 0,
+                                   0x200);
 }

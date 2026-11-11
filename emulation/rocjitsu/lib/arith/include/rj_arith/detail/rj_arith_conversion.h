@@ -120,7 +120,8 @@ int rj_arith_v_cvt_off_f32_i4_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 // original lanes. Convert FP32 A to an unsigned byte with guest FP32 rounding, saturation
 // to [0,255] and NaN-to-zero. Insert it into byte (B & 3) of C and write D;
 // each operand holds one VGPR. Supports A ABS/NEG; CLAMP is accepted without
-// numeric effect. Loose semantics, full EXEC masking and all whole-register
+// numeric effect. Loose and bit-exact numeric semantics (Compatibility resolves to
+// mode 2), full EXEC masking and all whole-register
 // aliases are supported. Host rounding does not affect results; exceptions may
 // change. Input-denormal flushing applies before rounding. RJ_ARITH_FP16_OVFL,
 // guest IEEE and output-denormal flags have no numerical effect.
@@ -182,14 +183,15 @@ int rj_arith_v_cvt_pk_u16_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t i
 // halves; unary forms preserve the unselected D half. Floating sources support
 // ABS/NEG; FP16 sources support HIGH_A/B, unary destinations support HIGH_D.
 // CLAMP is accepted without numeric effect; unary forms also accept and ignore
-// OMOD. RJ_ARITH_FP16_OVFL has no effect. Supports loose semantics, all EXEC masks
-// and whole-register aliases. Host FP exception flags may change.
+// OMOD. RJ_ARITH_FP16_OVFL has no effect. Supports loose and bit-exact numeric
+// semantics, with Compatibility resolving to mode 2, all EXEC masks and
+// whole-register aliases. Host FP exception flags may change.
 
 // Packed-half forms use RDNA3 TRAPSTS by default and RDNA4 EXCP_FLAG_USER with
 // _gfx12. Other normalized forms use the same API without an architecture suffix on both
 // architectures. Half sources honor input-denormal flushing. Guest IEEE and
 // output-denormal flags have no numerical effect.
-// Loose calls leave FP status untouched; exact reporting is unsupported.
+// Mode 3 returns UNSUPPORTED_FP_STATUS, also for forms without a status operand.
 
 int rj_arith_v_cvt_pk_norm_i16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
@@ -227,7 +229,7 @@ int rj_arith_v_cvt_norm_u16_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t
                                     uint32_t *const *d, const uint32_t *const *a);
 
 // Wave64 normalized conversions use the same VGPR layouts, modifiers and
-// loose semantics. Packed-half FP status reporting remains unsupported.
+// semantics. FP status reporting remains unsupported.
 int rj_arith_v_cvt_pk_norm_i16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b);
@@ -262,7 +264,8 @@ int rj_arith_v_cvt_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t
 // DPP8/DPP16 permute A before conversion and modifiers; B stays in its
 // original lane. Pack two FP32 source VGPRs into one 16-bit-pair destination: A goes to the
 // low half, B to the high half. Supports ABS/NEG on A/B, full EXEC masking and
-// whole-register aliases. Loose semantics only. CLAMP is accepted without
+// whole-register aliases. Loose and bit-exact numeric semantics; Compatibility
+// resolves to mode 2. CLAMP is accepted without
 // numeric effect. The FP16 RTZ form also accepts and ignores OMOD, truncates
 // toward zero, saturates finite overflow and quiets NaNs while retaining payload
 // bits. Integer forms truncate and saturate to the destination range, with NaNs
@@ -272,7 +275,7 @@ int rj_arith_v_cvt_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t
 // Packed APIs without _gfx12 use RDNA3 TRAPSTS; _gfx12 APIs use EXCP_FLAG_USER.
 // The FP16 RTZ form honors input and output-denormal flushing; integer forms
 // accept those controls without numerical effect. Guest IEEE has no effect.
-// Loose calls leave FP status untouched; exact reporting is unsupported.
+// FP status reporting (mode 3) is unsupported.
 
 int rj_arith_v_cvt_pk_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
@@ -303,7 +306,7 @@ int rj_arith_v_cvt_pk_u16_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                         uint32_t *excp_flag_user);
 
 // Wave64 packed conversions use the same rounding, modifiers and one VGPR
-// per operand. Loose semantics and optional-state restrictions are unchanged.
+// per operand. Semantics and optional-state restrictions are unchanged.
 int rj_arith_v_cvt_pk_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
@@ -416,7 +419,7 @@ int rj_arith_v_cvt_f32_ubyte3_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 
 // Wave64 byte/nibble conversions use the same operand layouts and modifiers.
 // Integer-to-float results support exact semantics at both widths. Byte packing
-// retains loose semantics and rejects mode 3 FP status reporting.
+// supports exact numeric semantics and rejects mode 3 FP status reporting.
 int rj_arith_v_cvt_f32_ubyte0_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a);
 
@@ -462,7 +465,8 @@ int rj_arith_v_cvt_pk_u8_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c, uint32_t *excp_flag_user);
 
-// FP16 conversions, one VGPR per operand; loose semantics only. HIGH_A selects
+// FP16 conversions, one VGPR per operand; loose and bit-exact numeric semantics,
+// with Compatibility resolving to mode 2. HIGH_A selects
 // a 16-bit source half, HIGH_D selects a 16-bit destination half, preserving the
 // other half. The corresponding selector is invalid for a full FP32 operand.
 // Floating inputs support ABS/NEG; integer inputs reject them. Floating outputs
@@ -470,7 +474,7 @@ int rj_arith_v_cvt_pk_u8_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // FP16_OVFL at both rounding stages. Nonzero OMOD flushes initially tiny
 // results and either initial zero to +0; newly tiny scaled results become
 // signed zero. APIs without _gfx12 use RDNA3 TRAPSTS; _gfx12 APIs use EXCP_FLAG_USER.
-// FP status reporting is unavailable; loose calls leave it untouched.
+// FP status reporting (mode 3) is unavailable; other modes leave it untouched.
 // RDNA3 ignores OMOD when IEEE is set or output denormals are preserved.
 // RDNA4 applies OMOD independently. Guest IEEE/input/output-denormal flags are
 // accepted. Input flushing precedes conversion and output flushing uses tininess
@@ -527,7 +531,7 @@ int rj_arith_v_cvt_f32_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
                                      uint32_t *excp_flag_user);
 
 // Wave64 FP16 conversions use the same half selectors, destination preservation,
-// overflow behavior and loose semantics. Optional-state restrictions are unchanged.
+// overflow behavior and semantics. Optional-state restrictions are unchanged.
 int rj_arith_v_cvt_f16_i16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
@@ -571,15 +575,16 @@ int rj_arith_v_cvt_f32_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
                                      uint32_t *excp_flag_user);
 
 // FP64 conversions: FP64 operands use two VGPRs, low word first; FP32 and
-// integer operands use one. Loose semantics only. Integer inputs reject ABS/NEG;
+// integer operands use one. Loose and bit-exact numeric semantics; Compatibility
+// resolves to mode 2. Integer inputs reject ABS/NEG;
 // floating inputs support ABS/NEG. Floating outputs round to the destination
 // format before OMOD and CLAMP. Host nearest-even rounding and enabled denormals
 // are required. Integer outputs truncate, saturate overflow, map NaNs to zero,
 // and accept CLAMP/OMOD without numeric effect; GPU exceptions are not modeled.
 // APIs without _gfx12 select RDNA3 and use TRAPSTS where applicable; _gfx12 APIs
-// use EXCP_FLAG_USER. Mode 3 FP status reporting is unsupported; loose calls
-// leave FP status untouched. RDNA3 ignores OMOD when IEEE is set or output
-// denormals are preserved. RDNA4 applies it independently. Guest IEEE and
+// use EXCP_FLAG_USER. Mode 3 FP status reporting is unsupported, also for forms
+// without a status operand; other modes leave FP status untouched. RDNA3 ignores OMOD when IEEE is
+// set or output denormals are preserved. RDNA4 applies it independently. Guest IEEE and
 // input/output-denormal and destination rounding flags are accepted. Narrowing
 // quiets NaNs and retains leading payload bits; widening quiets on RDNA4 and
 // on RDNA3 with IEEE set. Source denormals flush before conversion; destination
@@ -627,7 +632,7 @@ int rj_arith_v_cvt_f32_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      uint32_t *excp_flag_user);
 
-// Wave64 FP64 conversions use the same one/two-VGPR layouts, loose semantics
+// Wave64 FP64 conversions use the same one/two-VGPR layouts, semantics
 // and optional-state restrictions. DPP is unsupported at both widths.
 int rj_arith_v_cvt_f64_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
@@ -669,15 +674,17 @@ int rj_arith_v_cvt_f32_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      uint32_t *excp_flag_user);
 
-// FP32/integer conversions, one VGPR per operand. Loose semantics only.
+// FP32/integer conversions, one VGPR per operand. Loose and bit-exact numeric
+// semantics; Compatibility resolves to mode 2.
 // Integer-to-FP32 conversion uses RJ_ARITH_FP_ROUND_MASK, followed by OMOD
 // and CLAMP; source ABS/NEG are invalid. Float-to-integer conversion saturates
 // to the destination range and supports ABS/NEG. Truncating forms map NaNs to
 // zero; nearest/floor forms map them to the signed limit selected by the NaN sign
 // after source modifiers. CLAMP is accepted but does not affect integer results.
 // Truncating forms also accept OMOD without numeric scaling. GPU exceptions are
-// not modeled. Mode 3 FP status reporting is unsupported on both architectures;
-// loose calls leave FP status untouched. Truncating forms without _gfx12 use
+// not modeled. Mode 3 FP status reporting is unsupported on both architectures,
+// also for forms without a status operand; other modes leave FP status untouched.
+// Truncating forms without _gfx12 use
 // RDNA3 TRAPSTS, while _gfx12 forms use EXCP_FLAG_USER.
 // Integer-to-FP32 forms without _gfx12 select RDNA3: OMOD is ignored with IEEE mode
 // or preserved output denormals. _gfx12 forms apply it independently. Guest IEEE
@@ -723,7 +730,7 @@ int rj_arith_v_cvt_floor_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a);
 
 // Wave64 FP32/integer conversions use the same layouts, rounding, modifiers
-// and loose semantics. Optional-state restrictions remain unchanged.
+// and semantics. Optional-state restrictions remain unchanged.
 int rj_arith_v_cvt_f32_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 

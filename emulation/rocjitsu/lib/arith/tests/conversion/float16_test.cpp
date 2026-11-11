@@ -91,7 +91,7 @@ void check_float16(Call call, Conversion16 operation) {
           conversion_float(std::bit_cast<uint32_t>(a), std::bit_cast<uint32_t>(e), 32);
         }
       },
-      modifiers, false,
+      modifiers, true,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
           (op == 5 && !Gfx12 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0));
@@ -217,4 +217,23 @@ TEST(ConversionCvtF32F16W64Gfx11, Arithmetic) {
 // Check FP16 conversion results, modifiers, and aliasing.
 TEST(ConversionCvtF32F16W64Gfx12, Arithmetic) {
   check_float16<64, true>(rj_arith_v_cvt_f32_f16_w64_gfx12, Conversion16::HalfToFloat);
+}
+
+// gfx1201 captures: guest rounding and FP16_OVFL saturation on narrowing, NaNs to zero on
+// integer conversion, and quieted widening NaN payloads. FP16 results keep the high D half.
+TEST(ConversionFloat16Gfx12, ExactMatchesHardware) {
+  constexpr uint64_t d = 0xa5a5a5a5U;
+  for (uint64_t guest : {uint64_t(0), RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP16_OVFL}) {
+    const uint64_t expected = guest ? 0xa5a57bffU : 0xa5a57c00U;
+    expect_captured_conversion<1, 1>(rj_arith_v_cvt_f16_f32_w32_gfx12, guest, 0x7f7fffff, 0, 0, d,
+                                     expected);
+    expect_captured_conversion<1, 1>(rj_arith_v_cvt_f16_u16_w32_gfx12, guest, 0xed09ffff, 0, 0, d,
+                                     expected);
+  }
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u16_f16_w32_gfx12, 0, 0xc0e0fc00, 0, 0, d,
+                                   0xa5a50000U);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_u16_f16_w32_gfx12, 0, 0x93c17e00, 0, 0, d,
+                                   0xa5a50000U);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_f16_w32_gfx12, 0, 0xd70f7c01, 0, 0, d,
+                                   0x7fc02000);
 }
