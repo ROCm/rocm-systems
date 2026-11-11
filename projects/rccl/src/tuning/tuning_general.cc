@@ -57,9 +57,9 @@ float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float* la
   float precision_ratio = 1.0;
   if (a == NCCL_ALGO_RING) {
     // Any factor large enough to act as a partition between lossy and non-lossy algos.
-    precision_ratio = rcclFp8RingCostFactor(inputs->datatype, inputs->func, inputs->comm->nRanks, inputs->comm->nNodes,
-                                            inputs->nBytes, rcclDdaLL128Threshold(inputs->comm, ncclFuncAllReduce),
-                                            inputs->comm->archName);
+    precision_ratio =
+      rcclFp8RingCostFactor(inputs->datatype, inputs->func, inputs->comm->nRanks, inputs->comm->nNodes, inputs->nBytes,
+                            rcclDdaLL128Threshold(inputs->comm, ncclFuncAllReduce), inputs->comm->archName);
   }
 
   return (*lat * latCount + inputs->nBytes / (1000 * (*bw))) * precision_ratio;
