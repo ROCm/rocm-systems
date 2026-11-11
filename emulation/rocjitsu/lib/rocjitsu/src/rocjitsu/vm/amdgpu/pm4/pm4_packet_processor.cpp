@@ -348,7 +348,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             T value;
             std::memcpy(&value, bytes.data(), sizeof(value));
             value = apply_int_atomic(atomic, value, static_cast<T>(address(3)),
-                                     static_cast<T>(address(5)));
+                                     static_cast<T>(address(5)))
+                        .value();
             std::memcpy(bytes.data(), &value, sizeof(value));
           });
         };
