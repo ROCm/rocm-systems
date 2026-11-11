@@ -77,7 +77,7 @@ what makes snapshots agent-scoped.
 captures two categories:
 
 1. **Tracked allocations** owned by `agent`, as filtered above.
-2. **Module-scope `__device__` and `__constant__` variables** visible to `agent`.
+2. **Module-scope `__device__` and `__constant__` variables** exposed as HSA variable symbols to `agent`.
 
 Capture is a plain device-to-host copy through `hsa_memory_copy`, taken from rocprofiler's captured
 HSA table so it uses the original, un-wrapped function.
@@ -90,7 +90,8 @@ would leak that mutation into the next pass. `snap()` therefore discovers them s
 iterates the loaded code objects and, for each one, calls `hsa_executable_iterate_agent_symbols` for
 the replaying agent, collecting symbols of kind `HSA_SYMBOL_KIND_VARIABLE` along with their device
 address and size. Symbols with a zero address or size are skipped, as is anything larger than 1 GiB
-(a sanity cap).
+(a sanity cap). Internal or static device state that is not exposed as an HSA variable symbol is
+not discovered or restored; writes to it can accumulate across replay passes.
 
 Iterating for a specific agent naturally scopes the walk to executables loaded on that agent —
 others yield no symbols — which matches `snap()`'s per-agent contract.
@@ -119,8 +120,8 @@ under the agent writer lock. The application sees a normal, un-replayed executio
 
 ## What `restore()` writes back
 
-`restore()` copies each captured region back host-to-device and returns the number of regions
-successfully restored. The two categories are handled differently:
+`restore()` copies each captured region back host-to-device and returns whether all required
+copies succeeded. The two categories are handled differently:
 
 - **Tracked allocations** are re-validated first. The lookup and the copy happen together under the
   inventory read lock, so a concurrent free cannot race between the check and the write. If the
@@ -130,7 +131,8 @@ successfully restored. The two categories are handled differently:
 - **Module-scope variables** live in the loaded executable and are always present, so they are
   restored directly.
 
-A failed individual copy is logged and skipped; it does not abort the replay.
+A failed individual copy returns failure; the replay loop aborts rather than executing another
+pass with partially restored memory.
 
 ## HIP graphs
 
@@ -163,22 +165,14 @@ Stated plainly, because each one has a concrete cause in the mechanism above.
   gate. The source marks serializing them as a follow-up. See
   [Concurrency and isolation](kernel_replay_concurrency_and_isolation.md#what-is-not-isolated).
 - **Coarse-grained device memory only in the tracker.** Kernarg, host, fine-grained and executable
-  allocations are excluded by design, as is unified and managed memory. Before the first pass, the
-  arguments are checked using the kernel's own `amdhsa` metadata: checked pointers to memory
-  outside the snapshot, including fine-grained device memory, run the dispatch once without replay. An unavailable pointer-information
-  query or required host-mapping scan also causes the dispatch to run once. The check follows
-  pointer arguments and `by_value` arguments of at least 16 bytes; the latter are scanned in
-  eight-byte words starting at their metadata offset. Smaller by-value arguments and pointer fields
-  at other offsets, such as fields in packed structs, are not detected, while scalar aggregates can
-  resemble pointers and cause replay to be declined. A pointer the kernel finds inside memory it
-  was handed (a device-side linked list, say) is not seen, and neither is a scalar the width of a
-  pointer whose bits happen to name an address. For a kernel whose metadata cannot be read, every
-  word of its kernarg segment is followed instead.
-- **The runtime's copy and fill kernels are replayed without the check above,** because they are
-  handed the runtime's own staging memory rather than application data, and writing the same value
-  again in a later pass is harmless. That holds only while a copy's source and destination do not
-  overlap; overlapping ranges are not detected, and the exemption covers only the copy and fill
-  kernels named in `is_idempotent_runtime_kernel`.
+  allocations are excluded by design, as is unified and managed memory. Detected argument pointers
+  to memory outside the snapshot cause the dispatch to run once without replay. Pointer discovery
+  is best effort: indirect pointers and some aggregate fields can be missed, allowing writes
+  outside the snapshot to accumulate across passes. Scalar values can also cause false declines.
+- **Kernarg-buffer access fails closed.** If the allocation extent cannot be verified or the buffer
+  cannot be copied safely for inspection, the dispatch runs once without replay.
+- **Selected runtime copy/fill kernels bypass argument checks.** Overlapping copies are not
+  detected and may not be repeatable.
 - **HIP graph launches are not replayed** (warn once, run once), as described above.
 - **Only single-packet, single-dispatch submissions are replayed.** The replay gate requires exactly
   one packet in the batch and exactly one dispatch packet in it; anything else takes the normal path.

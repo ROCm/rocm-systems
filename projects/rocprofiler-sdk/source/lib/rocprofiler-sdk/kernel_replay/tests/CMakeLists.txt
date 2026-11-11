@@ -106,8 +106,8 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-# Classification of kernel-argument words and save/restore of memory the snapshot does not
-# cover. Pointer lookups and copies are injected, so no GPU is needed.
+# Classification of kernel-argument words and run-once decisions for memory outside the
+# snapshot. Pointer lookups are injected, so no GPU is needed.
 add_executable(kernel-replay-untracked-memory-test)
 target_sources(kernel-replay-untracked-memory-test PRIVATE untracked_memory.cpp)
 

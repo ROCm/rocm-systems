@@ -24,14 +24,15 @@
 
 // Memory a replayed dispatch is handed that the snapshot does not cover.
 //
-// The snapshot restores tracked coarse-grained device allocations and module-scope variables before
-// every replayed pass. A checked pointer to memory outside that snapshot means the dispatch runs
-// once without replay, including fine-grained device, host-pinned, managed, locked or pageable
-// host memory, another agent's memory and virtual-memory mappings. Which words of the kernarg
-// segment hold a pointer comes from the kernel's own `amdhsa` metadata, so a scalar the width of
-// a pointer is not read as one; without that metadata every word is a candidate. What is not seen
-// is a pointer the kernel finds inside memory it was handed, or one stored in a by-value argument
-// too small to be told from a scalar.
+// The snapshot restores tracked coarse-grained device allocations and module-scope variables
+// exposed as HSA symbols before every replayed pass. A checked pointer to memory outside that
+// snapshot means the dispatch runs once without replay, including fine-grained device, host-pinned,
+// managed, locked or pageable host memory, another agent's memory and virtual-memory mappings.
+// Which words of the kernarg segment hold a pointer comes from the kernel's own `amdhsa` metadata.
+// Complete descriptions exclude small scalars; partial descriptions also scan the pre-hidden words.
+// Metadata-described printf, hostcall and heap pointers are checked; without metadata every word is
+// a candidate. What is not seen is a pointer the kernel finds inside memory it was handed, or one
+// stored in a by-value argument too small to be told from a scalar.
 
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
@@ -64,7 +65,7 @@ enum class kind_t
 };
 
 // What hsa_amd_pointer_info (and, for UNKNOWN pointers, the process's writable mappings)
-// says about an address, reduced to what the classification needs.
+// says about an address, reduced to what classification and kernarg bounds checks need.
 struct pointer_facts_t
 {
     enum class type_t
@@ -79,9 +80,14 @@ struct pointer_facts_t
 
     type_t type                     = type_t::unknown;
     bool   owner_is_cpu             = false;
+    bool   owner_is_gpu             = false;
+    bool   in_agent_allocation      = false;
     bool   in_writable_host_mapping = false;
     bool   pointer_info_succeeded   = false;
     bool   host_mappings_ok         = false;
+    // Allocation extent in the queried address view; zero when HSA does not report one.
+    uint64_t allocation_base = 0;
+    uint64_t allocation_size = 0;
 };
 
 using pointer_facts_fn_t = std::function<pointer_facts_t(uint64_t address)>;
@@ -108,8 +114,8 @@ struct hit_t
 const char*
 to_string(kind_t kind);
 
-// Writable mappings of this process that hold host memory, sorted by address. Device mappings and
-// the pages the kernel manages itself (vvar, vdso, vsyscall) are left out. Read once per dispatch
+// Writable mappings of this process that hold host memory, sorted by address. Mappings through
+// /dev/kfd and /dev/dri are left out. Read once per dispatch
 // that needs it, not cached across dispatches: this is the application's address space, and it
 // changes as the application maps and unmaps. A failed open or read returns ok=false; a
 // successfully read empty mapping set returns ok=true.
@@ -143,7 +149,8 @@ std::optional<kind_t>
 classify_pointer(const pointer_facts_t& facts);
 
 // The first kernarg word that identifies memory outside the snapshot. `pointer_regions` holds
-// ranges that can carry a pointer, or is null when every word is a candidate. Words are read from
+// ranges that can carry a pointer, or is null when every word is a candidate. The caller supplies
+// readable CPU storage for segment_size bytes. Words are read from
 // each region's metadata offset, including unaligned regions. A successful UNKNOWN query with no
 // writable-host-mapping hit is not treated as unsupported memory.
 std::optional<hit_t>
@@ -153,8 +160,11 @@ scan_kernarg(const uint8_t*                                    kernarg,
              const std::vector<address_span_t>&                covered,
              const pointer_facts_fn_t&                         facts);
 
-// Returns false, after logging why, when a checked argument identifies unsupported memory or
-// cannot be classified; the dispatch must then run once without replay.
+// Copies a verified HSA kernarg allocation into host storage before scanning it. GPU addresses
+// use a GPU-to-host copy; CPU views use a fault-aware read. facts is
+// queried for both the buffer and candidate argument pointers. Returns false when the buffer
+// extent or complete read cannot be verified, or a checked pointer identifies unsupported memory
+// or cannot be classified; the dispatch must then run once without replay.
 bool
 can_replay_dispatch(const uint8_t*                                    kernarg,
                     size_t                                            segment_size,

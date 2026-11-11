@@ -46,7 +46,7 @@ set(REPLAY_PASSES 5)
 # records the expected launch counts after checking device support and application
 # results.
 set(REPLAY_UNTRACKED_PASS_COUNTS_FILE
-    "${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory/pass-counts.txt")
+    "${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-untracked-memory-pass-counts.txt")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-kernel-replay-generate

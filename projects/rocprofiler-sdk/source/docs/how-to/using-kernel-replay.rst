@@ -193,7 +193,8 @@ Between passes, kernel replay restores:
 
 * Coarse-grained device (VRAM) allocations from ``hipMalloc`` /
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
-* Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
+* Module-scope ``__device__`` and ``__constant__`` variables exposed as HSA variable symbols
+  in loaded executables. Internal or static device state not exposed as symbols is not restored.
 
 It does **not** restore:
 
@@ -204,13 +205,14 @@ It does **not** restore:
 * Kernarg or executable allocations (excluded by design).
 * HIP graph-managed memory.
 
-If argument-memory checks find unsupported memory, or memory needed for replay cannot be safely
-captured or classified, the dispatch runs once without replay, with a warning.
+Detected unsupported argument memory, failed snapshot capture, or failed required memory checks
+cause the dispatch to run once without replay. The same applies if the kernarg buffer cannot be
+verified and safely inspected.
 
-Argument-memory checks are best effort: pointers embedded in by-value arguments or loaded
-indirectly from other allocations are not guaranteed to be detected. Writes through undetected
-pointers to memory outside the snapshot can accumulate across replay passes. Values that resemble
-pointers can also cause a dispatch to run once without replay.
+Argument-memory checks are best effort: indirect pointers and some aggregate fields can be missed,
+allowing writes outside the snapshot to accumulate across passes. Scalar values can also cause
+false declines. Selected runtime copy/fill kernels bypass the guard; overlapping copies are not
+detected. Guard warnings are diagnostic, not a per-dispatch replay-status API.
 
 Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
 ``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,

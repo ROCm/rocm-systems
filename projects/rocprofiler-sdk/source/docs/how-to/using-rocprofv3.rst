@@ -1196,7 +1196,7 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
 
-   - Only coarse-grained device allocations and module-scope ``__device__`` / ``__constant__`` variables are restored. When argument-memory checks identify fine-grained device, unified, managed, ``hipMallocAsync``, host, or another GPU's memory outside that snapshot, the dispatch runs once without replay. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+   - Only tracked coarse-grained device allocations and HSA-visible module-scope ``__device__`` / ``__constant__`` variables are restored; internal or static state not exposed as symbols is not restored. Argument-memory checks are best effort. Detected unsupported memory or failed required replay checks cause the dispatch to run once without replay. Snapshot is a full in-memory copy; dirty-page hashing is not implemented. See :ref:`using-kernel-replay` for limitations.
 
    - HIP graph launches are not replayed (warn once, run once).
 

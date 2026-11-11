@@ -22,18 +22,23 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/untracked_memory.hpp"
 
+#include "lib/common/units.hpp"
+
 #include <gtest/gtest.h>
 
 #include <sys/mman.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <new>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -58,6 +63,15 @@ facts_of(type_t type, bool owner_is_cpu = false, bool in_host_mapping = false)
     f.pointer_info_succeeded   = true;
     f.host_mappings_ok         = true;
     return f;
+}
+
+um::pointer_facts_t
+host_allocation(const void* base, size_t size)
+{
+    auto facts            = facts_of(type_t::hsa, true);
+    facts.allocation_base = reinterpret_cast<uint64_t>(base);
+    facts.allocation_size = size;
+    return facts;
 }
 
 bool
@@ -94,10 +108,66 @@ bool
 can_replay(const std::vector<uint64_t>& words, const um::pointer_facts_fn_t& facts)
 {
     const auto kernarg = kernarg_with(words);
+    const auto query   = [&](uint64_t address) {
+        if(address == reinterpret_cast<uint64_t>(kernarg.data()))
+            return host_allocation(kernarg.data(), kernarg.size());
+        return facts(address);
+    };
     return um::can_replay_dispatch(
-        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, facts);
+        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, query);
 }
 }  // namespace
+
+TEST(kernel_replay_untracked_memory_DeathTest, reads_only_verified_kernarg_buffers)
+{
+    ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+    auto       argument_queries             = size_t{0};
+    const auto check =
+        [&](const uint8_t* data, size_t size, const um::pointer_facts_t& allocation) {
+            return um::can_replay_dispatch(
+                data, size, nullptr, msnp::device_snapshot_t{}, [&](uint64_t address) {
+                    if(address == reinterpret_cast<uint64_t>(data)) return allocation;
+                    EXPECT_EQ(address, vmem_addr);
+                    ++argument_queries;
+                    return facts_of(type_t::unknown);
+                });
+        };
+
+    const auto buffer     = kernarg_with({vmem_addr, 0});
+    const auto allocation = host_allocation(buffer.data(), buffer.size());
+    EXPECT_TRUE(check(buffer.data(), buffer.size(), allocation));
+    EXPECT_EQ(argument_queries, 1u);
+
+    argument_queries = 0;
+    EXPECT_TRUE(check(buffer.data() + 8, 8, allocation));
+    EXPECT_FALSE(check(buffer.data(), buffer.size(), host_allocation(buffer.data(), 8)));
+    EXPECT_FALSE(check(buffer.data() + 8, buffer.size(), allocation));
+    auto unavailable                   = allocation;
+    unavailable.pointer_info_succeeded = false;
+    EXPECT_FALSE(check(buffer.data(), buffer.size(), unavailable));
+    auto overflowing            = allocation;
+    overflowing.allocation_size = std::numeric_limits<uint64_t>::max();
+    EXPECT_FALSE(check(buffer.data(), buffer.size(), overflowing));
+    EXPECT_FALSE(check(nullptr, 8, allocation));
+    EXPECT_TRUE(check(nullptr, 0, um::pointer_facts_t{}));
+    EXPECT_EQ(argument_queries, 0u);
+
+    const auto page_size = rocprofiler::common::units::get_page_size();
+    ASSERT_GT(page_size, 0);
+    const auto page    = static_cast<size_t>(page_size);
+    auto*      mapping = static_cast<uint8_t*>(
+        ::mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    ASSERT_NE(mapping, MAP_FAILED);
+    ASSERT_EQ(::mprotect(mapping + page, page, PROT_NONE), 0);
+    const auto mapped = host_allocation(mapping, 2 * page);
+    EXPECT_EXIT({ std::_Exit(check(mapping + page, 8, mapped) ? 1 : 0); },
+                ::testing::ExitedWithCode(0),
+                "");
+    EXPECT_EXIT({ std::_Exit(check(mapping + page - 8, 16, mapped) ? 1 : 0); },
+                ::testing::ExitedWithCode(0),
+                "");
+    EXPECT_EQ(::munmap(mapping, 2 * page), 0);
+}
 
 TEST(kernel_replay_untracked_memory, classifies_memory_the_snapshot_does_not_restore)
 {
@@ -242,6 +312,15 @@ TEST(kernel_replay_untracked_memory, host_mappings_hold_the_memory_a_kernel_coul
         << "a writable-only mapping is host memory a kernel can be handed";
     ::munmap(write_only, page);
 
+    auto       sample = std::istringstream{"10000-11000 rw-p 00000000 00:01 1 /dev/kfd\n"
+                                     "20000-21000 rw-p 00000000 00:01 2 /dev/dri/renderD128\n"
+                                     "30000-31000 rw-p 00000000 00:01 3 /tmp/dev/kfd\n"};
+    const auto parsed = um::read_writable_host_mappings(sample);
+    ASSERT_TRUE(parsed.ok);
+    EXPECT_FALSE(covers(parsed.spans, 0x10000));
+    EXPECT_FALSE(covers(parsed.spans, 0x20000));
+    EXPECT_TRUE(covers(parsed.spans, 0x30000));
+
     auto       empty_file = std::istringstream{};
     const auto empty      = um::read_writable_host_mappings(empty_file);
     EXPECT_TRUE(empty.ok);
@@ -299,11 +378,24 @@ TEST(kernel_replay_untracked_memory, memory_outside_the_snapshot_runs_the_dispat
         << "successful UNKNOWN query with no writable host mapping";
 }
 
-TEST(kernel_replay_untracked_memory, allocation_failure_declines_replay)
+TEST(kernel_replay_untracked_memory, memory_check_failure_declines_replay)
 {
-    auto       kernarg = kernarg_with({vmem_addr});
-    const auto facts   = [](uint64_t) -> um::pointer_facts_t { throw std::bad_alloc{}; };
-
-    EXPECT_FALSE(um::can_replay_dispatch(
-        kernarg.data(), kernarg.size(), nullptr, msnp::device_snapshot_t{}, facts));
+    const auto failures = std::array<um::pointer_facts_fn_t, 3>{
+        [](uint64_t) -> um::pointer_facts_t { throw std::bad_alloc{}; },
+        [](uint64_t) -> um::pointer_facts_t { throw std::runtime_error{"query failed"}; },
+        [](uint64_t) -> um::pointer_facts_t { throw 1; },
+    };
+    for(const auto& facts : failures)
+    {
+        auto       argument_queried = false;
+        const auto query            = [&](uint64_t address) {
+            EXPECT_EQ(address, vmem_addr);
+            argument_queried = true;
+            return facts(address);
+        };
+        auto replayable = true;
+        EXPECT_NO_THROW(replayable = can_replay({vmem_addr}, query));
+        EXPECT_TRUE(argument_queried);
+        EXPECT_FALSE(replayable);
+    }
 }
