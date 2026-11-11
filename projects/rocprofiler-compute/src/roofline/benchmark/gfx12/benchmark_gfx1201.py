@@ -152,7 +152,7 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         self.matrix_f8f6f4_src = ""
 
         self.matrix_f16_src = """
-            typedef __fp16 half8 __attribute__((ext_vector_type(8)));
+            typedef _Float16 half8 __attribute__((ext_vector_type(8)));
             typedef float  float8 __attribute__((ext_vector_type(8)));
             extern "C" __global__ void wmma_f16(int iter, float *dummy)
             {

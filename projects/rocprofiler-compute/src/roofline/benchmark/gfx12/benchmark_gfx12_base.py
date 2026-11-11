@@ -146,6 +146,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
                 // Input: 8 F32 registers (16 x f16)
                 vec8<float> a;
                 a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
+                const vec16<_Float16> b = __builtin_bit_cast(vec16<_Float16>, a);
 
                 // Input: negate 'bool' (const int) per matrix
                 // 0 -- none, 1 -- neg
@@ -157,13 +158,15 @@ class Bench_gfx12(benchmark_base.Bench_base):
 
                 // Output: 4 F32 registers (8 x f16)
                 vec4<float> result = {0};
+                vec8<_Float16> acc = __builtin_bit_cast(vec8<_Float16>, result);
 
                 // gfx1250: V_WMMA_F16_16X16X32_F16_w32 ops: 16x16x32x2 = 16384
                 for(int i = 0; i < iter; ++i)
                 {
-                    result = __builtin_amdgcn_wmma_f16_16x16x32_f16 (A_mod, a, A_mod,\
-                          a, result_mod, result, A_reuse, A_reuse);
+                    acc = __builtin_amdgcn_wmma_f16_16x16x32_f16 (A_mod, b, A_mod,\
+                          b, result_mod, acc, A_reuse, A_reuse);
                 }
+                result = __builtin_bit_cast(vec4<float>, acc);
 
                 if (result[0] != 2*result[0])
                 {
@@ -181,6 +184,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
                 // Input: 8 i32 registers (16 x bf16)
                 vec8<int> a;
                 a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] =threadIdx.x;
+                const vec16<__bf16> b = __builtin_bit_cast(vec16<__bf16>, a);
 
                 // Input: negate 'bool' (const int) per matrix
                 // 0 -- none, 1 -- neg
@@ -192,13 +196,15 @@ class Bench_gfx12(benchmark_base.Bench_base):
 
                 // Output: 4 i32 registers (8 x bf16)
                 vec4<int> result = {0};
+                vec8<__bf16> acc = __builtin_bit_cast(vec8<__bf16>, result);
 
                 // gfx1250: V_WMMA_BF16_16X16X32_BF16_w32 ops: 16x16x32x2 = 16384
                 for(int i = 0; i < iter; ++i)
                 {
-                    result = __builtin_amdgcn_wmma_bf16_16x16x32_bf16 (A_mod, a, A_mod,\
-                          a, result_mod, result, A_reuse, A_reuse);
+                    acc = __builtin_amdgcn_wmma_bf16_16x16x32_bf16 (A_mod, b, A_mod,\
+                          b, result_mod, acc, A_reuse, A_reuse);
                 }
+                result = __builtin_bit_cast(vec4<int>, acc);
 
                 if (result[0] != 2*result[0])
                 {
