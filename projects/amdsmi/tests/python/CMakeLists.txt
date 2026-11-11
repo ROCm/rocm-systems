@@ -42,3 +42,14 @@ install(
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests/
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# test_log_dir_perms.py runs do_configureLogrotate() out of these maintainer
+# script templates, found relative to its REPO_ROOT (SHARE_INSTALL_PREFIX in the
+# installed layout), so they must ship with the tests -- otherwise every
+# subtest raises SkipTest and the log-permission guard never runs in CI.
+install(
+    FILES ${PROJECT_SOURCE_DIR}/DEBIAN/postinst.in
+    DESTINATION ${SHARE_INSTALL_PREFIX}/DEBIAN/
+    COMPONENT ${TESTS_COMPONENT}
+)
+install(FILES ${PROJECT_SOURCE_DIR}/RPM/post.in DESTINATION ${SHARE_INSTALL_PREFIX}/RPM/ COMPONENT ${TESTS_COMPONENT})

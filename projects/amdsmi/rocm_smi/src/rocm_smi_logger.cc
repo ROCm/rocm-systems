@@ -22,6 +22,9 @@
  * whatever interface fits your needs.
  */
 
+// C Header File(s)
+#include <sys/stat.h>
+
 // C++ Header File(s)
 #include <cstdlib>
 #include <ctime>
@@ -480,12 +483,11 @@ void ROCmLogging::Logger::initialize_resources() {
   if (m_File.fail()) {
     std::cout << "WARNING: Failed opening log file." << std::endl;
   }
-  // 0664 to match the mode the package postinst sets and avoid churn on the
-  // first root-run. The log is root-owned, so the group-write bit has no
-  // practical effect; the security-relevant part is withholding world-write
-  // (S_IWOTH), which would let any local user tamper with a root-owned log
-  // (CWE-732).
-  chmod(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  if (m_File.is_open()) {
+    // The package scriptlet owns the log mode; this only tightens a log a root
+    // run just created under a permissive umask.
+    chmod(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+  }
 }
 
 void ROCmLogging::Logger::destroy_resources() { m_File.close(); }
