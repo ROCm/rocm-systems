@@ -28,6 +28,7 @@
 #include "plugin/nccl_tuner.h"
 #include "rccl_common.h"
 #include "rocmwrap.h"
+#include "warp_speed_plan.h"
 
 #include <algorithm>
 #include <chrono>
@@ -2064,6 +2065,123 @@ TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
     EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
 }
 
+TEST(Rcclwrap, WarpSpeedPlanCap_LeadingPrefixPreservesWarpSpeed)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    struct
+    {
+        int nTasks;
+        int ordinaryTask;
+        int treeTask;
+        bool expectPlanEligible;
+        bool expectCap;
+    } const cases[] = {
+        {4, -1, -1, true, true},
+        {4, 0, -1, false, false},
+        {4, 3, -1, false, true},
+        {4, -1, 1, false, false},
+        {5, -1, -1, true, true},
+        {5, 4, -1, false, true},
+        {4, 2, -1, false, false},
+        {3, 2, -1, false, false},
+    };
+
+    for(const auto& c : cases)
+    {
+        ncclTaskColl tasks[5]{};
+        for(int i = 0; i < c.nTasks; ++i)
+        {
+            tasks[i].algorithm = i == c.treeTask ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+            tasks[i].useWarpSpeed = i != c.ordinaryTask;
+            tasks[i].next = i + 1 < c.nTasks ? &tasks[i + 1] : nullptr;
+        }
+
+        EXPECT_EQ(c.expectPlanEligible, rcclWarpSpeedSupported(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_EQ(c.expectCap, rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], c.nTasks));
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+    }
+}
+
+TEST(Rcclwrap, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    comm->topo = topo.get();
+    comm->nNodes = 2;
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[58]{};
+    for(int i = 0; i < 58; ++i)
+    {
+        tasks[i].algorithm = NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 58 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls)
+    {
+        EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], nPlanColls))
+            << "nPlanColls=" << nPlanColls;
+    }
+}
+
+TEST(Rcclwrap, GroupedPlanCap_SingleNodeGfx950CapsEveryPrefix)
+{
+    auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
+    auto plan = std::make_unique<ncclKernelPlan>();
+    char arch[] = "gfx950";
+    char archWithSuffix[] = "gfx950:sramecc+:xnack-";
+    char otherArch[] = "gfx942";
+    comm->topo = topo.get();
+    comm->archName = arch;
+    comm->nNodes = 1;
+    topo->warpSpeedEnabled = false;
+    ncclIntruQueueConstruct(&plan->p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan->bcastTaskQueue);
+
+    ncclTaskColl tasks[5]{};
+    for(int i = 0; i < 5; ++i)
+    {
+        tasks[i].func = i == 0 ? ncclFuncReduce : ncclFuncAllReduce;
+        tasks[i].datatype = i == 1 ? ncclFloat16 : ncclFloat;
+        tasks[i].count = 1048575 + i;
+        tasks[i].opHost = i == 2 ? ncclMax : ncclSum;
+        tasks[i].algorithm = i == 3 ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 5 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int ranks : {2, 8})
+    {
+        comm->nRanks = ranks;
+        for(char* gfx950Arch : {arch, archWithSuffix})
+        {
+            comm->archName = gfx950Arch;
+            EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/3));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+            EXPECT_TRUE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/5));
+        }
+    }
+
+    comm->archName = otherArch;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+    comm->archName = archWithSuffix;
+    comm->nNodes = 2;
+    EXPECT_FALSE(rcclShouldCapGroupedPlan(comm.get(), plan.get(), &tasks[0], /*nPlanColls=*/4));
+}
+
 TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
 {
     ncclComm comm{};
@@ -3085,7 +3203,7 @@ TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
     // A few of the DPX-only entries, so a DPX value copied back over SPX shows up here.
     EXPECT_EQ(dpx->agRingLL128MaxPerRank, (size_t)16 * 1024 * 1024);
     EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
-    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
+    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)128 * 1024);
     EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
     // DPX sets total-byte broadcast ceilings. SPX leaves them 0.
     EXPECT_EQ(dpx->bcRingLLMaxBytes, (size_t)16 * 1024);
@@ -3230,12 +3348,17 @@ void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
     comm.ddaLLEpochLen         = DDA_FABRIC_MAXBLOCKS;
 }
 
-ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
+// Distinct, 256-byte aligned send and receive buffers; selection reads only their addresses.
+alignas(256) char a2aSendStorage[256];
+alignas(256) char a2aRecvStorage[256];
+
+// count is per-peer bytes / type size; totalBytes = count * type size * nRanks
+ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out, size_t sendOffset = 0,
+                       size_t recvOffset = 0, ncclDataType_t datatype = ncclFloat32)
 {
-    // count is per-peer bytes / sizeof(float); totalBytes = count * sizeof(float) * nRanks
-    size_t count = totalBytes / sizeof(float) / comm.nRanks;
-    return rcclSelectAlltoAll(&comm, /*sendbuff=*/nullptr, /*recvbuff=*/nullptr,
-                              count, ncclFloat32, /*stream=*/nullptr,
+    size_t count = totalBytes / ncclTypeSize(datatype) / comm.nRanks;
+    return rcclSelectAlltoAll(&comm, a2aSendStorage + sendOffset, a2aRecvStorage + recvOffset,
+                              count, datatype, /*stream=*/nullptr,
                               /*query=*/true, /*graphCapturingHint=*/false, &out);
 }
 } // namespace
@@ -3301,6 +3424,56 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
+{
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128},
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
+    for (const auto& c : cases)
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
+        EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
+}
+
+// gfx1250 DPX table, 8 ranks, bf16: buffer offsets of 1 and 2 bytes, in and out of place, take the band
+// a 256-byte aligned call takes, so ranks whose buffers differ in alignment pick the same kernel.
+TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
+{
+    auto comm = std::make_unique<ncclComm>();
+    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(comm->archThresholds, nullptr);
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128}};
+    const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
+    for (const auto& c : cases)
+    {
+        for (const auto& o : offsets)
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(SelectA2A(*comm, c.first, dec, o.first, o.second, ncclBfloat16), ncclSuccess) << c.first;
+            EXPECT_EQ(dec.algo, c.second) << c.first << " send+" << o.first << " recv+" << o.second;
+        }
+        rcclCollDecision dec{};
+        const size_t count = c.first / ncclTypeSize(ncclBfloat16) / comm->nRanks;
+        ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + 2, a2aRecvStorage + 2, count, ncclBfloat16,
+                                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
+                  ncclSuccess);
+        EXPECT_EQ(dec.algo, c.second) << c.first << " in place +2";
+    }
 }
 
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):

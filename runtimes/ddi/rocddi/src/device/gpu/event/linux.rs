@@ -30,7 +30,7 @@ struct ProcessPage {
 }
 
 struct ProcessPageSlot {
-    process: u32,
+    process: crate::os::ProcessIdentity,
     page: Mutex<ProcessPage>,
 }
 
@@ -39,16 +39,25 @@ struct ProcessPageSlot {
 static PROCESS_PAGE_SLOT: AtomicPtr<ProcessPageSlot> = AtomicPtr::new(std::ptr::null_mut());
 
 #[allow(unsafe_code)]
-fn process_page_slot() -> &'static ProcessPageSlot {
-    let process = std::process::id();
+fn process_page_slot() -> Result<&'static ProcessPageSlot, Error> {
     loop {
         let current = PROCESS_PAGE_SLOT.load(Ordering::Acquire);
         if !current.is_null() {
             // SAFETY: A published slot is never freed or moved.
-            if unsafe { (*current).process == process } {
-                return unsafe { &*current };
+            match unsafe { (*current).process.matches_current_process() } {
+                Ok(true) => return Ok(unsafe { &*current }),
+                Ok(false) => {}
+                Err(source) => {
+                    return Err(crate::os::native_error(
+                        "KFD signal page process identity",
+                        source,
+                    ));
+                }
             }
         }
+        let process = crate::os::ProcessIdentity::capture().map_err(|source| {
+            crate::os::native_error("KFD signal page process identity", source)
+        })?;
         let candidate = Box::into_raw(Box::new(ProcessPageSlot {
             process,
             page: Mutex::new(ProcessPage {
@@ -64,7 +73,7 @@ fn process_page_slot() -> &'static ProcessPageSlot {
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            Ok(_) => return unsafe { &*candidate },
+            Ok(_) => return Ok(unsafe { &*candidate }),
             Err(_) => unsafe { drop(Box::from_raw(candidate)) },
         }
     }
@@ -178,7 +187,7 @@ impl ProcessSignalEventPageGuard {
 /// # Errors
 /// Reports poisoned process state.
 fn lock_process_signal_event_page() -> Result<ProcessSignalEventPageGuard, Error> {
-    process_page_slot()
+    process_page_slot()?
         .page
         .lock()
         .map(ProcessSignalEventPageGuard)
@@ -365,7 +374,7 @@ pub struct SignalEventMailbox {
 /// the shared process-page identity; session services keep a private page.
 pub struct SignalEventService {
     lifetime: DriverContextLifetime,
-    process_id: u32,
+    process: crate::os::ProcessIdentity,
     page: Option<SignalEventPage>,
     confirmed: bool,
 }
@@ -373,10 +382,10 @@ pub struct SignalEventService {
 impl SignalEventService {
     /// Creates an inert service without allocating or installing a page.
     #[must_use]
-    pub fn new(lifetime: DriverContextLifetime) -> Self {
+    pub fn new(session: &crate::session::Session) -> Self {
         Self {
-            lifetime,
-            process_id: std::process::id(),
+            lifetime: session.driver_context_lifetime(),
+            process: session.process_identity(),
             page: None,
             confirmed: false,
         }
@@ -400,14 +409,10 @@ impl SignalEventService {
     }
 
     fn ensure_process(&self) -> Result<(), Error> {
-        if self.process_id == std::process::id() {
-            Ok(())
-        } else {
-            Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "KFD signal event service belongs to another process",
-            })
-        }
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "KFD signal event service belongs to another process",
+        })
     }
 
     /// Install the one KFD page on every GPU this connection can discover.
