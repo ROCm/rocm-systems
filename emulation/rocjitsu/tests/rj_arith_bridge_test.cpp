@@ -14011,5 +14011,76 @@ TEST(ArithBridgeTest, PackedSelectionIgnoresUnselectedNanHalf) {
   }
 }
 
+TEST(ArithBridgeTest, Gfx1250DualRoundThenFlushBoundary) {
+  for (unsigned op : {32U, 34U, 7U}) {
+    BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5);
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(0x50);
+    const bool wide = op != 7;
+    f.cu->write_vgpr(f.base(), 0, wide ? 0U : 0x00800000U);
+    f.cu->write_vgpr(f.base() + 1, 0, 0x00100000U);
+    f.cu->write_vgpr(f.base() + 2, 0, wide ? 0xffffffffU : 0x3f7fffffU);
+    f.cu->write_vgpr(f.base() + 3, 0, 0x3fefffffU);
+    f.cu->write_vgpr(f.base() + 4, 0, 0U);
+    f.cu->write_vgpr(f.base() + 5, 0, 0U);
+    // VOPD3 X is the tested arithmetic; Y copies a disjoint VGPR.
+    const std::array<uint32_t, 3> words = {0xcf000000U | (op << 18) | (8U << 12) | 256U,
+                                           258U | (2U << 16) | (4U << 24),
+                                           6U | (2U << 8) | (4U << 16) | (9U << 24)};
+    auto instruction = f.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+    ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), wide ? 0U : 0x00800000U);
+    if (wide) {
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), 0x00100000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250DualFmaNegatedAddend) {
+  BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5);
+  f.wave->set_exec(1);
+  f.wave->set_mode_raw(0xf0);
+  f.cu->write_vgpr(f.base(), 0, 0x40000000U);
+  f.cu->write_vgpr(f.base() + 2, 0, 0x40400000U);
+  f.cu->write_vgpr(f.base() + 4, 0, 0x3f800000U);
+  const std::array<uint32_t, 3> words = {0xcf000000U | (19U << 18) | (8U << 12) | 256U,
+                                         258U | (4U << 9) | (2U << 16) | (4U << 24),
+                                         6U | (2U << 8) | (4U << 16) | (9U << 24)};
+  auto instruction = f.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+  ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+  EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x40a00000U);
+}
+
+TEST(ArithBridgeTest, Gfx1250DualMulRejectsUnqualifiedStatus) {
+  for (bool scalar : {false, true}) {
+    struct RestoreScalar {
+      bool previous = util::force_scalar();
+      ~RestoreScalar() { util::set_force_scalar_for_testing(previous); }
+    } restore;
+    util::set_force_scalar_for_testing(scalar);
+    BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5, 32,
+                    ArithmeticPolicy{ArithmeticSemantics::BitExactEmpirical});
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(0xf0);
+    f.wave->set_trapsts(0x10);
+    f.cu->write_vgpr(f.base(), 0, 0x7f7fffffU);
+    f.cu->write_vgpr(f.base() + 2, 0, 0x40000000U);
+    const std::array<uint32_t, 3> words = {0xcf000000U | (3U << 18) | (8U << 12) | 256U,
+                                           258U | (2U << 16), 6U | (2U << 8) | (9U << 24)};
+    auto instruction = f.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+    EXPECT_FALSE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x3c003c00U);
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0x3c003c00U);
+    EXPECT_EQ(f.wave->trapsts(), 0x10U);
+    EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
+  }
+}
+
 } // namespace
 } // namespace rocjitsu::amdgpu

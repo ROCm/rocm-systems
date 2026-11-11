@@ -8419,11 +8419,11 @@ def test_vopd_execution_failure_stops_before_either_slot_commits(
     codegen.gen_vopd()
     cpp = (tmp_path / arch_name / 'vopd_exec.cpp').read_text()
     assert 'throw ' not in cpp
-    if arch_name in ('rdna3', 'rdna4'):
+    if arch_name in ('rdna3', 'rdna4', 'cdna5'):
         # rj-arith evaluates both slots into temporaries and commits only on success.
         wave_check, invoke = cpp.split('amdgpu::arith::execute_dual_pair', 1)
         assert 'if (wf.wf_size() != 32)' in wave_check
-        assert ('InvalidInstructionEncoding' in wave_check) == (arch_name == 'rdna4')
+        assert ('InvalidInstructionEncoding' in wave_check) == (arch_name != 'rdna3')
         assert 'return;' in wave_check
         assert 'amdgpu::InstructionExecutionError::UnimplementedInstruction' in invoke
         assert 'return RJ_ARITH_ERROR_INVALID_FLAGS;' in invoke
@@ -8492,30 +8492,21 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     assert 'if (vdstx < y_end && vdsty < x_end)' in cpp
     assert 'case 3:\n              case 7:' not in cpp
     assert 'if (lhs == 0.0f || rhs == 0.0f)' not in exec_cpp
-    src_neg_start = exec_cpp.index('bool Vopd::uses_src_neg_modifier')
-    src_neg_body = exec_cpp[
-        src_neg_start : exec_cpp.index('uint32_t Vopd::apply_neg', src_neg_start)
-    ]
-    assert 'case kVopdCndmaskB32:' in src_neg_body
-    assert 'if (uses_src_neg_modifier(slot.op))' in exec_cpp
     assert 'Vopd::execute_slot' not in cpp
     assert 'Vopd::execute_impl' not in cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in cpp
-    execute_start = exec_cpp.index('uint32_t Vopd::execute_slot')
-    mul_dx9_start = exec_cpp.index('case kVopdMulDx9ZeroF32:', execute_start)
-    mul_dx9_case = exec_cpp[
-        mul_dx9_start : exec_cpp.index('case kVopdAddF32:', mul_dx9_start)
-    ]
-    assert 'fp_mode::Arithmetic::MUL_LEGACY' in mul_dx9_case
-    assert 'wf.fp_round_mode_f32()' in mul_dx9_case
-    assert 'wf.fp_denorm_mode_f32()' in mul_dx9_case
-    fma_start = exec_cpp.index('case kVopdFmaF32', execute_start)
-    fma_case = exec_cpp[fma_start : exec_cpp.index('case kVopdSubNcU32:', fma_start)]
-    assert 'fp_mode::Arithmetic::FMA' in fma_case
-    assert 'wf.fp_round_mode_f32()' in fma_case
-    assert 'wf.fp_denorm_mode_f32()' in fma_case
-    assert 'std::bit_cast<float>(src1),' in fma_case
-    assert 'std::bit_cast<float>(src2),' in fma_case
+    for opcode, api in (
+        ('MulDx9ZeroF32', 'mul_dx9_zero_f32'),
+        ('FmaF32', 'fma_f32'),
+        ('CndmaskB32', 'cndmask_b32'),
+    ):
+        body = exec_cpp.split(f'case kVopd{opcode}:', 1)[1].split('case ', 1)[0]
+        assert f'rj_arith_v_dual_{api}_w32_gfx1250' in body
+        assert 'slot.neg & 1' in body
+        assert 'slot.neg & 2' in body
+        if opcode != 'CndmaskB32':
+            assert 'float32_flags(wf' in body
+    assert 'execute_dual_pair<2>' in exec_cpp
     assert 'constexpr uint16_t kVopdFmaF64 = 32;' in exec_cpp
     assert 'constexpr uint16_t kVopdAddF64 = 33;' in exec_cpp
     assert 'bool Vopd::is_float64_op' in cpp
@@ -8573,28 +8564,14 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(
     if missing_op is not None:
         assert f'k{missing_op}' not in exec_cpp
 
-    if arch == 'rdna4':
-        # rj-arith now owns SIMD dispatch. Retain profile gating and the guarantee
-        # that MOV does not observe its unused second source.
-        assert 'try_execute_vopd_integer_pair_simd<' not in exec_cpp
-        assert 'execute_dual_pair' in exec_cpp
-        start = exec_cpp.index('case kVopdMovB32:')
-        mov_case = exec_cpp[start : exec_cpp.index('case kVopdCndmaskB32:', start)]
-        assert '*slot.src0' in mov_case
-        assert '*slot.src1' not in mov_case
-        assert 'rj_arith_v_dual_mov_b32_w32' in mov_case
-    else:
-        # CDNA5 retains the original probe and source-negation contract.
-        assert ('try_execute_vopd_integer_pair_simd<' in exec_cpp) == (
-            missing_op is None
-        )
-        execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
-        assert execute_slot.index('src0 = apply_neg(') < execute_slot.index(
-            'return src0;'
-        )
-        assert execute_slot.index('return src0;') < execute_slot.index(
-            'uint32_t src1 ='
-        )
+    # All targeted architectures delegate SIMD dispatch to rj-arith.
+    assert 'try_execute_vopd_integer_pair_simd<' not in exec_cpp
+    assert 'execute_dual_pair' in exec_cpp
+    start = exec_cpp.index('case kVopdMovB32:')
+    mov_case = exec_cpp[start : exec_cpp.index('case kVopdCndmaskB32:', start)]
+    assert '*slot.src0' in mov_case
+    assert '*slot.src1' not in mov_case
+    assert 'rj_arith_v_dual_mov_b32_w32' in mov_case
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])

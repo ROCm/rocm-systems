@@ -3341,6 +3341,15 @@ class CodeGenerator:
                 '  static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);\n',
                 '',
             )
+            if has_vopd3:
+                header = header.replace(
+                    'static uint64_t apply_neg64(uint64_t value, uint8_t neg_bits, uint8_t src_idx);\n',
+                    '',
+                ).replace(
+                    'static uint64_t execute_slot64(const Slot &slot, amdgpu::Wavefront &wf,\n'
+                    '                               uint32_t lane);\n',
+                    '',
+                )
 
         vopd_isa_diagnostics = cpp_block('''
             // Evaluate the qualified operand restrictions once, at decode.
