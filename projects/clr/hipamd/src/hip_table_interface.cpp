@@ -2853,6 +2853,14 @@ HIP_PUBLIC_API hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGr
       stream, graph, dependencies, dependencyData, numDependencies, mode);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipStreamBeginRecaptureToGraph(
+    hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph,
+    hipGraphRecaptureCallbackData* callbackData) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipStreamBeginRecaptureToGraph_fn(stream, mode, graph,
+                                                                       callbackData);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
   TRY;
   return hip::GetHipDispatchTable()->hipGetFuncBySymbol_fn(functionPtr, symbolPtr);

@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 559 HIP APIs.
+ * Generated from 560 HIP APIs.
  */
 
 #pragma once
@@ -513,6 +513,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipStreamAttachMemAsync", "T4", 1, false, true, false, false},
     {"hipStreamBeginCaptureToGraph", "T4", 0, false, true, false, false},
     {"hipStreamBeginCapture_spt", "T4", 0, false, true, false, false},
+    {"hipStreamBeginRecaptureToGraph", "T4", 0, false, true, false, false},
     {"hipStreamCopyAttributes", "T4", 0, false, true, false, false},
     {"hipStreamEndCapture_spt", "T4", 0, false, true, false, false},
     {"hipStreamGetAttribute", "T4", 0, false, true, false, false},

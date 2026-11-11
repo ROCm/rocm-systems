@@ -223,6 +223,8 @@ typedef enum __HIP_NODISCARD hipError_t UINT32_BASE {
   hipErrorInvalidResourceConfiguration = 915,  ///< Resource configuration is not valid for
                                                ///< the operation.
   hipErrorStreamDetached = 916,            ///< The stream is detached.
+  hipErrorGraphRecaptureFailure = 918,  ///< Recapturing into the source graph failed and was
+                                        ///< terminated.
   hipErrorUnknown = 999,                   ///< Unknown error.
   // HSA Runtime Error Codes start here.
   hipErrorRuntimeMemory = 1052,  ///< HSA runtime memory call returned error.  Typically not seen
@@ -8983,6 +8985,22 @@ int hipGetStreamDeviceId(hipStream_t stream);
  */
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode);
 
+typedef enum hipGraphRecaptureStatus {
+  hipGraphRecaptureEligibleForUpdate = 0,  ///< hipGraphExecUpdate can apply the change.
+  hipGraphRecaptureIneligibleForUpdate =
+      1,  ///< hipGraphExecUpdate would reject the change.
+  hipGraphRecaptureError = 2,  ///< The node cannot be recaptured; recapture ends.
+} hipGraphRecaptureStatus;
+
+typedef hipError_t (*hipGraphRecaptureCallback_t)(
+    void* data, hipGraphNode_t node, const hipGraphNodeParams* originalParams,
+    const hipGraphNodeParams* recaptureParams, hipGraphRecaptureStatus status);
+
+typedef struct hipGraphRecaptureCallbackData {
+  hipGraphRecaptureCallback_t callbackFunc;  ///< Called for every parameter mismatch.
+  void* userData;                            ///< Passed to callbackFunc as data.
+} hipGraphRecaptureCallbackData;
+
 /**
 * @brief Begins graph capture on a stream to an existing graph.
 *
@@ -9006,6 +9024,36 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
                                         size_t numDependencies, hipStreamCaptureMode mode);
+
+/**
+ * @brief Begins graph recapture on a stream into an existing graph.
+ *
+ * Each operation captured on the stream is matched, in order, against the next node already in
+ * @p graph. The operation must have the same node type and the same dependencies as that node;
+ * the node then keeps its handle and takes the newly captured parameters. Because node handles
+ * are preserved, an executable graph instantiated from @p graph can be refreshed with
+ * ::hipGraphExecUpdate. Any user objects owned by @p graph are released when recapture begins.
+ *
+ * If @p callbackData has a non-null callbackFunc, it is called for every node whose captured
+ * parameters differ from the existing ones. The status tells whether ::hipGraphExecUpdate can
+ * apply the change. Returning an error from the callback, or a status of
+ * #hipGraphRecaptureError, terminates the recapture.
+ *
+ * ::hipStreamEndCapture returns #hipErrorGraphRecaptureFailure if the recapture was terminated,
+ * if an operation did not match, or if not every existing node was matched.
+ *
+ * @param [in] stream - Stream to initiate recapture.
+ * @param [in] mode - Controls the interaction of this capture sequence with other API calls that
+ * are not safe.
+ * @param [in] graph - Graph to recapture into.
+ * @param [in] callbackData - Optional callback invoked for parameter mismatches. Can be NULL.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState,
+ * #hipErrorStreamCaptureUnsupported, #hipErrorStreamDetached, #hipErrorContextIsDestroyed
+ */
+hipError_t hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMode mode,
+                                          hipGraph_t graph,
+                                          hipGraphRecaptureCallbackData* callbackData);
 
 /**
  * @brief Ends capture on a stream, returning the captured graph.

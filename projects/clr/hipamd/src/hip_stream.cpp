@@ -35,6 +35,14 @@ void EraseCaptureTracking(Stream* stream) {
   }
   EraseIfPresent(tls.capture_streams_, stream);
 }
+
+// A graph from hipGraphChildGraphNodeGetGraph is a subobject of its ChildGraphNode, which owns
+// it, so the capture must give it up without deleting it.
+void ReleaseIfEmbedded(std::unique_ptr<hip::Graph>& graph) {
+  if (dynamic_cast<hip::ChildGraphNode*>(graph.get()) != nullptr) {
+    (void)graph.release();
+  }
+}
 }  // namespace
 
 // ================================================================================================
@@ -53,7 +61,10 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 
 // ================================================================================================
 // Out of line so that captureGraph_'s deleter is instantiated where hip::Graph is complete.
-Stream::~Stream() { device().ReleaseGlobalSignal(blocked_on_signal_.load()); }
+Stream::~Stream() {
+  ReleaseIfEmbedded(captureGraph_);
+  device().ReleaseGlobalSignal(blocked_on_signal_.load());
+}
 
 // ================================================================================================
 bool Stream::IsBlockedOn(void* signal) const {
@@ -132,6 +143,18 @@ void Stream::JoinCapture(hip::Stream* member) {
 }
 
 // ================================================================================================
+void Stream::SetGraphRecapture(std::unique_ptr<hip::GraphRecapture> state) {
+  std::scoped_lock lock(lock_);
+  graphRecapture_ = std::move(state);
+}
+
+// ================================================================================================
+void Stream::ClearGraphRecapture() {
+  std::scoped_lock lock(lock_);
+  graphRecapture_.reset();
+}
+
+// ================================================================================================
 hip::Graph* Stream::EndCapture(bool preserveInvalidated) {
   if (!originStream_ && captureOwner_ != nullptr) {
     // A participant leaving the capture on its own, via hipStreamDestroy or Detach.
@@ -139,11 +162,53 @@ hip::Graph* Stream::EndCapture(bool preserveInvalidated) {
     captureOwner_->captureStreams_.erase(this);
   }
 
+  // Recapture teardown runs under lock_ so a captured operation cannot match against nodes
+  // that are about to be destroyed. The graph destructor runs after the unlock: user-object
+  // callbacks must be able to take this lock. A recapture callback drops lock_ while it runs;
+  // wait that out first so the callback still has live node handles. The callback's own
+  // hipStreamEndCapture does not wait.
+  if (originStream_ && graphRecapture_ != nullptr) {
+    std::unique_ptr<hip::Graph> destroyAfterUnlock;
+    hip::Graph* graph = nullptr;
+    std::unique_lock<std::recursive_mutex> lock(lock_);
+    // hipStreamEndCapture and hipStreamDestroy from the callback thread must return. The
+    // matcher reads the flag after the callback and does not lock this stream again.
+    if (graphRecapture_->callbackInProgress &&
+        graphRecapture_->callbackThread == std::this_thread::get_id()) {
+      *graphRecapture_->callbackEndedCapture = true;
+    }
+    while (graphRecapture_ != nullptr && graphRecapture_->callbackInProgress &&
+           !*graphRecapture_->callbackEndedCapture) {
+      lock.unlock();
+      std::this_thread::yield();
+      lock.lock();
+    }
+    if (captureGraph_ != nullptr) {
+      captureGraph_->SetRecapturingStream(nullptr);
+    }
+    graphRecapture_.reset();
+    if (GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+      ReleaseIfEmbedded(captureGraph_);
+      destroyAfterUnlock = std::move(captureGraph_);
+    } else {
+      graph = captureGraph_.release();
+    }
+    for (auto* participant : captureStreams_) {
+      std::scoped_lock participantLock(participant->lock_);
+      participant->ResetCaptureStateLocked(preserveInvalidated);
+    }
+    ResetCaptureStateLocked(preserveInvalidated);
+    lock.unlock();
+    destroyAfterUnlock.reset();
+    return graph;
+  }
+
   // Only the origin holds the graph, so only the origin disposes of it. An invalidated capture
   // can no longer produce a graph, so it is destroyed instead of handed back.
   hip::Graph* graph = nullptr;
   if (originStream_) {
     if (GetCaptureStatus() == hipStreamCaptureStatusInvalidated) {
+      ReleaseIfEmbedded(captureGraph_);
       captureGraph_.reset();
     } else {
       graph = captureGraph_.release();
@@ -170,6 +235,13 @@ bool Stream::Create() { return create(); }
 
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
+  // Destroying the origin of a recapture takes the same path as an incomplete recapture: the
+  // graph is destroyed and every participant leaves the capture.
+  if (stream->IsOriginStream() && stream->GetGraphRecapture() != nullptr) {
+    stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    EraseCaptureTracking(stream);
+    (void)stream->EndCapture();
+  }
   stream->device().removeFromActiveQueues(stream);
   stream->GetDevice()->RemoveStream(stream);
   stream->SetForceDestroy(forceDestroy);
@@ -603,13 +675,8 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
     if (waitStream == nullptr || waitStream->GetCaptureGraph() == nullptr) {
       return hipErrorInvalidHandle;
     }
-    auto lastCapturedNodes = waitStream->GetLastCapturedNodes();
-    hip::GraphNode* pGraphNode = waitStream->GetCaptureGraph()->AddExternalEventWaitNode(
-                                      reinterpret_cast<hip::GraphNode*>(lastCapturedNodes.data()),
-                                      lastCapturedNodes.size(),
-                                      event);
-    waitStream->SetLastCapturedNode(pGraphNode);
-    return hipSuccess;
+    hip::GraphNode* node = new hip::GraphEventWaitNode(event);
+    return hip::ihipAddCapturedNode(waitStream, &node);
   }
 
   // Event is being captured on eventStream: wire up the capture graph.

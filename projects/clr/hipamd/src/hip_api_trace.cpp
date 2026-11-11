@@ -807,6 +807,9 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
                                         size_t numDependencies, hipStreamCaptureMode mode);
+hipError_t hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMode mode,
+                                          hipGraph_t graph,
+                                          hipGraphRecaptureCallbackData* callbackData);
 hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr);
 hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                      const hipGraphNode_t* dependencies, size_t numDependencies,
@@ -1563,6 +1566,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
   ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
   ptrDispatchTable->hipDeviceFlushGPUDirectRDMAWrites_fn = hip::hipDeviceFlushGPUDirectRDMAWrites;
+  ptrDispatchTable->hipStreamBeginRecaptureToGraph_fn = hip::hipStreamBeginRecaptureToGraph;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2317,6 +2321,8 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttributeForDevice_fn, 547);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
 HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamBeginRecaptureToGraph_fn, 550);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2324,9 +2330,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 550)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 551)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 39,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 40,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -512,7 +512,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipKernelSetAttributeForDevice = 490,
   HIP_API_ID_hipKernelSetCacheConfig = 491,
   HIP_API_ID_hipExtMemcpyBatchAsync = 492,
-  HIP_API_ID_LAST = 492,
+  HIP_API_ID_hipStreamBeginRecaptureToGraph = 493,
+  HIP_API_ID_LAST = 493,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -976,6 +977,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipStreamBatchMemOp: return "hipStreamBatchMemOp";
     case HIP_API_ID_hipStreamBeginCapture: return "hipStreamBeginCapture";
     case HIP_API_ID_hipStreamBeginCaptureToGraph: return "hipStreamBeginCaptureToGraph";
+    case HIP_API_ID_hipStreamBeginRecaptureToGraph: return "hipStreamBeginRecaptureToGraph";
     case HIP_API_ID_hipStreamCopyAttributes: return "hipStreamCopyAttributes";
     case HIP_API_ID_hipStreamCreate: return "hipStreamCreate";
     case HIP_API_ID_hipStreamCreateWithFlags: return "hipStreamCreateWithFlags";
@@ -1462,6 +1464,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipStreamBatchMemOp", name) == 0) return HIP_API_ID_hipStreamBatchMemOp;
   if (strcmp("hipStreamBeginCapture", name) == 0) return HIP_API_ID_hipStreamBeginCapture;
   if (strcmp("hipStreamBeginCaptureToGraph", name) == 0) return HIP_API_ID_hipStreamBeginCaptureToGraph;
+  if (strcmp("hipStreamBeginRecaptureToGraph", name) == 0) return HIP_API_ID_hipStreamBeginRecaptureToGraph;
   if (strcmp("hipStreamCopyAttributes", name) == 0) return HIP_API_ID_hipStreamCopyAttributes;
   if (strcmp("hipStreamCreate", name) == 0) return HIP_API_ID_hipStreamCreate;
   if (strcmp("hipStreamCreateWithFlags", name) == 0) return HIP_API_ID_hipStreamCreateWithFlags;
@@ -4189,6 +4192,13 @@ typedef struct hip_api_data_s {
       size_t numDependencies;
       hipStreamCaptureMode mode;
     } hipStreamBeginCaptureToGraph;
+    struct {
+      hipStream_t stream;
+      hipStreamCaptureMode mode;
+      hipGraph_t graph;
+      hipGraphRecaptureCallbackData* callbackData;
+      hipGraphRecaptureCallbackData callbackData__val;
+    } hipStreamBeginRecaptureToGraph;
     struct {
       hipStream_t dst;
       hipStream_t src;
@@ -7169,6 +7179,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipStreamBeginCaptureToGraph.numDependencies = (size_t)numDependencies; \
   cb_data.args.hipStreamBeginCaptureToGraph.mode = (hipStreamCaptureMode)mode; \
 };
+// hipStreamBeginRecaptureToGraph[('hipStream_t', 'stream'), ('hipStreamCaptureMode', 'mode'), ('hipGraph_t', 'graph'), ('hipGraphRecaptureCallbackData*', 'callbackData')]
+#define INIT_hipStreamBeginRecaptureToGraph_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipStreamBeginRecaptureToGraph.stream = (hipStream_t)stream; \
+  cb_data.args.hipStreamBeginRecaptureToGraph.mode = (hipStreamCaptureMode)mode; \
+  cb_data.args.hipStreamBeginRecaptureToGraph.graph = (hipGraph_t)graph; \
+  cb_data.args.hipStreamBeginRecaptureToGraph.callbackData = (hipGraphRecaptureCallbackData*)callbackData; \
+};
 // hipStreamCopyAttributes[('hipStream_t', 'dst'), ('hipStream_t', 'src')]
 #define INIT_hipStreamCopyAttributes_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipStreamCopyAttributes.dst = (hipStream_t)dst; \
@@ -9222,6 +9239,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipStreamBeginCaptureToGraph:
       if (data->args.hipStreamBeginCaptureToGraph.dependencies) data->args.hipStreamBeginCaptureToGraph.dependencies__val = *(data->args.hipStreamBeginCaptureToGraph.dependencies);
       if (data->args.hipStreamBeginCaptureToGraph.dependencyData) data->args.hipStreamBeginCaptureToGraph.dependencyData__val = *(data->args.hipStreamBeginCaptureToGraph.dependencyData);
+      break;
+// hipStreamBeginRecaptureToGraph[('hipStream_t', 'stream'), ('hipStreamCaptureMode', 'mode'), ('hipGraph_t', 'graph'), ('hipGraphRecaptureCallbackData*', 'callbackData')]
+    case HIP_API_ID_hipStreamBeginRecaptureToGraph:
+      if (data->args.hipStreamBeginRecaptureToGraph.callbackData) data->args.hipStreamBeginRecaptureToGraph.callbackData__val = *(data->args.hipStreamBeginRecaptureToGraph.callbackData);
       break;
 // hipStreamCopyAttributes[('hipStream_t', 'dst'), ('hipStream_t', 'src')]
     case HIP_API_ID_hipStreamCopyAttributes:
@@ -12986,6 +13007,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", dependencyData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.dependencyData__val); }
       oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.numDependencies);
       oss << ", mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginCaptureToGraph.mode);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipStreamBeginRecaptureToGraph:
+      oss << "hipStreamBeginRecaptureToGraph(";
+      oss << "stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginRecaptureToGraph.stream);
+      oss << ", mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginRecaptureToGraph.mode);
+      oss << ", graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginRecaptureToGraph.graph);
+      if (data->args.hipStreamBeginRecaptureToGraph.callbackData == NULL) oss << ", callbackData=NULL";
+      else { oss << ", callbackData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipStreamBeginRecaptureToGraph.callbackData__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipStreamCopyAttributes:

@@ -181,6 +181,8 @@ const char* ihipGetErrorName(hipError_t hip_error) {
       return "hipErrorStreamCaptureWrongThread";
     case hipErrorGraphExecUpdateFailure:
       return "hipErrorGraphExecUpdateFailure";
+    case hipErrorGraphRecaptureFailure:
+      return "hipErrorGraphRecaptureFailure";
     case hipErrorInvalidChannelDescriptor:
       return "hipErrorInvalidChannelDescriptor";
     case hipErrorInvalidTexture:
@@ -339,6 +341,8 @@ const char* ihipGetErrorString(hipError_t hip_error) {
     case hipErrorGraphExecUpdateFailure:
       return "the graph update was not performed because it included changes which violated "
              "constraints specific to instantiated graph update";
+    case hipErrorGraphRecaptureFailure:
+      return "recapturing into the source graph failed and was terminated";
     case hipErrorInvalidChannelDescriptor:
       return "invalid resource description of texture passed to the api";
     case hipErrorInvalidTexture:

@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 631 | 631 | 0 |
-| **total** | **631** | **631** | **0** |
+| `contract` | 634 | 634 | 0 |
+| **total** | **634** | **634** | **0** |
 
 ## Tier: `contract`
 
@@ -86,12 +86,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_RepeatedStagingIsIndependent` | hipLaunchByPtr | repeated configure/setup/launch sequences stage independent argument stacks that do not leak between calls |
 | `Contract_CallConfig_HipLaunchByPtr_ConfigureSetupLaunch_WritesExpectedValue` | hipLaunchByPtr | legacy configure/setup/launch staging path launches a kernel that writes the expected value |
 
-### `capture_to_graph` (3 cases)
+### `capture_to_graph` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_CaptureToGraph_HipStreamBeginCaptureToGraph_BeginCaptureIntoGraph_LaunchWritesExpectedValue` | hipStreamBeginCaptureToGraph | a graph captured into the caller graph instantiates, launches, and produces the captured kernel's write |
 | `Contract_CaptureToGraph_HipStreamBeginCaptureToGraph_BeginCaptureIntoGraph_ProducesSameGraph` | hipStreamBeginCaptureToGraph | ending capture returns the caller-provided graph handle populated with the captured nodes |
+| `Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_MissingNode_DestroysGraph` | hipStreamBeginRecaptureToGraph | an incomplete recapture fails with hipErrorGraphRecaptureFailure, returns a null graph and destroys the input graph |
+| `Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_Recapture_LaunchWritesNewValue` | hipStreamBeginRecaptureToGraph | recaptured parameters are applied to the existing node and the launch writes the new value |
+| `Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_Recapture_ReturnsSameGraphAndNodes` | hipStreamBeginRecaptureToGraph | ending a recapture returns the input graph handle and keeps its node handles |
 | `Contract_CaptureToGraph_HipStreamUpdateCaptureDependencies_Default_AddsToDependencySet` | hipStreamUpdateCaptureDependencies | re-adding the queried capture dependency set is accepted while capture stays active |
 
 ### `context` (6 cases)

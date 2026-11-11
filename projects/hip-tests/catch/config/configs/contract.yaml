@@ -675,6 +675,15 @@ contract:
   Contract_CaptureToGraph_HipStreamUpdateCaptureDependencies_Default_AddsToDependencySet:
     <<: *level_0
     tags: [capture_to_graph, P0]
+  Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_Recapture_ReturnsSameGraphAndNodes:
+    <<: *level_0
+    tags: [capture_to_graph, P0]
+  Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_Recapture_LaunchWritesNewValue:
+    <<: *level_0
+    tags: [capture_to_graph, P0]
+  Contract_CaptureToGraph_HipStreamBeginRecaptureToGraph_MissingNode_DestroysGraph:
+    <<: *level_0
+    tags: [capture_to_graph, P0]
   Contract_GraphKernel_HipGraphAddKernelNode_Default_WritesExpectedValue:
     <<: *level_0
     tags: [graph_kernel, P0]

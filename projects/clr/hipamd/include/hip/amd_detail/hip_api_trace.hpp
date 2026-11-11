@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 39
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 40
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -998,6 +998,9 @@ typedef hipError_t (*t_hipStreamBeginCaptureToGraph)(hipStream_t stream, hipGrap
                                                      const hipGraphEdgeData* dependencyData,
                                                      size_t numDependencies,
                                                      hipStreamCaptureMode mode);
+typedef hipError_t (*t_hipStreamBeginRecaptureToGraph)(hipStream_t stream,
+                                                       hipStreamCaptureMode mode, hipGraph_t graph,
+                                                       hipGraphRecaptureCallbackData* callbackData);
 typedef hipError_t (*t_hipGetFuncBySymbol)(hipFunction_t* functionPtr, const void* symbolPtr);
 typedef hipError_t (*t_hipDrvGraphAddMemFreeNode)(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                                   const hipGraphNode_t* dependencies,
@@ -1874,8 +1877,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
   t_hipExtMemcpyBatchAsync hipExtMemcpyBatchAsync_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+  t_hipStreamBeginRecaptureToGraph hipStreamBeginRecaptureToGraph_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
 
   // ******************************************************************************************* //
   //

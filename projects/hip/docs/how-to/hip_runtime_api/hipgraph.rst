@@ -150,6 +150,8 @@ the operations assigned to the stream are captured into a graph instead of being
 executed. The associated graph is returned when calling :cpp:func:`hipStreamEndCapture`, which
 also stops capturing operations.
 In order to capture to an already existing graph use :cpp:func:`hipStreamBeginCaptureToGraph`.
+To capture the same operations again into a graph from an earlier capture, see
+`Recapturing into an existing graph`_.
 
 The functions assigned to the capturing stream are not executed, but instead are
 captured and defined as nodes in the graph, to be run when the instantiated
@@ -188,6 +190,27 @@ graph from a stream.
     :start-after: // [sphinx-start]
     :end-before: // [sphinx-end]
     :language: cpp
+
+Recapturing into an existing graph
+--------------------------------------------------------------------------------
+
+:cpp:func:`hipStreamBeginRecaptureToGraph` captures the same sequence of
+operations again, into the graph that an earlier capture produced. Instead of
+adding nodes, each captured operation is matched, in order, against the next
+existing node. It must have the same node type and the same dependencies. The
+node keeps its handle and takes the newly captured parameters, so an executable
+graph instantiated from the graph can be refreshed with
+:cpp:func:`hipGraphExecUpdate` instead of being instantiated again.
+
+An optional :cpp:type:`hipGraphRecaptureCallbackData` callback is called for
+every node whose parameters changed. Its :cpp:type:`hipGraphRecaptureStatus`
+argument tells whether :cpp:func:`hipGraphExecUpdate` can apply the change.
+Returning an error from the callback terminates the recapture.
+
+:cpp:func:`hipStreamEndCapture` returns ``hipErrorGraphRecaptureFailure`` if the
+recapture was terminated, if an operation did not match, or if not every
+existing node was matched. User objects owned by the graph are released when
+recapture begins.
 
 Explicit graph creation
 ================================================================================

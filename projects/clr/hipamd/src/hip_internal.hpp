@@ -76,6 +76,7 @@ enum MemcpyType {
 
 struct Graph;
 struct GraphNode;
+struct GraphRecapture;
 class GraphExecBase;
 class GraphExecSegmented;
 struct UserObject;
@@ -442,6 +443,18 @@ namespace hip {
     hip::Graph* GetCaptureGraph() const {
       return captureOwner_ != nullptr ? captureOwner_->captureGraph_.get() : nullptr;
     }
+    /// Origin of the capture this stream belongs to, or null when it is not capturing.
+    hip::Stream* GetCaptureOwner() const { return captureOwner_; }
+    /// Recapture state for this capture, stored on the origin. Null for a normal capture.
+    hip::GraphRecapture* GetGraphRecapture() const {
+      return captureOwner_ != nullptr ? captureOwner_->graphRecapture_.get() : nullptr;
+    }
+    /// Locks the capture state shared by the origin and its participants.
+    std::unique_lock<std::recursive_mutex> LockCaptureState() {
+      return std::unique_lock<std::recursive_mutex>(lock_);
+    }
+    void SetGraphRecapture(std::unique_ptr<hip::GraphRecapture> state);
+    void ClearGraphRecapture();
     /// Returns last captured graph node
     const std::vector<hip::GraphNode*>& GetLastCapturedNodes() const { return lastCapturedNodes_; }
     /// Set last captured graph node; copies stream priority onto kernel nodes.
@@ -548,7 +561,7 @@ namespace hip {
     std::atomic<hipStreamCaptureStatus> captureStatus_{hipStreamCaptureStatusNone};
     /// Graph being constructed by the capture this stream started, and set on no other
     /// stream. EndCapture hands it to the caller, or destroys it if the capture was
-    /// invalidated.
+    /// invalidated. A graph embedded in a ChildGraphNode is released instead, never deleted.
     std::unique_ptr<hip::Graph> captureGraph_;
     hipStreamCaptureMode captureMode_{hipStreamCaptureModeGlobal}; //!< API restriction mode
     bool originStream_ = false;                           //!< True if this stream started capture
@@ -560,6 +573,9 @@ namespace hip {
                                                           //!< excluding the origin. Origin only.
     std::unordered_set<hipEvent_t> captureEvents_;        //!< Events tied to this capture
     uint64_t captureID_ = 0;                              //!< Unique ID for this capture sequence
+    /// Set on the origin while recapturing into an existing graph. Participants reach it
+    /// through captureOwner_. Null during a normal capture.
+    std::unique_ptr<hip::GraphRecapture> graphRecapture_;
 
     // ----- Execution context (green context) state -----
     std::atomic<bool> detached_{false};  //!< True once the owning ExecutionCtx has been destroyed

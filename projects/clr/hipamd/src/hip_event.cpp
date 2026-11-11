@@ -467,15 +467,14 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
     e->SetNodesPrevToRecorded(lastCapturedNodes);
 
     if (flags == hipEventRecordExternal) {
-      auto* const node = new hip::GraphEventRecordNode(event);
-      const auto status = hip::ihipGraphAddNode(node, hip_stream->GetCaptureGraph(),
-                                                lastCapturedNodes.data(),
-                                                lastCapturedNodes.size(), false);
+      hip::GraphNode* node = new hip::GraphEventRecordNode(event);
+      constexpr bool kExemptFromUnjoinedCheck = true;
+      const auto status =
+          hip::ihipAddCapturedNode(hip_stream, &node, 0, kExemptFromUnjoinedCheck);
       if (status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "hipEventRecord add external event node failed");
         return status;
       }
-      hip_stream->SetLastCapturedNode(node);
     }
     return hipSuccess;
   }

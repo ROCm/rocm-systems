@@ -30,6 +30,7 @@
 #define CUDA_12030 12030
 #define CUDA_12080 12080
 #define CUDA_13000 13000
+#define CUDA_13030 13030
 
 #ifdef __cplusplus
 extern "C" {
@@ -1203,6 +1204,10 @@ inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
       return hipErrorStreamCaptureWrongThread;
     case cudaErrorGraphExecUpdateFailure:
       return hipErrorGraphExecUpdateFailure;
+#if CUDA_VERSION >= CUDA_13030
+    case cudaErrorGraphRecaptureFailure:
+      return hipErrorGraphRecaptureFailure;
+#endif
     case cudaErrorInvalidChannelDescriptor:
       return hipErrorInvalidChannelDescriptor;
     case cudaErrorInvalidTexture:
@@ -1663,6 +1668,10 @@ inline static cudaError_t hipErrorToCudaError(hipError_t hError) {
       return cudaErrorStreamCaptureWrongThread;
     case hipErrorGraphExecUpdateFailure:
       return cudaErrorGraphExecUpdateFailure;
+#if CUDA_VERSION >= CUDA_13030
+    case hipErrorGraphRecaptureFailure:
+      return cudaErrorGraphRecaptureFailure;
+#endif
     case hipErrorNotPermitted:
       return cudaErrorNotPermitted;
     case hipErrorNotSupported:
@@ -1890,6 +1899,26 @@ typedef struct cudaKernelNodeParams hipKernelNodeParams;
 typedef struct cudaMemsetParams hipMemsetParams;
 #if CUDA_VERSION >= CUDA_12020
 typedef struct cudaGraphNodeParams hipGraphNodeParams;
+#endif
+
+#if CUDA_VERSION >= CUDA_13030
+// Verified against CUDA 13.3 driver_types.h. The type name matches. The enumerators omit
+// "Status": cudaGraphRecaptureEligibleForUpdate, cudaGraphRecaptureIneligibleForUpdate and
+// cudaGraphRecaptureError, with values 0, 1 and 2. The cast between the two enums is valid.
+typedef enum hipGraphRecaptureStatus {
+  hipGraphRecaptureEligibleForUpdate = 0,
+  hipGraphRecaptureIneligibleForUpdate = 1,
+  hipGraphRecaptureError = 2,
+} hipGraphRecaptureStatus;
+
+typedef hipError_t (*hipGraphRecaptureCallback_t)(
+    void* data, hipGraphNode_t node, const hipGraphNodeParams* originalParams,
+    const hipGraphNodeParams* recaptureParams, hipGraphRecaptureStatus status);
+
+typedef struct hipGraphRecaptureCallbackData {
+  hipGraphRecaptureCallback_t callbackFunc;
+  void* userData;
+} hipGraphRecaptureCallbackData;
 #endif
 
 #if CUDA_VERSION >= CUDA_11040
@@ -4761,6 +4790,62 @@ inline static hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGra
                                                       hipStreamCaptureMode mode) {
   return hipCUDAErrorTohipError(cudaStreamBeginCaptureToGraph(
       stream, graph, dependencies, dependencyData, numDependencies, mode));
+}
+#endif
+
+#if CUDA_VERSION >= CUDA_13030
+typedef struct hipRecaptureCallbackAdapter {
+  hipGraphRecaptureCallbackData hipData;
+  cudaGraphRecaptureCallbackData cudaData;
+} hipRecaptureCallbackAdapter;
+
+inline static cudaError_t hipRecaptureCallbackTrampoline(void* data, cudaGraphNode_t node,
+                                                         const cudaGraphNodeParams* originalParams,
+                                                         const cudaGraphNodeParams* recaptureParams,
+                                                         cudaGraphRecaptureStatus status) {
+  hipRecaptureCallbackAdapter* adapter = (hipRecaptureCallbackAdapter*)data;
+  return hipErrorToCudaError(adapter->hipData.callbackFunc(
+      adapter->hipData.userData, node, originalParams, recaptureParams,
+      static_cast<hipGraphRecaptureStatus>(status)));
+}
+
+inline static void CUDART_CB hipRecaptureCallbackAdapterDestroy(void* data) { free(data); }
+
+inline static hipError_t hipStreamBeginRecaptureToGraph(
+    hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph,
+    hipGraphRecaptureCallbackData* callbackData) {
+  if (callbackData == NULL) {
+    return hipCUDAErrorTohipError(cudaStreamBeginRecaptureToGraph(stream, mode, graph, NULL));
+  }
+  if (callbackData->callbackFunc == NULL) {
+    cudaGraphRecaptureCallbackData cudaData = {NULL, callbackData->userData};
+    return hipCUDAErrorTohipError(cudaStreamBeginRecaptureToGraph(stream, mode, graph, &cudaData));
+  }
+
+  hipRecaptureCallbackAdapter* adapter =
+      (hipRecaptureCallbackAdapter*)malloc(sizeof(hipRecaptureCallbackAdapter));
+  if (adapter == NULL) {
+    return hipErrorOutOfMemory;
+  }
+  adapter->hipData = *callbackData;
+  adapter->cudaData = cudaGraphRecaptureCallbackData{hipRecaptureCallbackTrampoline, adapter};
+
+  cudaError_t err = cudaStreamBeginRecaptureToGraph(stream, mode, graph, &adapter->cudaData);
+  if (err != cudaSuccess) {
+    free(adapter);
+    return hipCUDAErrorTohipError(err);
+  }
+
+  // Recapture is now active and CUDA may call the trampoline, so on failure below the adapter
+  // is leaked rather than freed.
+  cudaUserObject_t object;
+  err = cudaUserObjectCreate(&object, adapter, hipRecaptureCallbackAdapterDestroy, 1,
+                             cudaUserObjectNoDestructorSync);
+  if (err != cudaSuccess) {
+    return hipCUDAErrorTohipError(err);
+  }
+  return hipCUDAErrorTohipError(
+      cudaGraphRetainUserObject(graph, object, 1, cudaGraphUserObjectMove));
 }
 #endif
 
