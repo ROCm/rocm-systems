@@ -215,12 +215,13 @@ TEST(MathOutputControls, OverflowAndSignalingNan) {
       }
     }
     for (auto call : {rj_arith_v_fract_f32_w32, rj_arith_v_fract_f16_w32}) {
-      const bool half = call == rj_arith_v_fract_f16_w32;
-      a[0] = half ? 0x7c01 : 0x7f800001;
-      d[0] = 0;
-      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, destination, source, &status),
-                0);
-      EXPECT_EQ(d[0], a[0]);
+      for (auto semantics : hardware_semantics()) {
+        const bool half = call == rj_arith_v_fract_f16_w32;
+        a[0] = half ? 0x7c01 : 0x7f800001;
+        d[0] = 0;
+        ASSERT_EQ(call(cpu | semantics, 1, 0, destination, source, &status), 0);
+        EXPECT_EQ(d[0], a[0]);
+      }
     }
     a[0] = 0x813c;
     d[0] = 0;

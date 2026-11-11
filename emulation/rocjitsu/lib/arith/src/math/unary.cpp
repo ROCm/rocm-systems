@@ -166,9 +166,6 @@ int unary_loose(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t
   if (int error = rocjitsu::arith::validate(flags, modifiers & ~known, fp_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
   }
@@ -252,6 +249,8 @@ int unary(uint64_t flags, uint32_t exec_mask, uint64_t modifiers, uint32_t *cons
       (Op != rocjitsu::arith::Unary::Sqrt || !rocjitsu::arith::is_exact(flags))) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
+  // FRACT's kernel below already matches the gfx1201 and gfx1100 captures (guest-rounded
+  // subtraction, cap below one, NaN policy), so exact requests share it.
   if constexpr (Op != rocjitsu::arith::Unary::Fract) {
     if (rocjitsu::arith::is_exact(flags)) {
       return unary_exact<Op>(flags, exec_mask, modifiers, d, a, Rdna3, excp_flag_user);
@@ -616,7 +615,8 @@ int rj_arith_v_log_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -632,7 +632,8 @@ int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -994,7 +995,8 @@ int rj_arith_v_log_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 int rj_arith_v_fract_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a,
                              [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -1011,7 +1013,8 @@ int rj_arith_v_fract_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
 int rj_arith_v_fract_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

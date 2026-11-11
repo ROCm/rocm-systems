@@ -167,10 +167,11 @@ int rj_arith_v_cos_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *excp_flag_user);
 
 // FP32 fractional part: x - floor(x), capped below one before OMOD/CLAMP.
-// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing in loose
-// semantics. One VGPR per operand; infinite inputs produce NaN.
+// Supports A ABS/NEG, OMOD, CLAMP and guest input/output flushing, with loose and
+// bit-exact numeric semantics; Compatibility resolves to mode 2. One VGPR per
+// operand; infinite inputs produce NaN. Guest rounding applies to the subtraction.
 // RDNA3 ignores OMOD with IEEE mode or preserved output denormals; RDNA4 does not.
-// Required exact results and FP status reporting are unsupported.
+// FP status reporting is unsupported.
 int rj_arith_v_fract_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                              uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_fract_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -269,7 +270,8 @@ int rj_arith_v_frexp_mant_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // integral instructions retain their named rounding rule for the core operation.
 // Supports DPP8/DPP16 on A. Loose semantics require host nearest-even arithmetic
 // with denormals enabled. RCP, RSQ, SQRT, EXP, LOG and FRACT round to FP16 before OMOD.
-// All forms except FRACT support exact results. EXP/LOG use rocjitsu's FP64 libm
+// All forms support exact results; FRACT shares its loose kernel and every form
+// resolves Compatibility to mode 2. EXP/LOG use rocjitsu's FP64 libm
 // model with integer narrowing and explicit NaN policy; no host controls are changed.
 // All forms accept
 // guest input/output-denormal flags and IEEE. EXP/LOG flush rounded half results
