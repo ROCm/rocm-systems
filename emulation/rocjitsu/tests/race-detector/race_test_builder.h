@@ -253,7 +253,7 @@ public:
   ///   0xC = hi 2 bytes (D16 hi half)
   /// A race fires only when the pending load's bytes overlap the read's bytes.
   void checkVgprRead(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprRead(reg, lane, byteMask);
+    waves_[wave]->checkVgprReadLanes(reg, uint64_t{1} << lane, byteMask);
   }
 
   void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
@@ -261,7 +261,7 @@ public:
   }
 
   void checkVgprWrite(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprWrite(reg, lane, byteMask);
+    waves_[wave]->checkVgprWriteLanes(reg, uint64_t{1} << lane, byteMask);
   }
 
   void checkVgprWriteLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {

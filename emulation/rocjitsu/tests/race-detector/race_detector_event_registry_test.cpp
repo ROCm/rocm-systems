@@ -110,13 +110,13 @@ TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
   const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
                              {}, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(events.pc(id), kInstruction.pc());
   EXPECT_EQ(events.instruction(id), kInstruction);
 }
 
 TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
   auto &wave = detector.getWaveRaceState(0);
   const std::array<uint32_t, 1> addresses{8};
+  const std::array<uint32_t, 1> secondAddresses{16};
   auto at = [](int offset) { return InstructionSnapshot(kInstruction.pc() + offset, kWords); };
   wave.registerEvent(at(0), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, kObligations,
                      MemoryOrderClass::UNORDERED);
@@ -124,18 +124,16 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
                           MemoryOrderClass::UNORDERED);
   wave.registerLdsEvent(at(2), MemoryEventType::LDS_TO_VGPR, {3}, 1, 1, addresses, 4, 0xf,
                         kObligations, MemoryOrderClass::UNORDERED);
-  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, addresses, 4,
-                        0xf, kObligations, MemoryOrderClass::UNORDERED);
-  wave.registerDualOffsetLdsEvent(at(4), MemoryEventType::LDS_TO_VGPR, {5}, 1, 1, addresses, 1, 3,
-                                  kObligations, MemoryOrderClass::UNORDERED);
+  wave.registerLdsEvent(at(3), MemoryEventType::LDS_TO_VGPR, {4}, 1, 1, addresses, secondAddresses,
+                        4, 0xf, kObligations, MemoryOrderClass::UNORDERED);
 
-  ASSERT_EQ(detector.events().totalAllocated(), 5);
-  for (int i = 0; i < 5; ++i)
+  ASSERT_EQ(detector.events().totalAllocated(), 4);
+  for (int i = 0; i < 4; ++i)
     EXPECT_EQ(detector.events().instruction(EventId{i}), at(i));
-  const auto &intervals = detector.events().ldsIntervals(EventId{4});
-  EXPECT_TRUE(intervals.overlapsRange(16, 24));
-  EXPECT_TRUE(intervals.overlapsRange(32, 40));
-  EXPECT_FALSE(intervals.overlapsRange(24, 32));
+  const auto &intervals = detector.events().ldsIntervals(EventId{3});
+  EXPECT_TRUE(intervals.overlapsRange(8, 12));
+  EXPECT_TRUE(intervals.overlapsRange(16, 20));
+  EXPECT_FALSE(intervals.overlapsRange(12, 16));
 }
 } // namespace
 
