@@ -366,6 +366,10 @@ class TestCliCacheLabels(unittest.TestCase):
         acronyms = [entry.get("cache_acronym") for entry in self._run_cache("json")]
         self.assertEqual(acronyms, ["vL1D", "L1I", "sL1D", "GL1", "L2"])
 
+        self._use_fixture([cache[i] for i in (0, 1, 3, 4)])
+        acronyms = [entry.get("cache_acronym") for entry in self._run_cache("json")]
+        self.assertEqual(acronyms, ["vL1D", "L1I", "GL1", "L2"])
+
     def test_level1_scalar_data_cache_listed_before_instruction_cache(self):
         self._use_fixture([_GFX90A_CACHE[i] for i in (0, 2, 1, 3)])
         acronyms = [entry.get("cache_acronym") for entry in self._run_cache("json")]

@@ -25,7 +25,8 @@ def _cache_acronyms(cache_info_list):
     KFD flags the vector L1D (TCP), scalar L1D (SQC) and GL1 alike, lists them in
     the order vector L1D, L1I, scalar L1D, GL1, and gives the scalar L1D the same
     CU sharing as the L1I, since both sit in the SQC. The scalar L1D is the data
-    cache that shares like an L1I, preferring the first one after it, then the
+    cache no larger than the L1I that shares like it, preferring the first one
+    after it, then the
     closest one before it other than the first data cache; failing that, the
     first data cache after the L1I unless it is shared far more widely than the
     L1I. Other data caches are vL1D before the L1I and GL1 after it.
@@ -59,17 +60,30 @@ def _cache_acronyms(cache_info_list):
     inst_max_shared = max(
         cache.get("max_num_cu_shared", 0) for i, cache in enumerate(cache_info_list) if inst[i]
     )
+    inst_max_size = max(
+        cache.get("cache_size", 0) for i, cache in enumerate(cache_info_list) if inst[i]
+    )
     after = [i for i in range(first_inst + 1, len(cache_info_list)) if data[i]]
     before = [i for i in range(first_inst) if data[i]]
+
+    def fits_sqc(i):
+        return cache_info_list[i].get("cache_size", 0) <= inst_max_size
+
     # The first data cache is the vector L1D, which shares like the L1I when an
     # SQC serves one CU, so a match before the L1I needs another data cache ahead
     # of it.
     scalar = next(
-        (i for i in after + before[:0:-1] if sharing(cache_info_list[i]) in inst_sharing), None
+        (
+            i
+            for i in after + before[:0:-1]
+            if fits_sqc(i) and sharing(cache_info_list[i]) in inst_sharing
+        ),
+        None,
     )
     if (
         scalar is None
         and after
+        and fits_sqc(after[0])
         and cache_info_list[after[0]].get("max_num_cu_shared", 0) <= 2 * inst_max_shared
     ):
         scalar = after[0]
