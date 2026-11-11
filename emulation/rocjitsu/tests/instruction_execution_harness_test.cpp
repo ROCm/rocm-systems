@@ -2511,7 +2511,7 @@ TEST(CdnaVop3True16Test, B16I16U16OpsUseOpSelAndCdnaDestinationPolicy) {
                                /*src2=*/258, /*opsel=*/0x7u),
               "v_mad_u16");
       for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-        EXPECT_EQ(cu->read_vgpr(vb + 4, lane), 10u)
+        EXPECT_EQ(cu->read_vgpr(vb + 4, lane), pack16(10u, 0xBEEFu))
             << arch.name << " force_scalar=" << force_scalar << " lane " << lane;
       }
 
@@ -6961,12 +6961,13 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
-  // The CDNA5 manual's FP16_OVFL table saturates infinities as well as finite
-  // overflow; gfx1201 keeps infinities, but gfx1250 is uncaptured.
+  // CDNA5 Table 7 (p. 22) preserves infinity outside WMMA, while the FP8/BF8
+  // table in section 7.6.2 (p. 81) saturates it with FP16_OVFL set. Physical
+  // gfx1201 preserves BF8 infinity. We use that result pending a gfx1250 capture.
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FB7Bu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FC7Cu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
   cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));
@@ -6978,9 +6979,9 @@ TEST(Gfx1250CvtFp8Test, Bf8OverflowHonorsFp16OvflMode) {
     wf->halt();
 }
 
-TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
-  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_sr_pk_f16_mem");
-  amdgpu::L2Cache l2("gfx1250_cvt_sr_pk_f16_l2");
+TEST(Gfx1250CvtF16Test, PackedStochasticConversionsUseSeparateSeedHalves) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_cvt_sr_pk_mem");
+  amdgpu::L2Cache l2("gfx1250_cvt_sr_pk_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
@@ -6991,43 +6992,58 @@ TEST(Gfx1250CvtF16Test, SrPackedF16ConsumesAdvancedSeedAndFp16OvflMode) {
 
   auto cu = amdgpu::ComputeUnitCore::create("gfx1250", cfg, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
-
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);
-
-  const auto words =
-      encode_vop3(cdna5::kVCvtSrPkF16F32Vop3, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
-  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-  ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "v_cvt_sr_pk_f16_f32");
-
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
-
   const uint32_t vb = wf->vgpr_alloc().base;
-  constexpr uint32_t kSeed = 0x40000000u;
-  const float sr_value = std::bit_cast<float>(0x3F801000u);
-  const uint16_t expected_lo = util::f32_to_f16_sr_mode(sr_value, kSeed, false);
-  const uint16_t expected_hi = util::f32_to_f16_sr_mode(sr_value, util::prng_advance(kSeed), false);
-  ASSERT_NE(expected_lo, expected_hi);
 
-  wf->set_mode_raw(0);
-  cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(sr_value));
-  cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(sr_value));
-  cu->write_vgpr(vb + 7, 0, kSeed);
-  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(expected_lo, expected_hi));
+  struct FormatCase {
+    uint32_t opcode;
+    uint32_t midpoint;
+    uint16_t bias;
+    uint16_t one;
+    uint32_t overflow_input;
+    uint16_t infinity;
+  };
+  for (const FormatCase &format_case : {
+           FormatCase{cdna5::kVCvtSrPkF16F32Vop3, 0x3f801000, 0x1000, 0x3c00,
+                      std::bit_cast<uint32_t>(70000.0f), 0x7c00},
+           FormatCase{cdna5::kVCvtSrPkBf16F32Vop3, 0x3f808000, 0x8000, 0x3f80, 0x7f7fffff, 0x7f80},
+       }) {
+    const auto words = encode_vop3(format_case.opcode, 2, vgpr_src(5), vgpr_src(6), vgpr_src(7));
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    SCOPED_TRACE(inst->mnemonic());
+    auto check = [&](uint32_t src0, uint32_t src1, uint32_t seed, uint32_t expected) {
+      cu->write_vgpr(vb + 5, 0, src0);
+      cu->write_vgpr(vb + 6, 0, src1);
+      cu->write_vgpr(vb + 7, 0, seed);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_vgpr(vb + 2, 0), expected) << "seed " << seed;
+    };
 
-  cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(70000.0f));
-  cu->write_vgpr(vb + 6, 0, std::bit_cast<uint32_t>(-70000.0f));
-  cu->write_vgpr(vb + 7, 0, 0xFFFFFFFFu);
-  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7C00u, 0xFC00u));
+    wf->set_mode_raw(0);
+    check(format_case.midpoint, format_case.midpoint, pack16(format_case.bias, 0),
+          pack16(format_case.one + 1, format_case.one));
+    check(format_case.midpoint, format_case.midpoint, pack16(0, format_case.bias),
+          pack16(format_case.one, format_case.one + 1));
+    if (format_case.opcode == cdna5::kVCvtSrPkF16F32Vop3)
+      check(0x3f801000u, 0x3f800000u, 0x80000000u, 0x3c043c00u);
+    // A zero addend truncates even above the midpoint.
+    check(format_case.midpoint + 1, format_case.midpoint + 1, 0,
+          pack16(format_case.one, format_case.one));
 
-  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), pack16(0x7BFFu, 0xFBFFu));
+    const uint32_t negative_overflow = format_case.overflow_input | 0x80000000u;
+    check(format_case.overflow_input, negative_overflow, 0xffffffffu,
+          pack16(format_case.infinity, format_case.infinity | 0x8000));
+    wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
+    check(format_case.overflow_input, negative_overflow, 0xffffffffu,
+          pack16(format_case.infinity - 1, (format_case.infinity - 1) | 0x8000));
+    check(0x7f800000, 0xff800000, 0xffffffffu,
+          pack16(format_case.infinity, format_case.infinity | 0x8000));
+  }
 
   if (!wf->is_halted())
     wf->halt();
@@ -7383,6 +7399,18 @@ TEST(Cdna4CvtSrTest, SingleResultF16Bf16ConsumesSeedAndFp16OvflMode) {
   EXPECT_TRUE(cu->execute_instruction(bf16_hi_inst.get(), *wf).succeeded());
   EXPECT_EQ(cu->read_vgpr(vb + 3, 0), (static_cast<uint32_t>(bf16_seed_lo) << 16) | 0xBEEFu);
 
+  wf->set_mode_raw(amdgpu::Wavefront::FP_DENORM_MASK);
+  // Exact smallest BF16 subnormal, then a negative subnormal rounding into the normal range.
+  cu->write_vgpr(vb + 5, 0, 0x00010000u);
+  cu->write_vgpr(vb + 6, 0, 0);
+  cu->write_vgpr(vb + 3, 0, 0xA5A50000u);
+  ASSERT_TRUE(cu->execute_instruction(bf16_inst.get(), *wf).succeeded());
+  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0xA5A50001u);
+  cu->write_vgpr(vb + 5, 0, 0x807fffffu);
+  cu->write_vgpr(vb + 6, 0, 0x00010000u);
+  ASSERT_TRUE(cu->execute_instruction(bf16_hi_inst.get(), *wf).succeeded());
+  EXPECT_EQ(cu->read_vgpr(vb + 3, 0), 0x80800001u);
+
   const float bf16_overflow = std::numeric_limits<float>::max();
   const uint16_t bf16_clear = util::f32_to_bf16_sr_mode(bf16_overflow, kOverflowSeed, false);
   const uint16_t bf16_set = util::f32_to_bf16_sr_mode(bf16_overflow, kOverflowSeed, true);
@@ -7534,7 +7562,7 @@ TEST(CdnaLegacyCvtF16Test, SetregImm32ModeControlsOverflowingF32ToF16) {
   }
 }
 
-TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
+TEST(Rdna4ScalarF16Test, AddAndFmacConsumeFp16OvflMode) {
   amdgpu::GpuMemory gpu_mem("rdna4_scalar_f16_add_mode_mem");
   amdgpu::L2Cache l2("rdna4_scalar_f16_add_mode_l2");
 
@@ -7555,17 +7583,21 @@ TEST(Rdna4ScalarF16Test, AddDoesNotConsumeFp16OvflMode) {
   ASSERT_NE(wf, nullptr);
 
   const uint32_t sb = wf->sgpr_alloc().base;
-  cu->write_sgpr(sb + 0, util::f32_to_f16(65504.0f));
-  cu->write_sgpr(sb + 1, util::f32_to_f16(65504.0f));
-
-  const auto words = encode_sop2(rdna4::kSAddF16Sop2, 2, 0, 1);
-  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-  ASSERT_NE(inst, nullptr);
-  ASSERT_EQ(std::string_view(inst->mnemonic()), "s_add_f16");
-
-  wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
-  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xFFFFu, 0x7C00u);
+  for (bool fmac : {false, true}) {
+    SCOPED_TRACE(fmac);
+    cu->write_sgpr(sb, 0x7bffu);
+    cu->write_sgpr(sb + 1, fmac ? 0x4000u : 0x7bffu);
+    const auto words = encode_sop2(fmac ? rdna4::kSFmacF16Sop2 : rdna4::kSAddF16Sop2, 2, 0, 1);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    for (bool saturate : {false, true}) {
+      // FMAC reads old D. Reset it so the previous overflow cannot mask the next result.
+      cu->write_sgpr(sb + 2, 0);
+      wf->set_mode_raw(saturate ? amdgpu::Wavefront::FP16_OVFL_BIT : 0);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_sgpr(sb + 2) & 0xffffu, saturate ? 0x7bffu : 0x7c00u);
+    }
+  }
 
   if (!wf->is_halted())
     wf->halt();
@@ -7654,14 +7686,14 @@ TEST(Cdna3CvtFp8Test, SetregImm32ModeChangeRecomputesFp16OvflRounding) {
   // Recompute through s_setreg_imm32_b32 so the conversion observes shader MODE updates end to end.
   wf->set_mode_raw(0);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x00008080u);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A58080u);
 
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
   EXPECT_TRUE(cu->execute_instruction(setreg_inst.get(), *wf).succeeded());
   EXPECT_EQ(wf->mode_raw(), amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_TRUE(wf->fp16_ovfl());
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0000FF7Fu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
   if (!wf->is_halted())
     wf->halt();
@@ -7775,12 +7807,12 @@ TEST(Cdna3CvtFp8Test, Bf8AndStochasticPathsHonorFp16OvflMode) {
 
   wf->set_mode_raw(0);
   EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x00008080u);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A58080u);
 
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
   EXPECT_TRUE(cu->execute_instruction(bf8_inst.get(), *wf).succeeded());
-  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x0000FF7Fu);
+  EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A5FF7Fu);
 
   cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(300.0f));
   cu->write_vgpr(vb + 6, 0, 0u);

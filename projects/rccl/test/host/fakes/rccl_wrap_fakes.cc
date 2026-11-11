@@ -21,6 +21,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllReduce, rcclSelectAllReduce);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllGather, rcclSelectAllGather);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectReduceScatter, rcclSelectReduceScatter);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAlltoAll, rcclSelectAlltoAll);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectBroadcast, rcclSelectBroadcast);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEnabled, rcclDdaEnabled);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
@@ -140,15 +141,22 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
 // definitions are dropped by --gc-sections when the option is off.
 bool g_rcclWarpSpeedSupported = false;
 int g_rcclWarpSpeedSupportedCalls = 0;
-bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
-  ++g_rcclWarpSpeedSupportedCalls;
+struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+int g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+static bool DefaultWarpSpeedSupportedPrefix(struct ncclComm*, struct ncclKernelPlan*,
+                                            struct ncclTaskColl*, int) {
   return g_rcclWarpSpeedSupported;
 }
-bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*, struct ncclTaskColl*, int) {
+std::function<bool(struct ncclComm*, struct ncclKernelPlan*,
+                   struct ncclTaskColl*, int)> g_rcclWarpSpeedSupportedPrefix =
+    DefaultWarpSpeedSupportedPrefix;
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
   ++g_rcclWarpSpeedSupportedCalls;
-  return g_rcclWarpSpeedSupported;
+  g_rcclWarpSpeedSupportedLastCollHead = collHead;
+  g_rcclWarpSpeedSupportedLastNCollTasks = nCollTasks;
+  return g_rcclWarpSpeedSupportedPrefix(comm, plan, collHead, nCollTasks);
 }
-
 // Identity by default, so an ENABLE_WARP_SPEED=ON build computes the same
 // channel count as an OFF one and the existing topoGetAlgoInfo expectations hold.
 static int DefaultWarpSpeedAdjustChannels(struct ncclComm*, struct ncclTaskColl*, int nc) {
@@ -227,6 +235,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                  struct rcclCollDecision* decision) {
   return g_rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, stream, query, graphCapturingHint,
                                decision);
+}
+
+static ncclResult_t DefaultSelectBroadcast(struct ncclComm*, size_t, ncclDataType_t, int, bool,
+                                           struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectBroadcast");
+}
+std::function<ncclResult_t(struct ncclComm*, size_t, ncclDataType_t, int, bool, struct rcclCollDecision*)>
+    g_rcclSelectBroadcast = DefaultSelectBroadcast;
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision) {
+  return g_rcclSelectBroadcast(comm, count, datatype, root, query, decision);
 }
 
 static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
@@ -371,6 +390,9 @@ void ResetRcclWrapFakes() {
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
   g_rcclWarpSpeedSupportedCalls = 0;
+  g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+  g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+  g_rcclWarpSpeedSupportedPrefix = DefaultWarpSpeedSupportedPrefix;
   g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
@@ -386,6 +408,7 @@ void ResetRcclWrapFakes() {
   g_rcclSelectAllGather = DefaultSelectAllGather;
   g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
   g_rcclSelectAlltoAll = DefaultSelectAlltoAll;
+  g_rcclSelectBroadcast = DefaultSelectBroadcast;
   g_rcclDdaEnabled = DefaultDdaEnabled;
   g_rcclDdaEntryThreshold = DefaultDdaEntryThreshold;
   g_rcclGetAlgoName = DefaultGetAlgoName;

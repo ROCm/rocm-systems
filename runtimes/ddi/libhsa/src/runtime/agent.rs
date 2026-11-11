@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::isa::gfx_target_name;
-use rocddi::topology::host::{HostCaches, HostTopologySnapshot};
-use rocddi::topology::{MemoryBankKind, NodeKind, TopologySnapshot};
+use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
+use rocddi::topology::{MemoryBankKind, NodeKind, TopologyGraphSnapshot};
 
 /// A transient native query failure leaves support undecided so public calls
 /// can retry after the underlying condition clears.
@@ -57,7 +57,7 @@ pub(super) fn decode_cache_handle(cache: HsaCache, cache_count: usize) -> Option
 
 /// Selects OS cache records only when a CPU node can identify their domain.
 pub(super) fn host_caches_for_cpu(
-    topology: &HostTopologySnapshot,
+    topology: &HostTopologyGraphSnapshot,
     core_id_base: Option<u32>,
     cpu_count: usize,
 ) -> Option<&HostCaches> {
@@ -87,7 +87,7 @@ pub(crate) struct Cpu {
 
 /// Builds one CPU agent per KFD node that actually reports CPU cores.
 pub(super) fn cpu_agents(
-    topology: &TopologySnapshot,
+    topology: &TopologyGraphSnapshot,
     host: &rocddi::topology::host::CpuInfo,
     host_memory_bytes: usize,
 ) -> Vec<Cpu> {

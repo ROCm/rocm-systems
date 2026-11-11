@@ -1141,7 +1141,8 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
-  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction[0],
+                           test::kUnimplementedInstruction[1], S_ENDPGM};
   f.run_kernel(code, std::size(code));
   ASSERT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cu()->is_idle());
@@ -1540,7 +1541,7 @@ public:
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
-    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_32x16x128_f4");
     hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
@@ -1571,7 +1572,7 @@ std::vector<uint32_t> independent_wmma_kernel() {
   // Zero operands are sufficient: this test checks real offload and callback
   // lifetimes; the matrix suites separately compare nonzero numerical results.
   for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
-    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                           {.vdst = dst,
                                            .src0 = 256,
                                            .src1 = 288,
