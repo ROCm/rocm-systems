@@ -38,6 +38,13 @@ thread_local size_t g_reduceLLMaxBytes = 0;
 thread_local ncclLLA2AHandle g_reduceLLHandle = {};
 thread_local ncclDevResourceRequirements g_reduceLLReq = {};
 
+// -D 4 credit flags, per rank (uint32): ready[nRanks] posted by each peer at
+// kernel start, done[nRanks] posted by each owner to the root, then the launch
+// sequence of each CTA (local only).
+static constexpr int kReduceFlagMaxCtas = 128;
+thread_local ncclDevResourceHandle_t g_reduceFlagHandle = {};
+thread_local ncclDevResourceRequirements g_reduceFlagReq = {};
+
 static int reduceLLCtas(size_t bytes) {
   const size_t units = bytes / 8;
   const size_t ctas = (units + kReduceLLUnitsPerCta - 1) / kReduceLLUnitsPerCta;
@@ -81,6 +88,9 @@ static bool reduceUseLL(size_t bytes, int nRanks) {
 // Each peer's partition is put by a single thread: the anvil SDMA queue is per
 // peer, and concurrent producers on different XCDs can ring its doorbell out of
 // order, leaving committed packets unprocessed (the put hangs in quiet).
+// There are no barriers: each rank posts a per-launch ready flag to every peer
+// and writes into a peer only once that peer's flag has arrived, and each
+// owner posts a done flag to the root, which waits for all of them.
 // Because the issuing CTA differs from the reducing CTA, a CTA's only guarantee
 // that the previous Reduce finished with its slots is the kernel boundary, so
 // -D 4 has no persistent device-timed variant.
@@ -180,6 +190,14 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
       reqs->lsaBarrierCount = deviceCtaCount;
       // -D 4 alternates between two sets of per-chunk signals.
       reqs->ginSignalCount = (deviceImpl == 4 ? 2 : 1) * deviceCtaCount;
+      if (deviceImpl == 4) {
+        memset(&g_reduceFlagReq, 0, sizeof(g_reduceFlagReq));
+        g_reduceFlagReq.bufferSize = ((size_t)(2 * commProperties.nRanks + kReduceFlagMaxCtas) * sizeof(uint32_t) + 15) & ~(size_t)15;
+        g_reduceFlagReq.bufferAlign = 16;
+        g_reduceFlagReq.outBufferHandle = &g_reduceFlagHandle;
+        g_reduceFlagReq.next = reqs->resourceRequirementsList;
+        reqs->resourceRequirementsList = &g_reduceFlagReq;
+      }
       g_reduceLLMaxBytes = 0;
       g_reduceLLHandle = {};
       if (deviceImpl == 3) {
@@ -213,11 +231,10 @@ bool ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 
   switch(deviceImpl) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3:   // GinReduceKernel: reduce-scatter-to-root LSA read-reduce (no scratch)
-    case 4: { // GinSdmaReduceKernel: SDMA puts to partition owners + CU reduce
+    case 3: { // GinReduceKernel: reduce-scatter-to-root LSA read-reduce (no scratch)
       reqs->barrierCount = deviceCtaCount;
       reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = (deviceImpl == 4 ? 2 : 1) * deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
       return true;
     }
 #endif
@@ -228,6 +245,36 @@ bool ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Waits until this wave's stores have reached L2, so a system-scope release by
+// one thread after a CTA barrier also covers the other waves' stores.
+// __syncthreads() alone does not wait for them on every target.
+__device__ __forceinline__ void waitWaveStores() {
+#if defined(__GFX12__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__GFX10__) || defined(__GFX11__)
+  asm volatile("s_waitcnt_vscnt null, 0x0" ::: "memory");
+#else
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
+}
+
+// An LSA barrier sync whose memory ordering runs once per CTA. The barrier's
+// own release fence runs on every wave (a system-scope L2 writeback each) and
+// its acquire on every poll (an L2 invalidate each), which with many CTAs costs
+// more than the data movement.
+__device__ __forceinline__ void leanBarSync(ncclLsaBarrierSession<ncclCoopCta>& bar, bool release, bool acquire) {
+  if (release) {
+    waitWaveStores();
+    __syncthreads();
+    if (threadIdx.x == 0) cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+  }
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (acquire) {
+    if (threadIdx.x == 0) cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+    __syncthreads();
+  }
+}
+
 // `count` is the FULL element count (== base*nRanks, aligned by
 // ReduceGetCollByteCount). A warp-strided pack-unrolled loop (U outstanding
 // coalesced loads per source) with 2-way peer ILP and a source-0 prefetch of the
@@ -344,7 +391,7 @@ __device__ __forceinline__ void ginReduceBody(ncclWindow_t sendwin, size_t sendo
     }
   }
 
-  lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+  leanBarSync(lsaBar, /*release=*/true, /*acquire=*/false);
 }
 
 template <typename K>
@@ -484,28 +531,26 @@ __device__ __forceinline__ void sdmaFoldPacks(const Pack* const* src, Pack* dst,
   }
 }
 
-// Waits until this wave's stores have reached L2, so a system-scope release by
-// one thread after a CTA barrier also covers the other waves' stores.
-// __syncthreads() alone does not wait for them on every target.
-__device__ __forceinline__ void waitWaveStores() {
-#if defined(__GFX12__)
-  asm volatile("s_wait_storecnt 0x0" ::: "memory");
-#elif defined(__GFX10__) || defined(__GFX11__)
-  asm volatile("s_waitcnt_vscnt null, 0x0" ::: "memory");
-#else
-  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-#endif
-}
 
-// Per-chunk count of reducing CTAs that finished, in two sets alternated by
-// launch parity like the chunk signals. Device globals are per GPU, and each
-// GPU runs at most one -D 4 Reduce at a time.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// Per-chunk count of reducing CTAs that finished, and the count of CTAs that
+// finished storing to the root, in two sets alternated by launch parity like
+// the chunk signals. Device globals are per GPU, and each GPU runs at most one
+// -D 4 Reduce at a time.
 __device__ unsigned int gSdmaReduceChunkDone[2][128];
+__device__ unsigned int gSdmaReduceRootDone[2];
+
+__device__ __forceinline__ void postFlag(uint32_t* flag, uint32_t seq) {
+  __hip_atomic_store(flag, seq, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+__device__ __forceinline__ void waitFlag(const uint32_t* flag, uint32_t seq) {
+  while ((int32_t)(__hip_atomic_load(flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM) - seq) < 0) {}
+}
 
 // `count` is the FULL element count (== part*(nRanks-1), aligned by
 // ReduceGetCollByteCount).
 template <typename T>
-__device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks) {
+__device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks, ncclDevResourceHandle_t flagHandle) {
   const int nRanks = devComm.nRanks;
   const int me = devComm.rank;
   const int nOwners = nRanks - 1;
@@ -516,23 +561,37 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   const int G = (int)gridDim.x;
 
   ncclGin gin { devComm, 0 };
-  ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
-  // Every launch syncs each barrier exactly twice, so the epoch gives every CTA
-  // on every rank the same launch parity. Launches alternate between two sets
-  // of G signals: this one counts chunks in set `sigBase` and clears the other
-  // set, which the previous launch has finished waiting on and which the next
-  // launch's senders cannot touch until this kernel has ended.
-  const unsigned int par = (lsaBar.epoch >> 1) & 1u;
+  // Credits instead of barriers. Each rank posts `seq` to ready[me] on every
+  // peer when it starts, meaning its previous Reduce and whatever its stream
+  // ran since are done; a rank writes into peer q's memory only after ready[q]
+  // reaches seq. Senders reuse their sendbuff once their own flush returns, so
+  // only the root waits at the end, for done[] from every owner.
+  uint32_t* flags = (uint32_t*)ncclGetResourceBufferLocalPointer(devComm, flagHandle);
+  uint32_t* const ready = flags;
+  uint32_t* const done = flags + nRanks;
+  uint32_t* const ctaSeq = flags + 2 * nRanks;
+  auto peerFlags = [&](int peer) {
+    return (uint32_t*)ncclGetResourceBufferPeerPointer(devComm, flagHandle, ncclTeamLsa(devComm), peer);
+  };
+  // Every CTA of every rank counts the same launches, so seq agrees across
+  // them. Launches alternate between two sets of G signals: this one counts
+  // chunks in set `sigBase` and clears the other set, which the previous launch
+  // has finished waiting on and which the next launch's senders cannot touch
+  // before this rank posts its next ready.
+  const uint32_t seq = ctaSeq[blockIdx.x] + 1;
+  const unsigned int par = seq & 1u;
   const unsigned int sigBase = par * (unsigned int)G;
-  lsaBar.sync(ncclCoopCta(), cuda::memory_order_acquire);
   if (threadIdx.x == 0) gin.resetSignal((unsigned int)G - sigBase + blockIdx.x);
   for (int j = blockIdx.x * blockDim.x + threadIdx.x; j < 128; j += G * blockDim.x) gSdmaReduceChunkDone[par ^ 1u][j] = 0;
+  if (blockIdx.x == 0 && threadIdx.x == 0) gSdmaReduceRootDone[par ^ 1u] = 0;
+  if (blockIdx.x == 0)
+    for (int p = threadIdx.x; p < nRanks; p += blockDim.x)
+      if (p != me) postFlag(peerFlags(p) + me, seq);
 
   // With at least 2N CTAs, CTAs [0, N) only issue puts, so no chunk waits on a
   // CTA that is still busy draining queues. With fewer, CTA b issues for peers
-  // q = b (mod G) and then reduces alongside the rest. Passing the barrier with
-  // q's matching CTA means q has finished the previous Reduce, so its slots are
-  // free.
+  // q = b (mod G) and then reduces alongside the rest. Each issuing thread
+  // waits for its own peer's ready before its first put.
   const int nIssue = (G >= 2 * nRanks) ? nRanks : 0;
   const int nReducers = G - nIssue;
   // With issuer CTAs, owners stage each reduced chunk in the root's slot (just
@@ -545,6 +604,7 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     if (threadIdx.x == 0) {
       const int owner = (me - root - 1 + nRanks) % nRanks;
       const int rootSlot = root < me ? root : root - 1;
+      waitFlag(ready + root, seq);
       for (int k = 0; k < dmaChunks; k++) {
         const size_t lo = (size_t)k * partPacks / dmaChunks * sizeof(Pack);
         const size_t hi = (size_t)(k + 1) * partPacks / dmaChunks * sizeof(Pack);
@@ -563,6 +623,7 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
       if (q != root && q != me) {
         const int owner = (q - root - 1 + nRanks) % nRanks;
         const int slot = me < q ? me : me - 1;
+        waitFlag(ready + q, seq);
         // The signal quiets the queue first, so put k+1 is only queued once
         // put k has landed and chunk k has been released to the owner.
         for (int k = 0; k < dmaChunks; k++) {
@@ -587,6 +648,10 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     // thread, so staging the result there is safe.
     Pack* dst = nIssue ? (Pack*)(slots + (size_t)(root < me ? root : root - 1) * partBytes)
                        : (Pack*)((char*)ncclGetLsaPointer(recvwin, recvoffset, root) + (size_t)owner * partBytes);
+    if (!nIssue) {
+      if (threadIdx.x == 0) waitFlag(ready + root, seq);
+      __syncthreads();
+    }
     const size_t first = (size_t)((int)blockIdx.x - nIssue) * blockDim.x + threadIdx.x;
     const size_t stride = (size_t)nReducers * blockDim.x;
     constexpr int NR8 = 8;
@@ -647,18 +712,38 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
         }
       }
     }
+    if (!nIssue) {
+      // CU stores to the root: the last CTA to finish tells the root.
+      waitWaveStores();
+      __syncthreads();
+      if (threadIdx.x == 0) {
+        cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+        if (__hip_atomic_fetch_add(&gSdmaReduceRootDone[par], 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT) == (unsigned int)nReducers - 1)
+          postFlag(peerFlags(root) + nRanks + me, seq);
+      }
+    }
   }
-  // Flush drains this rank's SDMA queues, so the owner-to-root puts have landed
-  // before the exit barrier releases the root. Every flushing CTA polls every
-  // busy queue, so with issuer CTAs only they flush: on the root, the idle
-  // CTAs would otherwise slow the issuers' puts.
+  // Flush drains this rank's SDMA queues, so this rank's puts have landed and
+  // its sendbuff is free once it returns. Every flushing CTA polls every busy
+  // queue, so with issuer CTAs only they flush: on the root, the idle CTAs
+  // would otherwise slow the issuers' puts.
   if (nIssue == 0 || (int)blockIdx.x < nIssue) gin.flush(ncclCoopCta());
-  lsaBar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
+  // CTA `root` fed the owner-to-root queue, so after its flush the staged
+  // chunks are in the root's recvbuff.
+  if (nIssue && (int)blockIdx.x == root && me != root && threadIdx.x == 0)
+    postFlag(peerFlags(root) + nRanks + me, seq);
+  if (me == root && blockIdx.x == 0) {
+    for (int p = threadIdx.x; p < nRanks; p += blockDim.x)
+      if (p != root) waitFlag(done + p, seq);
+    __syncthreads();
+    if (threadIdx.x == 0) cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+  }
+  if (threadIdx.x == 0) ctaSeq[blockIdx.x] = seq;
 }
 
 template <typename K>
-__global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks) {
-  ginSdmaReduceBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, dmaChunks);
+__global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks, ncclDevResourceHandle_t flagHandle) {
+  ginSdmaReduceBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, dmaChunks, flagHandle);
 }
 
 // SDMA puts per partition for -D 4. More chunks overlap the copies with the
@@ -683,6 +768,7 @@ static int sdmaReduceDmaChunks(size_t partBytes, int ctas, int nRanks) {
   }
   return (int)std::max(1L, std::min(k, (long)ctas));
 }
+#endif
 
 // Like testLaunchDeviceKernel() but forwards the reduction op (and any extra
 // kernel arguments), which the shared launcher's fixed signature does not carry.
@@ -721,6 +807,7 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinReduceKernel, type, op), deviceCtaCount, sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream));
         return testSuccess;
       }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
       case 4: {
         if (sendbuff == recvbuff && sendoffset == recvoffset) {
           fprintf(stderr, "Reduce -D 4 reuses recvbuff as receive scratch and is out-of-place only; run with -O 1.\n");
@@ -730,9 +817,10 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         const int nRanks = ((ncclDevComm*)comm)->nRanks;
         const size_t partBytes = count / (size_t)(nRanks - 1) * wordSize(type);
         TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinSdmaReduceKernel, type, op), deviceCtaCount, sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream,
-                                           sdmaReduceDmaChunks(partBytes, deviceCtaCount, nRanks)));
+                                           sdmaReduceDmaChunks(partBytes, deviceCtaCount, nRanks), g_reduceFlagHandle));
         return testSuccess;
       }
+#endif
 #endif
       default:
         return testNotImplemented;
