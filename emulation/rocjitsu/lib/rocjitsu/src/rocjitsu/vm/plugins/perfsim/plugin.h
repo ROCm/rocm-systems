@@ -34,15 +34,10 @@ public:
 
   bool requires_serial_hot_hooks() const override;
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
-  bool observes_after_execute_instruction() const override { return false; }
-  bool observes_async_instruction_issued() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_before_execute_instruction() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_memory_access() const override { return true; }
-  bool observes_sgpr_reads() const override { return false; }
+  bool supports_async_instructions() const override { return false; }
 
   /// @brief Activate the configured backend, whose callbacks must not throw.
   /// The FFM on_init callback returns no status and cannot report activation failure.

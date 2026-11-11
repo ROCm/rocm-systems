@@ -389,6 +389,9 @@ TEST(WaveDebugTest, Gfx10OrderedPsDoneIssuesOnceAfterOlderMemory) {
   class Observer : public ExecutionPlugin {
   public:
     Observer() : ExecutionPlugin("ordered_ps_done") {}
+    bool observes_before_execute_instruction() const override { return true; }
+    bool observes_after_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
     using ExecutionPlugin::onAmdgpuBeforeExecuteInstruction;
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
                                           std::span<const uint32_t>) override {

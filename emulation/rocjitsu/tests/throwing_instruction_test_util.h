@@ -13,6 +13,9 @@ namespace rocjitsu::test {
 // unimplemented guest instruction is an ordinary simulator failure.
 class ThrowingInstructionPlugin final : public ExecutionPlugin {
 public:
+  bool observes_sgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   ThrowingInstructionPlugin() : ExecutionPlugin("throwing_instruction") {}
 
   // Throw from inside execution so the CU's instruction cleanup also runs.

@@ -53,6 +53,9 @@ using ReadCallback = std::tuple<uint32_t, uint64_t, uint8_t>;
 
 class SnapshotObserver final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   explicit SnapshotObserver(const ComputeUnitCore &cu) : ExecutionPlugin("ds_snapshot"), cu_(cu) {}
   std::set<Read> reads;
   std::vector<ReadCallback> callbacks;

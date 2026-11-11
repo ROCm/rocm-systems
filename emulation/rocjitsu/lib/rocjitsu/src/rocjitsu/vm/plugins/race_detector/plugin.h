@@ -92,14 +92,12 @@ public:
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_sgpr_reads() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
   bool observes_register_hazards() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
-  bool supports_async_instructions() const override { return true; }
   /// Skip slots without a live race-analysis state.
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 

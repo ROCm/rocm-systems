@@ -20,8 +20,8 @@ public:
   explicit KernelLoggingPlugin(const char *config_json = nullptr);
   ~KernelLoggingPlugin() override;
 
-  bool observes_sgpr_reads() const override { return false; }
-  bool supports_async_instructions() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
   void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &inst, Wavefront &wf) override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;

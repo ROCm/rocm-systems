@@ -2689,6 +2689,12 @@ TEST(ExecutionPluginTest, DisabledWaitCheckingPreservesRegisterHooksAcrossPlugin
 TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
   class SnapshotPlugin : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_vgpr_writes() const override { return true; }
+    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     SnapshotPlugin() : ExecutionPlugin("register_snapshot") {}
     void snapshot(const Wavefront *wf) {
       (void)wf->read_scc();
@@ -2793,6 +2799,9 @@ TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
 // Records the host FP environment seen by each VGPR read callback.
 class RoundingObserverPlugin : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   RoundingObserverPlugin() : ExecutionPlugin("rounding_observer") {}
   std::vector<int> read_roundings;
   std::vector<uint32_t> read_mxcsrs;
@@ -2811,6 +2820,9 @@ TEST(ExecutionPluginTest, ScalarRoundConvertAndPackObserversSeeCallerFpEnvironme
   class ScalarObserver final : public ExecutionPlugin {
   public:
     ScalarObserver() : ExecutionPlugin("scalar_fp_observer") {}
+    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override {
       reads.push_back(std::fegetround());
     }

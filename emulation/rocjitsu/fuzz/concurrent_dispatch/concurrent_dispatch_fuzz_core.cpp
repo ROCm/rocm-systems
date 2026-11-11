@@ -410,20 +410,13 @@ private:
 
 class FuzzObserver final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   FuzzObserver(amdgpu::AddressSpaceHandle address_space, const amdgpu::GpuMemory &memory,
                const Scenario &scenario)
       : ExecutionPlugin("concurrent-dispatch-fuzz-observer"), address_space_(address_space),
         memory_(memory), workgroups_(scenario.workgroups), barrier_(scenario.barrier) {}
-
-  bool observes_after_execute_instruction() const override { return false; }
-  bool observes_async_instruction_issued() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
-  bool observes_sgpr_reads() const override { return false; }
-  bool observes_memory_routing() const override { return false; }
-  bool observes_tensor_dma_memory_access() const override { return false; }
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
                                         amdgpu::Wavefront &) override {

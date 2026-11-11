@@ -292,6 +292,10 @@ struct SubtractionHostEnvironment {
 
 class SubtractionObserver : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   SubtractionObserver() : ExecutionPlugin("subtraction_fp_state") {}
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t lanes,
                              uint8_t bytes) override {
