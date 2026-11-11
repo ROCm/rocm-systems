@@ -10,10 +10,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 
