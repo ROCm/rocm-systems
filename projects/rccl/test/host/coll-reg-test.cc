@@ -1426,12 +1426,11 @@ TEST_F(RegisterCollRingAutoMicrotest, AllGather_RegistersWholeRecvBuffer) {
   EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
 }
 
-TEST_F(RegisterCollRingAutoMicrotest, MultiNode_RegistersSendBufferToo) {
+TEST_F(RegisterCollRingAutoMicrotest, MultiNode_LeavesBufferUnregistered) {
   comm_->nNodes = 2;
-  IpcLocalRegisters({kRecv});
   EXPECT_EQ(Run(), ncclSuccess);
-  EXPECT_EQ(autoCalls_, (std::vector<std::pair<const void*, size_t>>{{kRecv, kBytes}, {kSend, kBytes}}));
-  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
 }
 
 TEST_F(RegisterCollRingAutoMicrotest, BufferCannotBeRegistered_LeavesBufferUnregistered) {

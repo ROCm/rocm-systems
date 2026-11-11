@@ -1566,7 +1566,8 @@ threshold table introduced for gfx1250.
           measurement, not production.
 
     * - | ``RCCL_RING_AUTO_REGISTER``
-        | On gfx1250, registers the user buffer of an unregistered out-of-place
+        | On gfx1250 within one node (an MNNVL domain counts as one node),
+          registers the user buffer of an unregistered out-of-place
           Ring Simple ``ncclAllReduce`` or ``ncclAllGather`` on first use, so
           peers store straight into it instead of staging every hop in the P2P
           FIFO. RCCL registers the buffer's whole allocation and releases it when

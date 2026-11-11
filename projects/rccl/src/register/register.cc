@@ -281,9 +281,9 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
     return ncclSuccess;
   }
 #if HIP_VERSION >= 71260540
-  // On one node peers import only cuMem allocations unless legacy IPC is on (see ipcRegisterBuffer), so a legacy
-  // allocation would only hold a record that no peer ever maps. Across nodes NET registration still uses it.
-  if (comm->nNodes == 1 && (comm->directMode || !ncclParamLegacyCudaRegister())) {
+  // Peers import only cuMem allocations unless legacy IPC is on (see ipcRegisterBuffer), so a legacy allocation would
+  // only hold a record that no peer ever maps.
+  if (comm->directMode || !ncclParamLegacyCudaRegister()) {
     int legacyIpcCap = 0;
     if (cuPointerGetAttribute(&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, (CUdeviceptr)buff) !=
           CUDA_SUCCESS ||

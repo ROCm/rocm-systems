@@ -3766,6 +3766,8 @@ protected:
         const char* why     = nullptr;
         if (!IsArchMatch(getActiveCommunicator()->archName, "gfx1250"))
             why = "RCCL_RING_AUTO_REGISTER applies to gfx1250 only";
+        else if (getActiveCommunicator()->nNodes > 1)
+            why = "RCCL_RING_AUTO_REGISTER applies within one node or MNNVL domain only";
         else if (!autoReg || atoi(autoReg) == 0)
             // Opt-in, and read once per process, so it has to be set at launch.
             why = "RCCL_RING_AUTO_REGISTER is off; launch with RCCL_RING_AUTO_REGISTER=1";

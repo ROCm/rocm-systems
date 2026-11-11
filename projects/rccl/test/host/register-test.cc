@@ -972,24 +972,14 @@ TEST_F(RegisterAutoLocalMicrotest, AddressRangeQueryFails_LeavesUnregistered) {
 }
 
 #if HIP_VERSION >= 71260540
-TEST_F(RegisterAutoLocalMicrotest, SingleNodeLegacyAllocation_LeavesUnregistered) {
-  comm_->nNodes = 1;
+TEST_F(RegisterAutoLocalMicrotest, LegacyAllocation_LeavesUnregistered) {
   legacyIpcCap_ = 1;
   EXPECT_EQ(Auto(0x10000, kPage), nullptr);
   EXPECT_EQ(Population(), 0);
 }
 #endif
 
-TEST_F(RegisterAutoLocalMicrotest, SingleNodeCuMemAllocation_CreatesOwnedRecord) {
-  comm_->nNodes = 1;
-  ncclReg* reg = Auto(0x10000, kPage);
-  ASSERT_NE(reg, nullptr);
-  EXPECT_TRUE(reg->rcclAuto.owned);
-}
-
-TEST_F(RegisterAutoLocalMicrotest, MultiNodeLegacyAllocation_CreatesOwnedRecordForNetRegistration) {
-  comm_->nNodes = 2;
-  legacyIpcCap_ = 1;
+TEST_F(RegisterAutoLocalMicrotest, CuMemAllocation_CreatesOwnedRecord) {
   ncclReg* reg = Auto(0x10000, kPage);
   ASSERT_NE(reg, nullptr);
   EXPECT_TRUE(reg->rcclAuto.owned);

@@ -19,9 +19,11 @@ NCCL_PARAM(MloPartRdmaEnable, "MLOPART_RDMA_ENABLE", 0);
 RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 0);
 
 // gfx1250 Ring Simple: RCCL registers unregistered AllReduce/AllGather buffers so peers store straight into them
-// instead of copying through the P2P FIFO. Graph capture keeps its own registration path.
+// instead of copying through the P2P FIFO. Graph capture keeps its own registration path. Single node only (an MNNVL
+// domain is one node): a NET registration would leave the freed allocation's MR in the IB MR cache, which every
+// communicator on the device shares and matches by address.
 static bool rcclRingAutoRegister(struct ncclComm* comm, struct ncclTaskColl* info) {
-  return rcclParamRingAutoRegister() && ncclParamLocalRegister() && !comm->planner.persistent &&
+  return rcclParamRingAutoRegister() && ncclParamLocalRegister() && !comm->planner.persistent && comm->nNodes == 1 &&
          (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) &&
          IsArchMatch(comm->archName, "gfx1250");
 }
@@ -375,7 +377,7 @@ ncclResult_t ncclRegisterCollBuffers(
       bool hasSendNetPeer = false;
 
       const bool autoRegister = rcclRingAutoRegister(comm, info);
-      // The IPC and NET registration below look the records up again.
+      // The IPC registration below looks the record up again.
       rcclRegAutoScope autoVisible(&comm->regCache, autoRegister);
       if (autoRegister) {
         NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->recvbuff, recvbuffSize, &recvRegRecord));
@@ -383,11 +385,7 @@ ncclResult_t ncclRegisterCollBuffers(
         NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &recvRegRecord));
       }
       if (recvRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister())) goto exit;
-      if (autoRegister && comm->nNodes > 1) {
-        NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->sendbuff, sendbuffSize, &sendRegRecord));
-      } else {
-        NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &sendRegRecord));
-      }
+      NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &sendRegRecord));
       if (comm->nNodes > 1 && sendRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister()))
         goto exit;
       NCCLCHECK(ncclCalloc(&sendNetConns, comm->nChannels));
