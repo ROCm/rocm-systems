@@ -18,8 +18,10 @@
 namespace gin {
 namespace fabric {
 
+// Window offsets can leave either pointer off a 16-byte boundary, and a uint4
+// access there faults on gfx1250, so such a copy takes the byte loop.
 __device__ __forceinline__ void ginFabricLsaA2ACopyCta(char* dst, const char* src, size_t bytes) {
-  size_t nVec = bytes / sizeof(uint4);
+  size_t nVec = (((uintptr_t)dst | (uintptr_t)src) & (sizeof(uint4) - 1)) ? 0 : bytes / sizeof(uint4);
   for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) {
     ((uint4*)dst)[i] = ((const uint4*)src)[i];
   }
@@ -31,10 +33,13 @@ __device__ __forceinline__ void ginFabricLsaA2ACopyCta(char* dst, const char* sr
 // 2D grid: blockIdx.x == peer, blockIdx.y == chunk. Extra CTAs from a padded
 // host grid (gin.put / LL) return before the LSA barrier. Barrier indices are
 // flattened as (chunk * nRanks + peer) so they stay in the LSA pool even when
-// grid.x is larger than nRanks.
+// grid.x is larger than nRanks. Past kGinFabricLsaA2AMaxCtas ranks the
+// indices would run past the pool, so the body does nothing there;
+// ginFabricLsaAlltoAllSizeOk keeps callers off that path.
 __device__ __forceinline__ void ginFabricLsaAlltoAllBody(ncclWindow_t sendWin, size_t sendOff, ncclWindow_t recvWin,
                                                          size_t recvOff, size_t bytesPerPeer,
                                                          struct ncclDevComm devComm) {
+  if (devComm.nRanks > kGinFabricLsaA2AMaxCtas) return;
   int chunks = 0;
   int threads = 0;
   size_t chunkBytes = 0;
