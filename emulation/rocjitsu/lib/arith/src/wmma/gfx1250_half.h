@@ -6,6 +6,7 @@
 #pragma once
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/gfx1250_backends.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
