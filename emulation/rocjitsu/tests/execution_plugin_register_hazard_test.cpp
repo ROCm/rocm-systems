@@ -130,7 +130,9 @@ struct DiagnosticHarness {
     queue.dispatch(kernel, grid, workgroup);
     fixture.run_until_idle();
     ASSERT_EQ(probe->completed, 1u) << sink->str();
-    EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+    for (uint32_t slot = 0; slot < 2; ++slot)
+      if (const auto *wave = fixture.cu()->wf(slot))
+        EXPECT_FALSE(wave->has_plugin_state(race->slot_index()));
   }
 };
 

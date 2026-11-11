@@ -122,8 +122,8 @@ public:
     wave_->set_exec(1);
     std::array<Wavefront *, 1> waves{wave_};
     plugins_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-    state_ =
-        static_cast<RaceWavefrontState *>(wave_->plugin_state(observer->slot_index()))->race_state;
+    state_ = static_cast<RaceWavefrontState *>(wave_->plugin_state(observer->slot_index()))
+                 ->race_state.get();
   }
   bool ready() const { return state_ != nullptr; }
   static bool supports(CounterDomain domain) { return domain.lds.has_value(); }
