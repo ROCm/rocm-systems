@@ -299,6 +299,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroArgcheck`** — `misc/argcheck.cc` (via `ARGCHECK_CC_PATH`, from
   `argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
   `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
+- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
+  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
+  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
+  symbols `os/linux.cc` defines. The units run on real sockets and files through
+  `fakes/libc_seam.h` with `UseRealLibc()`.
 - **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
   suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
   `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
@@ -908,8 +915,9 @@ symbol.
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`) | `fakes/libc_fakes.cc` |
-| libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders) | `fakes/dl_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`; the OS surface of `os/linux*.cc` and `misc/{socket,signals}.cc`) | `fakes/libc_fakes.cc` |
+| libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders and `os/linux.cc`) | `fakes/dl_fakes.cc` |
+| `src/init.cc`'s `SetCpuStackSize` param (`rccl-UnitTestsMicroLinux`, which cannot link `init_fakes.cc`) | `fakes/linux_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
@@ -1156,7 +1164,8 @@ triage it into the right bucket:
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself.
 - **It's a logging or env-param helper** → already covered by
-  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (parses the value
+  `ncclDebugLog` (prints to stderr; a test that asserts on what was logged
+  hooks `g_ncclDebugLog`) / `ncclLoadParam` (parses the value
   `SetMicroEnv` scripted for that name, and the param's compile-time default
   when the name is unmapped). If a new logging primitive
   appears, follow the same pattern.

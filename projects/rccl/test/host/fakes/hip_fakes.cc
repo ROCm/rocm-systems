@@ -83,6 +83,10 @@ ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
 
+ASSERT_HOOK_MATCHES_PROD(g_hipHostRegister,               hipHostRegister);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostGetDevicePointer,       hipHostGetDevicePointer);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostUnregister,             hipHostUnregister);
+
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================

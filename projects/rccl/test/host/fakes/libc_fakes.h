@@ -15,11 +15,17 @@
 // restores every default and clears every record.
 //
 // Add a symbol here when a unit under test reaches it -- with a working
-// default and a reset, never as a hardcoded always-succeed. poll remains
-// deliberately absent until a caller needs a shared recording surface.
+// default and a reset, never as a hardcoded always-succeed. poll and the other
+// OS slots call straight through and record nothing; add a record when a
+// caller needs one.
 
 #include <dirent.h>
+#include <ifaddrs.h>
 #include <netdb.h>
+#include <poll.h>
+#include <sched.h>
+#include <signal.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <pthread.h>
 #include <sys/time.h>
@@ -121,6 +127,28 @@ extern std::function<int(void**, size_t, size_t)> g_posixMemalign;
 extern std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate;
 extern std::function<int(const struct timespec*, struct timespec*)> g_nanosleep;
 
+// The OS surface os/linux*.cc and misc/{socket,signals}.cc reach. Each defaults to the real call
+// and records nothing; a test makes one fail or vary with ScopedHook.
+extern std::function<int(struct pollfd*, nfds_t, int)> g_poll;
+extern std::function<int(int, int, int, void*, socklen_t*)> g_getsockopt;
+extern std::function<int(int, struct sockaddr*, socklen_t*)> g_getsockname;
+extern std::function<int(int, int)> g_shutdown;
+extern std::function<ssize_t(int, struct msghdr*, int)> g_recvmsg;
+extern std::function<ssize_t(int, const struct msghdr*, int)> g_sendmsg;
+extern std::function<int(int*)> g_pipe;
+extern std::function<int(struct ifaddrs**)> g_getifaddrs;
+extern std::function<void(struct ifaddrs*)> g_freeifaddrs;
+extern std::function<int(int, struct rlimit*)> g_getrlimit;
+extern std::function<int(int, const struct rlimit*)> g_setrlimit;
+extern std::function<int(pid_t, size_t, cpu_set_t*)> g_schedGetaffinity;
+extern std::function<char*(const char*, char*)> g_realpath;
+extern std::function<int(char*)> g_mkstemp;
+extern std::function<int(int, int, off_t, off_t)> g_fallocate;
+extern std::function<void*(void*, size_t, int, int, int, off_t)> g_mmap;
+extern std::function<int(void*, size_t)> g_munmap;
+extern std::function<int(const char*)> g_unlink;
+extern std::function<sighandler_t(int, sighandler_t)> g_signal;
+
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own
 // hook over a seam stops feeding the corresponding record.
@@ -191,5 +219,9 @@ void ScriptRecvData(std::string data);
 
 // Restores every seam to its default and clears every record above.
 void ResetLibcFakes();
+
+// ResetLibcFakes, then points every seam above at the real call, recording nothing: for units tested
+// on real sockets and files, whose production threads would race on the records.
+void UseRealLibc();
 
 #endif  // RCCL_TEST_HOST_FAKES_LIBC_FAKES_H_

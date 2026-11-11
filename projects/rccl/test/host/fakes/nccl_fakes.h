@@ -108,6 +108,13 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
                                   int /*ownerDev*/, void* /*ownerPtr*/)>
     g_memTrackImportFromPeer;
 
+// ncclDebugLog formats each line and hands it here, already demoted from WARN to INFO under NOWARN as
+// debug.cc does. The default prints it to stderr; a test that asserts on what was logged installs a
+// recorder.
+extern std::function<void(ncclDebugLogLevel, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
+                          const char* /*msg*/)>
+    g_ncclDebugLog;
+
 // Defaults succeed without tracking; UntrackDynamic reports a live persistent entry.
 struct ncclMemUntrackInfo;
 extern std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,

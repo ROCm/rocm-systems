@@ -35,6 +35,9 @@ struct ncclRawTaskColl {
   struct ncclDevRedOpFull opDev;
   cudaStream_t stream;
   ncclCollConfig_t collConfig;
+  // RCCL: ncclAllReduceWithBias accumulator and the op count, which the default path also records.
+  void const* acc;
+  uint64_t opCount;
 };
 
 // AllGatherV inputs built by merging broadcast raw tasks during pre-tuning.
