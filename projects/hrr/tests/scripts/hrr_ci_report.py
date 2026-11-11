@@ -40,7 +40,8 @@ JOB_PATTERNS = (
     ("Script tests", re.compile(r"^HRR script tests$")),
     ("Unit", re.compile(r"(?:^|/ )Unit \((?P<name>[^)]+)\)$")),
     ("Build", re.compile(r"(?:^|/ )Build capture-enabled HIP and HRR$")),
-    # The real-GPU job is "Integration (<family>)", the rocJitsu one "rocJitsu (<family>)".
+    # The simulator job is "rocJitsu (<family>)". "Integration (<family>)" is the
+    # name the removed real-GPU job used; the pattern still reads it.
     ("Integration", re.compile(r"(?:^|/ )(?:Integration|rocJitsu) \((?P<name>[^)]+)\)$")),
 )
 # Anything else (queued, in_progress, waiting, unknown) has not finished.

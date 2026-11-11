@@ -21,7 +21,7 @@ from pathlib import Path
 
 # The unit job's matrix in .github/workflows/hrr-ci.yml.
 UNIT_COLUMNS = (
-    ("unit-ubuntu-24.04.xml", "Unit", "Linux"),
+    ("unit-ubuntu-26.04.xml", "Unit", "Linux"),
     ("unit-windows-2022.xml", "Unit", "Windows"),
 )
 

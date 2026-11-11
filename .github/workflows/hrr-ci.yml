@@ -1,8 +1,8 @@
 # HRR CI: API-ID and workload checks, HRR script tests and the host unit suite,
-# plus the GPU capture/replay suite (hrr-gpu.yml).
+# plus the capture/replay suite on the rocJitsu GPU simulator (hrr-gpu.yml).
 # projects/hrr/tests/config/ci.yaml and hrr_ci_configure.py decide what runs.
 #
-# To run the capture/GPU suite on a pull request, add the `ci:hrr-capture` label.
+# To run the capture/simulator suite on a pull request, add the `ci:hrr-capture` label.
 #
 # Interim: once TheRock CI builds and tests HRR (TheRock PR #8965 adds the
 # core-hrr artifact), the build and test jobs here are expected to go. This
@@ -50,19 +50,14 @@ on:
       - "!projects/hrr/skills/**"
   schedule:
     # Nightly: capture-enabled build and the rocJitsu simulator suite on
-    # simulator.default_families. Real GPUs run only on workflow_dispatch.
+    # simulator.default_families.
     - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       families:
-        description: "Comma-separated GPU families (TheRock keys, e.g. gfx94x,gfx110x). Empty: the families ci.yaml selects."
+        description: "Comma-separated GPU families, run on rocJitsu (TheRock keys, e.g. gfx94x,gfx110x). Empty: the families ci.yaml selects."
         type: string
         default: ""
-      backend:
-        description: "simulator runs rocJitsu on ubuntu-24.04. gpu runs the real runners."
-        type: choice
-        options: [simulator, gpu]
-        default: simulator
       ignore_test_config:
         description: "Run the cases the suite config skips"
         type: boolean
@@ -90,7 +85,7 @@ env:
 jobs:
   configure:
     name: Configure
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -100,7 +95,6 @@ jobs:
       run_gpu: ${{ steps.decide.outputs.run_gpu }}
       families: ${{ steps.decide.outputs.families }}
       simulator_families: ${{ steps.decide.outputs.simulator_families }}
-      gpu_families: ${{ steps.decide.outputs.gpu_families }}
       skipped_families: ${{ steps.decide.outputs.skipped_families }}
       reason: ${{ steps.decide.outputs.reason }}
       rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
@@ -122,24 +116,9 @@ jobs:
           persist-credentials: false
           repository: ROCm/TheRock
           # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
-          ref: 488e66e7c2220df926c2762e9b97a50becfb4239 # 2026-10-21
+          ref: 647a8c52a206f2e7d0e9c63cbf0af0ded084f08b # 2026-11-09
           path: therock
           sparse-checkout: build_tools/github_actions
-
-      # Current runner labels, as TheRock's setup_multi_arch.yml loads them.
-      - name: Checkout TheRock CI runner config
-        id: ci_config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        continue-on-error: true
-        with:
-          persist-credentials: false
-          repository: ROCm/therock-ci-config
-          ref: main
-          path: ci-config
-
-      - name: Warn when runner config is unavailable
-        if: ${{ steps.ci_config.outcome == 'failure' }}
-        run: echo "::warning::could not check out ROCm/therock-ci-config; runner labels may be out of date"
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -152,7 +131,6 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
-          CI_CONFIG_PATH: ci-config
           EVENT: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -161,23 +139,19 @@ jobs:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
-          # Empty when the head repository was deleted, which counts as a fork.
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           FAMILIES: ${{ inputs.families }}
-          BACKEND: ${{ inputs.backend }}
         run: >-
           python projects/hrr/tests/scripts/hrr_ci_configure.py
           --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
           --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
-          --action "${ACTION}" --label "${LABEL}" --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
-          --backend "${BACKEND}"
+          --action "${ACTION}" --label "${LABEL}" --families "${FAMILIES}"
           --therock-dir therock
 
   api-checks:
     name: API IDs and workloads
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -209,7 +183,7 @@ jobs:
     name: HRR script tests
     needs: configure
     if: ${{ needs.configure.outputs.run_cpu == 'true' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -255,7 +229,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             exe: hrr-unit-tests
             linker_flags: ""
           - os: windows-2022
@@ -373,7 +347,6 @@ jobs:
     # Note: not using 'secrets: inherit' here; no secrets are needed.
     with:
       simulator_families: ${{ needs.configure.outputs.simulator_families }}
-      gpu_families: ${{ needs.configure.outputs.gpu_families }}
       ignore_test_config: ${{ inputs.ignore_test_config || false }}
 
   summary:
@@ -385,7 +358,7 @@ jobs:
       || needs.configure.outputs.run_cpu == 'true'
       || needs.configure.outputs.run_gpu == 'true'
       || (github.event_name == 'pull_request' && github.event.action == 'labeled')) }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: read

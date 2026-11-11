@@ -21,7 +21,7 @@ import hrr_ci_report as rpt  # noqa: E402
 JOBS = [
     {"name": "Configure", "conclusion": "success", "html_url": "u0"},
     {"name": "API IDs and workloads", "conclusion": "success", "html_url": "c0"},
-    {"name": "Unit (ubuntu-24.04)", "conclusion": "success", "html_url": "u1"},
+    {"name": "Unit (ubuntu-26.04)", "conclusion": "success", "html_url": "u1"},
     {"name": "Unit (windows-2022)", "conclusion": "failure", "html_url": "u2"},
     {"name": "gpu / Build capture-enabled HIP and HRR", "conclusion": "success", "html_url": "u3"},
     {"name": "gpu / Integration (gfx94x)", "conclusion": "success", "html_url": "u4"},
@@ -38,7 +38,7 @@ class ClassifyTest(unittest.TestCase):
             [(r["kind"], r["name"]) for r in rows],
             [
                 ("API checks", ""),
-                ("Unit", "ubuntu-24.04"),
+                ("Unit", "ubuntu-26.04"),
                 ("Unit", "windows-2022"),
                 ("Build", ""),
                 ("Integration", "gfx94x"),
@@ -97,7 +97,7 @@ class RocJitsuJobTest(unittest.TestCase):
 
 class GpuDispatchTest(unittest.TestCase):
     def test_skipped_rocjitsu_build_does_not_fail_a_gpu_dispatch(self):
-        # A gpu dispatch runs the real-GPU jobs; "Build rocJitsu" is skipped.
+        # A dispatch can skip "Build rocJitsu".
         # It is no HRR job row, so the green Integration rows must pass.
         rows = rpt.classify_jobs(
             [
@@ -194,7 +194,7 @@ class RenderTest(unittest.TestCase):
         jobs = [
             {"name": "API IDs and workloads", "conclusion": "success", "html_url": "u0"},
             {"name": "HRR script tests", "conclusion": "success"},
-            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "Unit (ubuntu-26.04)", "conclusion": "success"},
             {"name": "Unit (windows-2022)", "conclusion": "success"},
             {"name": "GPU / Build capture-enabled HIP and HRR", "conclusion": "success"},
             {"name": "GPU / rocJitsu (gfx950)", "status": "queued", "html_url": "u2"},
@@ -218,7 +218,7 @@ class RenderTest(unittest.TestCase):
             (Path(tmp) / "integration-gfx950.xml").write_text(failed, encoding="utf-8")
             rc = rpt.main([
                 "--run-gpu", "true", "--results-dir", tmp,
-                "--families", '[{"family":"gfx950","runner":"ubuntu-24.04"}]',
+                "--families", '[{"family":"gfx950","runner":"ubuntu-26.04"}]',
                 "--needs-json", json.dumps(needs),
             ])
         self.assertEqual(rc, 1)
@@ -231,7 +231,7 @@ class RenderTest(unittest.TestCase):
         jobs = [
             {"name": "API IDs and workloads", "conclusion": "success"},
             {"name": "HRR script tests", "conclusion": "success"},
-            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "Unit (ubuntu-26.04)", "conclusion": "success"},
             {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
         ]
         needs = {name: {"result": "success"} for name in (
@@ -273,7 +273,7 @@ class RenderTest(unittest.TestCase):
         jobs = [
             {"name": "API IDs and workloads", "conclusion": "success"},
             {"name": "HRR script tests", "conclusion": "success"},
-            {"name": "Unit (ubuntu-24.04)", "conclusion": "success"},
+            {"name": "Unit (ubuntu-26.04)", "conclusion": "success"},
             {"name": "Unit (windows-2022)", "conclusion": "success"},
             {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "success"},
         ]

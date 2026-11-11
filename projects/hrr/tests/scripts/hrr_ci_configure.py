@@ -6,13 +6,14 @@
 Writes these GitHub Actions outputs:
 
   run_cpu           "true" when the API check, script and unit jobs run.
-  run_gpu           "true" when the capture-enabled build and the GPU suite run.
+  run_gpu           "true" when the capture-enabled build and the rocJitsu
+                    simulator suite run. (The name predates the simulator;
+                    no job here uses a real GPU.)
   families          JSON list of {family, runner, backend, arch, config}.
   simulator_families
-                    The subset whose backend is simulator.
-  gpu_families      The subset whose backend is gpu.
+                    The same rows, as hrr-gpu.yml's input.
   skipped_families  JSON list of {"family", "reason"}: the other ci.yaml
-                    families, when the suite runs.
+                    simulator families, when the suite runs.
   reason            One line explaining the decision, shown in the summary.
   rocm_sdk_version  The ROCm SDK the unit job installs.
 
@@ -22,13 +23,10 @@ It runs when a change touches a capture or suite path, on a pull request with
 the capture label that touches any HRR path (hrr-ci.yml's paths filter starts
 no run otherwise), nightly and on workflow_dispatch.
 
-The default backend is rocJitsu (simulator). Its jobs are
-simulator.default_families, not the families marked enabled. The
-workflow_dispatch families input replaces the selection. A simulator family
-with no config is an error. ci:gfx labels are TheRock's, so this script does
-not read them. The GPU backend
-runs every enabled family on TheRock's runner. workflow_dispatch uses its
-backend input; any other event uses backend.default.
+Every job runs on the rocJitsu simulator. Its families are
+simulator.default_families; the workflow_dispatch families input replaces the
+selection. A family with no simulator config is an error. ci:gfx labels are
+TheRock's, so this script does not read them.
 """
 
 from __future__ import annotations
@@ -41,12 +39,12 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Iterable
 
 import yaml
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "ci.yaml"
-# Its targets.arch is what the GPU suite is built for.
+# Its targets.arch is what the suite is built for.
 INTEGRATION_CONFIG = DEFAULT_CONFIG.with_name("integration.yaml")
 
 EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
@@ -55,21 +53,9 @@ EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
 # is treated as touching everything rather than guessed at.
 MAX_LISTED_FILES = 3000
 
-NO_RUNNER = "no runner label in TheRock's runner config"
-
 
 class ConfigError(ValueError):
     pass
-
-
-@dataclass(frozen=True)
-class Family:
-    enabled: bool = True
-
-
-@dataclass(frozen=True)
-class Backend:
-    default: str
 
 
 @dataclass(frozen=True)
@@ -87,9 +73,7 @@ class Config:
     suite_paths: tuple[str, ...]
     excluded_paths: tuple[str, ...]
     capture_label: str
-    backend: Backend
     simulator: Simulator
-    families: dict[str, Family]
 
 
 @dataclass
@@ -127,53 +111,24 @@ def _strings(where: str, value) -> tuple[str, ...]:
     return tuple(_string(f"{where}[{i}]", v) for i, v in enumerate(value))
 
 
-def _bool(where: str, value) -> bool:
-    if not isinstance(value, bool):
-        raise ConfigError(f"{where}: expected true or false")
-    return value
-
-
-def _backend(value) -> Backend:
-    value = _mapping("backend", value, ("default",))
-    default = _string("backend.default", value["default"])
-    if default not in ("simulator", "gpu"):
-        raise ConfigError(
-            f"backend.default: expected simulator or gpu, got {default!r}"
-        )
-    return Backend(default)
-
-
-def _simulator(value, families: dict) -> Simulator:
+def _simulator(value) -> Simulator:
     value = _mapping("simulator", value, ("runner", "default_families", "configs"))
     default_families = _strings("simulator.default_families", value["default_families"])
-    unknown = [key for key in default_families if key not in families]
-    if unknown:
-        raise ConfigError(
-            f"simulator.default_families: {', '.join(unknown)} not in families"
-        )
     configs = value["configs"]
     if not isinstance(configs, dict) or not configs:
         raise ConfigError("simulator.configs: expected a mapping")
-    unknown = [key for key in configs if key not in families]
-    if unknown:
-        raise ConfigError(f"simulator.configs: {', '.join(unknown)} not in families")
     parsed = {
         _string("simulator.configs", key): _string(f"simulator.configs.{key}", path)
         for key, path in configs.items()
     }
-    missing = [key for key in default_families if key not in parsed]
-    if missing:
-        raise ConfigError(f"simulator.configs: missing {', '.join(missing)}")
+    unknown = [key for key in default_families if key not in parsed]
+    if unknown:
+        raise ConfigError(f"simulator.configs: missing {', '.join(unknown)}")
     return Simulator(
         runner=_string("simulator.runner", value["runner"]),
         default_families=default_families,
         configs=parsed,
     )
-
-
-def _family(where: str, value) -> Family:
-    value = _mapping(where, value or {}, (), ("enabled",))
-    return Family(enabled=_bool(f"{where}.enabled", value.get("enabled", True)))
 
 
 def parse_config(data) -> Config:
@@ -185,21 +140,12 @@ def parse_config(data) -> Config:
             "rocm_sdk_version",
             "paths",
             "capture_label",
-            "backend",
             "simulator",
-            "families",
         ),
     )
     if type(data["version"]) is not int or data["version"] != 1:
         raise ConfigError(f"version: expected 1, got {data['version']!r}")
     paths = _mapping("paths", data["paths"], ("cpu", "capture", "suite", "excluded"))
-    families = data["families"]
-    if not isinstance(families, dict) or not families:
-        raise ConfigError("families: expected a mapping with at least one family")
-    parsed_families = {
-        _string("families", key): _family(f"families.{key}", value)
-        for key, value in families.items()
-    }
     return Config(
         rocm_sdk_version=_string("rocm_sdk_version", data["rocm_sdk_version"]),
         cpu_paths=_strings("paths.cpu", paths["cpu"]),
@@ -207,9 +153,7 @@ def parse_config(data) -> Config:
         suite_paths=_strings("paths.suite", paths["suite"]),
         excluded_paths=_strings("paths.excluded", paths["excluded"]),
         capture_label=_string("capture_label", data["capture_label"]),
-        backend=_backend(data["backend"]),
-        simulator=_simulator(data["simulator"], parsed_families),
-        families=parsed_families,
+        simulator=_simulator(data["simulator"]),
     )
 
 
@@ -229,7 +173,7 @@ def load_config(path: Path) -> Config:
 
 
 def check_families(config: Config, matrix: dict) -> None:
-    unknown = [key for key in config.families if key not in matrix]
+    unknown = [key for key in config.simulator.configs if key not in matrix]
     if unknown:
         raise ConfigError(
             f"families: {', '.join(unknown)} not in TheRock's family matrix"
@@ -251,11 +195,11 @@ def family_targets(linux: dict) -> list[str]:
 
 
 def check_targets(config: Config, matrix: dict, archs: Iterable[str]) -> None:
-    """The suite must be built for every target of every family ci.yaml lists,
-    enabled or not, since a label can request any of them."""
+    """The suite must be built for every target of every simulator family
+    ci.yaml lists, default or not, since workflow_dispatch can request any."""
     archs = set(archs)
     problems = []
-    for key in config.families:
+    for key in config.simulator.configs:
         targets = family_targets(matrix[key].get("linux", {}))
         missing = [t for t in targets if t not in archs]
         if not targets:
@@ -297,22 +241,6 @@ def label_matters(label: str, config: Config) -> bool:
     return label == config.capture_label.lower()
 
 
-def runner_for(linux: dict, pick_weighted: Callable[[list, str], str]) -> str:
-    labels = linux.get("test-runs-on-labels")
-    if labels:
-        return pick_weighted(labels, "hrr")
-    return linux.get("test-runs-on", "")
-
-
-def resolve_backend(event: str, config: Config, backend_input: str) -> str:
-    """workflow_dispatch uses its input. Any other event uses the default."""
-    if event == "workflow_dispatch" and backend_input:
-        if backend_input not in ("simulator", "gpu"):
-            raise ConfigError(f"backend {backend_input!r} is not simulator or gpu")
-        return backend_input
-    return config.backend.default
-
-
 def _arch(matrix: dict, key: str) -> str:
     return ",".join(family_targets(matrix.get(key, {}).get("linux", {})))
 
@@ -328,44 +256,13 @@ def _job(family: str, runner: str, backend: str, arch: str, config: str = "") ->
 
 
 def _requested(config: Config, requested: list[str]) -> set[str]:
-    unknown = [key for key in requested if key not in config.families]
+    unknown = [key for key in requested if key not in config.simulator.configs]
     if unknown:
         raise ConfigError(
-            f"requested families {', '.join(unknown)} are not in ci.yaml"
-            f" (known: {', '.join(config.families)})"
+            f"requested families {', '.join(unknown)} have no simulator config in"
+            f" ci.yaml (known: {', '.join(config.simulator.configs)})"
         )
     return set(requested)
-
-
-def select_families(
-    config: Config,
-    requested: list[str],
-    matrix: dict,
-    pick_weighted: Callable[[list, str], str],
-) -> tuple[list[dict], list[dict]]:
-    """GPU families to test and the other ci.yaml families with the reason, in
-    ci.yaml order."""
-    if requested:
-        chosen = _requested(config, requested)
-    else:
-        chosen = {key for key, family in config.families.items() if family.enabled}
-
-    families, skipped = [], []
-    for key, family in config.families.items():
-        if key not in chosen:
-            if requested:
-                reason = "not requested"
-            else:
-                reason = "disabled in ci.yaml"
-            skipped.append({"family": key, "reason": reason})
-            continue
-        linux = matrix.get(key, {}).get("linux", {})
-        runner = runner_for(linux, pick_weighted)
-        if not runner:
-            skipped.append({"family": key, "reason": NO_RUNNER})
-            continue
-        families.append(_job(key, runner, "gpu", _arch(matrix, key)))
-    return families, skipped
 
 
 def select_simulator(
@@ -379,12 +276,9 @@ def select_simulator(
         chosen = _requested(config, requested)
     else:
         chosen = set(config.simulator.default_families)
-    missing = sorted(key for key in chosen if key not in config.simulator.configs)
-    if missing:
-        raise ConfigError(f"simulator has no config for {', '.join(missing)}")
 
     families, skipped = [], []
-    for key in config.families:
+    for key in config.simulator.configs:
         if key not in chosen:
             reason = "not requested" if requested else "not a default simulator family"
             skipped.append({"family": key, "reason": reason})
@@ -405,13 +299,10 @@ def decide(
     event: str,
     paths: list[str] | None,
     labels: list[str],
-    is_fork: bool,
     requested: list[str],
     config: Config,
     matrix: dict,
-    pick_weighted: Callable[[list, str], str],
     added_label: str | None = None,
-    backend: str = "",
 ) -> Decision:
     """paths is None when the change set could not be listed in full.
 
@@ -456,32 +347,10 @@ def decide(
     run_cpu = run_cpu or capture
     if not capture:
         return Decision(run_cpu, False, why)
-    # A fork pull request gets no secrets and cannot use the real GPU runners,
-    # but the simulator jobs need neither (hrr-gpu.yml has read-only
-    # permissions), so only the gpu backend is refused.
-    resolved = resolve_backend(event, config, backend)
-    if is_fork and resolved == "gpu":
-        return Decision(
-            run_cpu, False, why + "; GPU suite skipped for a fork pull request"
-        )
-
-    if resolved == "simulator":
-        families, skipped = select_simulator(config, requested, matrix)
-    else:
-        families, skipped = select_families(config, requested, matrix, pick_weighted)
-    no_runner = [s["family"] for s in skipped if s["reason"] == NO_RUNNER]
-    if no_runner:
-        why += f"; no runner for {', '.join(no_runner)}"
-    if not families:
-        return Decision(
-            run_cpu, False, why + "; no GPU family with a runner was selected"
-        )
+    # The simulator jobs need no secrets and no GPU runner (hrr-gpu.yml has
+    # read-only permissions), so a fork pull request runs them like any other.
+    families, skipped = select_simulator(config, requested, matrix)
     return Decision(run_cpu, True, why, families, skipped)
-
-
-def is_fork(event: str, head_repo: str, repo: str) -> bool:
-    """A pull request from another repository, or from one since deleted."""
-    return event == "pull_request" and head_repo != repo
 
 
 def list_pr_files(repo: str, number: str) -> list[str] | None:
@@ -526,8 +395,7 @@ def load_matrix(therock_dir: Path):
     sys.path.insert(0, str(therock_dir / "build_tools" / "github_actions"))
     import amdgpu_family_matrix  # noqa: E402
 
-    families = amdgpu_family_matrix.get_all_families_for_trigger_types([])
-    return families, amdgpu_family_matrix.select_weighted_label
+    return amdgpu_family_matrix.get_all_families_for_trigger_types([])
 
 
 def _dump(rows: list[dict]) -> str:
@@ -537,14 +405,11 @@ def _dump(rows: list[dict]) -> str:
 def write_outputs(
     decision: Decision, rocm_sdk_version: str, output_path: str | None
 ) -> None:
-    simulator = [row for row in decision.families if row.get("backend") == "simulator"]
-    gpu = [row for row in decision.families if row.get("backend") == "gpu"]
     lines = [
         f"run_cpu={'true' if decision.run_cpu else 'false'}",
         f"run_gpu={'true' if decision.run_gpu else 'false'}",
         f"families={_dump(decision.families)}",
-        f"simulator_families={_dump(simulator)}",
-        f"gpu_families={_dump(gpu)}",
+        f"simulator_families={_dump(decision.families)}",
         f"skipped_families={_dump(decision.skipped)}",
         f"reason={decision.reason}",
         f"rocm_sdk_version={rocm_sdk_version}",
@@ -567,18 +432,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--action", default="", help="The pull_request event's action")
     parser.add_argument("--label", default="", help="The label a labeled event added")
     parser.add_argument(
-        "--head-repo",
-        default="",
-        help="owner/name of the pull request's head repository",
-    )
-    parser.add_argument(
         "--families", default="", help="Comma-separated family keys (workflow_dispatch)"
-    )
-    parser.add_argument(
-        "--backend",
-        default="",
-        choices=("", "simulator", "gpu"),
-        help="workflow_dispatch backend; empty uses ci.yaml",
     )
     parser.add_argument("--therock-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -593,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config)
-        matrix, pick_weighted = load_matrix(args.therock_dir)
+        matrix = load_matrix(args.therock_dir)
         check_families(config, matrix)
         check_targets(config, matrix, load_archs(args.integration_config))
 
@@ -607,13 +461,10 @@ def main(argv: list[str] | None = None) -> int:
             args.event,
             paths,
             labels,
-            is_fork(args.event, args.head_repo, args.repo),
             requested,
             config,
             matrix,
-            pick_weighted,
             added_label=args.label if args.action == "labeled" else None,
-            backend=args.backend,
         )
     except ConfigError as e:
         print(f"::error::{e}")

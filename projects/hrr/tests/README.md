@@ -157,27 +157,22 @@ applies (`scripts/hrr_ci_configure.py`):
   `paths.excluded` counts for neither. The `paths` filter of `hrr-ci.yml` is the same
   lists, so a pull request that touches none of them starts no HRR CI run;
   `test_hrr_ci_configure.py` fails when the filter and `ci.yaml` disagree.
-- `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
+- `capture_label` (`ci:hrr-capture`) runs the simulator suite on a pull request that touches
   an HRR path but no capture path. Adding it restarts the run; adding any other label,
   including TheRock's `ci:gfx...` labels, leaves the run in progress alone.
-- `backend` and `simulator`: every event except a `workflow_dispatch` that asks for
-  `backend: gpu` runs on the rocJitsu simulator, on the families in
+- `simulator`: every run uses the rocJitsu simulator, on the families in
   `simulator.default_families`, each with its rocJitsu config from `simulator.configs`.
-  No pull request, push or nightly run queues on a real GPU runner.
-- `families`: the GPU families as TheRock family keys. They matter only for a
-  `workflow_dispatch` with `backend: gpu`, which runs the `enabled` ones on the runner
-  TheRock's family matrix names, or the ones the `families` input names, disabled or
-  not. Only gfx94x is enabled today; the others are listed with `enabled: false`.
-  The input also replaces the default families of a simulator run. `ci:gfx...` labels
-  are TheRock's and do not select an HRR family.
+  No job uses a real GPU. The `workflow_dispatch` `families` input replaces the default
+  families with any key in `simulator.configs`. `ci:gfx...` labels are TheRock's and do
+  not select an HRR family.
   `targets.arch` in `config/integration.yaml` stays wide on purpose: configure fails
-  unless it covers every family listed here, and a requested family needs its
+  unless it covers every family in `simulator.configs`, and a requested family needs its
   architecture compiled into the binary.
 - `rocm_sdk_version`: the ROCm SDK the unit job installs.
 
 An unknown key or family fails the configure job, and so does a family whose
 GPU targets in TheRock's family matrix are not all in `targets.arch` of
-`config/integration.yaml`. To take a pool out of a real-GPU run, set `enabled: false`.
+`config/integration.yaml`.
 
 TheRock never reads the HRR workflows or `projects/hrr/tests`, `tools` and `skills`,
 so `.github/skip-ci-config.toml` lists them: a pull request that changes only those

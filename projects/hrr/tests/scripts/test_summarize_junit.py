@@ -126,7 +126,7 @@ class SummarizeTest(ScratchDir):
         self.assertIn("error", data)
 
     def test_render_marks_missing_unreadable_and_extra(self):
-        self.write("unit-ubuntu-24.04.xml", junit(record("A"), record("B", "failure")))
+        self.write("unit-ubuntu-26.04.xml", junit(record("A"), record("B", "failure")))
         self.write("integration-gfx90a.xml", "<broken")
         self.write("integration-extra.xml", junit(record("Z")))
         errors: list[str] = []
