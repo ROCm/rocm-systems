@@ -3096,9 +3096,10 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       NCCLCHECK(ncclTopoGetAlgoTime(comm, info->func, a, p, nBytes, numPipeOps, &table[a][p]));
       // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
       // to be least preferred.
-      if (a == NCCL_ALGO_RING && rcclPenalizeFp8Ring(info->datatype, info->func, comm->nRanks, comm->nNodes, nBytes,
-                                                    rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName)) {
-        table[a][p] *= 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
+      if (a == NCCL_ALGO_RING) {
+        // Any factor large enough to act as a partition between lossy and non-lossy algos.
+        table[a][p] *= rcclFp8RingCostFactor(info->datatype, info->func, comm->nRanks, comm->nNodes, nBytes,
+                                             rcclDdaLL128Threshold(comm, ncclFuncAllReduce), comm->archName);
       }
     }
   }

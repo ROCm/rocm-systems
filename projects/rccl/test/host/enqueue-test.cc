@@ -1909,21 +1909,50 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AtOrBelowEightRanks_NotPenalised
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8NonAllReduceRingAboveEightRanks_IsPenalised) {
+  // Same shape as the exempt allreduce, except the collective.
+  constexpr size_t kCeiling = 256ULL << 20;
+  ResetEnqueueTestDeps();
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return kCeiling; };
   CostComm big(/*nRanks=*/16);
+  big.get()->archName = const_cast<char*>("gfx1250");
   CostTable tbl;
   auto task = CostTask(ncclFuncReduceScatter, ncclFloat8e4m3);
   ScriptAllTimes(2.0f);
-  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, kCeiling, 0, 0, 1, 0, tbl.ptr()));
   EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+  EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE]);
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AllReduceOutsideGfx1250LargeRingCase_IsPenalised) {
+  constexpr size_t kCeiling = 256ULL << 20;
+  ResetEnqueueTestDeps();
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return kCeiling; };
   CostComm big(/*nRanks=*/16);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce, ncclFloat8e4m3);
   ScriptAllTimes(2.0f);
-  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 256ULL << 20, 0, 0, 1, 0, tbl.ptr()));
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, kCeiling, 0, 0, 1, 0, tbl.ptr()));
   EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+  EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE]);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250ExemptionDropsWhenNodeOrRankCountFlips) {
+  constexpr size_t kCeiling = 256ULL << 20;
+  struct RankNodes { int nRanks; int nNodes; };
+  for (RankNodes setup : {RankNodes{16, 2}, RankNodes{12, 1}}) {
+    ResetEnqueueTestDeps();
+    g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return kCeiling; };
+    CostComm big(setup.nRanks, setup.nNodes);
+    big.get()->archName = const_cast<char*>("gfx1250");
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllReduce, ncclFloat8e4m3);
+    ScriptAllTimes(2.0f);
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, kCeiling, 0, 0, 1, 0, tbl.ptr()));
+    EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE])
+        << "nRanks=" << setup.nRanks << " nNodes=" << setup.nNodes;
+    EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE])
+        << "nRanks=" << setup.nRanks << " nNodes=" << setup.nNodes;
+  }
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NonFp8_NeverPenalised) {

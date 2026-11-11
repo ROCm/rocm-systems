@@ -394,6 +394,20 @@ TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRin
   otherArch.func = ncclFuncAllReduce;
   const float otherBase = latency + static_cast<float>(otherArch.nBytes) / (1000.0f * bandwidth);
   EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
+
+  comm_->archName = const_cast<char*>("gfx1250");
+  comm_->nRanks = 16;
+  comm_->nNodes = 2;
+  EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
+
+  comm_->nNodes = 1;
+  comm_->nRanks = 12;
+  EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
+
+  table.ddaLL128Max[ncclFuncAllReduce] = 0;
+  ASSERT_EQ(0u, rcclDdaLL128Threshold(comm_.get(), ncclFuncAllReduce));
+  comm_->nRanks = 16;
+  EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
 }
 
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {
