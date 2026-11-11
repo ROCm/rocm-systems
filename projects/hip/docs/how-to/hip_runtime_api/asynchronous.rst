@@ -48,8 +48,9 @@ to the newly created stream:
     simultaneously without waiting for each other to complete, thus improving
     overall performance.
 
-- :cpp:func:`hipStreamCreateWithPriority`: Allows creating a stream with a
-  specified priority, enabling prioritization of certain tasks.
+- :cpp:func:`hipStreamCreateWithPriority`: Creates a stream with a specified
+  priority. Stream priority is currently disabled, so the runtime treats all
+  streams as normal priority.
 
 The :cpp:func:`hipStreamSynchronize` function is used to block the calling host
 thread until all previously submitted tasks in a specified HIP stream have

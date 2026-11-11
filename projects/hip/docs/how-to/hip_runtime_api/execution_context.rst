@@ -101,10 +101,10 @@ the first kernel's thread blocks retire.
 Consider a service that continuously runs a background kernel while occasionally
 launching a short, latency-sensitive kernel. If the background kernel occupies
 the available GPU resources, the latency-sensitive kernel cannot begin execution
-until enough of the background kernel's thread blocks complete. Increasing the
-priority of the latency-sensitive kernel's stream can reduce this delay, but it
-cannot eliminate it, because the kernel must still wait for in-flight thread
-blocks to drain.
+until enough of the background kernel's thread blocks complete. Stream priority
+does not help here: it is currently disabled, so the runtime treats all streams
+as normal priority, and a higher-priority kernel would still wait for in-flight
+thread blocks to drain.
 
 Execution contexts address this contention by partitioning resources before the
 work is launched. For example, the background kernel can be assigned to a context
@@ -802,9 +802,9 @@ kernel's runtime is timed in two configurations:
   the rest.
 
 Without execution contexts, the critical kernel waits for the background
-kernel's thread blocks to retire before CUs open up, even with a higher stream
-priority. With execution contexts, each kernel uses a distinct set of CUs, so the
-critical kernel can start with less interference. Both kernels give up access to
+kernel's thread blocks to retire before CUs open up. With execution contexts,
+each kernel uses a distinct set of CUs, so the critical kernel can start with
+less interference. Both kernels give up access to
 the full available CU set, so each may run slightly longer alone, but the
 critical kernel is no longer held back by the background workload.
 
