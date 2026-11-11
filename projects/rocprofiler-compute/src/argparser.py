@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
@@ -16,19 +16,8 @@ DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
     "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
 }
 
-
-def warn_deprecated_options(args: argparse.Namespace) -> None:
-    """Warn about each deprecated option the command line uses."""
-    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
-        if getattr(args, dest, None) not in (None, False):
-            console_warning(
-                f"{option} is deprecated and will be removed in a future release. "
-                f"Use {replacement} instead."
-            )
-
-
 # Standard argparse actions that ExperimentalAction and DebugAction delegate to
-_BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
+BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
     "store": argparse._StoreAction,
     "store_const": argparse._StoreConstAction,
     "store_true": argparse._StoreTrueAction,
@@ -40,123 +29,14 @@ _BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
 }
 
 
-class _DelegatingAction(argparse.Action):
-    """Parse an option like the standard argparse action named by base_action.
-
-    Subclasses change the help text or check the option before it is stored.
-    """
-
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        dest: str,
-        base_action: str,
-        **kwargs: Any,
-    ) -> None:
-        if base_action not in _BASE_ACTIONS:
-            raise ValueError(
-                f"Unsupported base_action: {base_action}. "
-                f"Specify one of: {', '.join(_BASE_ACTIONS)}"
+def warn_deprecated_options(args: argparse.Namespace) -> None:
+    """Warn about each deprecated option the command line uses."""
+    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
+        if getattr(args, dest, None) not in (None, False):
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"Use {replacement} instead."
             )
-        self._base_action = _BASE_ACTIONS[base_action](option_strings, dest, **kwargs)
-        super().__init__(
-            option_strings=option_strings,
-            dest=dest,
-            nargs=self._base_action.nargs,
-            const=self._base_action.const,
-            default=self._base_action.default,
-            type=self._base_action.type,
-            choices=self._base_action.choices,
-            required=self._base_action.required,
-            help=self._base_action.help,
-            metavar=self._base_action.metavar,
-        )
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: Optional[str] = None,
-    ) -> None:
-        self._base_action(parser, namespace, values, option_string)
-
-
-class ExperimentalAction(_DelegatingAction):
-    """
-    Custom action that enforces experimental feature gating.
-    - Suppresses help text when experimental mode is disabled
-    - Errors if feature used without --experimental flag
-    - Warns when experimental feature is used
-    - Delegates to inner action for proper value storage
-    """
-
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        dest: str,
-        base_action: str,
-        experimental_enabled: bool,
-        feature_label: str,
-        help: str,
-        **kwargs: Any,
-    ) -> None:
-        self.experimental_enabled = experimental_enabled
-        self.feature_label = feature_label
-
-        if experimental_enabled:
-            leading_whitespace = help[: len(help) - len(help.lstrip())]
-            help_content = help.lstrip()
-            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
-        else:
-            help = argparse.SUPPRESS
-
-        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: object,
-        option_string: Optional[str] = None,
-    ) -> None:
-        # Error if experimental feature used without --experimental flag
-        if not self.experimental_enabled:
-            parser.error(
-                f"{self.feature_label} is an experimental feature. "
-                f"Use --experimental to enable it."
-            )
-
-        console_warning(
-            f"{self.feature_label} is experimental and may change in future releases."
-        )
-
-        super().__call__(parser, namespace, values, option_string)
-
-
-class DebugAction(_DelegatingAction):
-    """
-    Custom action for debug options.
-    - Suppresses help text unless --debug is given
-    - Delegates to inner action for proper value storage
-    """
-
-    def __init__(
-        self,
-        option_strings: Sequence[str],
-        dest: str,
-        base_action: str,
-        debug_enabled: bool,
-        help: str,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            option_strings,
-            dest,
-            base_action,
-            help=help if debug_enabled else argparse.SUPPRESS,
-            **kwargs,
-        )
 
 
 def validate_block(value: str) -> str:
@@ -264,7 +144,12 @@ def add_general_group(
     general_group.add_argument(
         "--debug",
         action="store_true",
-        help="Show the debug options in --help.",
+        help=(
+            "Show the debug options in --help:\n"
+            "   Top level and profile: --debug-list-metrics-gfx-id\n"
+            "   Analyze: --debug-metric-expression, --debug-table-view, "
+            "--debug-verify-deps\n"
+        ),
     )
 
 
@@ -901,27 +786,21 @@ Examples:
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
     )
     analyze_debug_group.add_argument(
-        "--debug-single-metric",
+        "--debug-metric-expression",
         action=DebugAction,
         base_action="store_true",
         debug_enabled=debug_enabled,
-        help=(
-            "Print the counter data, and each metric's expression and inputs.\n"
-            "Add --block <id> to print one metric."
-        ),
+        help="Print the counter data, and each metric's expression and inputs.",
     )
     analyze_debug_group.add_argument(
         "--debug-table-view",
-        dest="view",
         action=DebugAction,
-        base_action="store_const",
+        base_action="store_true",
         debug_enabled=debug_enabled,
-        const="table",
         help="Force plain tables and ignore cli_style from YAML.",
     )
     analyze_debug_group.add_argument(
         "--debug-verify-deps",
-        dest="verify_deps",
         action=DebugAction,
         base_action="store_true",
         debug_enabled=debug_enabled,
@@ -962,15 +841,133 @@ def _add_list_metrics_gfx_id(
     metrics of the -p workload's GPU."""
     debug_group.add_argument(
         "--debug-list-metrics-gfx-id",
-        dest="list_metrics_gfx_id",
         metavar="<arch>",
         choices=supported_archs.keys(),
         action=DebugAction,
         base_action="store",
         debug_enabled=debug_enabled,
         help=(
-            "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [id ...] to list their metrics.\n"
+            "With --list-metrics, list the blocks and metrics of GPU <arch>\n"
+            "instead of the current GPU.\n"
             f"Values: {', '.join(supported_archs)}"
         ),
     )
+
+
+class CustomAction(argparse.Action):
+    """Parse an option like the standard argparse action named by base_action.
+
+    Subclasses change the help text or check the option before it is stored.
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        **kwargs: Any,
+    ) -> None:
+        if base_action not in BASE_ACTIONS:
+            raise ValueError(
+                f"Unsupported base_action: {base_action}. "
+                f"Specify one of: {', '.join(BASE_ACTIONS)}"
+            )
+        self._base_action = BASE_ACTIONS[base_action](option_strings, dest, **kwargs)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=self._base_action.nargs,
+            const=self._base_action.const,
+            default=self._base_action.default,
+            type=self._base_action.type,
+            choices=self._base_action.choices,
+            required=self._base_action.required,
+            help=self._base_action.help,
+            metavar=self._base_action.metavar,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        self._base_action(parser, namespace, values, option_string)
+
+
+class ExperimentalAction(CustomAction):
+    """
+    Custom action that enforces experimental feature gating.
+    - Suppresses help text when experimental mode is disabled
+    - Errors if feature used without --experimental flag
+    - Warns when experimental feature is used
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        experimental_enabled: bool,
+        feature_label: str,
+        help: str,
+        **kwargs: Any,
+    ) -> None:
+        self.experimental_enabled = experimental_enabled
+        self.feature_label = feature_label
+
+        if experimental_enabled:
+            leading_whitespace = help[: len(help) - len(help.lstrip())]
+            help_content = help.lstrip()
+            help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
+        else:
+            help = argparse.SUPPRESS
+
+        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        # Error if experimental feature used without --experimental flag
+        if not self.experimental_enabled:
+            parser.error(
+                f"{self.feature_label} is an experimental feature. "
+                f"Use --experimental to enable it."
+            )
+
+        console_warning(
+            f"{self.feature_label} is experimental and may change in future releases."
+        )
+
+        super().__call__(parser, namespace, values, option_string)
+
+
+class DebugAction(CustomAction):
+    """
+    Custom action for debug options.
+    - Suppresses help text unless --debug is given
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: List[str],
+        dest: str,
+        base_action: str,
+        debug_enabled: bool,
+        help: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            option_strings,
+            dest,
+            base_action,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            **kwargs,
+        )

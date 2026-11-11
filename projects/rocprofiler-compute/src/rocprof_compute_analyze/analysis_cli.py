@@ -384,7 +384,7 @@ class cli_analysis(OmniAnalyze_Base):
                         workload.path = workload_path
 
                         pmc_df = parser.apply_filters(
-                            workload, debug=args.debug_single_metric
+                            workload, debug=args.debug_metric_expression
                         )
                         ai_data = calc_ai_analyze(
                             workload=workload,

@@ -47,12 +47,6 @@ from utils.utils_common import (
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
-
-def _tty_view_is_table(args: argparse.Namespace) -> bool:
-    """Return True when --debug-table-view asks for plain tables over cli_style."""
-    return getattr(args, "view", None) == "table"
-
-
 KERNEL_NAME_WRAP_WIDTH = 40
 
 PC_SAMPLING_TABLE_ID = "21.1"
@@ -944,7 +938,7 @@ def show_all(
     for panel_id, panel in arch_configs.panel_configs.items():
         # Handle roofline panel (400) with custom display logic
         # With --debug-table-view, tables 401/402 render as normal tables.
-        if panel_id == 400 and not _tty_view_is_table(args):
+        if panel_id == 400 and not args.debug_table_view:
             _ = is_roofline_shown(args, runs, output, panel)
 
         panel_content = ""  # store content of all data_source from one panel
@@ -1035,7 +1029,7 @@ def show_all(
                 # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
-                    and not _tty_view_is_table(args)
+                    and not args.debug_table_view
                     and Layouts.for_arch(gpu_arch) is not None
                 )
 
@@ -1081,7 +1075,7 @@ def show_all(
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --debug-table-view, roofline tables (401/402) render as normal tables.
         if panel_content and (
-            table_config["id"] not in [401, 402] or _tty_view_is_table(args)
+            table_config["id"] not in [401, 402] or args.debug_table_view
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)

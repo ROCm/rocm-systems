@@ -30,6 +30,7 @@ def first_column_ids(output: str) -> list[str]:
 
 def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     return_code = binary_handler_analyze_rocprof_compute([
+        "--list-metrics",
         "--debug-list-metrics-gfx-id",
         "gfx90a",
     ])

@@ -951,9 +951,8 @@ To use a debug option, pass it on its own; ``--debug`` is not required:
 
 Analyze mode has these debug options:
 
-* ``--debug-single-metric``: Print the counter data, and each metric's expression
-  and inputs. To print a single metric, combine it with ``--block``, for example
-  ``--block 2.1.0 --debug-single-metric``.
+* ``--debug-metric-expression``: Print the counter data, and each metric's
+  expression and inputs.
 
 * ``--debug-table-view``: Print every block as plain tables, including blocks
   that are normally drawn as a memory chart or a per-kernel roofline layout.

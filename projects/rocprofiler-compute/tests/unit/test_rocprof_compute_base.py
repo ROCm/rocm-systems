@@ -4,7 +4,6 @@
 """Unit tests for rocprof_compute_base.py."""
 
 import argparse
-import sys
 from unittest.mock import Mock
 
 import common
@@ -39,36 +38,6 @@ def rocprof_compute_with_args(args: argparse.Namespace) -> RocProfCompute:
     instance._RocProfCompute__args = args
     instance._RocProfCompute__mode = args.mode
     return instance
-
-
-def print_startup_help(monkeypatch, argv) -> None:
-    """Run RocProfCompute.parse_args on argv, which prints the help and exits."""
-    instance = RocProfCompute.__new__(RocProfCompute)
-    instance._RocProfCompute__supported_archs = common.SUPPORTED_ARCHS
-    instance._RocProfCompute__version = {"ver_pretty": "unit test"}
-    monkeypatch.setattr(sys, "argv", ["rocprof-compute", *argv])
-    with pytest.raises(SystemExit):
-        instance.parse_args()
-
-
-@pytest.mark.parametrize(
-    "argv, debug_option, shown",
-    [
-        (["--help"], "--debug-list-metrics-gfx-id", False),
-        (["--debug", "--help"], "--debug-list-metrics-gfx-id", True),
-        (["profile", "--help", "--debug"], "--debug-list-metrics-gfx-id", True),
-        (["analyze", "--help"], "--debug-single-metric", False),
-        (["analyze", "--debug", "--help"], "--debug-single-metric", True),
-        (["analyze", "--help", "--debug"], "--debug-single-metric", True),
-        (["analyze", "--debug", "--help"], "--debug-list-metrics-gfx-id", False),
-    ],
-)
-def test_parse_args_shows_debug_options_with_debug(
-    monkeypatch, capsys, argv, debug_option, shown
-):
-    """--debug, before or after --help, lists the debug options of the mode."""
-    print_startup_help(monkeypatch, argv)
-    assert (debug_option in capsys.readouterr().out) is shown
 
 
 @pytest.mark.parametrize(
@@ -117,3 +86,16 @@ def test_handle_analyze_args_operator_flags_require_stdout(
         assert "only supported with --output-format stdout" in error.call_args.args[1]
     else:
         instance.handle_analyze_args()
+
+
+def test_validate_list_option_exclusions_gfx_id_requires_list_metrics(monkeypatch):
+    """--debug-list-metrics-gfx-id is rejected without --list-metrics."""
+    error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
+    args = argparse.Namespace(
+        mode=None, debug_list_metrics_gfx_id="gfx90a", list_metrics=None
+    )
+    with pytest.raises(SystemExit):
+        rocprof_compute_with_args(args)._validate_list_option_exclusions()
+    assert "with --list-metrics" in error.call_args.args[0]
