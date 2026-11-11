@@ -416,7 +416,7 @@ void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
 // Bytes per node that Ring/LL128 all_reduce moves in one loop.
 static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) {
   const size_t chunk =
-    (size_t)(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) / comm->ll128LineElems * comm->ll128DataElems;
+    (size_t)RCCL_LL128_WIRE_TO_DATA(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS, comm->ll128LineElems);
   return chunk * nChannels * (comm->nRanks / comm->nNodes);
 }
 

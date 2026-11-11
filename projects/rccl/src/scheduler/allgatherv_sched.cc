@@ -77,7 +77,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     int stepSize = comm->buffSizes[proto] / NCCL_STEPS;
     int chunkSize = chunkSteps * stepSize;
     if (proto == NCCL_PROTO_LL) chunkSize = chunkSize / 2;
-    if (proto == NCCL_PROTO_LL128) chunkSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
+    if (proto == NCCL_PROTO_LL128) chunkSize = RCCL_LL128_WIRE_TO_DATA(chunkSize, (int)NCCL_LL128_LINEELEMS);
     size_t grainSize = rcclProtoGrainSize(proto, comm);
     nChannels = agvChannelCount(comm, tcoll.nMaxChannels);
     chunkSize = chunkSize / grainSize * grainSize;

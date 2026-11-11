@@ -101,11 +101,11 @@ struct ProtoLL128 {
 
   // Data bytes (no flags etc) in one step of the fifo queue.
   __device__ static int calcBytePerStep() {
-    return (ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) * NCCL_LL128_DATAELEMS / NCCL_LL128_LINEELEMS;
+    return RCCL_LL128_WIRE_TO_DATA(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS, (int)NCCL_LL128_LINEELEMS);
   }
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() {
-    return NCCL_LL128_SHMEM_ELEMS_PER_THREAD * NCCL_LL128_DATAELEMS * sizeof(uint64_t) / NCCL_LL128_LINEELEMS;
+    return RCCL_LL128_WIRE_TO_DATA(NCCL_LL128_SHMEM_ELEMS_PER_THREAD * (int)sizeof(uint64_t), (int)NCCL_LL128_LINEELEMS);
   }
   // Group width is how many consecutive group values a subchannel occupies.
   static constexpr int MaxGroupWidth = 1;

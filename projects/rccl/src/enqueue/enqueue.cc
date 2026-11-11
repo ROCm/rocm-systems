@@ -1583,7 +1583,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (protocol[dir] == NCCL_PROTO_LL) {
       chunkDataSize[dir] /= 2;
     } else if (protocol[dir] == NCCL_PROTO_LL128) {
-      chunkDataSize[dir] = (chunkDataSize[dir] / comm->ll128LineElems) * comm->ll128DataElems;
+      chunkDataSize[dir] = RCCL_LL128_WIRE_TO_DATA(chunkDataSize[dir], comm->ll128LineElems);
     }
     chunkDataSize_u32fp8[dir] = u32fp8Encode(chunkDataSize[dir]);
     chunkDataSize[dir] = u32fp8Decode(chunkDataSize_u32fp8[dir]);
@@ -1592,7 +1592,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     if (protocol[dir] == NCCL_PROTO_LL) {
       chunkSize[dir] *= 2;
     } else if (protocol[dir] == NCCL_PROTO_LL128) {
-      chunkSize[dir] = (chunkSize[dir] / comm->ll128DataElems) * comm->ll128LineElems;
+      chunkSize[dir] = RCCL_LL128_DATA_TO_WIRE(chunkSize[dir], comm->ll128LineElems);
     }
 
     if (p2pTasks[dir] && p2pTasks[dir]->allowUB) {
@@ -1804,8 +1804,8 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
           proxyOps[dir].nbytes *= 2;
           proxyOps[dir].nbytes = roundUp(proxyOps[dir].nbytes, sizeof(union ncclLLFifoLine));
         } else if (proxyOps[dir].protocol == NCCL_PROTO_LL128) {
-          // Convert data bytes to wire bytes (LL128 data lines carry an extra flag word).
-          proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, comm->ll128DataElems * sizeof(uint64_t)) *
+          // Convert data bytes to wire bytes (each LL128 line also carries a flag).
+          proxyOps[dir].nbytes = divUp(proxyOps[dir].nbytes, RCCL_LL128_LINE_DATA_BYTES(comm->ll128LineElems)) *
                                  comm->ll128LineElems * sizeof(uint64_t);
         }
       }
@@ -3556,7 +3556,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
   int chunkSize = stepSize * chunkSteps;
   if (info->protocol == NCCL_PROTO_LL) chunkSize /= 2;
-  if (info->protocol == NCCL_PROTO_LL128) chunkSize = (chunkSize / comm->ll128LineElems) * comm->ll128DataElems;
+  if (info->protocol == NCCL_PROTO_LL128) chunkSize = RCCL_LL128_WIRE_TO_DATA(chunkSize, comm->ll128LineElems);
   // Buffer-based ceiling; plugins may increase chunk size up to this limit.
   int bufferMaxChunkSize = chunkSize;
 
@@ -3630,7 +3630,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     // Broadcast and reduce pass each chunk along the whole ring, so a scaled-up LL128 chunk only pays off once a
     // channel carries at least nRanks / 2 chunks (gfx950, 2-8 nodes: -25 to -37% at 8-64 MB with the 4x chunk,
     // +6% from 512 MB); below that the chunk shrinks back toward the default.
-    const int defaultChunkSize = (comm->p2pLl128BuffSize / NCCL_STEPS / comm->ll128LineElems) * comm->ll128DataElems;
+    const int defaultChunkSize = RCCL_LL128_WIRE_TO_DATA(comm->p2pLl128BuffSize / NCCL_STEPS, comm->ll128LineElems);
     while (nBytes / ((size_t)nChannels * chunkSize) < (size_t)comm->nRanks / 2 && chunkSize / 2 >= defaultChunkSize)
       chunkSize /= 2;
   } else if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_LL128) {
@@ -3641,7 +3641,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     // stops at 128 KiB and a larger chunk leaves the tree pipeline fewer steps (-8% at 8 nodes, 64M).
     if (comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize)
       chunkSize =
-        std::min(chunkSize, (comm->p2pLl128BuffSize / NCCL_STEPS / comm->ll128LineElems) * comm->ll128DataElems);
+        std::min(chunkSize, RCCL_LL128_WIRE_TO_DATA(comm->p2pLl128BuffSize / NCCL_STEPS, comm->ll128LineElems));
     // Yes, we are OK with the division on the left side of the < operand being integer.
     // coverity[integer_division]
     while (nBytes / (nChannels * chunkSize) < nstepsLL128 * 64 / ppn && chunkSize > 131072) chunkSize /= 2;

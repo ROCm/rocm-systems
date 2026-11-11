@@ -66,6 +66,8 @@ set(SRC_FILES
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
   device/ll128Layout.h
+  device/ll128NarrowFlag.h
+  device/ll128NarrowFlagPrims.h
   device/ll128RecvWait.h
   device/onerank.cu
   device/op128.h
@@ -423,6 +425,7 @@ set(SRC_FILES
   include/rccl_common.h
   include/rccl_decision.h
   include/rccl_float8.h
+  include/rccl_ll128_flag.h
   include/rccl_vars.h
   include/recorder.h
   include/register.h
