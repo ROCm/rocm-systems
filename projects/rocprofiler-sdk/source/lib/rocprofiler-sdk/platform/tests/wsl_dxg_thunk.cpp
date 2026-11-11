@@ -221,7 +221,14 @@ struct FakeThunk
 
 const std::string kVersioned   = kLibRocdxgVersionedName;
 const std::string kUnversioned = kLibRocdxgUnversionedName;
-const std::string kHsaDir      = "/fake/rocm/lib/";
+const std::string kHsaDir      = "/fake/rocm/lib";
+
+// `name` in the directory of the one mapped libhsa-runtime64.
+std::string
+beside(const std::string& name)
+{
+    return kHsaDir + "/" + name;
+}
 
 // One dlopen as the fake loader saw it.
 struct OpenCall
@@ -240,8 +247,9 @@ operator<<(std::ostream& os, const OpenCall& call)
 
 // A fake dynamic loader. `resident` is what RTLD_NOLOAD finds and `loadable`
 // is what a real open finds, both keyed by the exact name passed to dlopen, so
-// the candidate order can be pinned. Records every symbol asked for so the
-// resolved set can be pinned exactly, and counts closes.
+// the candidate order can be pinned. `hsa_dirs` is where libhsa-runtime64 is
+// mapped from. Records every symbol asked for so the resolved set can be
+// pinned exactly, and counts closes.
 struct FakeLoader
 {
     std::vector<OpenCall>    opens;
@@ -249,7 +257,7 @@ struct FakeLoader
     int                      close_count    = 0;
     std::set<std::string>    resident       = {kVersioned, kUnversioned};
     std::set<std::string>    loadable       = {};
-    std::string              hsa_dir        = kHsaDir;
+    std::vector<std::string> hsa_dirs       = {kHsaDir};
     std::string              missing_symbol = {};
     void*                    handle         = reinterpret_cast<void*>(0xd06);
 
@@ -262,8 +270,8 @@ struct FakeLoader
             const auto& found = is_noload ? resident : loadable;
             return found.count(name) != 0 ? handle : nullptr;
         };
-        out.hsa_runtime_dir = [this]() { return hsa_dir; };
-        out.sym             = [this](void*, const char* name) -> void* {
+        out.hsa_runtime_dirs = [this]() { return hsa_dirs; };
+        out.sym              = [this](void*, const char* name) -> void* {
             requested_symbols.emplace_back(name);
             if(missing_symbol == name) return nullptr;
             if(std::strcmp(name, "hsaKmtOpenKFD") == 0)
@@ -305,6 +313,27 @@ const std::vector<std::string> kResolvedSymbols = {"hsaKmtOpenKFD",
                                                    "hsaKmtReleaseSystemProperties",
                                                    "hsaKmtCloseKFD",
                                                    "DxgAbiCheck"};
+
+// Every open a cold process makes when no candidate loads: the resident probe
+// for each name, then each name bare and, if `beside_hsa`, beside the one
+// mapped libhsa-runtime64.
+std::vector<OpenCall>
+every_cold_open(bool beside_hsa)
+{
+    auto names = std::vector<std::string>{};
+    if(!kVersioned.empty()) names.emplace_back(kVersioned);
+    names.emplace_back(kUnversioned);
+
+    auto opens = std::vector<OpenCall>{};
+    for(const auto& name : names)
+        opens.push_back({name, true});
+    for(const auto& name : names)
+    {
+        opens.push_back({name, false});
+        if(beside_hsa) opens.push_back({beside(name), false});
+    }
+    return opens;
+}
 }  // namespace
 
 // --- the happy path --------------------------------------------------------
@@ -608,7 +637,7 @@ TEST(wsl_dxg_thunk, a_resident_unversioned_library_is_reused_before_anything_is_
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
     loader.resident = {kUnversioned};
-    loader.loadable = {kVersioned, kHsaDir + kVersioned};
+    loader.loadable = {kVersioned, beside(kVersioned)};
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
@@ -630,7 +659,7 @@ TEST(wsl_dxg_thunk, a_cold_process_loads_the_versioned_name_first)
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
     loader.resident = {};
-    loader.loadable = {kVersioned, kHsaDir + kVersioned, kUnversioned};
+    loader.loadable = {kVersioned, beside(kVersioned), kUnversioned};
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
@@ -652,7 +681,7 @@ TEST(wsl_dxg_thunk, a_versioned_only_package_is_found_beside_libhsa_runtime64)
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
     loader.resident = {};
-    loader.loadable = {kHsaDir + kVersioned, kUnversioned};
+    loader.loadable = {beside(kVersioned), kUnversioned};
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
@@ -662,7 +691,7 @@ TEST(wsl_dxg_thunk, a_versioned_only_package_is_found_beside_libhsa_runtime64)
               (std::vector<OpenCall>{{kVersioned, true},
                                      {kUnversioned, true},
                                      {kVersioned, false},
-                                     {kHsaDir + kVersioned, false}}));
+                                     {beside(kVersioned), false}}));
     EXPECT_EQ(loader.close_count, 1);
 }
 
@@ -690,14 +719,14 @@ TEST(wsl_dxg_thunk, an_unversioned_library_beside_libhsa_runtime64_is_the_last_r
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
     loader.resident = {};
-    loader.loadable = {kHsaDir + kUnversioned};
+    loader.loadable = {beside(kUnversioned)};
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
 
     EXPECT_EQ(nodes.size(), 1);
     ASSERT_FALSE(loader.opens.empty());
-    EXPECT_EQ(loader.opens.back(), (OpenCall{kHsaDir + kUnversioned, false}));
+    EXPECT_EQ(loader.opens.back(), (OpenCall{beside(kUnversioned), false}));
     EXPECT_EQ(loader.close_count, 1);
 }
 
@@ -711,19 +740,8 @@ TEST(wsl_dxg_thunk, a_missing_library_tries_every_candidate_and_closes_nothing)
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
 
-    auto expected = std::vector<OpenCall>{};
-    if(!kVersioned.empty()) expected.push_back({kVersioned, true});
-    expected.push_back({kUnversioned, true});
-    if(!kVersioned.empty())
-    {
-        expected.push_back({kVersioned, false});
-        expected.push_back({kHsaDir + kVersioned, false});
-    }
-    expected.push_back({kUnversioned, false});
-    expected.push_back({kHsaDir + kUnversioned, false});
-
     EXPECT_TRUE(nodes.empty());
-    EXPECT_EQ(loader.opens, expected);
+    EXPECT_EQ(loader.opens, every_cold_open(/*beside_hsa=*/true));
     EXPECT_EQ(loader.close_count, 0);
     EXPECT_TRUE(fake.state.calls.empty());
 }
@@ -735,11 +753,52 @@ TEST(wsl_dxg_thunk, without_libhsa_runtime64_only_the_bare_names_are_tried)
     auto fake       = FakeThunk{};
     auto loader     = FakeLoader{};
     loader.resident = {};
-    loader.hsa_dir  = {};
+    loader.hsa_dirs = {};
 
     EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty());
-    for(const auto& call : loader.opens)
-        EXPECT_TRUE(call.name == kVersioned || call.name == kUnversioned) << call;
+    EXPECT_EQ(loader.opens, every_cold_open(/*beside_hsa=*/false));
+    EXPECT_EQ(loader.close_count, 0);
+    EXPECT_TRUE(fake.state.calls.empty());
+}
+
+// libhsa-runtime64 mapped from two directories: either could be the one that
+// loads the thunk, so neither is searched, even though both hold one - and
+// which directory is reported first changes nothing.
+TEST(wsl_dxg_thunk, several_libhsa_runtime64_directories_are_not_searched_beside)
+{
+    const auto first  = std::string{"/first/rocm/lib"};
+    const auto second = std::string{"/second/rocm/lib"};
+
+    for(const auto& dirs :
+        {std::vector<std::string>{first, second}, std::vector<std::string>{second, first}})
+    {
+        auto fake       = FakeThunk{};
+        auto loader     = FakeLoader{};
+        loader.resident = {};
+        loader.hsa_dirs = dirs;
+        for(const auto& dir : dirs)
+            for(const auto& name : {kVersioned, kUnversioned})
+                loader.loadable.emplace(dir + "/" + name);
+        fake.publish_gpu_nodes(1);
+
+        EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty()) << dirs.front();
+        EXPECT_EQ(loader.opens, every_cold_open(/*beside_hsa=*/false)) << dirs.front();
+        EXPECT_EQ(loader.close_count, 0) << dirs.front();
+        EXPECT_TRUE(fake.state.calls.empty()) << dirs.front();
+    }
+}
+
+// Two runtimes mapped from the same directory are one directory to search, and
+// each candidate in it is tried once.
+TEST(wsl_dxg_thunk, one_libhsa_runtime64_directory_reported_twice_is_searched_once)
+{
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.hsa_dirs = {kHsaDir, kHsaDir};
+
+    EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty());
+    EXPECT_EQ(loader.opens, every_cold_open(/*beside_hsa=*/true));
     EXPECT_EQ(loader.close_count, 0);
     EXPECT_TRUE(fake.state.calls.empty());
 }

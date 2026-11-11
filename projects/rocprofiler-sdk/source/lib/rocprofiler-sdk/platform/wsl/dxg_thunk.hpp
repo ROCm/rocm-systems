@@ -116,18 +116,18 @@ struct DxgThunk
 // friends; a test substitutes its own to observe the open order and the
 // open/close balance.
 //
-// hsa_runtime_dir answers the directory, with a trailing '/', of the
-// libhsa-runtime64 already mapped into this process, or an empty string if
-// none is. It is where the HSA runtime itself falls back to looking for the
-// thunk, so a versioned-only package layout that the global search cannot see
-// still resolves to the copy the HSA runtime will use.
+// hsa_runtime_dirs answers every directory holding a libhsa-runtime64 that is
+// mapped into this process, each without a trailing '/'. The HSA runtime falls
+// back to looking for the thunk beside itself, so that directory is searched
+// too - but only when it is exactly one, since with two runtimes mapped there
+// is no way to tell which one will load the thunk.
 struct DxgLoaderOps
 {
-    std::function<void*(const char*, int)>   open;
-    std::function<void*(void*, const char*)> sym;
-    std::function<int(void*)>                close;
-    std::function<const char*()>             error;
-    std::function<std::string()>             hsa_runtime_dir;
+    std::function<void*(const char*, int)>    open;
+    std::function<void*(void*, const char*)>  sym;
+    std::function<int(void*)>                 close;
+    std::function<const char*()>              error;
+    std::function<std::vector<std::string>()> hsa_runtime_dirs;
 };
 
 const DxgLoaderOps&
@@ -147,13 +147,13 @@ std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgThunk& thunk);
 
 // The same, preceded by loading and resolving librocdxg through `ops`. A copy
-// already resident under either name is reused before anything is loaded; a
-// cold process then loads the first of the versioned name, the versioned name
-// beside libhsa-runtime64, the unversioned name and the unversioned name beside
-// libhsa-runtime64 - the HSA runtime's own order, so the copy loaded here is
-// the one it will later find by soname instead of a second one. The handle is
-// closed on the way out of every path. read_dxg_gpu_topology() is this with
-// default_loader_ops().
+// already resident under either name is reused before anything is loaded.
+// Otherwise the candidates are those of the HSA runtime's ThunkLoader, in its
+// order: for the versioned and then the unversioned name, the bare name first
+// and the same name beside libhsa-runtime64 only if that fails. The order is
+// shared, but how a bare name resolves is not; see open_rocdxg() in
+// dxg_topology.cpp. The handle is closed on the way out of every path.
+// read_dxg_gpu_topology() is this with default_loader_ops().
 std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgLoaderOps& ops);
 }  // namespace wsl

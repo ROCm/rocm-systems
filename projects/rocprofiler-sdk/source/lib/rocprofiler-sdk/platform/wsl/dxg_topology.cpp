@@ -33,10 +33,13 @@
 #include <dlfcn.h>
 #include <link.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,6 +54,9 @@ namespace
 {
 constexpr const char* kLibRocdxg = "librocdxg";
 
+// --- which librocdxg to look for, and where --------------------------------
+
+// The names ThunkLoader tries, versioned first.
 std::vector<std::string>
 rocdxg_names()
 {
@@ -60,37 +66,79 @@ rocdxg_names()
     return names;
 }
 
-std::string
-active_hsa_runtime_dir()
+// The directory to search beside libhsa-runtime64, if exactly one is mapped.
+//
+// ThunkLoader searches beside the libhsa-runtime64 it is part of. With
+// runtimes mapped from two directories there is no telling which of them will
+// load the thunk, and a guess could map a thunk the HSA runtime then does not
+// use, so neither directory is searched.
+std::optional<std::string>
+adjacent_dir(std::vector<std::string> hsa_dirs)
 {
-    auto dir   = std::string{};
+    std::sort(hsa_dirs.begin(), hsa_dirs.end());
+    hsa_dirs.erase(std::unique(hsa_dirs.begin(), hsa_dirs.end()), hsa_dirs.end());
+
+    if(hsa_dirs.size() == 1) return hsa_dirs.front();
+    if(hsa_dirs.size() > 1)
+        ROCP_WARNING << fmt::format(
+            "wsl topology: libhsa-runtime64 is mapped from {} directories ({}), so {} is not "
+            "looked for beside any of them",
+            hsa_dirs.size(),
+            fmt::join(hsa_dirs, ", "),
+            kLibRocdxg);
+    return std::nullopt;
+}
+
+// ThunkLoader's order: for each name, the bare name, then the same name beside
+// libhsa-runtime64.
+std::vector<std::string>
+load_candidates(const std::vector<std::string>& names, const std::optional<std::string>& dir)
+{
+    auto candidates = std::vector<std::string>{};
+    for(const auto& name : names)
+    {
+        candidates.emplace_back(name);
+        if(dir) candidates.emplace_back(*dir + "/" + name);
+    }
+    return candidates;
+}
+
+// --- the dynamic loader ----------------------------------------------------
+
+// Every directory holding a mapped libhsa-runtime64, canonicalized so that one
+// directory reached through two paths counts once, in a stable order.
+std::vector<std::string>
+mapped_hsa_runtime_dirs()
+{
+    auto raw   = std::vector<std::string>{};
     auto visit = [](dl_phdr_info* info, size_t, void* data) -> int {
         const auto path  = std::string_view{info->dlpi_name != nullptr ? info->dlpi_name : ""};
         const auto slash = path.find_last_of('/');
         if(slash == std::string_view::npos) return 0;
         if(path.substr(slash + 1).rfind("libhsa-runtime64.so", 0) != 0) return 0;
-        *static_cast<std::string*>(data) = std::string{path.substr(0, slash + 1)};
-        return 1;
+        static_cast<std::vector<std::string>*>(data)->emplace_back(
+            slash == 0 ? std::string{"/"} : std::string{path.substr(0, slash)});
+        return 0;
     };
-    ::dl_iterate_phdr(visit, &dir);
-    return dir;
+    ::dl_iterate_phdr(visit, &raw);
+
+    auto dirs = std::set<std::string>{};
+    for(auto& dir : raw)
+    {
+        if(char* real = ::realpath(dir.c_str(), nullptr))
+        {
+            dir = real;
+            ::free(real);
+        }
+        dirs.emplace(std::move(dir));
+    }
+    return {dirs.begin(), dirs.end()};
 }
 
-// Bring librocdxg into the process the way the HSA runtime would, or find the
-// copy it already brought in.
-//
-// A copy that is already resident under either name is taken first, with
-// RTLD_NOLOAD, so a process can only ever hold the one the HSA runtime chose:
-// the versioned soname also matches a copy that was loaded from an explicit
-// path or under the unversioned name, as long as its DT_SONAME is versioned.
-// Only a cold process (rocprofv3-avail, tool initialization before hsa_init())
-// loads anything, and it walks ThunkLoader's own candidate order so the HSA
-// runtime later finds this object by soname instead of mapping another.
+// The first copy already resident under one of `names`, or null.
 void*
-open_rocdxg(const DxgLoaderOps& ops)
+open_resident(const DxgLoaderOps& ops, const std::vector<std::string>& names)
 {
-    const auto names = rocdxg_names();
-
     for(const auto& name : names)
     {
         if(void* handle = ops.open(name.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD))
@@ -99,44 +147,97 @@ open_rocdxg(const DxgLoaderOps& ops)
             return handle;
         }
     }
+    return nullptr;
+}
 
-    const auto hsa_dir  = ops.hsa_runtime_dir ? ops.hsa_runtime_dir() : std::string{};
-    auto       failures = std::vector<std::string>{};
-    for(const auto& name : names)
+// The first of a list of candidates that loads, and why each one before it did
+// not.
+struct LoadAttempt
+{
+    void*                    handle   = nullptr;
+    std::vector<std::string> failures = {};
+};
+
+LoadAttempt
+load_first(const DxgLoaderOps& ops, const std::vector<std::string>& candidates)
+{
+    auto attempt = LoadAttempt{};
+    for(const auto& candidate : candidates)
     {
-        auto paths = std::vector<std::string>{name};
-        if(!hsa_dir.empty()) paths.emplace_back(hsa_dir + name);
-
-        for(const auto& path : paths)
+        attempt.handle = ops.open(candidate.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if(attempt.handle)
         {
-            if(void* handle = ops.open(path.c_str(), RTLD_NOW | RTLD_LOCAL))
-            {
-                ROCP_INFO << fmt::format("wsl topology: loaded {}", path);
-                return handle;
-            }
-            const char* error = ops.error();
-            failures.emplace_back(
-                fmt::format("{} ({})", path, error != nullptr ? error : "unknown error"));
+            ROCP_INFO << fmt::format("wsl topology: loaded {}", candidate);
+            break;
         }
+        const char* error = ops.error();
+        attempt.failures.emplace_back(
+            fmt::format("{} ({})", candidate, error != nullptr ? error : "unknown error"));
     }
+    return attempt;
+}
 
+// Find the copy of librocdxg already in the process, or bring one in.
+//
+// A copy resident under either name is taken first, with RTLD_NOLOAD, and
+// nothing is loaded while one is. The versioned soname also matches a copy
+// that was loaded from an explicit path or under the unversioned name, as long
+// as its DT_SONAME is versioned.
+//
+// Otherwise the candidates are ThunkLoader's, in its order (keep the two in
+// step with ThunkLoader::ThunkLoader() in thunk_loader.cpp): for each name,
+// the bare name, and the same name beside libhsa-runtime64 only if the bare
+// name does not load. The directory beside libhsa-runtime64 is a fallback; it
+// never shadows a copy the bare-name search finds.
+//
+// The candidate order is shared with ThunkLoader; how a bare name resolves is
+// not. dlopen searches for a bare name using the dynamic tags of the object
+// that calls it, which here is librocprofiler-sdk.so rather than
+// libhsa-runtime64.so. A caller with DT_RUNPATH has LD_LIBRARY_PATH searched
+// before its RUNPATH; a caller with DT_RPATH and no DT_RUNPATH has its RPATH
+// searched before LD_LIBRARY_PATH. librocprofiler-sdk.so is linked with an
+// $ORIGIN run path, so when it is installed apart from libhsa-runtime64 its
+// bare-name search can find a copy beside itself that the HSA runtime's search
+// would not.
+void*
+open_rocdxg(const DxgLoaderOps& ops)
+{
+    const auto names = rocdxg_names();
+    if(void* handle = open_resident(ops, names)) return handle;
+
+    const auto hsa_dirs =
+        ops.hsa_runtime_dirs ? ops.hsa_runtime_dirs() : std::vector<std::string>{};
+    const auto dir     = adjacent_dir(hsa_dirs);
+    auto       attempt = load_first(ops, load_candidates(names, dir));
+    if(attempt.handle) return attempt.handle;
+
+    const char* beside = "";
+    if(!dir)
+        beside = hsa_dirs.empty() ? "; no libhsa-runtime64 is mapped to search beside"
+                                  : "; libhsa-runtime64 is mapped from several directories, so "
+                                    "none of them was searched";
     ROCP_WARNING << fmt::format(
         "wsl topology: could not load {}: tried {}{}. GPU agents cannot be enumerated without "
         "the DXG thunk, which the HSA runtime also requires for GPU operation.",
         kLibRocdxg,
-        fmt::join(failures, ", "),
-        hsa_dir.empty() ? "; no libhsa-runtime64 is mapped to search beside" : "");
+        fmt::join(attempt.failures, ", "),
+        beside);
     return nullptr;
 }
 
 // RAII handle to librocdxg.
 //
-// The library is normally already resident: the HSA runtime loads it before
-// tools are loaded, so agent enumeration during a profiling run finds it with
-// RTLD_NOLOAD and just takes a reference on the existing object. Pre-HSA
-// consumers fall through to a real dlopen. Either way the handle is
-// refcounted, so the close below cannot pull the object out from under the
-// HSA runtime.
+// The handle is a dlopen reference: the close below gives back only the
+// reference taken here, so it cannot unmap a copy the HSA runtime also holds.
+//
+// A copy this handle loaded itself, in a process where the HSA runtime has not
+// loaded the thunk yet, outlives the close only because librocdxg is linked
+// with -z nodelete (libhsakmt/CMakeLists_wsl.txt). The HSA runtime's later
+// dlopen of the versioned name then finds that copy by DT_SONAME. A thunk
+// linked without the flag is unmapped by the close when nothing else holds it,
+// and the HSA runtime later runs its own search. What this code itself
+// guarantees is narrower: it loads nothing while a copy is resident under
+// either name, so it never maps a second copy beside one already there.
 struct RocdxgHandle
 {
     const DxgLoaderOps& ops;
@@ -254,7 +355,7 @@ default_loader_ops()
                      [](void* handle, const char* name) { return ::dlsym(handle, name); },
                      [](void* handle) { return ::dlclose(handle); },
                      []() { return static_cast<const char*>(::dlerror()); },
-                     &active_hsa_runtime_dir};
+                     &mapped_hsa_runtime_dirs};
     return ops;
 }
 
