@@ -2267,8 +2267,17 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
             return status;
           }
 
-          const size_t packetCount = newBatch.dispatchPackets.size() - startIndex;
-          assert(packetCount != 0 && "Capture-enabled node produced no packets");
+          // CaptureAndFormPacket should only append to the batch. Existing packets must remain
+          // intact, and the parallel name and metadata vectors must grow by the same amount.
+          const size_t packetEnd = newBatch.dispatchPackets.size();
+          assert(packetEnd >= startIndex && "CaptureAndFormPacket removed existing packets");
+          assert(newBatch.dispatchKernelNames.size() == packetEnd &&
+                 newBatch.dispatchMetadataPackets.size() == packetEnd &&
+                 "CaptureAndFormPacket produced misaligned batch vectors");
+
+          const size_t packetCount = packetEnd - startIndex;
+          // CaptureAndFormPacket should return an error when capture produces no packets.
+          assert(packetCount != 0 && "Successful capture must produce packets");
 
           // Store node mapping with range info
           newBatch.nodeRanges.push_back({startIndex, packetCount, nodeEnabled});
