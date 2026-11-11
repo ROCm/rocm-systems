@@ -61,6 +61,8 @@ struct State {
   // Topology allows fabric memory even where this rank did not opt in.
   bool fabricMemCapable = false;
   bool fabricLsaCapable = true;
+  bool fabricLsaOptIn = false;
+  long long fabricLsaThresholdEnv = -1;
   bool fabricAddSelfFail = false;
   bool fabricExchangeFail = false;
   void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
@@ -107,6 +109,8 @@ void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
 void SetUseFabricMem(bool use) { g.useFabricMem = use; }
 void SetFabricMemCapable(bool capable) { g.fabricMemCapable = capable; }
 void SetFabricLsaCapable(bool capable) { g.fabricLsaCapable = capable; }
+void SetFabricLsaOptIn(bool optIn) { g.fabricLsaOptIn = optIn; }
+void SetFabricLsaThresholdEnv(long long threshold) { g.fabricLsaThresholdEnv = threshold; }
 void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
 void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
 void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
@@ -438,6 +442,10 @@ bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks) {
   if (comm->devrState.lsaSize != comm->nRanks) return false;
   return true;
 }
+
+bool ginAnvilFabricLsaA2AOptIn() { return GinAnvilPluginStubs::g.fabricLsaOptIn; }
+
+int64_t ginAnvilFabricLsaThresholdEnv() { return GinAnvilPluginStubs::g.fabricLsaThresholdEnv; }
 
 ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
   : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},

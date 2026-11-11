@@ -35,6 +35,10 @@ void SetUseFabricMem(bool use);
 // Make the faked ginAnvilFabricMemCapable true without this rank opting in.
 void SetFabricMemCapable(bool capable);
 void SetFabricLsaCapable(bool capable);
+// Fakes RCCL_GIN_ANVIL_FABRIC_LSA_A2A and RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL
+// (-1 is unset) as read by gin_anvil_reach.cc.
+void SetFabricLsaOptIn(bool optIn);
+void SetFabricLsaThresholdEnv(long long threshold);
 void SetFabricAddSelfFail(bool fail);
 void SetFabricExchangeFail(bool fail);
 void SetFabricPeerBase(void* ptr);

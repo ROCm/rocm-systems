@@ -368,7 +368,7 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
 }
 
 TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricLsaA2ALane) {
-  ScopedEnv lsaEnv("RCCL_GIN_FABRIC_LSA_A2A", "1");
+  GinAnvilPluginStubs::SetFabricLsaOptIn(true);
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
@@ -396,10 +396,10 @@ TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricLsaA2ALane) {
 }
 
 // The device kernel picks LSA or gin.put from the threshold, so a rank that
-// parsed a different RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL must keep every
+// parsed a different RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL must keep every
 // rank off LSA.
 TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdMismatchDisablesLane) {
-  ScopedEnv lsaEnv("RCCL_GIN_FABRIC_LSA_A2A", "1");
+  GinAnvilPluginStubs::SetFabricLsaOptIn(true);
   GinAnvilPluginStubs::SetUseFabricMem(true);
   GinAnvilPluginStubs::SetFabricLsaCapable(true);
   mockComm_.comm.MNNVL = 1;
@@ -421,6 +421,66 @@ TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdMismatchDisablesLane) {
   ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
   EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 0u);
   EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 0u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The lane needs peer windows mapped LSA-flat through fabric handles; an opt-in
+// alone does not arm it.
+TEST_F(GinAnvilPluginTest, CreateContext_LsaOptInWithoutCapabilityKeepsLaneOff) {
+  GinAnvilPluginStubs::SetFabricLsaOptIn(true);
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(false);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 0u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// An explicit threshold replaces the 2 MiB default.
+TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdEnvOverridesDefault) {
+  GinAnvilPluginStubs::SetFabricLsaOptIn(true);
+  GinAnvilPluginStubs::SetFabricLsaThresholdEnv(256 * 1024);
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(true);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 1u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 256u * 1024u);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);

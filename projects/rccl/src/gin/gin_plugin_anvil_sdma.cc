@@ -156,13 +156,9 @@ static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, GinAnvilF
 }
 
 // Arms the fabric LSA AllToAll lane only if every rank opted in with the same
-// threshold. The device kernel picks LSA or gin.put from that threshold, and
-// LSA's barriers are collective, so ranks with different values would split
-// between the two bodies and hang. *allEnabled is 0 unless the allgather
-// succeeded and every vote matched; a non-success return is the allgather's own
-// failure, not a negative vote. localSetupOk carries a rank-local context setup
-// failure into the same allgather, so a failing rank still joins it; any such
-// failure returns ncclSystemError on every rank.
+// threshold: the kernel picks LSA or gin.put from it and LSA barriers are
+// collective, so a split would hang. localSetupOk rides the same allgather so a
+// rank whose setup failed still joins it, and then every rank fails.
 static ncclResult_t ginAnvilAgreeLsaA2A(struct ncclComm* comm, int localSetupOk, int localEnabled,
                                         size_t localThreshold, int* allEnabled) {
   *allEnabled = 0;
@@ -1426,8 +1422,16 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
                                           ncclNetDeviceHandle_v11_t** outDevHandle) {
   ginAnvilCollCtx* cctx = (ginAnvilCollCtx*)collComm;
   ncclResult_t ret = ncclSuccess;
-  auto* ctx = new ginAnvilGinCtx{};
+  auto* ctx = new (std::nothrow) ginAnvilGinCtx{};
   size_t threshold = 0;
+  if (ctx == nullptr) {
+    WARN("GIN anvil-sdma: failed to allocate the GIN context");
+    if (cctx->fabricMem) {
+      int allLsaEnabled = 0;
+      (void)ginAnvilAgreeLsaA2A(cctx->comm, /*localSetupOk*/ 0, /*localEnabled*/ 0, 0, &allLsaEnabled);
+    }
+    return ncclSystemError;
+  }
   ctx->signalSpanLsaSelf = nullptr;
   ctx->nRanks = cctx->nranks;
   ctx->rank = cctx->rank;
@@ -1455,7 +1459,11 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ANVIL_SDMA_NET_VERSION;
   ctx->devHandle->needsProxyProgress = 0;
 
-  ctx->gpuCtxHost = new ncclGinAnvilSdmaGPUContext[(size_t)ctx->nContexts]{};
+  ctx->gpuCtxHost = new (std::nothrow) ncclGinAnvilSdmaGPUContext[(size_t)ctx->nContexts]{};
+  if (!ctx->gpuCtxHost) {
+    ret = ncclSystemError;
+    goto agree;
+  }
   ctx->signal_remote_addrs_dev = (uintptr_t**)calloc((size_t)ctx->nContexts, sizeof(uintptr_t*));
   if (!ctx->signal_remote_addrs_dev) {
     ret = ncclSystemError;
@@ -1501,15 +1509,14 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
     ncclGinAnvilIpcTableGetDevice(&gpuCtx->ipcTable, &gpuCtx->ipcTableCount);
   }
 
-  // Only context 0 (what devComm.ginHandles[0] points at) gets the fabric LSA
-  // lane, since that is the context the device-API AllToAll reads. The others
-  // use gin.put.
 agree:
   if (cctx->fabricMem) {
     const bool setupOk = ret == ncclSuccess;
-    const size_t lsaThreshold = setupOk ? gin::fabric::resolveGinFabricLsaThresholdAlltoAll(ctx->nRanks) : 0;
+    const bool lsaOptIn = ginAnvilFabricLsaA2AOptIn();
+    const size_t lsaThreshold =
+        setupOk ? gin::fabric::ginFabricLsaA2AThreshold(lsaOptIn, ginAnvilFabricLsaThresholdEnv(), ctx->nRanks) : 0;
     const bool lsaCapable = setupOk && ginFabricLsaA2ACapable(cctx->comm, ctx->nRanks) && lsaThreshold > 0;
-    const int localLsaEnabled = gin::fabric::ginFabricLsaA2AWantEnabled(lsaCapable) ? 1 : 0;
+    const int localLsaEnabled = lsaCapable ? 1 : 0;
     int allLsaEnabled = 0;
     const ncclResult_t agreeRet =
         ginAnvilAgreeLsaA2A(cctx->comm, setupOk ? 1 : 0, localLsaEnabled, lsaThreshold, &allLsaEnabled);
@@ -1519,14 +1526,16 @@ agree:
       ret = agreeRet;
       goto fail;
     }
+    // Only context 0, the one devComm.ginHandles[0] points at and the
+    // device-API AllToAll reads, gets the lane; the others use gin.put.
     if (allLsaEnabled) {
       ctx->gpuCtxHost[0].fabricA2ALsaEnabled = 1;
       ctx->gpuCtxHost[0].fabricA2ALsaThreshold = lsaThreshold;
     }
   } else if (ret != ncclSuccess) {
     goto fail;
-  } else if (gin::fabric::ginFabricLsaA2AEnvMode() == 1) {
-    INFO(NCCL_INIT, "GIN anvil-sdma: RCCL_GIN_FABRIC_LSA_A2A=1 needs fabric registration (RCCL_GIN_ANVIL_FABRIC_MEM=1 "
+  } else if (ginAnvilFabricLsaA2AOptIn()) {
+    INFO(NCCL_INIT, "GIN anvil-sdma: RCCL_GIN_ANVIL_FABRIC_LSA_A2A=1 needs fabric registration (RCCL_GIN_ANVIL_FABRIC_MEM=1 "
                     "on every rank of an MI450 MNNVL clique); LSA AllToAll lane off");
   }
 

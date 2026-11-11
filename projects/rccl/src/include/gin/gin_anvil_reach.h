@@ -7,6 +7,8 @@
 #ifndef _GIN_ANVIL_REACH_H_
 #define _GIN_ANVIL_REACH_H_
 
+#include <cstdint>
+
 struct ncclComm;
 
 // Readers of comm state, defined in src/gin/gin_anvil_reach.cc.
@@ -22,5 +24,11 @@ bool ginAnvilUseFabricMem(struct ncclComm* comm);
 
 // True when peer user windows are reachable via LSA-flat fabric mapping for this comm.
 bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks);
+
+// This rank's RCCL_GIN_ANVIL_FABRIC_LSA_A2A=1 opt-in into the LSA AllToAll lane.
+bool ginAnvilFabricLsaA2AOptIn();
+
+// RCCL_GIN_ANVIL_FABRIC_LSA_THRESHOLD_ALLTOALL in bytes, or -1 when unset.
+int64_t ginAnvilFabricLsaThresholdEnv();
 
 #endif  // _GIN_ANVIL_REACH_H_
