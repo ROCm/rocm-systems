@@ -552,6 +552,28 @@ public:
     });
   }
 
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierSignaled(wf, round);
+    });
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wavefronts,
+                                     const BarrierRound &round) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierRoundCompleted(wavefronts, round);
+    });
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierWaitPassed(wf, round);
+    });
+  }
+
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
     // Immortal singleton: the shared_ptr is heap-allocated and deliberately never
     // deleted, so its control block outlives process teardown. In local-mode

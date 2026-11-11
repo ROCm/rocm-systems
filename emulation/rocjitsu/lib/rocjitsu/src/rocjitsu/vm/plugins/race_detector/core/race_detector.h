@@ -131,6 +131,36 @@ public:
       wave.flushBarrierPendingEvents();
   }
 
+  // -- Split barriers --
+  //
+  // A signal releases the events its wave has completed; passing the wait of
+  // the round acquires every release made into that round.
+
+  /// `wave`'s signal was counted toward `round`.
+  void barrierSignaled(WaveId /*wave*/, BarrierRoundId /*round*/) {}
+
+  /// `round` completed, notifying `members`. `wholeWorkgroup` is true for the
+  /// workgroup barriers, which cannot complete until every wave has signalled
+  /// or ended, so they also order the events of waves that ended.
+  void barrierRoundCompleted(BarrierRoundId /*round*/, std::span<const WaveId> members,
+                             bool wholeWorkgroup) {
+    if (wholeWorkgroup) {
+      flushWorkgroupBarrierEvents();
+      return;
+    }
+    for (WaveId member : members)
+      getWaveRaceState(member.value).flushBarrierPendingEvents();
+  }
+
+  /// `wave` passed its wait for `round`.
+  void barrierWaitPassed(WaveId /*wave*/, BarrierRoundId /*round*/) {}
+
+  /// `wave` ended. Its implicit end-of-program wait has already been applied.
+  void waveEnded(WaveId /*wave*/) {}
+
+  /// Rounds with a member that has not yet passed its wait.
+  size_t openBarrierRounds() const { return 0; }
+
 private:
   struct LdsChunkCounts {
     int bytes = 0;

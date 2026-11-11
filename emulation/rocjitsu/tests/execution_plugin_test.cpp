@@ -403,6 +403,9 @@ inline const char *kindName(HookEvent::Kind k) {
       "READ_SGPR",
       "WRITE_SGPR",
       "BARRIER_RESOLVED",
+      "BARRIER_SIGNALED",
+      "BARRIER_ROUND_COMPLETED",
+      "BARRIER_WAIT_PASSED",
       "INIT",
       "SHUTDOWN",
   };
@@ -2450,6 +2453,53 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
 
   ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
+}
+
+// A single-instruction s_barrier is a split barrier whose signal and wait
+// coincide: when it resolves, every member signals, the round completes, and
+// every member passes its wait, with no instruction in between.
+TEST(HookOrderingTest, LegacyBarrierEmitsSignalCompletionWaitTogether) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_BARRIER, S_ENDPGM};
+  f.run_kernel(code, 2, /*grid=*/128, /*workgroup=*/128);
+  f.shutdown();
+
+  using enum HookEvent::Kind;
+  std::vector<HookEvent::Kind> barrier_kinds;
+  std::vector<uint32_t> signalling_waves;
+  std::vector<uint32_t> waiting_waves;
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = amdgpu::kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  auto first = std::ranges::find_if(p->events,
+                                    [](const HookEvent &e) { return e.kind == BARRIER_SIGNALED; });
+  ASSERT_NE(first, p->events.end());
+  for (auto it = first; it != p->events.end() && barrier_kinds.size() < 6; ++it) {
+    barrier_kinds.push_back(it->kind);
+    if (it->kind == BARRIER_SIGNALED)
+      signalling_waves.push_back(it->wf_id);
+    if (it->kind == BARRIER_WAIT_PASSED)
+      waiting_waves.push_back(it->wf_id);
+    if (it->kind != BARRIER_RESOLVED) {
+      EXPECT_EQ(it->barrier_round, round) << kindName(it->kind);
+    }
+  }
+  EXPECT_EQ(barrier_kinds, (std::vector<HookEvent::Kind>{
+                               BARRIER_SIGNALED, BARRIER_SIGNALED, BARRIER_RESOLVED,
+                               BARRIER_ROUND_COMPLETED, BARRIER_WAIT_PASSED, BARRIER_WAIT_PASSED}));
+  // Each dispatched wave signals once and passes its wait once.
+  std::vector<uint32_t> dispatched_waves;
+  for (const HookEvent &e : p->events)
+    if (e.kind == WAVEFRONT_DISPATCHED)
+      dispatched_waves.push_back(e.wf_id);
+  std::ranges::sort(dispatched_waves);
+  std::ranges::sort(signalling_waves);
+  std::ranges::sort(waiting_waves);
+  EXPECT_EQ(signalling_waves, dispatched_waves);
+  EXPECT_EQ(waiting_waves, dispatched_waves);
 }
 
 TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {

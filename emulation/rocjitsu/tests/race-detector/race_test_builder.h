@@ -34,6 +34,7 @@ public:
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
+    ended_.assign(numWaves, false);
   }
 
   // -- Memory events --
@@ -247,12 +248,71 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
-  /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
-  void barrier() {
-    for (auto *w : waves_) {
-      w->flushBarrierPendingEvents();
-    }
+  void waitDscnt(int wave, int dscnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::DSCNT, dscnt);
+    waves_[wave]->dispatch(wait);
   }
+
+  /// A single-instruction workgroup barrier (s_barrier): every live wave
+  /// signals, the round completes, and every live wave passes its wait, as the
+  /// simulator reports it.
+  void barrier() {
+    const BarrierRoundId round = workgroupRound(nextWorkgroupGeneration_++);
+    const std::vector<int> members = liveWaves();
+    for (int wave : members)
+      signal(wave, round);
+    completeRound(round, members);
+    for (int wave : members)
+      waitPassed(wave, round);
+  }
+
+  // -- Split barriers (s_barrier_signal / s_barrier_wait) --
+
+  /// The simulator's completion bits for the workgroup and named barriers.
+  static constexpr uint8_t kWorkgroupBarrier = 1;
+  static constexpr uint8_t kNamedBarrier = 0;
+
+  static BarrierRoundId workgroupRound(uint64_t generation) {
+    return {.barrier = kWorkgroupBarrier, .namedId = 0, .generation = generation};
+  }
+
+  static BarrierRoundId namedRound(uint32_t namedId, uint64_t generation) {
+    return {.barrier = kNamedBarrier, .namedId = namedId, .generation = generation};
+  }
+
+  void signal(int wave, BarrierRoundId round) { detector_->barrierSignaled(WaveId{wave}, round); }
+
+  /// Complete `round`, notifying `members`. Workgroup rounds also order the
+  /// events of waves that ended before the round completed.
+  void completeRound(BarrierRoundId round, const std::vector<int> &members) {
+    std::vector<WaveId> ids;
+    for (int wave : members)
+      ids.push_back(WaveId{wave});
+    detector_->barrierRoundCompleted(round, ids, round.barrier == kWorkgroupBarrier);
+  }
+
+  void waitPassed(int wave, BarrierRoundId round) {
+    detector_->barrierWaitPassed(WaveId{wave}, round);
+  }
+
+  /// End a wave: apply s_endpgm's implicit wait for every counter, as the
+  /// plugin does when a wave halts, then report the end.
+  void endWave(int wave) {
+    PendingWaitCount wait;
+    for (auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT,
+                         amdgpu::WaitCounterType::EXPCNT, amdgpu::WaitCounterType::VSCNT,
+                         amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
+                         amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
+                         amdgpu::WaitCounterType::TENSORCNT, amdgpu::WaitCounterType::ASYNCCNT,
+                         amdgpu::WaitCounterType::SAMPLECNT})
+      wait.add(counter, 0);
+    waves_[wave]->dispatch(wait);
+    detector_->waveEnded(WaveId{wave});
+    ended_[wave] = true;
+  }
+
+  size_t openBarrierRounds() const { return detector_->openBarrierRounds(); }
 
   // -- Trigger race checks --
 
@@ -353,7 +413,24 @@ public:
   const EventRegistry &events() const { return detector_->events(); }
   const RaceDetector &detector() const { return *detector_; }
 
+  /// LDS events still checked against other waves' accesses.
+  size_t ldsWriteEventCount() const { return detector_->getLdsWriteEvents().size(); }
+  size_t ldsReadEventCount() const { return detector_->getLdsReadEvents().size(); }
+
+  /// Completed LDS events of `wave` that a barrier has not yet retired.
+  size_t barrierPendingEventCount(int wave) const {
+    return waves_[wave]->getBarrierPendingEvents().size();
+  }
+
 private:
+  std::vector<int> liveWaves() const {
+    std::vector<int> live;
+    for (int wave = 0; wave < static_cast<int>(waves_.size()); ++wave)
+      if (!ended_[wave])
+        live.push_back(wave);
+    return live;
+  }
+
   /// A transfer has no lanes; its violations report lane -1. Validates and
   /// registers the same bytes as the plugin's tensor DMA hook.
   void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges) {
@@ -384,6 +461,8 @@ private:
   int waveSize_;
   uint64_t defaultExec_;
   int pc_ = 0; // Auto-incrementing fake PC for event registration.
+  std::vector<bool> ended_;
+  uint64_t nextWorkgroupGeneration_ = 0;
 };
 
 } // namespace rocjitsu::plugins::race_detector

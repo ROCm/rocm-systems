@@ -40,6 +40,17 @@ struct EventId {
   bool operator<(EventId o) const { return value < o.value; }
 };
 
+/// Identifies one round of one barrier within a workgroup: the signals counted
+/// between two completions. Waves release into a round when they signal it and
+/// acquire it when they pass the wait it released.
+struct BarrierRoundId {
+  uint8_t barrier = 0;     ///< The simulator's completion bit for the barrier.
+  uint32_t namedId = 0;    ///< Named barrier ID, or 0.
+  uint64_t generation = 0; ///< Distinguishes successive rounds of one barrier.
+
+  auto operator<=>(const BarrierRoundId &) const = default;
+};
+
 /// A contiguous run of LDS bytes, for events described by byte ranges rather
 /// than per-lane addresses.
 struct LdsByteRange {

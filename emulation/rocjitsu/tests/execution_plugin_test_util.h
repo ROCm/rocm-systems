@@ -240,6 +240,9 @@ struct HookEvent {
     READ_SGPR,
     WRITE_SGPR,
     BARRIER_RESOLVED,
+    BARRIER_SIGNALED,
+    BARRIER_ROUND_COMPLETED,
+    BARRIER_WAIT_PASSED,
     INIT,
     SHUTDOWN,
     KIND_COUNT,
@@ -270,6 +273,7 @@ struct HookEvent {
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
   BarrierKind barrier_kind = BarrierKind::Workgroup;
+  BarrierRound barrier_round;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -578,6 +582,35 @@ public:
       e.wg_id = wfs[0]->wg_id();
     }
     e.barrier_kind = kind;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_SIGNALED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wfs,
+                                     const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_ROUND_COMPLETED};
+    if (!wfs.empty()) {
+      e.dispatch_id = wfs[0]->dispatch_id();
+      e.wg_id = wfs[0]->wg_id();
+    }
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_WAIT_PASSED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
     events.push_back(e);
   }
 };
