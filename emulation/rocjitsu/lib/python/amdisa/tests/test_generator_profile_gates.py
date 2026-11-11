@@ -2286,7 +2286,7 @@ def test_fixed_wave_swmmac_layout_selects_sparse_executor_without_arch_name(
 @pytest.mark.parametrize(
     ('mnemonic', 'callee'),
     [
-        ('V_WMMA_I32_16X16X64_IU8', 'exec_wmma_i32_16x16x64_iu8'),
+        ('V_WMMA_I32_16X16X64_IU8', 'arith::exec_dense_fp_matrix<8, 8, 32>'),
         ('V_WMMA_F32_16X16X32_F16', 'arith::exec_dense_fp_matrix<8, 8, 32>'),
     ],
 )
@@ -2414,7 +2414,7 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             (
                 'V_WMMA_I32_16X16X64_IU8',
                 'cdna5',
-                'exec_wmma_i32_16x16x64_iu8',
+                'arith::exec_dense_fp_matrix<8, 8, 32>',
                 False,
             ),
             ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
@@ -3478,7 +3478,7 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
 
     for arch in ('cdna3', 'cdna4'):
         body = _gen_mfma(inst, arch)
-        assert 's2, const_acc, inst_.blgp);' in body
+        assert 'cu.arithmetic_flags(), inst_.blgp,' in body
 
     for arch in ('rdna3_5', 'cdna5'):
         body = _gen_mfma(inst, arch)
@@ -4692,9 +4692,9 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
         runtime_api_headers_include_root,
+        rocjitsu_source_root / 'lib' / 'arith' / 'include',
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
-        rocjitsu_source_root / 'lib' / 'arith' / 'include',
     )
     for source_path in (
         generated_root / 'vop3p_exec.cpp',
@@ -10425,3 +10425,67 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
         assert 'arithmetic_flags()' in body
         assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
         assert 'std::optional<uint32_t>(const_acc)' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('m,batch', [(16, 1), (4, 4)])
+def test_f64_mfma_library_dispatch(arch, m, batch):
+    suffix = '_4B' if batch == 4 else ''
+    name = f'V_MFMA_F64_{m}X{m}X4{suffix}_F64'
+    outputs = m * m * batch // 32
+    destination = Operand(
+        'vdst', outputs * 32, 'OPR_VGPR', False, True, False, False, 0
+    )
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'},
+    )
+    assert f'exec_dense_fp_matrix<2, {outputs}, 64, {outputs}, false, true>' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'cu.arithmetic_flags(), inst_.blgp' in body
+    assert 'inst_.acc_cd' in body
+    assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
+    assert 'std::optional<uint64_t> inline_c' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize(
+    'm,k,batch',
+    [
+        (32, 4, 2),
+        (16, 4, 4),
+        (4, 4, 16),
+        (32, 16, 1),
+        (16, 32, 1),
+        (16, 64, 1),
+        (32, 32, 1),
+    ],
+)
+def test_dense_integer_mfma_library_dispatch(arch, m, k, batch):
+    if arch == 'cdna3' and (m, k) in {(16, 64), (32, 32)}:
+        pytest.skip('These two shapes were introduced on gfx950')
+    suffix = f'_{batch}B' if batch > 1 else ''
+    name = f'V_MFMA_I32_{m}X{m}X{k}{suffix}_I8'
+    outputs = m * m * batch // 64
+    destination = Operand(
+        'vdst', outputs * 32, 'OPR_VGPR', False, True, False, False, 0
+    )
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'},
+    )
+    assert f'exec_dense_fp_matrix<{m*k*batch//256}, {outputs}, 64>' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'inst_.cbsz' in body and 'inst_.blgp' in body and 'inst_.acc_cd' in body
+
+
+def test_dense_integer_gfx1250_wmma_library_dispatch():
+    destination = Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0)
+    body = _gen_mfma(
+        Instruction('V_WMMA_I32_16X16X64_IU8', 'ENC_VOP3P', 0, [destination]), 'cdna5'
+    )
+    assert 'exec_dense_fp_matrix<8, 8, 32>' in body
+    assert 'rj_arith_v_wmma_i32_16x16x64_iu8_w32' in body
+    assert 'inst_.neg & 3' in body and 'RJ_ARITH_WMMA_CLAMP' in body

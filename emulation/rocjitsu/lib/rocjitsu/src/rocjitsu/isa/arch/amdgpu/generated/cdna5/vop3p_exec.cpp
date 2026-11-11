@@ -3182,9 +3182,12 @@ void VWmmaI3216x16x64Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_i32_16x16x64_iu8(cu, dst, src0_base, src1_base, s2,
-                                     /*a_signed=*/(inst_.neg & 0x1u) != 0,
-                                     /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp, const_acc);
+  uint64_t controls = inst_.neg & 3;
+  if (inst_.clamp)
+    controls |= RJ_ARITH_WMMA_CLAMP;
+  amdgpu::arith::exec_dense_fp_matrix<8, 8, 32>(
+      wf, rj_arith_v_wmma_i32_16x16x64_iu8_w32, cu.arithmetic_flags(), controls, dst, src0_base,
+      src1_base, s2, !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);
 }
 
 void VSwmmacF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
