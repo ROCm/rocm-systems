@@ -17,14 +17,16 @@ import os
 import re
 import socket
 import subprocess
+from contextlib import nullcontext
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
-from typing import Any, Optional, TypeVar
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeVar
 
 import config
 from utils import amdsmi_interface
+from utils.gpu_identity import identity_from_specs, match_gpu_identity
 from utils.logger import (
     console_debug,
     console_error,
@@ -192,7 +194,10 @@ def _kw_only(cls: T) -> T:
     return cls
 
 
-def _run_command(cmd: list[str]) -> Optional[str]:
+def _run_command(
+    cmd: List[str],  # noqa: UP006
+    env: Optional[Dict[str, str]] = None,  # noqa: UP006
+) -> Optional[str]:
     """Run a command and return stdout, aborting on execution failures."""
     cmd_str = " ".join(cmd)
     try:
@@ -201,6 +206,7 @@ def _run_command(cmd: list[str]) -> Optional[str]:
             check=False,
             capture_output=True,
             text=True,
+            env=env,
         )
     except FileNotFoundError as exc:
         console_error(f"Required command not found: {cmd_str} ({exc})")
@@ -225,37 +231,6 @@ def search_pattern(pattern: str, string: str) -> Optional[str]:
     match = re.search(pattern, string, re.MULTILINE)
     if match is not None:
         return match.group(1)
-    return None
-
-
-def _detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
-    """Detect GPU architecture from rocminfo output."""
-    supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
-    unsupported_gpu_arch: set[str] = set()
-
-    for idx, line_text in enumerate(rocminfo_lines):
-        # The regex stops at the first non-alphanumeric character (e.g. `-`)
-        # on purpose: variants like gfx1250-strict map to their base arch gfx1250.
-        gpu_arch = search_pattern(
-            r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
-        )
-        if not gpu_arch:
-            continue
-
-        if gpu_arch in supported_gpu_arch:
-            return (gpu_arch, idx)
-
-        if gpu_arch not in unsupported_gpu_arch:
-            unsupported_gpu_arch.add(gpu_arch)
-            console_warning(
-                f"Detected GPU architecture: {gpu_arch} is currently NOT supported "
-                "by the profile mode."
-            )
-
-    if unsupported_gpu_arch:
-        console_log(f"Supported architectures: {list(supported_gpu_arch.keys())}")
-
-    console_error("Cannot find a supported arch in rocminfo.")
     return None
 
 
@@ -302,7 +277,17 @@ def _reconstruct_specs_from_sysinfo(sysinfo: dict[str, Any]) -> MachineSpecs:
             )
 
         spec_cls = spec_family_for_arch(gpu_arch)
-        return spec_cls(**sysinfo)
+        saved_specs = dict(sysinfo)
+        # Older candidate workloads stored a discovery ordinal as an identity.
+        # Physical metadata remains compatible; that ordinal is unnecessary.
+        saved_specs.pop("gpu_device_index", None)
+        identity = identity_from_specs(saved_specs)
+        saved_specs.update(
+            gpu_node_id=identity.node_id,
+            gpu_bdf_id=identity.bdf_id,
+            gpu_uuid=identity.uuid,
+        )
+        return spec_cls(**saved_specs)
 
     except KeyError:
         console_error(
@@ -324,9 +309,9 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpec
 
     machine_info = _extract_machine_info()
     soc_info = _extract_soc_info()
-    gpu_info = _extract_gpu_info(gpu_arch=soc_info["gpu_arch"])
-
     with amdsmi_interface.amdsmi_ctx():
+        device = _resolve_amdsmi_device(soc_info)
+        gpu_info = _extract_gpu_info(soc_info["gpu_arch"], device=device)
         specs = spec_family_for_arch(soc_info["gpu_arch"])(
             version=specs_version,
             timestamp=timestamp,
@@ -335,14 +320,21 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpec
             cpu_model=machine_info["cpu_model"],
             sbios=machine_info["sbios"],
             linux_kernel_version=machine_info["linux_kernel_version"],
-            amd_gpu_kernel_version=amdsmi_interface.get_amdgpu_driver_version(),
+            amd_gpu_kernel_version=amdsmi_interface.get_amdgpu_driver_version(
+                device=device
+            ),
             cpu_memory=machine_info["cpu_memory"],
-            gpu_memory=amdsmi_interface.get_gpu_vram_size(),
+            gpu_memory=amdsmi_interface.get_gpu_vram_size(device=device),
             linux_distro=machine_info["linux_distro"],
             rocm_version=get_rocm_ver().strip(),
             vbios=gpu_info["vbios"],
             gpu_arch=soc_info["gpu_arch"],
             gpu_chip_id=soc_info["gpu_chip_id"],
+            gpu_uuid=soc_info["gpu_uuid"],
+            gpu_bdf_id=soc_info["gpu_bdf_id"],
+            gpu_node_id=soc_info["gpu_node_id"],
+            max_mclk=str(amdsmi_interface.get_mem_max_clock(device=device)),
+            gpu_model_names=amdsmi_interface.get_gpu_model(device=device),
         )
 
     _load_soc_module(args, specs)
@@ -351,7 +343,9 @@ def _probe_live_machine_specs(args: Optional[argparse.Namespace]) -> MachineSpec
         specs.gpu_model = specs.gpu_model or ""
     else:
         specs.gpu_model = (
-            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id) or ""
+            mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
+            or specs.gpu_model
+            or ""
         )
 
     specs.finalize_soc_fields(gpu_info)
@@ -409,7 +403,10 @@ def _extract_machine_info() -> dict[str, Any]:
 
 
 @demarcate
-def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
+def _extract_gpu_info(
+    gpu_arch: Optional[str],
+    device: Any = None,  # noqa: ANN401
+) -> Dict[str, Any]:  # noqa: UP006
     """Extract GPU information from amd-smi."""
     is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
         gpu_arch=gpu_arch, gpu_model=None
@@ -425,20 +422,30 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         "perf_level": None,
     }
 
-    with amdsmi_interface.amdsmi_ctx():
-        result["vbios"] = amdsmi_interface.get_gpu_vbios_part_number()
+    with amdsmi_interface.amdsmi_ctx() if device is None else nullcontext():
+        result["vbios"] = amdsmi_interface.get_gpu_vbios_part_number(device=device)
         if is_partition_supported:
-            result["compute_partition"] = amdsmi_interface.get_gpu_compute_partition()
-            result["memory_partition"] = amdsmi_interface.get_gpu_memory_partition()
+            result["compute_partition"] = amdsmi_interface.get_gpu_compute_partition(
+                device=device
+            )
+            result["memory_partition"] = amdsmi_interface.get_gpu_memory_partition(
+                device=device
+            )
         else:
             result["compute_partition"] = "N/A"
             result["memory_partition"] = "N/A"
 
-        result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
-        result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
-        result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width()
+        result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units(
+            device=device
+        )
+        result["gpu_cache_info"] = (
+            amdsmi_interface.get_gpu_cache_info(device=device) or {}
+        )
+        result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width(
+            device=device
+        )
         if spec_family_for_arch(gpu_arch) is MachineSpecsRDNA35:
-            result["perf_level"] = amdsmi_interface.get_gpu_perf_level()
+            result["perf_level"] = amdsmi_interface.get_gpu_perf_level(device=device)
 
     if is_partition_supported:
         if result["compute_partition"] == "N/A" or not result["compute_partition"]:
@@ -466,29 +473,173 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
 
 
 @demarcate
-def _extract_soc_info() -> dict[str, Any]:
-    """Extract SoC information from rocminfo."""
-    result: dict[str, Any] = {
+def _extract_soc_info() -> Dict[str, Any]:  # noqa: UP006
+    """Discover the physical GPU selected by the workload visibility masks."""
+    result: Dict[str, Any] = {  # noqa: UP006
         "rocminfo_lines": None,
         "gpu_arch": None,
         "gpu_chip_id": None,
+        "gpu_uuid": None,
+        "gpu_bdf_id": None,
+        "gpu_node_id": None,
     }
-
-    rocminfo_full = _run_command(["rocminfo"])
+    environment = dict(os.environ)
+    # ROCr owns ROCR_VISIBLE_DEVICES grammar, topology order, and UUID resolution.
+    # HIP/CUDA filter this resulting ROCr agent list in the workload runtime.
+    discovery_environment = dict(environment)
+    for variable in (
+        "HIP_VISIBLE_DEVICES",
+        "CUDA_VISIBLE_DEVICES",
+    ):
+        discovery_environment.pop(variable, None)
+    rocminfo_full = _run_command(["rocminfo"], env=discovery_environment)
     if rocminfo_full is None:
         return result
-
-    rocminfo_lines = rocminfo_full.split("\n")
-    arch_result = _detect_arch(rocminfo_lines)
-
-    if arch_result is None:
+    try:
+        selected = _select_workload_gpu(
+            _parse_rocminfo_gpu_agents(rocminfo_full), environment
+        )
+        selected["gpu_chip_id"] = _detect_gpu_chip_id(selected["rocminfo_lines"])
+        identity = identity_from_specs(selected)
+        selected.update(
+            gpu_uuid=identity.uuid,
+            gpu_node_id=identity.node_id,
+            gpu_bdf_id=identity.bdf_id,
+        )
+        return selected
+    except ValueError as error:
+        console_error(str(error))
         return result
 
-    result["gpu_arch"], arch_idx = arch_result
-    result["rocminfo_lines"] = rocminfo_lines[arch_idx + 1 :]
-    result["gpu_chip_id"] = _detect_gpu_chip_id(rocminfo_lines)
 
-    return result
+def _parse_rocminfo_gpu_agents(
+    rocminfo_full: str,
+) -> List[Dict[str, Any]]:  # noqa: UP006
+    """Keep each GPU's properties inside its rocminfo agent block."""
+    sections = re.split(r"^\s*Agent\s+\d+\s*$", rocminfo_full, flags=re.MULTILINE)
+    if len(sections) == 1:
+        sections = re.split(r"(?=^\s*Name\s*:)", rocminfo_full, flags=re.MULTILINE)
+    gpu_agents = []
+    for section in sections:
+        arch_match = re.search(
+            r"^\s*Name\s*:\s*(gfx[a-zA-Z0-9]+)",
+            section,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
+        if arch_match is None:
+            continue
+        gpu_arch = arch_match.group(1).lower()
+        agent_lines = section.splitlines()
+        arch_index = section[: arch_match.end()].count("\n")
+        gpu_uuid = search_pattern(r"^\s*Uuid\s*:\s*(\S+)\s*$", section)
+        gpu_bdf_id = search_pattern(r"^\s*BDFID\s*:\s*(\d+)", section)
+        gpu_node_id = search_pattern(r"^\s*Internal Node ID\s*:\s*(\d+)", section)
+        gpu_agents.append({
+            "gpu_arch": gpu_arch,
+            "gpu_chip_id": search_pattern(r"^\s*Chip ID\s*:\s*(\d+)", section),
+            # Visibility matching uses ROCr's exact string; normalize afterward.
+            "gpu_uuid": gpu_uuid,
+            "gpu_bdf_id": int(gpu_bdf_id) if gpu_bdf_id is not None else None,
+            "gpu_node_id": int(gpu_node_id) if gpu_node_id is not None else None,
+            "rocminfo_lines": agent_lines[arch_index + 1 :],
+        })
+    return gpu_agents
+
+
+def _apply_gpu_visibility(
+    gpu_agents: List[Dict[str, Any]],  # noqa: UP006
+    mask: str,
+    variable: str,
+) -> List[Dict[str, Any]]:  # noqa: UP006
+    """Apply CLR's HIP/CUDA ordinal and first UUID substring matching rules."""
+    visible_agents: List[Dict[str, Any]] = []  # noqa: UP006
+    for token in mask.split(","):
+        if (
+            token.isascii()
+            and token.isdigit()
+            and str(int(token)) == token
+            and int(token) < len(gpu_agents)
+        ):
+            matches = [gpu_agents[int(token)]]
+        elif "GPU-" in token:
+            matches = [
+                agent
+                for agent in gpu_agents
+                if agent["gpu_uuid"] and token in agent["gpu_uuid"]
+            ][:1]
+        else:
+            matches = []
+        if len(matches) != 1:
+            # CLR discards identifiers following the first invalid token.
+            break
+        if matches[0] in visible_agents:
+            continue
+        visible_agents.append(matches[0])
+    if not visible_agents:
+        raise ValueError(f"{variable}={mask!r} does not select a matching GPU.")
+    return visible_agents
+
+
+def _select_workload_gpu(
+    gpu_agents: List[Dict[str, Any]],  # noqa: UP006
+    environment: Mapping[str, str],
+) -> Dict[str, Any]:  # noqa: UP006
+    """Select the first visible GPU, retaining legacy unmasked supported discovery."""
+    visible_agents = gpu_agents
+    masks = []
+    hip_mask = environment.get("HIP_VISIBLE_DEVICES")
+    if hip_mask is not None:
+        masks.append(("HIP_VISIBLE_DEVICES", hip_mask))
+    elif "CUDA_VISIBLE_DEVICES" in environment:
+        masks.append(("CUDA_VISIBLE_DEVICES", environment["CUDA_VISIBLE_DEVICES"]))
+    for variable, mask in masks:
+        visible_agents = _apply_gpu_visibility(visible_agents, mask, variable)
+    supported_archs = mi_gpu_specs.get_gpu_series_dict()
+    if masks or "ROCR_VISIBLE_DEVICES" in environment:
+        if not visible_agents:
+            raise ValueError("ROCr visibility does not select a matching GPU.")
+        selected_agent = visible_agents[0]
+        if selected_agent["gpu_arch"] not in supported_archs:
+            raise ValueError(
+                f"The selected GPU architecture {selected_agent['gpu_arch']} "
+                "is not supported by profile mode. "
+                f"Supported architectures: {list(supported_archs)}"
+            )
+        return selected_agent
+    for agent in visible_agents:
+        if agent["gpu_arch"] in supported_archs:
+            return agent
+    raise ValueError(
+        "Cannot find a supported arch in rocminfo. "
+        f"Supported architectures: {list(supported_archs)}"
+    )
+
+
+def _resolve_amdsmi_device(soc_info: Dict[str, Any]) -> Any:  # noqa: ANN401, UP006
+    """Match rocminfo identity to an AMD-SMI handle without ordinal assumptions."""
+    device_identities = [
+        (device, amdsmi_interface.get_device_identity(device))
+        for device in amdsmi_interface.get_device_handles()
+    ]
+    try:
+        return _match_amdsmi_device(soc_info, device_identities)
+    except ValueError as error:
+        console_error(str(error))
+
+
+def _match_amdsmi_device(
+    soc_info: Dict[str, Any],  # noqa: UP006
+    device_identities: List[Tuple[Any, Dict[str, Any]]],  # noqa: UP006
+) -> Any:  # noqa: ANN401
+    """Resolve the selected GPU using shared physical matching and fallback rules."""
+    return match_gpu_identity(
+        identity_from_specs(soc_info),
+        [
+            (device, identity_from_specs(identity))
+            for device, identity in device_identities
+        ],
+        "AMD-SMI",
+    )
 
 
 @_kw_only
@@ -669,6 +820,21 @@ class MachineSpecs:
             "optional": True,
             "show_in_table": True,
         },
+    )
+    gpu_uuid: Optional[str] = field(
+        default=None,
+        metadata={"show_in_table": False, "serialize": True, "optional": True},
+    )
+    gpu_model_names: Optional[Tuple[str, str, str]] = field(  # noqa: UP006
+        default=None, metadata={"show_in_table": False}
+    )
+    gpu_bdf_id: Optional[int] = field(
+        default=None,
+        metadata={"show_in_table": False, "serialize": True, "optional": True},
+    )
+    gpu_node_id: Optional[int] = field(
+        default=None,
+        metadata={"show_in_table": False, "serialize": True, "optional": True},
     )
     gpu_l1: Optional[str] = field(
         default=None,
@@ -918,7 +1084,9 @@ class MachineSpecs:
         missing_required_fields: list[str] = []
 
         for class_field in fields(self):
-            if not class_field.metadata.get("show_in_table", True):
+            if not class_field.metadata.get("show_in_table", True) and not (
+                class_field.metadata.get("serialize", False)
+            ):
                 continue
 
             name = class_field.name
