@@ -572,7 +572,7 @@ private:
     uint64_t padding_bytes = 0;           ///< s_nop fill ahead of the stub, for entry alignment.
     uint64_t stub_offset = 0;             ///< .text offset the descriptor enters at.
     std::optional<uint16_t> storage_base; ///< Persistent pair, when context is requested.
-    std::vector<EntryVgprCapture> captured_vgprs;
+    std::vector<EntryRegisterCapture> captured_registers;
     std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
   };
 

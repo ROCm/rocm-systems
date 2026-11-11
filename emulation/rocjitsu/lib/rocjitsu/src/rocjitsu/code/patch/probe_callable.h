@@ -76,6 +76,7 @@ enum class ProbeArgSource {
   LogBufferPtrHi, ///< High dword of that pointer.
   AnchorVgpr,     ///< Guest VGPR value at the selected observation point.
   EntryVgprLane0, ///< Lane zero of a VGPR, captured once at dispatch entry.
+  EntrySgpr,      ///< Original guest SGPR, captured after wrapper restoration.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
@@ -83,7 +84,7 @@ enum class ProbeArgSource {
 struct ProbeArgValue {
   ProbeArgSource source = ProbeArgSource::Immediate;
   uint32_t immediate = 0;      ///< Read only when source is Immediate.
-  uint16_t register_index = 0; ///< VGPR index for AnchorVgpr or EntryVgprLane0.
+  uint16_t register_index = 0; ///< Register index for a register-sourced argument.
 
   constexpr bool operator==(const ProbeArgValue &) const = default;
 };
@@ -120,7 +121,7 @@ struct ProbeArgValue {
 /// @brief Does @p source read the framework's persistent entry-storage pair?
 [[nodiscard]] inline constexpr bool reads_entry_storage(ProbeArgSource source) {
   return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi ||
-         source == ProbeArgSource::EntryVgprLane0;
+         source == ProbeArgSource::EntryVgprLane0 || source == ProbeArgSource::EntrySgpr;
 }
 
 /// @brief Is @p source one of the values ProbeArgSource declares?
@@ -139,6 +140,7 @@ struct ProbeArgValue {
   case ProbeArgSource::LogBufferPtrHi:
   case ProbeArgSource::AnchorVgpr:
   case ProbeArgSource::EntryVgprLane0:
+  case ProbeArgSource::EntrySgpr:
     return true;
   }
   return false;
