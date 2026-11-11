@@ -58,6 +58,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
   - When processes exited between its count and its read, the list ended with entries of undefined content; when processes started, the call failed.
 
+- **Fixed process information in containers showing other processes' data**.  
+  - In a container with its own PID namespace, `amd-smi process` and the process APIs could show host PIDs or another process's name, memory or GPUs. They now show only the container's processes (other users' only with `CAP_SYS_PTRACE`) by their container PIDs, and the driver's per-process statistics, such as CU occupancy and SDMA usage, are N/A unless the container shares the host's PID namespace (`docker run --pid=host`).
+
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 

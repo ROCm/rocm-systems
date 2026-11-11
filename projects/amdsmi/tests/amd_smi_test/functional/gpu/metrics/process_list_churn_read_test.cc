@@ -207,17 +207,11 @@ void TestProcessListChurnRead::Run(void) {
            Clock::now() + std::chrono::seconds(10) +
            std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
        !listed && Clock::now() < give_up;) {
-    if (query(kfd_pid, &listed) != AMDSMI_STATUS_SUCCESS || !listed) {
+    if (query(helper, &listed) != AMDSMI_STATUS_SUCCESS || !listed) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
-  // In a container rocm_smi may list this namespace's PIDs instead of KFD's.
-  bool listed_by_own_pid = false;
-  if (!listed && kfd_pid != helper && query(helper, &listed_by_own_pid) == AMDSMI_STATUS_SUCCESS &&
-      listed_by_own_pid) {
-    GTEST_SKIP() << "The library lists the helper by this PID namespace's PID";
-  }
-  ASSERT_TRUE(listed) << "GPU 0 does not list the helper";
+  ASSERT_TRUE(listed) << "GPU 0 does not list the helper by its PID";
 
   std::atomic<bool> stop{false};
   std::atomic<int> churned{0};
@@ -238,7 +232,7 @@ void TestProcessListChurnRead::Run(void) {
   int unlisted = 0;
   std::map<amdsmi_status_t, int> errors;
   for (const auto end = Clock::now() + kChurnTime; Clock::now() < end; ++calls) {
-    const amdsmi_status_t st = query(kfd_pid, &listed);
+    const amdsmi_status_t st = query(helper, &listed);
     if (st != AMDSMI_STATUS_SUCCESS) {
       ++errors[st];
     } else if (!listed) {
