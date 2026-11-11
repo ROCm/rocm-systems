@@ -150,6 +150,8 @@ extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseReduceScatterDirect;
 // RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1).
 extern int64_t g_rcclParamDdaEnable;
+// RCCL_PARAM(DdaIpcLazyInit, "DDA_IPC_LAZY_INIT", 1).
+extern int64_t g_rcclParamDdaIpcLazyInit;
 
 // NET user-buffer registration (net.cc's ncclNet{Local,Graph}RegisterBuffer). Both segment
 // counts default to keeping the caller's *numSegments; rcclNetRegCommit records its calls.
