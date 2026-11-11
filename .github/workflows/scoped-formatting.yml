@@ -44,7 +44,7 @@ jobs:
           - scope: rocjitsu
             # The base-branch PR bot still requires this name during rollout.
             check-name: pre-commit
-            include: '^(emulation/(mirage|rocjitsu)/|\.github/scripts/(tests/test_)?(collect_rocjitsu_afl_results\.py|rocjitsu_fuzz_report\.js|run_rocjitsu_afl_campaign\.py)\Z|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
+            include: '^(emulation/(mirage|rocjitsu)/|\.github/scripts/(tests/test_)?(collect_rocjitsu_afl_results\.py|rocjitsu_fuzz_report\.js|rocjitsu_benchmark_report\.js|run_rocjitsu_afl_campaign\.py)\Z|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
             sparse-checkout: |
               emulation/mirage
               emulation/rocjitsu

@@ -158,10 +158,11 @@ class WorkflowScopeTests(unittest.TestCase):
         self.assertTrue(self.affected("rocjitsu", "emulation/mirage/src/lib.rs"))
         self.assertTrue(self.affected("rocjitsu", "emulation/rocjitsu/test.py"))
 
-    def test_rocjitsu_fuzzing_scripts_activate_formatting(self) -> None:
+    def test_rocjitsu_scripts_activate_formatting(self) -> None:
         for filename in (
             "collect_rocjitsu_afl_results.py",
             "rocjitsu_fuzz_report.js",
+            "rocjitsu_benchmark_report.js",
             "run_rocjitsu_afl_campaign.py",
         ):
             for relative in (filename, f"tests/test_{filename}"):
