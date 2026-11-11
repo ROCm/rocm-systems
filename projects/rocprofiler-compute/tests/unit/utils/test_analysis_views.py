@@ -14,6 +14,7 @@ import sys
 
 from conftest import ProfileModeImportGuard
 
+import utils
 from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
     iter_view_rows,
@@ -148,8 +149,11 @@ def test_view_metric_errors():
 
 def test_imports_only_profile_mode_dependencies(monkeypatch):
     """The views and the equation normalizer use only stdlib, project and vendored
-    code."""
+    code. The re-import rebinds the utils package attributes, so they are restored too:
+    later tests patch these modules by name."""
     for module in ("utils.analysis_views", "utils.equation_format"):
+        name = module.split(".")[1]
+        monkeypatch.setattr(utils, name, getattr(utils, name))
         monkeypatch.delitem(sys.modules, module, raising=False)
     with ProfileModeImportGuard():
         importlib.import_module("utils.analysis_views")
