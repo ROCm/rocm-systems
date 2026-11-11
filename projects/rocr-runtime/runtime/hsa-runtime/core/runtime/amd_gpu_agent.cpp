@@ -2211,7 +2211,16 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // that SDMA is enabled/disabled globally (the HSA_ENABLE_SDMA=0 case this
     // fallback targets). If per-direction SDMA availability ever diverges this
     // probe would need to move per-entry, but today all blits share one state.
-    if (!GetBlitObject(BlitHostToDev)->isSDMA()) {
+    //
+    // RECT ops read the flag instead: the probe creates an H2D SDMA queue on the copy agent, and
+    // those queues are few and shared by every process (8 per host-facing engine). A process
+    // that finds none would get a shader blit and have every RECT op rejected, though the op
+    // would not use that queue. DmaCopyRect checks the engine it does use.
+    const bool sdma_off =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_RECT)
+            ? core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE
+            : !GetBlitObject(BlitHostToDev)->isSDMA();
+    if (sdma_off) {
       status = DmaCopyBatchFallback(op, dep_signals);
       if (status != HSA_STATUS_SUCCESS)
         return status;
