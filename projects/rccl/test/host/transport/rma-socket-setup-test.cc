@@ -11,17 +11,37 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <functional>
 #include <initializer_list>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/socket_fakes.h"
 #include "transport/RmaSocketTest.h"
 
+namespace {
+
+std::vector<void*> g_setupAllocations;
+
+template <typename Value>
+ncclResult_t SetupTestCalloc(Value** pointer, size_t count) {
+  ncclResult_t result = ncclCalloc(pointer, count);
+  if (result == ncclSuccess) g_setupAllocations.push_back(*pointer);
+  return result;
+}
+
+}
+
+#undef ncclCalloc
+#define ncclCalloc(...) SetupTestCalloc(__VA_ARGS__)
+#include "fakes/libc_seam.h"
 #include RMA_SOCKET_SETUP_CC_PATH
+#include "fakes/libc_seam_undef.h"
+#undef ncclCalloc
 
 namespace {
 
@@ -104,13 +124,18 @@ class ScopedConnectHandshake {
 
 class RmaSocketSetupMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override { g_hipAsyncOpsResult = hipSuccess; }
+  void SetUp() override {
+    g_hipAsyncOpsResult = hipSuccess;
+    g_setupAllocations.clear();
+    ResetLibcFakes();
+  }
 
   void TearDown() override {
     ResetSocketFakes();
     ResetOsFakes();
     ResetHipFakes();
     ResetNcclFakes();
+    ResetLibcFakes();
   }
 
   template <typename Signature>
@@ -133,7 +158,7 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
     });
     ScopedHook release(g_hipHostFree, [&](void* pointer) {
       auto found = std::find(allocations.begin(), allocations.end(), pointer);
-      EXPECT_NE(allocations.end(), found);
+      EXPECT_NE(found, allocations.end());
       if (found != allocations.end()) {
         allocations.erase(found);
         std::free(pointer);
@@ -142,18 +167,19 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
     });
     void* output = &listen;
 
-    EXPECT_EQ(ncclRemoteError, ncclRmaSocketProxyConnect(nullptr, handles.data(), 2, 1, &listen, &output));
-    EXPECT_EQ(nullptr, output);
-    EXPECT_EQ(failCall, failure.calls);
-    EXPECT_EQ(expectedCloses, handshake.close.calls);
-    EXPECT_EQ(4, allocate.calls);
-    EXPECT_EQ(4, release.calls);
+    EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), 2, 1, &listen, &output), ncclRemoteError);
+    EXPECT_EQ(output, nullptr);
+    EXPECT_EQ(failure.calls, failCall);
+    EXPECT_EQ(handshake.close.calls, expectedCloses);
+    EXPECT_EQ(allocate.calls, 4);
+    EXPECT_EQ(release.calls, 4);
     EXPECT_TRUE(allocations.empty());
   }
 };
 
 TEST_F(RmaSocketSetupMicrotest, Connect_IncomingInitFailureReleasesPeerResources) {
   ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketInit, 3, 4));
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketInit, 4, 4));
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_SecondConnectFailureReleasesPeerResources) {
@@ -408,7 +434,7 @@ TEST_F(RmaSocketSetupMicrotest, CreateAndDestroyContext_PublishesRequestsAndUpda
 
 TEST_F(RmaSocketSetupMicrotest, CreateContext_QueueCapacityOverflowDoesNotPublishContexts) {
   auto* comm = AllocateOwnedComm(2);
-  ASSERT_NE(nullptr, comm);
+  ASSERT_NE(comm, nullptr);
   const int existingContexts = INT_MAX / (2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
   comm->nContexts = existingContexts;
   ncclRmaConfig_t config{};
@@ -416,12 +442,17 @@ TEST_F(RmaSocketSetupMicrotest, CreateContext_QueueCapacityOverflowDoesNotPublis
   config.rankStride = 1;
   void* output = nullptr;
 
-  EXPECT_EQ(ncclInvalidArgument, ncclRmaSocketProxyCreateContext(comm, &config, &output));
+  EXPECT_EQ(ncclRmaSocketProxyCreateContext(comm, &config, &output), ncclInvalidArgument);
 
-  EXPECT_EQ(nullptr, output);
-  EXPECT_EQ(existingContexts, comm->nContexts);
-  EXPECT_EQ(0, comm->peerSender[0].capacity);
-  EXPECT_EQ(0, comm->peerSender[1].capacity);
+  EXPECT_EQ(output, nullptr);
+  EXPECT_EQ(comm->nContexts, existingContexts);
+  EXPECT_EQ(comm->peerSender[0].capacity, 0);
+  EXPECT_EQ(comm->peerSender[1].capacity, 0);
+  ASSERT_EQ(g_setupAllocations.size(), 3u);
+  EXPECT_EQ(g_freedPointers.size(), g_setupAllocations.size());
+  for (void* allocation : g_setupAllocations) {
+    EXPECT_EQ(std::count(g_freedPointers.begin(), g_freedPointers.end(), allocation), 1);
+  }
   FreeOwnedComm(comm);
 }
 
