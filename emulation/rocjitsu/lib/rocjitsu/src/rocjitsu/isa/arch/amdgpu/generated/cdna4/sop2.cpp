@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include <memory>
 
@@ -1520,6 +1521,7 @@ SRfeRestoreB64Sop2::SRfeRestoreB64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {
@@ -1532,6 +1534,10 @@ DecodeResult decodeSRfeRestoreB64Sop2(const MachineInst *opcode,
   return std::make_unique<SRfeRestoreB64Sop2>(opcode);
 }
 } // namespace detail
+
+bool SRfeRestoreB64Sop2::tracks_explicit_source(uint8_t operand_index) const {
+  return src_operands_[operand_index] != &ssrc1;
+}
 
 SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
     : Sop2("s_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),

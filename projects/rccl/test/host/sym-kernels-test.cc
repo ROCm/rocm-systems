@@ -544,6 +544,8 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
     comm_->symkState.kcomm.hierScaleInSize = c.scaleIn;
     uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaST), c.offered) << c.name;
+    EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
+        << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
   }
 }

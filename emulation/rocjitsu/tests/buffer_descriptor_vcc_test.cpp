@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -48,7 +49,9 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("descriptor_vcc", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "descriptor_vcc", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     auto *next = cu->dispatch_wf(1, 0, 106, 16);
     ASSERT_NE(wf, nullptr);

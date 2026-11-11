@@ -69,6 +69,8 @@ set_tests_properties(
                120
                LABELS
                "samples"
+               RUN_SERIAL
+               ON
                ENVIRONMENT
                "${spm-device-counting-env}"
                FAIL_REGULAR_EXPRESSION
