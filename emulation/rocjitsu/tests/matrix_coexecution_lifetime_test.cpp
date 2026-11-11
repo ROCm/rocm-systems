@@ -26,14 +26,14 @@ using AdmissionCache = amdgpu::MmaAdmissionCache;
 AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::InstructionCache &icache,
                                    uint64_t pc, bool dependent, uint16_t branch_immediate) {
   const auto a =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
-                                    {.vdst = 96,
-                                     .src0 = uint16_t(dependent ? 320 : 256),
-                                     .src1 = 288,
-                                     .src2 = 352,
-                                     .opsel_hi = 3});
+  const auto b =
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p, {.vdst = 96,
+                                                            .src0 = uint16_t(dependent ? 320 : 256),
+                                                            .src1 = 288,
+                                                            .src2 = 352,
+                                                            .opsel_hi = 3});
   for (unsigned i = 0; i != 2; ++i) {
     memory.write32(pc + 4 * i, a[i]);
     memory.write32(pc + 8 + 4 * i, b[i]);
@@ -112,7 +112,7 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
   amdgpu::InstructionCache icache;
   constexpr uint64_t pc = 0x4d0000;
   const auto a =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
   for (unsigned i = 0; i != a.size(); ++i)
     memory.write32(pc + 4 * i, a[i]);
@@ -124,7 +124,7 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
 
   for (unsigned version = 0; version != 12; ++version) {
     const bool dependent = version % 2;
-    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                       {.vdst = 96,
                                        .src0 = uint16_t(dependent ? 320 : 256),
                                        .src1 = 288,

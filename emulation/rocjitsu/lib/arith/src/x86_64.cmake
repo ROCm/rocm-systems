@@ -33,7 +33,11 @@ check_cxx_compiler_flag(
 )
 
 set(rj_arith_x86_64_v3_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_gfx1250_half_x86_64_v3.cpp
+    wmma/x86_64/wmma_gfx1250_fp8_x86_64_v3.cpp
+    wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
@@ -114,7 +118,11 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_gfx1250_half_x86_64_v4.cpp
+    wmma/x86_64/wmma_gfx1250_fp8_x86_64_v4.cpp
+    wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp

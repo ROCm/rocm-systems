@@ -22,7 +22,10 @@ endfunction()
 
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
-rj_arith_add_test(rj_arith_mfma_half_test mfma/mfma_half_test.cpp)
+rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
+rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
 
 # One explicit source, executable and arithmetic test per instruction.

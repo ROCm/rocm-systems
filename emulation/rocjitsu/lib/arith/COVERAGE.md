@@ -57,8 +57,10 @@ not the ability to raise a flag on half of all DOT mnemonics.
 
 ## CDNA and gfx1250 matrix migration
 
-The initial CDNA matrix migration covers ten gfx942 FP16/BF16 MFMA forms,
-four additional gfx950 forms, and five gfx1250 half-input WMMA forms.
+CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
+fourteen gfx950 half-input MFMA forms plus eight OCP FP8/BF8 forms, and five
+gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
+gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
 All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
 Compatibility are supported; strict bit-exact modes are not advertised.
 Other CDNA instruction families retain their existing handlers.

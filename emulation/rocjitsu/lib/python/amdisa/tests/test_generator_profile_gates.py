@@ -2562,7 +2562,7 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             (
                 'V_WMMA_F16_16X16X64_FP8_BF8',
                 'cdna5',
-                'exec_wmma_f16_f8_spec',
+                'arith::exec_dense_fp_matrix<8, 4, 32, 4, true>',
                 False,
             ),
             # Fixed-wave generic dense result variants.
@@ -3041,8 +3041,9 @@ def test_gfx1250_wmma_f16_f8_passes_fp16_overflow_mode(
     inst = Instruction(f'V_WMMA_F16_16X16X{k}_{input_type}', 'ENC_VOP3P', 0, [])
     body = _gen_mfma(inst, 'cdna5')
 
-    assert f'amdgpu::exec_wmma_f16_f8_spec<16, 16, {k}, {a_fp8}, {b_fp8}>(' in body
-    assert 'const_acc, wf.fp16_ovfl());' in body
+    assert f'rj_arith_v_wmma_f16_16x16x{k}_{input_type.lower()}_w32' in body
+    assert f'exec_dense_fp_matrix<{k // 8}, 4, 32, 4, true>' in body
+    assert 'if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;' in body
 
 
 def test_gfx1250_wmma_f16_passes_overflow_mode() -> None:
@@ -10425,6 +10426,67 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
         assert 'arithmetic_flags()' in body
         assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
         assert 'std::optional<uint32_t>(const_acc)' in body
+
+
+@pytest.mark.parametrize('m,k', [(16, 8), (32, 4)])
+def test_xf32_mfma_library_dispatch(m, k):
+    name = f'V_MFMA_F32_{m}X{m}X{k}_XF32'
+    destination = Operand('vdst', m * m // 2, 'OPR_VGPR', False, True, False, False, 0)
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        'cdna3',
+        enc_field_names={'acc_cd'},
+    )
+    assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'inst_.acc_cd' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('formats', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+@pytest.mark.parametrize('m,k', [(16, 32), (32, 16)])
+def test_fp8_mfma_library_dispatch_distinguishes_fnuz_and_ocp(arch, formats, m, k):
+    name = f'V_MFMA_F32_{m}X{m}X{k}_{formats}'
+    destination = Operand('vdst', m * m // 2, 'OPR_VGPR', False, True, False, False, 0)
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'},
+    )
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
+    assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
+    assert 'inst_.acc_cd' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize(
+    'm,k,batch', [(32, 1, 2), (16, 1, 4), (4, 1, 16), (32, 2, 1), (16, 4, 1)]
+)
+def test_f32_mfma_library_dispatch(arch, m, k, batch):
+    suffix = f'_{batch}B' if batch > 1 else ''
+    name = f'V_MFMA_F32_{m}X{m}X{k}{suffix}_F32'
+    destination = Operand(
+        'vdst', m * m * batch // 2, 'OPR_VGPR', False, True, False, False, 0
+    )
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'},
+    )
+    assert f'exec_dense_fp_matrix<1, {m * m * batch // 64}, 64>' in body
+    assert f'rj_arith_{name.lower()}_w64' in body
+    assert 'inst_.acc_cd' in body
+
+
+def test_f32_gfx1250_wmma_library_dispatch():
+    destination = Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0)
+    body = _gen_mfma(
+        Instruction('V_WMMA_F32_16X16X4_F32', 'ENC_VOP3P', 0, [destination]),
+        'cdna5',
+    )
+    assert 'exec_dense_fp_matrix<2, 8, 32>' in body
+    assert 'rj_arith_v_wmma_f32_16x16x4_f32_w32' in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])

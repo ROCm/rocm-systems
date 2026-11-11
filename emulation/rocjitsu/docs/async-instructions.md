@@ -94,10 +94,10 @@ cover this fallback; arbitrary forked application workloads are not qualified.
 
 ## Eligibility and fallback
 
-The eligible instruction families are FP8/BF8 and scaled/unscaled f8f6f4
-MFMA on gfx950, and FP8/BF8 K64/K128, dense FP4 and scaled 16x16x128
-f8f6f4 WMMA on gfx1250. Dense FP16/BF16 MFMA and FP16/BF16 K32 WMMA
-execute synchronously through rj-arith and do not use the helper pool.
+The eligible instruction families are scaled/unscaled f8f6f4 MFMA on
+gfx950, and dense FP4 and scaled 16x16x128 f8f6f4 WMMA on gfx1250.
+Dense FP16/BF16 and FP8/BF8 matrix instructions execute synchronously
+through rj-arith and do not use the helper pool.
 Both targets use [cached lookahead admission](mma-admission.md) to require an
 independent MMA that can remain on the issuer. Scaled instructions require
 vector or inline scale operands; scalar-register scales execute synchronously.
