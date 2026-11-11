@@ -1362,7 +1362,7 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   // nChannelsPerNetPeer or RCCL_SATURATE_P2P_NCHANNELS.
   if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
       comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
-      rcclParamSaturateP2pNChannels() <= 0 &&
+      (rcclParamSaturateP2pNChannels() == 0 || rcclParamSaturateP2pNChannels() == RCCL_VALUE_UNSET) &&
       comm->rankToNode[task->root] != comm->node &&
       IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942")) {
     int fitted = comm->p2pnChannelsPerPeer;
