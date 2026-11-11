@@ -80,7 +80,7 @@ clock in MHz from profiler system specs.
 Bandwidth and cache rows
 ------------------------
 
-The throughput rows for GL0 (TCP Cache), GL1, GL2, and SQC use heuristic ceilings that are
+The throughput rows for GL0 (TCP Cache), GL2, and SQC use heuristic ceilings that are
 not anchored to a single public RDNA3.5 table, so the percentage of peak
 reported for these rows is indicative rather than exact. The memory hierarchy
 runs GL0 (TCP Cache) -> GL1 -> GL2 -> system memory via GCEA. Each level's
@@ -89,7 +89,6 @@ ceiling is one peak transfer per cycle, scaled by instance count and
 
 * GL0 (TCP Cache): One 128-byte cacheline per cycle per CU --
   ``$cu_per_gpu * 128 B/cycle * $max_sclk``
-* GL1: One 128-byte request per cycle per GL1C instance -- ``($cu_per_gpu / 8) * 128 B/cycle * $max_sclk``
 * GL2: One 128-byte request per cycle per L2 bank --
   ``$total_l2_chan * 128 B/cycle * $max_sclk``
 * SQC (scalar data cache and instruction cache): One 64-byte Texture Cache (TC) request per
