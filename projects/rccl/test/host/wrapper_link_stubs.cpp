@@ -159,4 +159,6 @@ ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclS
 
 // Return type is int64_t (no ncclResult_t), so this can live here. ncclMgmtTaskEnqueue
 // uses the real ncclResult_t enum and is defined in init_stubs.cpp.
-int64_t ncclParamEnqueueRearchEnable() { return 0; }
+// 0 (the in-group task branch) unless a test opts into the rearch job path.
+int64_t g_wrapperEnqueueRearchEnable = 0;
+int64_t ncclParamEnqueueRearchEnable() { return g_wrapperEnqueueRearchEnable; }
