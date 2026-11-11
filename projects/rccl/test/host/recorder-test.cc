@@ -153,6 +153,7 @@ class RecorderMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetDebugLog();
+    originalDirectory_ = std::filesystem::current_path();
     g_device = 2;
     g_addressRangeResult = hipSuccess;
     g_captureInfoResult = hipSuccess;
@@ -172,6 +173,7 @@ class RecorderMicrotest : public ::testing::Test {
 
   void TearDown() override {
     Restart(nullptr);
+    std::filesystem::current_path(originalDirectory_);
     if (!dir_.empty()) std::filesystem::remove_all(dir_);
   }
 
@@ -244,6 +246,7 @@ class RecorderMicrotest : public ::testing::Test {
   }
 
   std::string dir_;
+  std::filesystem::path originalDirectory_;
   std::string path_;
   int localRankToRank_[2] = {7, 9};
   std::unique_ptr<ncclComm> comm_;
@@ -302,14 +305,56 @@ TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
   EXPECT_EQ(ReadFile(path_), "");
 }
 
-// The extension starts at the first '.' in the whole path, so a dotted directory breaks it. Pins AICOMRCCL-2955; a fix
-// flips this pin.
-TEST_F(RecorderMicrotest, FileName_KnownBug_DotInDirectorySplitsThePath) {
+TEST_F(RecorderMicrotest, FileName_DottedPathsKeepTheFinalExtension) {
   std::string dotted = Dir() + "/run.1";
   ASSERT_EQ(mkdir(dotted.c_str(), 0700), 0);
-  Recorder& r = Restart((dotted + "/trace.json").c_str());
-  EXPECT_EQ(r.output_json, 0);
-  EXPECT_FALSE(r.outputFile.is_open());  // tried <dir>/run.<pid>.<host>.1/trace.json
+  const std::vector<std::string> names = {"/run.1/trace", "/./trace", "/run.1/../trace", "/trace.part.1"};
+  for (const std::string& name : names) {
+    for (const std::string& extension : {std::string(".json"), std::string(".bin"), std::string()}) {
+      if (name == "/trace.part.1" && extension.empty()) continue;
+      SCOPED_TRACE(name + extension);
+      const std::string input = Dir() + name + extension;
+      const std::string expected = Output(name, extension);
+      Recorder& recorder = Restart(input.c_str());
+      ASSERT_TRUE(recorder.outputFile.is_open());
+      EXPECT_EQ(recorder.output_json, extension == ".json");
+      Restart(nullptr);
+      EXPECT_TRUE(std::filesystem::exists(expected));
+      EXPECT_EQ(ReadFile(expected), extension == ".json" ? "{\n  version : 1,\n}\n" : "");
+    }
+  }
+}
+
+TEST_F(RecorderMicrotest, FileName_RelativePathKeepsTheDirectory) {
+  const std::string input = "./" + std::filesystem::relative(Dir() + "/trace.json").string();
+  Recorder& recorder = Restart(input.c_str());
+  EXPECT_TRUE(recorder.outputFile.is_open());
+  EXPECT_EQ(recorder.output_json, 1);
+  Restart(nullptr);
+  EXPECT_EQ(ReadFile(Output("/trace", ".json")), "{\n  version : 1,\n}\n");
+}
+
+TEST_F(RecorderMicrotest, FileName_BareNameKeepsTheFormatAndSuffix) {
+  std::filesystem::current_path(Dir());
+  for (const std::string& extension : {std::string(".json"), std::string(".bin"), std::string()}) {
+    const std::string input = "trace" + extension;
+    SCOPED_TRACE(input);
+    Recorder& recorder = Restart(input.c_str());
+    ASSERT_TRUE(recorder.outputFile.is_open());
+    EXPECT_EQ(recorder.output_json, extension == ".json");
+    Restart(nullptr);
+    const std::string expected = Output("/trace", extension);
+    EXPECT_TRUE(std::filesystem::exists(expected));
+    EXPECT_EQ(ReadFile(expected), extension == ".json" ? "{\n  version : 1,\n}\n" : "");
+  }
+}
+
+TEST_F(RecorderMicrotest, FileName_FailedOpenWarnsWithTheOutputPath) {
+  const std::string input = Dir() + "/missing/trace.json";
+  Recorder& recorder = Restart(input.c_str());
+  EXPECT_FALSE(recorder.outputFile.is_open());
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Could not open RCCL replay file"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, Output("/missing/trace", ".json")));
 }
 
 TEST_F(RecorderMicrotest, Destructor_ClosesTheJsonObject) {

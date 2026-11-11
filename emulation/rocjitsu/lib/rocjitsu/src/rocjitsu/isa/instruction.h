@@ -134,7 +134,9 @@ enum InstFlags : uint64_t {
   /// branches (s_cbranch_cdbg*).
   /// @details Kept separate from BRANCH and COND_BRANCH so CFG construction does
   /// not change. Query through writes_pc(), which combines them.
-  WRITES_PC = (1ULL << 37)
+  WRITES_PC = (1ULL << 37),
+  /// @brief Software trap instruction (s_trap).
+  SOFTWARE_TRAP = (1ULL << 38)
 };
 
 class BasicBlock;

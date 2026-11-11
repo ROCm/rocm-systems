@@ -91,9 +91,6 @@ constexpr int RJ_ARITH_ERROR_INVALID_FLAGS = 2;
 // Required faithful FP status reporting is unavailable.
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
 
-// A non-FP architectural side effect requested by a register operation is unavailable.
-constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
-
 // Names retain ISA mnemonics. Wave and architecture suffixes follow corresponding
 // Clang AMDGPU builtins where available, with wave width before architecture.
 // Vector APIs always identify wave width; scalar APIs omit it. Shared instruction

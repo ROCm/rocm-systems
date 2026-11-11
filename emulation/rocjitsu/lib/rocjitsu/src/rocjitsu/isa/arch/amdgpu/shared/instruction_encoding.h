@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 
 #include <algorithm>
 #include <array>
@@ -23,8 +24,10 @@ namespace amdgpu {
 
 /// Add an M0-relative VGPR offset after resolving the encoded register bank.
 inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset,
-                                                   uint32_t width, uint32_t allocation_size) {
-  if (!base || offset > 1023 || uint64_t{*base} + offset + width > allocation_size)
+                                                   uint32_t width, uint32_t allocation_size,
+                                                   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5) {
+  const uint32_t max_offset = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 1023 : 255;
+  if (!base || offset > max_offset || uint64_t{*base} + offset + width > allocation_size)
     return std::nullopt;
   return *base + offset;
 }
@@ -112,12 +115,44 @@ constexpr unsigned valu_permutation_source(ValuPermutation kind, unsigned lane, 
   group_width = std::min(group_width, wave_size);
   const unsigned base = (lane / group_width) * group_width;
   const unsigned offset = lane - base;
-  const unsigned source = kind == ValuPermutation::Bcast  ? selector % group_width
-                          : kind == ValuPermutation::Down ? offset + selector
-                          : kind == ValuPermutation::Up
-                              ? (selector <= offset ? offset - selector : group_width)
-                              : offset ^ selector;
-  return source < group_width ? base + source : wave_size;
+  if (kind == ValuPermutation::Bcast)
+    return base + selector % group_width;
+  if (kind == ValuPermutation::Up)
+    return selector <= offset ? lane - selector : lane;
+  if (kind == ValuPermutation::Down)
+    return selector < group_width - offset ? lane + selector : lane;
+  // PERMLANE_XOR can read an earlier group. Only its upper group edge is a bound.
+  const unsigned source = lane ^ selector;
+  return selector < wave_size && source < base + group_width ? source : lane;
+}
+
+struct PermutationLanes {
+  uint64_t read = 0;
+  uint64_t write = 0;
+};
+
+// Compute observed source lanes and writable destinations for a lane permutation.
+template <typename Select>
+PermutationLanes valu_permutation_lanes(ValuPermutation kind, uint64_t exec, unsigned wave_size,
+                                        unsigned group_width, bool row16, bool fi, bool bound_ctrl,
+                                        Select select) {
+  PermutationLanes result;
+  for (unsigned lane = 0; lane < wave_size; ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const unsigned source =
+        valu_permutation_source(kind, lane, select(lane), group_width, wave_size);
+    if (source >= wave_size)
+      continue;
+    if (row16 && !fi && !(exec & (uint64_t{1} << source))) {
+      if (bound_ctrl)
+        result.write |= uint64_t{1} << lane;
+      continue;
+    }
+    result.read |= uint64_t{1} << source;
+    result.write |= uint64_t{1} << lane;
+  }
+  return result;
 }
 
 constexpr uint64_t valu_swap_write_lanes(uint64_t exec, unsigned wave_size, unsigned stride,
@@ -136,18 +171,41 @@ struct RegisterModifiers {
   ValuPermutation valu_permutation = ValuPermutation::None;
   uint16_t ds_offset = 0;
   uint8_t memory_result_bytes = 0xf;
-  uint8_t memory_result_last_bytes = 0xf;
+  uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
+  bool memory_result_has_status = false;
+  void set_packed_image_result(unsigned components, unsigned result_words) {
+    if (components & 1u) {
+      memory_result_last_bytes = 0x3;
+      memory_result_has_status = result_words > (components + 1) / 2;
+    }
+  }
+  const Operand *packed_store_data = nullptr; // Only the low half of the final word is stored.
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
 
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   /// Coordinate VGPR selectors, including NSA selectors.
-  std::array<uint32_t, 4> image_coordinates{};
+  ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
+  /// VGPR words occupied by derivative inputs.
+  uint8_t image_prefix_words = 0;
+  /// Prefix words whose upper half is unused by packed odd-dimensional derivatives.
+  uint16_t image_low_half_prefix = 0;
+  /// GFX9 derives its actual tuple from the descriptor. The sentinel
+  /// leaves RDNA's instruction-derived coordinate metadata in effect.
+  struct Gfx9ImageTuple {
+    uint32_t resource_selector = ~0u;
+    /// Coordinates include an array layer when the descriptor is layered.
+    bool image_array = false;
+    /// A view-relative level or sample LOD follows the coordinates.
+    bool mip = false;
+    /// Explicit gradient words precede the coordinates.
+    bool derivatives = false;
+  } gfx9_image_tuple;
   uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;
@@ -451,6 +509,16 @@ enum class SourceModifierFormat {
 };
 
 } // namespace sdwa
+
+/// Select each result half independently, then flip its source sign bit if requested.
+template <typename V>
+inline V select_packed_halves(V value, uint32_t low, uint32_t high, unsigned operand,
+                              uint32_t negations = 0) {
+  const V selected = ((value >> (((low >> operand) & 1u) * 16)) & V(0xffffu)) |
+                     ((value >> (((high >> operand) & 1u) * 16)) << 16);
+  const uint32_t sign_bits = ((negations >> operand) & 0x00010001u) << 15;
+  return selected ^ V(sign_bits);
+}
 
 /// @brief Return the VOP3 output-select field across MRISA spelling variants.
 template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {

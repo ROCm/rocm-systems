@@ -104,12 +104,20 @@ inline uint64_t fma_round_ieee(Uint128 significand, int exponent, bool negative,
          (T(kept) & ((T(1) << F::fraction) - 1));
 }
 
-// Return A*B+C with one guest-directed rounding. All three encodings must be finite.
-inline uint64_t fma_finite_f64(uint64_t a, uint64_t b, uint64_t c, unsigned rounding) {
+// Unrounded A*B+C as significand * 2^exponent, with sticky bits standing in for discarded
+// low-order bits. A zero significand stands for the signed zero chosen by the guest rounding.
+struct FmaSumF64 {
+  Uint128 significand;
+  int exponent;
+  bool negative;
+};
+
+// Sum A*B+C exactly enough for one rounding. All three encodings must be finite.
+inline FmaSumF64 fma_sum_f64(uint64_t a, uint64_t b, uint64_t c, unsigned rounding) {
   using F = FmaF64Format;
   using T = uint64_t;
   constexpr T fraction_mask = (T(1) << F::fraction) - 1;
-  T am = a & ~F::sign, bm = b & ~F::sign, cm = c & ~F::sign, result;
+  T am = a & ~F::sign, bm = b & ~F::sign, cm = c & ~F::sign;
   bool pn = ((a ^ b) & F::sign) != 0, cn = (c & F::sign) != 0;
   int ae = int(am >> F::fraction), be = int(bm >> F::fraction), ce = int(cm >> F::fraction);
   T as = (a & fraction_mask) | (ae ? T(1) << F::fraction : 0),
@@ -119,23 +127,54 @@ inline uint64_t fma_finite_f64(uint64_t a, uint64_t b, uint64_t c, unsigned roun
   int pe = (ae ? ae : 1) + (be ? be : 1) - 2 * (F::bias + F::fraction),
       se = (ce ? ce : 1) - F::bias - F::fraction;
   if (product == 0 && addend == 0) {
-    result = (pn == cn ? pn : rounding == 2) ? F::sign : 0;
-  } else if (product == 0) {
-    result = fma_round_ieee(addend, se, cn, rounding);
-  } else if (addend == 0) {
-    result = fma_round_ieee(product, pe, pn, rounding);
-  } else {
-    int pt = fma_top_bit128(product), ct = fma_top_bit128(addend);
-    int exponent = pe + pt > se + ct ? pe + pt : se + ct;
-    product = fma_shift_jam128(product << (126 - pt), exponent - pe - pt);
-    addend = fma_shift_jam128(addend << (126 - ct), exponent - se - ct);
-    bool negative = pn == cn ? pn : product > addend ? pn : addend > product ? cn : rounding == 2;
-    Uint128 sum = pn == cn           ? product + addend
-                  : product > addend ? product - addend
-                                     : addend - product;
-    result = fma_round_ieee(sum, exponent - 126, negative, rounding);
+    return {0, 0, pn == cn ? pn : rounding == 2};
   }
-  return result;
+  if (product == 0) {
+    return {addend, se, cn};
+  }
+  if (addend == 0) {
+    return {product, pe, pn};
+  }
+  int pt = fma_top_bit128(product), ct = fma_top_bit128(addend);
+  int exponent = pe + pt > se + ct ? pe + pt : se + ct;
+  product = fma_shift_jam128(product << (126 - pt), exponent - pe - pt);
+  addend = fma_shift_jam128(addend << (126 - ct), exponent - se - ct);
+  bool negative = pn == cn ? pn : product > addend ? pn : addend > product ? cn : rounding == 2;
+  Uint128 sum = pn == cn           ? product + addend
+                : product > addend ? product - addend
+                                   : addend - product;
+  return {sum, exponent - 126, negative};
+}
+
+// Return A*B+C with one guest-directed rounding. All three encodings must be finite.
+inline uint64_t fma_finite_f64(uint64_t a, uint64_t b, uint64_t c, unsigned rounding) {
+  FmaSumF64 sum = fma_sum_f64(a, b, c, rounding);
+  return fma_round_ieee(sum.significand, sum.exponent, sum.negative, rounding);
+}
+
+// Whether A*B+C is tiny after rounding: rounded to full precision in the guest mode with an
+// unbounded exponent range, it lies below the smallest normal. A result that reaches the
+// smallest normal only on the subnormal grid is tiny. Scaling by 2^64 moves every result
+// near the smallest normal into the normal range, where rounding keeps all 53 bits.
+// Encodings must be finite.
+inline bool fma_tiny_f64(uint64_t a, uint64_t b, uint64_t c, unsigned rounding) {
+  using F = FmaF64Format;
+  FmaSumF64 sum = fma_sum_f64(a, b, c, rounding);
+  constexpr uint64_t scaled_smallest_normal = uint64_t(1 + 64) << F::fraction;
+  return sum.significand == 0 ||
+         (fma_round_ieee(sum.significand, sum.exponent + 64, sum.negative, rounding) & ~F::sign) <
+             scaled_smallest_normal;
+}
+
+// Replace a rounded A*B+C equal to the smallest normal by a zero of its sign when the sum is
+// tiny after rounding, for callers about to flush or apply OMOD. Other results are unchanged:
+// only the smallest normal can hide a tiny sum.
+inline uint64_t fma_flush_tiny_f64(uint64_t result, uint64_t a, uint64_t b, uint64_t c,
+                                   unsigned rounding) {
+  using F = FmaF64Format;
+  return (result & ~F::sign) == (uint64_t(1) << F::fraction) && fma_tiny_f64(a, b, c, rounding)
+             ? result & F::sign
+             : result;
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

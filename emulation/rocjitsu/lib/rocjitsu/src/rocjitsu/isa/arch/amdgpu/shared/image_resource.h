@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -28,25 +29,22 @@ struct ImageResource {
   uint32_t selectors = 0;
   uint32_t base_level = 0;
   uint32_t last_level = 0;
-  uint32_t max_level = 0;  ///< Last physical mip in the allocation.
-  bool compressed = false; ///< Compression metadata or compressed writes are enabled.
+  uint32_t max_level = 0;      ///< Last physical mip in the allocation.
+  uint32_t min_lod = 0;        ///< Raw resource LOD clamp; nonzero values are unqualified.
+  uint32_t perf_mod = 0;       ///< Resource filter-performance modifier.
+  bool corner_samples = false; ///< Sample coordinates refer to corners rather than centers.
+  bool compressed = false;     ///< Compression metadata or compressed writes are enabled.
+  /// Selects the GFX10+ residency or sampling-status map descriptor layout.
+  bool linked_resource = false;
   uint32_t swizzle_mode = 0;
   uint32_t type = 0;
   uint32_t base_array = 0;
   uint32_t array_pitch = 0;
   bool uav3d = false;       ///< GFX12 UAV3D view control, separate from DEPTH_SCALE.
-  uint32_t depth_scale = 0; ///< GFX12 five-bit DEPTH_SCALE control.
+  uint32_t depth_scale = 0; ///< GFX11/12 descriptor scaling controls.
+  uint32_t height_scale = 0;
+  uint32_t width_scale = 0;
 };
-
-/// SQ_RSRC_IMG_* resource types.
-inline constexpr uint32_t kImage1d = 8;
-inline constexpr uint32_t kImage2d = 9;
-inline constexpr uint32_t kImage3d = 10;
-inline constexpr uint32_t kImageCube = 11;
-inline constexpr uint32_t kImage1dArray = 12;
-inline constexpr uint32_t kImage2dArray = 13;
-inline constexpr uint32_t kImage2dMsaa = 14;
-inline constexpr uint32_t kImage2dMsaaArray = 15;
 
 /// @brief GFX10.3+ non-array types whose word-4 field encodes pitch.
 inline bool image_resource_encodes_pitch(uint32_t type) {
@@ -60,6 +58,8 @@ inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &d
   };
   ImageResource resource;
   resource.base = ((uint64_t{field(32, 8)} << 32) | descriptor[0]) << 8;
+  resource.min_lod = field(40, 12);
+  resource.perf_mod = field(92, 3);
   resource.data_format = field(52, 6);
   resource.num_format = field(58, 4);
   resource.width = field(64, 14) + 1;
@@ -89,7 +89,13 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
   const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
   ImageResource resource;
+  resource.min_lod = rdna1 || arch == ROCJITSU_CODE_ARCH_RDNA2
+                         ? field(40, 12)
+                         : field(rdna4 ? 186 : 187, rdna4 ? 13 : 12);
   resource.base = ((uint64_t{field(32, 8)} << 32) | descriptor[0]) << 8;
+  resource.perf_mod = field(180, 3);
+  resource.corner_samples = field(183, 1);
+  resource.linked_resource = field(184, 1);
   resource.type = field(124, 4);
   resource.width = field(62, rdna4 || rdna1 ? 16 : 14) + 1;
   resource.height = field(78, rdna4 || rdna1 ? 16 : 14) + 1;
@@ -111,8 +117,15 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
   if (rdna4) {
     resource.uav3d = field(164, 1);
     resource.depth_scale = field(165, 5);
+    resource.height_scale = field(170, 5);
+    resource.width_scale = field(175, 5);
   } else {
     resource.array_pitch = field(160, 4);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      resource.depth_scale = field(168, 4);
+      resource.height_scale = field(172, 4);
+      resource.width_scale = field(176, 4);
+    }
   }
   if (image_resource_encodes_pitch(resource.type)) {
     resource.depth = 1;
@@ -176,7 +189,7 @@ inline void execute_image_resource_info(Wavefront &wf, uint32_t resource, uint32
     descriptor[i] = read_scalar_selector(wf, resource + i);
   RegisterAccess regs(wf);
   const uint32_t base = wf.vgpr_alloc().base;
-  const auto lods = regs.read_vgpr_region(base + lod_vgpr, 1, wf.exec());
+  const auto lods = regs.read_vgpr_region(base + lod_vgpr, 1, wf.exec(), a16 ? 0x3 : 0xf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(wf.exec() & (uint64_t{1} << lane)))
       continue;
