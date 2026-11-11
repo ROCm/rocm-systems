@@ -485,25 +485,27 @@ TEST(sqlite_backend_impl_test, latest_schema_version_matches_newest_embedded_sch
                                                 schema.patch };
         EXPECT_FALSE(latest < embedded);
     }
-    EXPECT_TRUE(latest.is_latest(latest));
-    EXPECT_FALSE(profiler_hub::version_t{}.is_latest(latest));
-    EXPECT_FALSE((profiler_hub::version_t{ 3, 0, 1 }.is_latest(latest)));
 }
 
-class is_latest_schema_test : public ::testing::TestWithParam<profiler_hub::version_t>
+class latest_schema_version_test
+: public ::testing::TestWithParam<profiler_hub::version_t>
 {};
 
-TEST_P(is_latest_schema_test, is_true_only_for_the_newest_versions_yml_entry)
+TEST_P(latest_schema_version_test, equals_only_the_newest_versions_yml_entry)
 {
     const profiler_hub::version_t version = GetParam();
     const profiler_hub::version_t latest =
         rocpd::data_storage::schema::latest_schema_version();
 
-    EXPECT_EQ(version.is_latest(latest), version == latest);
+    const profiler_hub::version_t newest_in_versions_yml{ 3, 0, 5 };
+
+    EXPECT_NE(latest, profiler_hub::version_t{});
+    EXPECT_FALSE(latest < version);
+    EXPECT_EQ(latest == version, version == newest_in_versions_yml);
 }
 
 INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
-                         is_latest_schema_test,
+                         latest_schema_version_test,
                          ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
                                            profiler_hub::version_t{ 3, 0, 1 },
                                            profiler_hub::version_t{ 3, 0, 2 },

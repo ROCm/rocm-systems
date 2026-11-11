@@ -147,6 +147,17 @@ TEST_F(writer_test, register_agent_info_nic_rejected_on_3_0_0)
     nic.process_id           = 100;
 
     EXPECT_THROW(writer->register_agent_info(nic), std::runtime_error);
+
+    // A rejected insert must not leave the prepared statement broken for later inserts.
+    writer_types::agent_info_t gpu;
+    gpu.unique_id.agent_type = "GPU";
+    gpu.unique_id.type_index = 0;
+    gpu.absolute_index       = 0;
+    gpu.logical_index        = 0;
+    gpu.uuid                 = 123;
+    gpu.node_id              = 1;
+    gpu.process_id           = 100;
+    EXPECT_NO_THROW(writer->register_agent_info(gpu));
 }
 
 TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)

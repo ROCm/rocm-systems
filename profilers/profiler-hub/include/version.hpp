@@ -16,18 +16,6 @@ struct version_t
     uint32_t patch = 0;
 
     /**
-     * @brief Whether this version is the newest schema listed in versions.yml.
-     * `newest` comes from `latest_schema_version()`. version_t{} is never latest,
-     * because it means "no version requested" rather than a real schema.
-     * @param newest The highest embedded schema version
-     * @return true when this version equals `newest` and is not version_t{}
-     */
-    [[nodiscard]] bool is_latest(const version_t& newest) const noexcept
-    {
-        return !(*this == version_t{}) && *this == newest;
-    }
-
-    /**
      * @brief Format the version as "MAJOR.MINOR.PATCH".
      * @return The version string, for example "3.0.1"
      */

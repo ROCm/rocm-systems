@@ -146,9 +146,12 @@ public:
                  raw, position++, std::forward<Values>(value), m_query)),
              ...);
 
-            m_backend->validate_sqlite3_result(
-                SqlitePolicy::step(raw), m_query.c_str(), "Failed to execute step");
+            // Reset before validating so a failed step does not leave the statement
+            // in an error state for the next insert.
+            const int rc = SqlitePolicy::step(raw);
             SqlitePolicy::reset(raw);
+            m_backend->validate_sqlite3_result(
+                rc, m_query.c_str(), "Failed to execute step");
         }
 
     private:
