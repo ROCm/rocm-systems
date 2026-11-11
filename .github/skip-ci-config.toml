@@ -56,21 +56,14 @@ common = [
     ".github/workflows/rocr-runtime-*.yml",
 
     # Repo plumbing: labelling, imports, subtree sync, docs previews, bots.
-    ".github/workflows/apply-labels.yml",
     ".github/workflows/auto-label.yml",
     ".github/workflows/close-stale-prs.yml",
     ".github/workflows/codeql.yml",
-    ".github/workflows/collect-labels.yml",
     ".github/workflows/docs-pr-preview*.yml",
     ".github/workflows/hrr-skills.yml",
-    ".github/workflows/import-prep-workflow-*.yml",
     ".github/workflows/import_pr_list.yml",
-    ".github/workflows/initial-setup.yml",
     ".github/workflows/issue-import.yml",
     ".github/workflows/labeler.yml",
-    ".github/workflows/merge-codeowners.yml",
-    ".github/workflows/merge-submodules.yml",
-    ".github/workflows/new-subtree-setup*.yml",
     ".github/workflows/pr-import.yml",
     ".github/workflows/pr-merge-sync-patches*.yml",
     ".github/workflows/pr-org-label.yml",
@@ -78,7 +71,6 @@ common = [
     ".github/workflows/resolve-ci-config-tests.yml",
     ".github/workflows/systems-pr-bot.yml",
     ".github/workflows/update-docs.yml",
-    ".github/workflows/update-subtrees*.yml",
 
     # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
     # workflow_dispatch only), so it is likewise outside TheRock PR CI.
