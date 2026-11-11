@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
@@ -529,7 +530,8 @@ public:
 private:
   friend class test::ExecutionPluginGroupTestAccess;
 
-  template <typename Callback> void dispatch_with_plugin_lock(Callback &&callback) {
+  // Keep mutex handling out of the callbacks that run without serialization.
+  template <typename Callback> RJ_NOINLINE void dispatch_with_plugin_lock(Callback &&callback) {
     if (plugins_.empty())
       return;
     std::lock_guard<std::recursive_mutex> lock(callback_mutex_);
@@ -623,7 +625,10 @@ private:
       if (!observed)
         return;
     }
-    dispatch_with_optional_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+    if (serialize_hot_hooks_)
+      dispatch_with_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+    else
+      std::forward<Callback>(callback)(cached);
   }
 
   // Infrequent hooks may synchronously fire hot register hooks. Recursive
