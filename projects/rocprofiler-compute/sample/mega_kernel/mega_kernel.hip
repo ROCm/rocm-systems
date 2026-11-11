@@ -47,7 +47,7 @@
  * - Strix / Strix Halo / Krackan (RDNA 3.5 gfx115x) APU iGPU:
  *   - Wave32 native, WMMA (FP16/BF16/INT8), VOPD same-wave dual-issue VALU
  *   - FP8/BF8 support; scalar FP in scalar unit; s_singleuse_vdst hint
- *   - Async LDS, WGP architecture; unified s_waitcnt;
+ *   - Async LDS, WGP architecture; unified s_waitcnt
  *
  * - RDNA4 Consumer (gfx1200/gfx1201 - RX 9060/9070 variants):
  *   - FP8/BF8 OCP format conversions
