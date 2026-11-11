@@ -291,6 +291,7 @@ if(BUILD_TESTS)
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
+    GroupSimulateEstimateTests.cpp
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
