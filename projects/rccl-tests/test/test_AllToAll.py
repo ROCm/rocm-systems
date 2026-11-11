@@ -100,7 +100,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _launch_a2a(request, total_bytes, dtype):
+def _launch_a2a(request, total_bytes, dtype, extra_env=()):
     """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size."""
     size = str(int(total_bytes))
     gin_env = gin_env_xflags(
@@ -110,6 +110,7 @@ def _launch_a2a(request, total_bytes, dtype):
             "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
             "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLTOALL=0",
         ]
+        + list(extra_env)
         + XENV
     )
 
@@ -129,12 +130,12 @@ def _launch_a2a(request, total_bytes, dtype):
     return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
 
-def _run_a2a(request, total_bytes, dtype):
+def _run_a2a(request, total_bytes, dtype, extra_env=()):
     """Run one all-to-all with connectivity-gate retry on gfx950 VMM aborts."""
     if NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
     return run_with_conn_gate_retry(
-        lambda: _launch_a2a(request, total_bytes, dtype), CONN_RETRIES
+        lambda: _launch_a2a(request, total_bytes, dtype, extra_env), CONN_RETRIES
     )
 
 
@@ -153,3 +154,17 @@ def test_AllToAllGinSdmaLargeSegmented(request, per_peer_mib, dtype):
 def test_AllToAllGinSdma2GiBTotalHangGuard(request):
     rc, _ = _run_a2a(request, 2 * GiB, "int32")
     assert rc == 0, "AllToAll 2 GiB-total data check failed (nonzero exit)"
+
+
+# The fabric LSA lane arms only where every rank has fabric-registered windows
+# (MI450 MNNVL; pass NCCL_MNNVL_ENABLE=1 through RCCL_TESTS_A2A_XENV there).
+# Elsewhere the opt-ins leave -D 3 on gin.put. 64 KiB per peer keeps the total
+# under the 2 MiB default threshold at up to 32 ranks.
+_FABRIC_LSA_ENV = ("RCCL_GIN_ANVIL_FABRIC_MEM=1", "RCCL_GIN_ANVIL_FABRIC_LSA_A2A=1")
+
+
+@pytest.mark.parametrize("lane", [False, True], ids=["lsa-off", "lsa-on"])
+@pytest.mark.parametrize("dtype", ["float", "int32"])
+def test_AllToAllGinFabricLsaLane(request, lane, dtype):
+    rc, _ = _run_a2a(request, 64 * 1024 * NP, dtype, _FABRIC_LSA_ENV if lane else ())
+    assert rc == 0, "AllToAll data check failed (nonzero exit), lane={}, dtype={}".format(lane, dtype)
