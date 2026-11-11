@@ -6,11 +6,13 @@ This standalone CMake root builds one required test per selected family. It does
 
 | Family | Suite | First required test | Build inputs | Execution subject |
 |---|---|---|---|---|
-| `runtime-api` | `amdf-host` | AMDF negotiation, output preservation and inert instance/system-scope lifetime | Native C compiler and the public `ROCmRuntimeAPI::AMDF` header target | Explicit runtime prefix containing `lib/libamdf.so` |
+| `runtime-api` | `amdf-host` | AMDF negotiation, output preservation and host instance/system-scope lifetime | Native C compiler and the public `ROCmRuntimeAPI::AMDF` header target | Explicit runtime prefix containing `lib/libamdf.so` |
 | `ddi` | `ddi-host` | Aligned host allocation, independent lifetime and repeatable cleanup | Pinned Rust/Cargo and the selected rocddi source closure | rocddi already linked into the executable |
 | `kfd` | `kfd` | KFD version-query ioctl and repeat-query consistency | Native C compiler, test-owned KFD/DRM headers and Linux sysroot | Prepared `/dev/kfd` access and compatible KFD interface |
 
 These are narrow contract checks, not complete API, DDI or driver qualification. The KFD case exercises a real ioctl, not just device discovery; it does not submit GPU work or make firmware claims. There is no independently packaged HSA test or cross-layer suite in this slice. Private implementation unit tests retain their existing owners.
+
+The AMDF host suite requires ABI v12, support for both PROCESS and INSTANCE native-lifetime policies, and at least one instance-owned system-storage scope. Providers may support additional historical ABIs and expose multiple scopes. The suite checks the returned prefix/count protocol and host lifetime, without qualifying process-global initialization behavior.
 
 ## Build each family
 
@@ -93,4 +95,4 @@ With the runtime producer's prepared prerequisites and Python 3 available:
 python3 -B runtimes/testing/tests/test_standalone.py
 ```
 
-This builds actual separate family artifacts and a real runtime, exercises host contracts from moved read-only prefixes with build tools absent from `PATH`, and checks input/selection failures, binary link isolation, loader rejection and evidence retention. Invalid-provider fixtures only test loader failures; they never count as positive runtime evidence. On hosts without `/dev/kfd`, it also verifies a required KFD run fails with zero skipped tests. An actual passing KFD run in a prepared environment is a separate acceptance requirement.
+This builds actual separate family artifacts and a real runtime, exercises host contracts from moved read-only prefixes with build tools absent from `PATH`, and checks input/selection failures, binary link isolation, loader rejection and evidence retention. Deliberately failing providers test loader rejection and consumer protocol checks; they never count as positive runtime evidence. On hosts without `/dev/kfd`, it also verifies a required KFD run fails with zero skipped tests. An actual passing KFD run in a prepared environment is a separate acceptance requirement.

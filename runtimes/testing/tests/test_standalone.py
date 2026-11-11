@@ -360,6 +360,43 @@ class StandaloneTests(unittest.TestCase):
             "resolved outside selected image", (results / "junit.xml").read_text()
         )
 
+    def test_valid_protocol_variations_reach_the_injected_failure(self):
+        # Synthetic providers test the consumer's protocol decisions. Every
+        # invocation fails deliberately and supplies no runtime qualification.
+        cases = (
+            ("historical ABI", ["-DFIXTURE_SUPPORTS_ABI2=1"], "instance_create"),
+            ("multiple scopes", ["-DFIXTURE_SCOPE_COUNT=2"], "memory_scope_query_info"),
+        )
+        for name, settings, operation in cases:
+            with self.subTest(provider=name):
+                prefix = self.root / f"protocol provider {name}"
+                (prefix / "lib").mkdir(parents=True)
+                self.command(
+                    os.environ.get("CC", "cc"),
+                    "-std=c11",
+                    "-shared",
+                    "-fPIC",
+                    "-I",
+                    self.headers / "include",
+                    *settings,
+                    SOURCE / "testing/tests/fixtures/amdf_protocol_provider.c",
+                    "-o",
+                    prefix / "lib/libamdf.so",
+                )
+                _, results = self.run_suite(
+                    "runtime-api",
+                    "amdf-host",
+                    success=False,
+                    results=self.root / f"protocol results {name}",
+                    RUNTIME_PREFIX=prefix,
+                )
+                report = ET.parse(results / "junit.xml").getroot()
+                self.assertEqual(report.attrib["failures"], "1")
+                self.assertIn(
+                    f"fixture: {operation} reached",
+                    (results / "junit.xml").read_text(),
+                )
+
     @unittest.skipIf(
         Path("/dev/kfd").exists(), "Missing-device check requires /dev/kfd to be absent"
     )

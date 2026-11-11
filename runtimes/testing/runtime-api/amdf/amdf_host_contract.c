@@ -66,12 +66,20 @@ int main(int argc, char **argv) {
   CHECK(api->instance_create && api->instance_destroy &&
         api->instance_enumerate_memory_scopes && api->memory_scope_query_info);
   const amdf_api_t *again = api;
-  CHECK(query(2, 2, &again) ==
-        amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
-  CHECK(again == api);
+  amdf_status_t version_status =
+      query(AMDF_ABI_VERSION_2, AMDF_ABI_VERSION_2, &again);
+  CHECK(version_status == AMDF_STATUS_OK ||
+        version_status ==
+            amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
+  if (version_status == AMDF_STATUS_OK) {
+    CHECK(again != NULL && again->abi_version == AMDF_ABI_VERSION_2);
+  } else {
+    CHECK(again == api);
+  }
+  const amdf_api_t *preserved = again;
   CHECK(query(2, 1, &again) ==
         amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
-  CHECK(again == api);
+  CHECK(again == preserved);
 
   for (uint32_t lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
        lifetime <= AMDF_NATIVE_LIFETIME_INSTANCE; ++lifetime) {
@@ -86,8 +94,12 @@ int main(int argc, char **argv) {
           amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
     CHECK(count != 0);
     amdf_memory_scope_t *scope = NULL;
-    CHECK(api->instance_enumerate_memory_scopes(instance, 1, &scope, &count) ==
-          AMDF_STATUS_OK);
+    amdf_status_t enumeration_status =
+        api->instance_enumerate_memory_scopes(instance, 1, &scope, &count);
+    CHECK(count != 0 && scope != NULL);
+    CHECK(enumeration_status ==
+          (count > 1 ? amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL)
+                     : AMDF_STATUS_OK));
     amdf_memory_scope_info_t info = {0};
     info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
     info.structure_size = sizeof(info);
