@@ -80,7 +80,9 @@ run. It also needs your consent, given in one of two ways:
 * With ``HIP_HRR_CAPTURE_CONSENT=yes``, where no such file can be kept, as in CI or
   a container. The variable applies to every process that inherits it, child
   processes and MPI ranks included. Any other value, such as ``no``, withholds
-  consent even when the file says yes.
+  consent even when the file says yes. An empty value counts as unset, so the
+  file still decides: to turn capture off, unset ``HIP_HRR_CAPTURE_OUTPUT`` or
+  set ``HIP_HRR_CAPTURE_CONSENT=no``.
 
 Without either, the application runs unrecorded and says why in one line on
 stderr. Whoever controls your environment or configuration directory can give
