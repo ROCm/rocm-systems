@@ -7,10 +7,10 @@
 // Raw float ordering follows rocjitsu shared/comparison.h and reuses the vector
 // predicate helpers. Integer and bit tests follow generated/execute_shared.h.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "compare/float_compare_impl.h"
 #include "compare/predicate.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

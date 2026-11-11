@@ -5,7 +5,7 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "compare/class.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <immintrin.h>
 #include <stdint.h>

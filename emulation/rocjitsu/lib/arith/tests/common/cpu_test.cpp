@@ -5,9 +5,9 @@
 
 #include "common/cpu.h"
 #include "common/cpu_decode.h"
-#include "common/internal.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

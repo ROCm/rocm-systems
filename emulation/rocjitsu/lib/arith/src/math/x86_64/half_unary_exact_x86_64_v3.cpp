@@ -4,12 +4,12 @@
 // AVX2 exact FP16 special-function execution using SIMD with scalar repair.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
 #include "math/half_unary.h"
 #include "math/x86_64/rcp_exact.h"
 #include "math/x86_64/root_exact.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
 #include <stdint.h>

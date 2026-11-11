@@ -8,7 +8,7 @@
 #include "fp/binary.h"
 #include "fp/binary_impl.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

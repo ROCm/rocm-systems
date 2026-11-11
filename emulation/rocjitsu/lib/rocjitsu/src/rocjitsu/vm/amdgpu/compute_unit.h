@@ -14,7 +14,7 @@
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
@@ -1904,19 +1904,6 @@ inline std::string InstructionComputeUnitView::full_path() const { return raw_cu
 inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_cu().id(); }
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
   return raw_cu().engine();
-}
-inline uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
-                                                                   uint32_t process_id) const {
-  if (process_id == 0)
-    return raw_cu().memory()->fetch32(address);
-  if (!raw_cu().gpu_vm())
-    return 0;
-  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
-  uint32_t word = 0;
-  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
-  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
-             ? word
-             : 0;
 }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();

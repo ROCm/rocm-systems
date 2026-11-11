@@ -6,8 +6,8 @@
 
 // Semantics follow rocjitsu generated/shared/execute_shared.h for RDNA3/RDNA4.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

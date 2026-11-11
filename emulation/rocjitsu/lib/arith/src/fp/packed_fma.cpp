@@ -5,10 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "fp/packed_fma.h"
-#include "common/internal.h"
 #include "common/packed_alu.h"
+#include "common/validation.h"
 #include "fp/half_fma_scalar.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 

@@ -7,9 +7,9 @@
 // RDNA3 constant predicates follow rocjitsu execute_v_cmp_[ft]_* for results.
 // Floating exception reporting needs a separate RDNA3 model.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 #include <string.h>

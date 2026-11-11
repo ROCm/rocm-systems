@@ -5,7 +5,7 @@
 
 #include "common/integer.h"
 #include "common/word_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <algorithm>
 #include <gtest/gtest.h>

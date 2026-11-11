@@ -4,7 +4,7 @@
 // Tests for sums of absolute differences, sliding windows, and packed accumulators.
 
 #include "integer/sad_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 

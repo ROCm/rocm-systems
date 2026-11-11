@@ -7,10 +7,10 @@
 #include "conversion/conversion32.h"
 #include "common/alu.h"
 #include "common/bits.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "conversion/float_conversion.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 

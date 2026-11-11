@@ -7,7 +7,7 @@
 #include "common/registers.h"
 #include "fp/binary_arithmetic_test.h"
 #include "fp/elementwise.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

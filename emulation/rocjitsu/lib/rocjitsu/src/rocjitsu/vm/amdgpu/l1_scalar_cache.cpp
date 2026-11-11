@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"

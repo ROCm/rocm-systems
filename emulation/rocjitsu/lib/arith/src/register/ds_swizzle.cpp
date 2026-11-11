@@ -8,9 +8,9 @@
 // checked against RX 9070 captures; RDNA3's masked-rotate examples disagree
 // with its own pseudocode. Rotations wrap within each 32-lane row.
 
-#include "common/internal.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

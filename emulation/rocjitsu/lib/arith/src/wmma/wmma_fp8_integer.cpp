@@ -6,10 +6,9 @@
 // floating-point bit-exact accumulation uses the shared DOT8 model.
 
 #include "common/float_formats.h"
-#include "common/internal.h"
 #include "common/simd.h"
 #include "dot/dot.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <stdint.h>

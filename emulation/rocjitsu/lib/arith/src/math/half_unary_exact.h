@@ -7,7 +7,7 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/float_formats.h"
+#include "common/float_encoding.h"
 #include "common/round_integral.h"
 #include "fp/half_fma_scalar.h"
 #include "math/half_unary.h"
@@ -15,7 +15,7 @@
 #include "math/rsq_model.h"
 #include "math/sqrt_model.h"
 #include "math/unary_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

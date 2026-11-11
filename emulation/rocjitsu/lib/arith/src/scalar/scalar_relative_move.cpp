@@ -7,8 +7,8 @@
 // Both ISA manuals, sections 3.3.1 and S_MOVREL: indices count DWORDs,
 // and indexing cannot cross between SGPR/VCC and trap-temporary regions.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

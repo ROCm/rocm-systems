@@ -4,6 +4,7 @@
 // Tests for floating-point logarithm and exponential entry points.
 
 #include "math/unary_test.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathExpF32W32Gfx11, Arithmetic) {
