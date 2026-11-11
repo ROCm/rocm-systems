@@ -59,4 +59,12 @@ concept metadata_registry_policy =
         { const_registry.save_to_file(filepath, agents) } -> std::convertible_to<bool>;
     };
 
+/** What a writer of counter schemas needs: add a schema for an id, list them by id. */
+template <typename Registry, typename Schema>
+concept counter_schema_registry = requires(
+    Registry& registry, const Registry& const_registry, const Schema& description) {
+    { registry.add_counter_schema(description) } -> std::convertible_to<std::uint32_t>;
+    { const_registry.get_counter_schemas() } -> std::convertible_to<std::vector<Schema>>;
+};
+
 }  // namespace rocprofsys::policies::trace_cache
