@@ -8,9 +8,46 @@
 #include "core/utility.hpp"
 
 #include "logger/debug.hpp"
+#include "rocprofiler-systems/categories.h"
 
+#include <fmt/format.h>
+
+#include <array>
+#include <cstddef>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
+
+namespace rocprofsys
+{
+namespace
+{
+template <size_t... Idx>
+constexpr auto
+make_category_table(std::index_sequence<Idx...>)
+{
+    return std::array<category_names, sizeof...(Idx)>{ category_names{
+        .name        = tim::trait::name<category_type_id_t<Idx>>::value,
+        .description = tim::trait::name<category_type_id_t<Idx>>::description }... };
+}
+
+// Index 0 holds the first id after ROCPROFSYS_CATEGORY_NONE.
+constexpr auto k_category_table = make_category_table(
+    utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}  // namespace
+
+category_names
+category_info(std::size_t category_id)
+{
+    if(category_id == ROCPROFSYS_CATEGORY_NONE || category_id >= ROCPROFSYS_CATEGORY_LAST)
+    {
+        throw std::out_of_range(
+            fmt::format("category id {} has no category", category_id));
+    }
+    return k_category_table[category_id - 1];
+}
+}  // namespace rocprofsys
 
 namespace rocprofsys::categories
 {

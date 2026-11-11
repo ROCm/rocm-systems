@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "core/config.hpp"
 #include "library/pmc/collectors/cpu/device.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
 #include "library/pmc/collectors/cpu/types.hpp"
@@ -52,7 +51,7 @@ struct cpu_traits
     template <typename Settings>
     [[nodiscard]] static device_filter get_device_filter()
     {
-        return Settings::get_device_filter(rocprofsys::get_sampling_cpus());
+        return Settings::get_cpu_device_filter();
     }
 
     template <typename Settings>
