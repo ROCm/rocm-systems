@@ -47,7 +47,7 @@
  * - Strix / Strix Halo / Krackan (RDNA 3.5 gfx115x) APU iGPU:
  *   - Wave32 native, WMMA (FP16/BF16/INT8), VOPD same-wave dual-issue VALU
  *   - FP8/BF8 support; scalar FP in scalar unit; s_singleuse_vdst hint
- *   - Async LDS, WGP architecture; unified s_waitcnt; NO TDM, NO FP64 atomics
+ *   - Async LDS, WGP architecture; unified s_waitcnt;
  *
  * - RDNA4 Consumer (gfx1200/gfx1201 - RX 9060/9070 variants):
  *   - FP8/BF8 OCP format conversions
@@ -55,7 +55,6 @@
  *   - Async LDS operations
  *   - AI inference accelerators
  *   - Unified s_waitcnt instruction (still available)
- *   - NO TDM, NO hardware FP64 atomics
  *
  * KEY ARCHITECTURAL DIFFERENCES:
  * ==============================
@@ -123,7 +122,7 @@
 #include "mega_kernel_types.h"
 
 // ============================================================================
-// NPI TOOLCHAIN WORKAROUND: gfx1250 fallback detection
+// TOOLCHAIN WORKAROUND: gfx1250 fallback detection
 // ============================================================================
 // Some patched ROCm builds (+PATCHED) may not auto-define __gfx1250__ when
 // targeting gfx1250. Use s_wait_asynccnt builtin (gfx1250-specific for async
@@ -506,13 +505,13 @@ __device__ void test_fp8_e5m3_conversions(TestResults* results, int lane_id) {
     #if __has_builtin(__builtin_amdgcn_cvt_pk_fp8_f32_e5m3)
     fp8_e5m3_packed = __builtin_amdgcn_cvt_pk_fp8_f32_e5m3(test_val, test_val, fp8_e5m3_packed, false);
 
-    // NPI toolchain: builtin may exist but return 0 if not yet functional - bypass
+    // toolchain: builtin may exist but return 0 if not yet functional - bypass
     if (fp8_e5m3_packed == 0) {
         if (lane_id == 0) atomicMin(&results->fp8_e5m3_convert_passed, -1);
         return;
     }
     // Non-zero packed result: builtin works, mark as passed.
-    // Skip round-trip check on gfx1250 NPI builds since cvt_f32_fp8_e5m3
+    // Skip round-trip check on gfx1250 builds since cvt_f32_fp8_e5m3
     // may also be non-functional (returns wrong values) in this toolchain.
     passed = true;
     #else
@@ -541,13 +540,13 @@ __device__ void test_bf8_conversions(TestResults* results, int lane_id) {
 
 #if defined(__gfx1250__)
     // gfx1250: BF8 E5M2 OCP format
-    // Note: Some NPI toolchains expose the builtin but return 0 (not yet functional).
+    // Note: Some toolchains expose the builtin but return 0 (not yet functional).
     // Treat result=0 as "bypass" rather than "fail" in that case.
     float test_val = 2.0f;
     uint32_t bf8_packed = 0;
     bf8_packed = __builtin_amdgcn_cvt_pk_bf8_f32(test_val, test_val, bf8_packed, false);
     if (bf8_packed == 0) {
-        // Builtin not yet functional in this NPI toolchain - bypass
+        // Builtin not yet functional in this toolchain - bypass
         if (lane_id == 0) atomicMin(&results->bf8_convert_passed, -1);
         return;
     }
@@ -2247,7 +2246,6 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
 //
 // 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950), gfx1250 ONLY:
 //    - Two waves each contribute one VALU instruction
-//    - Requires dual VALU arbiters (new hardware in gfx950+)
 //
 // The following test demonstrates instruction patterns that enable dual-issue.
 
@@ -2314,14 +2312,6 @@ __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
     // ========================================================================
     // MI300 supports VOPD encoding which executes 2 operations from the SAME
     // wave in parallel.
-    //
-    // VOPD Operations (executed as dual ops in one instruction):
-    // - V_DUAL_FMAC_F32, V_DUAL_MUL_F32, V_DUAL_ADD_F32, V_DUAL_SUB_F32
-    // - V_DUAL_MOV_B32, V_DUAL_CNDMASK_B32
-    // - V_DUAL_MAX_NUM_F32, V_DUAL_MIN_NUM_F32
-    // - V_DUAL_ADD_NC_U32, V_DUAL_LSHLREV_B32, etc.
-    //
-    // VOPD3 extends this with 3 source operands per instruction.
 
     // Pattern: FP32 operations that compiler can potentially encode as VOPD
     float a = (float)lane_id * 0.1f;
@@ -2796,7 +2786,7 @@ __device__ void test_tdm_operations(int* global_src, [[maybe_unused]] int* globa
     group1.tileDim1(SIZE_Y);
 
     // TDM Load: Load 2D tensor from global to LDS
-    // Guard with __has_builtin: NPI toolchains may not yet expose TDM d2 builtins
+    // Guard with __has_builtin: toolchains may not yet expose TDM d2 builtins
 #if __has_builtin(__builtin_amdgcn_tensor_load_to_lds_d2)
     __builtin_amdgcn_tensor_load_to_lds_d2(group0.m_bitfield, group1.m_bitfield, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
@@ -2854,7 +2844,6 @@ __device__ void test_tdm_operations(int* global_src, [[maybe_unused]] int* globa
 // 1. CLUSTER SYNCHRONIZATION:
 //    - Workgroups in a cluster can synchronize using cluster barriers
 //    - Uses split-barrier mechanism (signal/wait pattern)
-//    - Up to 15 clusters per SE, up to 12 workgroups per cluster
 //
 // 2. CLUSTER BROADCAST LOADS:
 //    - CLUSTER_LOAD_B{32,64,128}: Shared memory loads across cluster
@@ -3053,17 +3042,6 @@ __device__ void test_cluster_operations(int* global_int, TestResults* results, i
 // WMMA INSTRUCTIONS - RDNA4 Matrix Cores:
 // =======================================
 // Reference: https://gpuopen.com/learn/using_matrix_core_amd_rdna4/
-//
-// gfx12/gfx1250 features 3rd-generation Matrix Cores with significantly
-// improved GEMM performance compared to RDNA3:
-//
-// PERFORMANCE COMPARISON (FLOPS/clock/CU):
-// ----------------------------------------
-// | Format | RDNA2 (RX 6950) | RDNA3 (RX 7900) | RDNA4 (RX 9070) |
-// |--------|-----------------|-----------------|-----------------|
-// | FP16   | 256             | 512             | 1024            |
-// | BF16   | N/A             | 512             | 1024            |
-// | I8     | 512             | 512             | 2048            |
 //
 // WMMA INTRINSIC FORMAT:
 // ----------------------
@@ -3515,25 +3493,8 @@ __device__ void test_wmma_operations([[maybe_unused]] TestResults* results,
 // ----------------------
 // - GFX12 architecture (gfx1200/gfx1201)
 // - WGP (Workgroup Processor) based - 2 CUs per WGP
-// - Wave32 native, Wave64 emulated
-// - Improved AI inference accelerators
+// - Wave32 native
 // - FP8/BF8 OCP (Open Compute Platform) format support
-//
-// KEY DIFFERENCES FROM CDNA (MI series):
-// --------------------------------------
-// - No hardware FP64 atomics (limited FP64 in general)
-// - Graphics-focused instruction set (more pixel/vertex ops)
-// - Different memory hierarchy (infinity cache)
-// - WGP instead of CU-centric design
-//
-// RDNA4 SPECIFIC INSTRUCTIONS:
-// ----------------------------
-// - FP8/BF8 conversions (OCP format)
-// - Async LDS operations
-// - AI inference dot products
-// - Ray-box/ray-triangle intersection instructions
-//
-// This test verifies RDNA4-specific features when running on consumer GPUs.
 
 __device__ void test_rdna4_features([[maybe_unused]] TestResults* results,
                                     [[maybe_unused]] int lane_id) {
