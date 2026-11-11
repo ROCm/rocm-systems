@@ -15,7 +15,7 @@ a list under a key is ORed; a missing key matches anything. Glob patterns
 ``kind: unsupported`` is permanent and needs only a reason.
 
 Usage:
-    hrr_test_config.py lint CONFIG [CONFIG ...] [--workflow hrr-ci.yml]
+    hrr_test_config.py lint CONFIG [CONFIG ...] [--workflow WORKFLOW]
     hrr_test_config.py check --binary EXE --config CONFIG [--update]
 """
 

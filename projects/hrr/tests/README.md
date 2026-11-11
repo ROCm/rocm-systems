@@ -1,8 +1,6 @@
 # HRR tests
 
-Layout, what each suite covers, and how to run it. CI runs everything here from
-[`.github/workflows/hrr-ci.yml`](../../../.github/workflows/hrr-ci.yml); the commands below
-are the same ones it uses.
+Layout, what each suite covers, and how to run it.
 
 ## Layout
 
@@ -189,8 +187,8 @@ skip:
 ```
 
 Direct workloads (`[hrr-direct]`, `[direct]`) are spawned by a driver and must not
-carry rules. `targets.arch` is the same list as `HRR_ARCHS` in
-`.github/workflows/hrr-ci.yml`; `hrr_test_config.py lint --workflow` checks that.
+carry rules. `hrr_test_config.py lint --workflow <workflow>` checks that
+`targets.arch` matches the workflow's `HRR_ARCHS` list.
 
 CI compares each binary's registered cases against its YAML, in both directions,
 because a case behind an `#if` or a missing define disappears without any failure.
