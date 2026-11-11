@@ -1496,7 +1496,13 @@ protected:
   static constexpr std::array<WriteBack, 2> kWriteBacks{
       {{"global_wb", 0xEE0B0000u}, {"global_wbinv", 0xEE13C000u}}};
 
-  void global_inv(int wave) { issue_words(wave, {0xEE0AC000u, 0x00000000u, 0x00000000u}); }
+  /// Issue a decoded GLOBAL_INV with the wave's EXEC set to `exec`.
+  void global_inv(int wave, uint64_t exec = 1) {
+    const uint64_t wave_exec = waves[wave]->exec();
+    waves[wave]->set_exec(exec);
+    issue_words(wave, {0xEE0AC000u, 0x00000000u, 0x00000000u});
+    waves[wave]->set_exec(wave_exec);
+  }
 
   struct LanePermute {
     const char *name;
@@ -2038,6 +2044,14 @@ TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvAdvancesLoadcnt) {
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
   ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvWithExecZeroAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0, /*exec=*/0));
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
