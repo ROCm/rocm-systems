@@ -37,10 +37,11 @@ bool binary_exact_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask,
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-// Attempt finite MUL domains without writes on decline; uses default host FP state.
-// FP status reporting follows the resolved semantics.
+// Attempt finite MUL or MUL_DX9_ZERO domains without writes on decline; uses default host FP
+// state. FP status reporting follows the resolved semantics.
 bool mul_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state);
+                         uint32_t *d, const uint32_t *a, const uint32_t *b, uint32_t *state,
+                         bool dx9_zero);
 #endif
 
 } // namespace rocjitsu::arith
