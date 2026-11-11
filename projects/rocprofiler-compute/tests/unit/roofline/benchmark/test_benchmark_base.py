@@ -238,14 +238,14 @@ def test_gfx1201_enabled_matrix_tests_have_operations_and_kernels():
         assert matrix_type in bench.matrix_kernel_selector
 
 
-def test_gfx1201_measures_dram_in_its_own_column():
-    """gfx1201 launches DRAM_bw and writes the DRAMBw column."""
+def test_gfx1201_measures_gddr6_in_its_own_column():
+    """gfx1201 launches DRAM_bw and writes the GDDR6Bw column."""
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
 
     assert not runs_benchmark(bench, "HBM")
-    assert runs_benchmark(bench, "DRAM")
-    assert bench.tests["DRAM"] == bench.dram_bw_benchmark
-    assert bench.csv_cols_map["DRAM"] == "DRAMBw"
+    assert runs_benchmark(bench, "GDDR6")
+    assert bench.tests["GDDR6"] == bench.dram_bw_benchmark
+    assert bench.csv_cols_map["GDDR6"] == "GDDR6Bw"
     assert "HBM" not in bench.csv_cols_map
     assert_source_defines(bench.hbm_bw_src, "DRAM_bw", "gfx1201 DRAM")
 
@@ -319,10 +319,10 @@ def test_percent_of_ceiling_reports_an_unusable_ceiling_as_unavailable():
     assert percent_of_ceiling(50.0, -1.0) == "n/a"
 
 
-def test_gfx1201_dram_test_runs_the_device_memory_benchmark_under_the_dram_name(
+def test_gfx1201_gddr6_test_runs_the_device_memory_benchmark_under_the_gddr6_name(
     monkeypatch, capsys
 ):
-    """The DRAM test launches the DRAM_bw kernel, labels it DRAM, and returns the
+    """The GDDR6 test launches the DRAM_bw kernel, labels it GDDR6, and returns the
     measured peak. The pin-rate reference it prints is a percentage of 640 GB/s."""
     bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
     calls = []
@@ -334,7 +334,7 @@ def test_gfx1201_dram_test_runs_the_device_memory_benchmark_under_the_dram_name(
     monkeypatch.setattr(bench, "hbm_bw_benchmark", fake_device_memory_benchmark)
 
     assert bench.dram_bw_benchmark(0) == 480.0
-    assert calls == [(0, "DRAM_bw", "DRAM")]
+    assert calls == [(0, "DRAM_bw", "GDDR6")]
     assert "(75.0%)" in capsys.readouterr().out
 
 
@@ -375,9 +375,9 @@ def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(
     assert grids[0] == [3584, 1, 1]
     assert "HBM BW, GPU ID: 0" in capsys.readouterr().out
 
-    benchmark_base.Bench_base.hbm_bw_benchmark(bench, 0, "DRAM_bw", "DRAM")
+    benchmark_base.Bench_base.hbm_bw_benchmark(bench, 0, "DRAM_bw", "GDDR6")
     assert kernels == ["HBM_bw", "DRAM_bw"]
-    assert "DRAM BW, GPU ID: 0" in capsys.readouterr().out
+    assert "GDDR6 BW, GPU ID: 0" in capsys.readouterr().out
 
 
 def test_resident_stream_plan_sizes_whole_grid_steps_and_the_pass_count():

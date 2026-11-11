@@ -227,6 +227,14 @@ class TestMIGPUSpecs:
                 levels = MIGPUSpecs.get_memory_levels(gpu_model)
                 assert set(bandwidth) <= set(levels), (gpu_arch, gpu_model)
 
+    def test_navi48_device_memory_is_gddr6_where_mi_keeps_hbm(self):
+        assert MIGPUSpecs.get_memory_levels("rdna4_navi48")[-1] == "GDDR6"
+        assert "HBM" not in MIGPUSpecs.get_memory_levels("rdna4_navi48")
+        assert "HBM" in MIGPUSpecs.get_memory_levels("mi300x_a1")
+        assert MIGPUSpecs.get_roofline_bandwidth("gfx1201")[0] == "GDDR6"
+        assert MIGPUSpecs.get_roofline_test_column("GDDR6") == "GDDR6Bw"
+        assert MIGPUSpecs.get_roofline_test_column("HBM") == "HBMBw"
+
     def test_roofline_plots_mall_only_where_the_arch_opts_in(self):
         assert MIGPUSpecs.get_roofline_plots_mall("gfx1201")
         assert not MIGPUSpecs.get_roofline_plots_mall("gfx942")

@@ -2,8 +2,8 @@
 # RDNA 4 (gfx1201, Navi 48) - Roofline Performance Metrics
 # =============================================================================
 # Navi 48: 64 CUs, wave32, 8 MB L2, 64 MB Infinity Cache, 256-bit DRAM (GDDR6) at 20 Gbps.
-# Cache hierarchy: GL0 (TCP) -> GL1 -> GL2 -> Infinity Cache -> DRAM.
-# The DRAM column of roofline.csv (DRAMBw) holds the measured DRAM bandwidth
+# Cache hierarchy: GL0 (TCP) -> GL1 -> GL2 -> Infinity Cache -> GDDR6.
+# The GDDR6 column of roofline.csv (GDDR6Bw) holds the measured GDDR6 bandwidth
 # and the MALL column the measured Infinity Cache bandwidth.
 # Device-memory bytes are 32-byte granules of GL2C/EA requests destined for DRAM
 # (GL2C_EA_RDREQ_DRAM_32B, PERF_SEL 0xa7; GL2C_EA_WRREQ_DRAM_32B, PERF_SEL 0xa8).
@@ -60,10 +60,10 @@ Panel Config:
           value: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
           peak: $LDSBw_empirical_peak * 1e9
-        DRAM BW:
+        GDDR6 BW:
           value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-          peak: $DRAMBw_empirical_peak * 1e9
+          peak: $GDDR6Bw_empirical_peak * 1e9
         DRAM-Destined BW (Infinity Cache Peak):
           value: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
@@ -92,7 +92,7 @@ Panel Config:
         AI LDS:
           value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu)
           unit: FLOPs/Byte
-        AI DRAM:
+        AI GDDR6:
           value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
           unit: FLOPs/Byte
         Performance (GFLOPs):
@@ -119,9 +119,9 @@ Panel Config:
       Achieved bandwidth at the GL0 vector cache (TCP Cache).
     LDS BW: >-
       Achieved bandwidth for Local Data Share memory operations.
-    DRAM BW: >-
+    GDDR6 BW: >-
       Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
-      with the measured DRAM bandwidth. These requests are also served by the
+      with the measured GDDR6 bandwidth. These requests are also served by the
       Infinity Cache, so a working set that fits in it can exceed this peak.
     DRAM-Destined BW (Infinity Cache Peak): >-
       Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
@@ -135,9 +135,9 @@ Panel Config:
       Arithmetic intensity relative to GL0 (TCP) requests.
     AI LDS: >-
       Arithmetic intensity relative to Local Data Share traffic.
-    AI DRAM: >-
+    AI GDDR6: >-
       Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The
-      plot marks the point at the DRAM level. Compare it with both the DRAM roof
+      plot marks the point at the GDDR6 level. Compare it with both the GDDR6 roof
       and the Infinity Cache (MALL) roof, since those requests can hit in the
       Infinity Cache.
     Performance (GFLOPs): >-

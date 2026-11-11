@@ -196,9 +196,9 @@ Roofline Performance Rates:
     plain: Achieved bandwidth for Local Data Share memory operations.
     rst: Achieved bandwidth for Local Data Share memory operations.
     unit: Bytes/s
-  DRAM BW:
-    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
-    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+  GDDR6 BW:
+    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured GDDR6 bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured GDDR6 bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
     unit: Bytes/s
   DRAM-Destined BW (Infinity Cache Peak):
     plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
@@ -221,9 +221,9 @@ Roofline Plot Points:
     plain: Arithmetic intensity relative to Local Data Share traffic.
     rst: Arithmetic intensity relative to Local Data Share traffic.
     unit: FLOPs/Byte
-  AI DRAM:
-    plain: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the DRAM level. Compare it with both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
-    rst: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the DRAM level. Compare it with both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+  AI GDDR6:
+    plain: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the GDDR6 level. Compare it with both the GDDR6 roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the GDDR6 level. Compare it with both the GDDR6 roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     plain: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
