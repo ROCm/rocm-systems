@@ -360,3 +360,70 @@ test('cancelled post-merge report offers recovery for the merged commit', async 
   assert.match(comments[0].body, /Rerun this workflow to measure the merged commit/);
   assert.doesNotMatch(comments[0].body, /current PR head/);
 });
+
+async function summaryArtifact(t, content) {
+  const { mkdtemp, writeFile, rm } = require('node:fs/promises');
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'rocjitsu-report-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'summary.json');
+  await writeFile(path, content);
+  return path;
+}
+
+test('includes an identified summary for the exact published run', async (t) => {
+  const { args, comments } = postCommitFixture();
+  const summaryPath = await summaryArtifact(t, JSON.stringify({ runId: args.publishedRunId,
+    headSha: args.headSha, markdown: '### Benchmark summary\n\nExample: 4 faster, 2 slower.' }));
+  await reportBenchmark({ ...args, summaryPath });
+  assert.match(comments[0].body, /Example: 4 faster, 2 slower/);
+});
+
+for (const changes of [ { runId: 'old-run' }, { headSha: 'b'.repeat(40) },
+  { markdown: 42 }, { markdown: 'x'.repeat(40001) } ]) {
+  test(`rejects an unrelated or invalid summary (${Object.keys(changes)[0]})`, async (t) => {
+    const { args, comments, warnings } = postCommitFixture();
+    const summaryPath = await summaryArtifact(t, JSON.stringify({ runId: args.publishedRunId,
+      headSha: args.headSha, markdown: '### Benchmark summary\nStale summary', ...changes }));
+    await reportBenchmark({ ...args, summaryPath });
+    assert.match(comments[0].body, /summary unavailable/);
+    assert.doesNotMatch(comments[0].body, /Stale summary/);
+    assert.equal(warnings.length, 1);
+  });
+}
+
+for (const content of ['not json', 'null']) {
+  test(`reports unavailable summary data without suppressing the PR comment (${content})`, async (t) => {
+    const { args, comments, warnings } = postCommitFixture();
+    const summaryPath = await summaryArtifact(t, content);
+    await reportBenchmark({ ...args, summaryPath });
+    assert.match(comments[0].body, /summary unavailable/);
+    assert.equal(warnings.length, 1);
+  });
+}
+
+test('a missing artifact does not suppress the PR comment', async () => {
+  const { args, comments, warnings } = postCommitFixture();
+  await reportBenchmark({ ...args, summaryPath: '/missing/rocjitsu-summary.json' });
+  assert.match(comments[0].body, /summary unavailable/);
+  assert.equal(warnings.length, 1);
+});
+
+test('unpublished runs do not include comparison statistics', async (t) => {
+  const { args, comments } = postCommitFixture();
+  const summaryPath = await summaryArtifact(t, JSON.stringify({ runId: args.publishedRunId,
+    headSha: args.headSha, markdown: '### Benchmark summary\nNot yet published' }));
+  await reportBenchmark({ ...args, summaryPath, publishResult: 'failure' });
+  assert.doesNotMatch(comments[0].body, /Not yet published/);
+});
+
+test('a report-only rerun accepts the original published benchmark summary', async (t) => {
+  const { args, comments } = postCommitFixture();
+  const summaryPath = await summaryArtifact(t, JSON.stringify({ runId: args.publishedRunId,
+    headSha: args.headSha, markdown: '### Benchmark summary\nOriginal benchmark measurements' }));
+  await reportBenchmark({ ...args, summaryPath, runAttempt: '3', benchmarkAttempt: '1' });
+  assert.match(comments[0].body, /Original benchmark measurements/);
+  assert.match(comments[0].body, /Reporting attempt: \*\*3\*\*/);
+  assert.match(comments[0].body, /Benchmark attempt: \*\*1\*\*/);
+});

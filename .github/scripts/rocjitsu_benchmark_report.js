@@ -3,6 +3,8 @@
 
 'use strict';
 
+const { readFile } = require('node:fs/promises');
+
 function previousOrder(body) {
   const identity = body.match(/<!-- rocjitsu-benchmark-report-run:\d+:(\d+):(\d+) -->/);
   if (!identity) throw new Error('Existing benchmark report has no workflow run identity.');
@@ -20,6 +22,7 @@ async function reportBenchmark({
   benchmarkAttempt,
   publishedRunId,
   headSha,
+  summaryPath,
 }) {
   const { owner, repo } = context.repo;
   let pull = context.payload.pull_request;
@@ -70,6 +73,19 @@ async function reportBenchmark({
     if (!publishedRunId) throw new Error('Successful publication has no published run ID.');
     dashboardUrl.searchParams.set('run', publishedRunId);
   }
+  let summaryMarkdown = '';
+  if (publishResult === 'success' && summaryPath) {
+    try {
+      const summary = JSON.parse(await readFile(summaryPath, 'utf8'));
+      if (summary.runId !== publishedRunId || summary.headSha !== headSha ||
+          typeof summary.markdown !== 'string' || summary.markdown.length > 40000) {
+        throw new Error('Benchmark summary does not match the published run');
+      }
+      summaryMarkdown = summary.markdown;
+    } catch (error) {
+      core?.warning(`Benchmark comparison summary unavailable: ${error.message}`);
+    }
+  }
   const body = [
     marker,
     `<!-- rocjitsu-benchmark-report-run:${context.runId}:${runNumber}:${runAttempt} -->`,
@@ -94,6 +110,7 @@ async function reportBenchmark({
     `- Benchmark job: **${benchmarkResult}**`,
     `- Publication job: **${publishResult}**`,
     '',
+    ...(publishResult === 'success' ? [summaryMarkdown || 'Benchmark comparison summary unavailable; see the dashboard for results.', ''] : []),
     `[Open the dashboard](${dashboardUrl.href})`,
     '',
     `[View the workflow run](${runUrl}).`,
