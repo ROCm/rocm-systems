@@ -207,11 +207,3 @@ python tools/config_management/metric_description_manager.py --generate-docs --d
 ```
 
 **Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.
-
-Earlier or imported gfx1201 per-architecture description files can contain
-the sections `GL2C-EA Interface - HBM Bandwidth` or `GL2C Cache Bandwidth`.
-During `--sync-arch gfx1201` or `--sync-all`, the manager merges those sections
-into `GL2 Cache Bandwidth`, preserving authored RST. Authored RST in the
-current section takes precedence, followed by the prior cache section and then
-the HBM section. This compatibility path applies to those description artifacts;
-it does not rename workload counters or affect gfx1250's HBM-labelled section.
