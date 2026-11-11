@@ -19,6 +19,7 @@
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/broadcast/dda_broadcast.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #include "sym_kernels.h"
@@ -932,7 +933,38 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrBroadcast, info));
 
-  return ncclEnqueueCheck(&info);
+  if (rcclCollectiveMustUseEnqueuePath(comm)) {
+    return ncclEnqueueCheck(&info);
+  }
+  struct rcclCollDecision decision;
+  NCCLCHECK(rcclSelectBroadcast(comm, count, datatype, root, /*query=*/false, &decision));
+  // Non-DDA decisions enqueue unchanged (info.decision stays unset).
+  if (decision.algo < NCCL_NUM_ALGORITHMS) {
+    return ncclEnqueueCheck(&info);
+  }
+
+  if (comm->rank == 0) {
+    const char* an = nullptr;
+    rcclGetAlgoName(decision.algo, &an);
+    INFO(NCCL_COLL, "Broadcast impl selected: algo %s", an ? an : "?");
+  }
+
+  switch (decision.algo) {
+  case RCCL_DDA_FABRIC_LL:
+    INFO(NCCL_COLL, "Broadcast: taking DDA LL path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu", comm->nRanks,
+         root, count, (int)datatype, count * ncclTypeSize(datatype));
+    return rcclAddonLaunch(info, [&] {
+      return ncclBroadcastDdaFabricLL(sendbuff, recvbuff, count, datatype, root, comm, stream);
+    });
+  case RCCL_DDA_FABRIC_LL128:
+    INFO(NCCL_COLL, "Broadcast: taking DDA LL128 path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu",
+         comm->nRanks, root, count, (int)datatype, count * ncclTypeSize(datatype));
+    return rcclAddonLaunch(info, [&] {
+      return ncclBroadcastDdaFabricLL128(sendbuff, recvbuff, count, datatype, root, comm, stream);
+    });
+  default:
+    return ncclEnqueueCheck(&info);
+  }
 }
 
 NCCL_API(ncclResult_t, ncclBroadcastConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
