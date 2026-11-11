@@ -28,6 +28,14 @@
 files: ^projects/rccl/
 
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
   # C/C++ formatting, advisory only.
   #
   # 134 of the 769 files under src/ do not match .clang-format today, so a
@@ -70,7 +78,9 @@ repos:
         name: pylint (advisory, RCCL-owned Python)
         language: python
         additional_dependencies: ["pylint==4.1.3"]
-        entry: bash -c 'pylint --rcfile=projects/rccl/.pylintrc "$@" || true' --
+        entry: >-
+          bash -c 'pylint --rcfile=projects/rccl/.pylintrc "$@"; status=$?;
+          if (( status & 33 )); then exit "$status"; fi' --
         # Always show output, even when the hook passes, since it always passes.
         verbose: true
-        files: ^projects/rccl/(ci/scripts|cmake/scripts|tools/asm_extract|tools/ci|tools/scripts|tools/time-trace|tuner)/.*\.py$|^projects/rccl/test/[^/]*\.py$
+        files: ^projects/rccl/.*\.py$

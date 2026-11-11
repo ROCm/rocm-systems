@@ -59,6 +59,7 @@ install_pre_commit() {
 # ---------------------------------------------------------------------------
 # Summarise the findings for the job summary
 # ---------------------------------------------------------------------------
+# shellcheck disable=SC2329  # invoked from the EXIT trap armed below
 summarise() {
   echo "## clang-tidy (advisory)"
   echo
@@ -79,9 +80,20 @@ summarise() {
   fi
 }
 
+# shellcheck disable=SC2329  # invoked from the EXIT trap armed below
+emit_summary() {
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    summarise >> "$GITHUB_STEP_SUMMARY"
+  else
+    summarise
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
+trap emit_summary EXIT
+
 install_build_deps
 fetch_nccl_ref
 install_pre_commit
@@ -93,7 +105,5 @@ pre-commit run \
   --config projects/rccl/.pre-commit-config.yaml \
   --hook-stage manual \
   clang-tidy || STATUS=$?
-
-summarise >> "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 exit "$STATUS"

@@ -53,12 +53,11 @@ jobs:
 
       - run: pip install pre-commit
 
-      - name: Run pre-commit on changed files
+      - name: Run pre-commit
         run: |
-          pre-commit run \
-            --config projects/rccl/.pre-commit-config.yaml \
-            --from-ref ${{ github.event.pull_request.base.sha }} \
-            --to-ref ${{ github.event.pull_request.head.sha }}
+          projects/rccl/maint/ci-pre-commit.sh \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }}
 
   clang-tidy:
     name: clang-tidy
@@ -74,7 +73,6 @@ jobs:
       image: rocm/dev-ubuntu-26.04:10.1.0-full
     env:
       ROCM_PATH: /opt/rocm
-      GPU_TARGETS: gfx942
     steps:
       - name: Install git
         run: |

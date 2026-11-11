@@ -187,8 +187,23 @@ if [[ "$INCLUDE_UPSTREAM" -eq 0 ]]; then
   # --full-tree matters: otherwise ls-tree restricts itself to the current
   # directory, which does not exist in NCCL's tree, giving an empty list and
   # silently unfiltered output.
+  #
+  # The findings name hipified files, so the upstream paths have to be carried
+  # through the same renames src/CMakeLists.txt applies before they can be
+  # compared: .cuh becomes .h, and .cu becomes .cu.cpp. Without this an upstream
+  # src/device/onerank.cu is reported as a finding in RCCL-owned
+  # src/device/onerank.cu.cpp, which is precisely the noise the filter exists to
+  # remove.
+  #
+  # Map forwards (upstream -> hipified) rather than backwards, because .cuh -> .h
+  # is not injective and the reverse would have to guess. Each line is emitted
+  # both as-is and renamed: `p` prints the original, the substitutions then act
+  # on the pattern space that sed auto-prints. The two cannot both fire, since a
+  # path ending .cuh no longer ends .cu after the first. sort -u drops the
+  # duplicate for every path that neither rule touches.
   git -C "$RCCL_ROOT" ls-tree -r --full-tree --name-only "$NCCL_REF" \
     | grep -E '\.(c|cc|cpp|h|hpp|cu|cuh)$' \
+    | sed -E 'p; s|\.cuh$|.h|; s|\.cu$|.cu.cpp|' \
     | sed 's|^|/|' \
     | sort -u > "$UPSTREAM_LIST"
 fi
@@ -207,12 +222,20 @@ fi
 
 # Keep stderr and check the driver's own status via PIPESTATUS: a driver that
 # dies early produces no output, which otherwise reads as a clean run.
+#
+# The second sed undoes the other hipify rename: add_file_unique() in
+# cmake/Dependencies.cmake appends _tmp to the stem of any source whose basename
+# already appears in the staged tree, so src/init.cc can arrive as init_tmp.cc
+# and src/device/onerank.cu as onerank_tmp.cu.cpp. That rename is injective, so
+# unlike .cuh -> .h it can be reversed here, which is what keeps the reported
+# path something you can open. The extension is matched in up to two parts so
+# that the .cu.cpp form survives.
 STDERR_LOG="${BUILD_DIR}/clang-tidy-stderr.txt"
 set +e
 "$RUN_CLANG_TIDY" "${ARGS[@]}" 2>"$STDERR_LOG" \
   | grep -E '(warning|error):' \
   | sed "s|${BUILD_DIR}/hipify/||" \
-  | sed 's/_tmp\.cc:/.cc:/' \
+  | sed -E 's|_tmp(\.[A-Za-z0-9]+(\.[A-Za-z0-9]+)?:)|\1|' \
   | sort -u > "${BUILD_DIR}/clang-tidy-all.txt"
 DRIVER_STATUS=${PIPESTATUS[0]}
 set -e
