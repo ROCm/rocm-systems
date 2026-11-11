@@ -94,7 +94,7 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
                    left == "fp8" || left == "bf8";
   std::minstd_rand random;
   for (int operand = 0; operand < 4; ++operand) {
-    for (int reg = 0; reg < 8; ++reg) {
+    for (int reg = 0; reg < kRegisters; ++reg) {
       for (int lane = 0; lane < 16; ++lane) {
         uint32_t raw = (uint32_t(random()) >> 15) | ((uint32_t(random()) >> 15) << 16);
         uint32_t value = word(formats[operand], raw, reg);
@@ -110,7 +110,7 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
       data[1][0][lane] = lane % 4;
     }
   }
-  for (int reg = 0; reg < 8; ++reg) {
+  for (int reg = 0; reg < kRegisters; ++reg) {
     a[reg] = data[0][reg];
     b[reg] = data[1][reg];
     c[reg] = data[2][reg];
@@ -133,7 +133,7 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     // Mix positive and negative fields, retaining gfx11's lane-group replication.
     const uint32_t sign = left == "iu4" ? 0x88888888U : 0x80808080U;
     for (int operand = 0; operand < 2; ++operand) {
-      for (int reg = 0; reg < 8; ++reg) {
+      for (int reg = 0; reg < kRegisters; ++reg) {
         for (int lane = 0; lane < 64; ++lane) {
           if ((lane >> operand) & 1) {
             data[operand][reg][lane] |= sign;

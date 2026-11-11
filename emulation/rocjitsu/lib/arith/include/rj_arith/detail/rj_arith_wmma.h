@@ -21,6 +21,14 @@ int rj_arith_v_wmma_i32_16x16x64_iu8_w32(uint64_t flags, uint64_t controls, uint
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c);
 
+// gfx1250 FP32 16x16x4 WMMA on all 32 lanes, ignoring EXEC. A/B each use two
+// VGPRs, C/D eight; NEG_C/ABS_C modify C, while unused source modifiers are ignored.
+// Guest FP controls are ignored. Loose, allow-Loose and Compatibility are approximate;
+// strict modes return UNSUPPORTED_SEMANTICS. Inputs may overlap D.
+int rj_arith_v_wmma_f32_16x16x4_f32_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
 // gfx1250 Wave32 16x16x32 half-input WMMA with FP32 C/D: eight VGPRs per operand.
 // Supports Loose, allow-Loose and Compatibility; strict exact modes are unsupported.
 // BF16 adds C after reducing the dot; FP16 starts the reduction at C. ABS_C then
@@ -446,6 +454,78 @@ int rj_arith_v_wmma_i32_16x16x16_iu4_w64_gfx12(uint64_t flags, uint64_t instruct
 int rj_arith_v_wmma_i32_16x16x32_iu4_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx1250 OCP FP8/BF8 Wave32 WMMA: A/B each consume K/8 VGPRs.
+// FP32 C/D consume eight VGPRs; packed FP16 C/D consume four. No EXEC or FP-status output.
+// Supports Loose, allow-Loose and Compatibility; strict exact modes are unsupported.
+// FP32 C accepts ABS then NEG. Packed C in Loose/allow-Loose also applies ABS then NEG;
+// INLINE_C uses the low-half F16 bits of c[0][0]. Compatibility ignores packed C
+// modifiers and uses the inherited full FP32 inline word instead.
+// FP16_OVFL saturates finite overflow and infinite results.
+// Guest rounding, denormal, IEEE and DX10 controls are ignored. Operand VGPRs may alias.
+int rj_arith_v_wmma_f32_16x16x64_fp8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x64_fp8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x64_fp8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x64_fp8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x64_bf8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x64_bf8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x64_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x64_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x128_fp8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x128_fp8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x128_fp8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x128_fp8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x128_bf8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x128_bf8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f32_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_wmma_f16_16x16x128_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                              uint32_t *const *d, const uint32_t *const *a,
+                                              const uint32_t *const *b, const uint32_t *const *c);
 
 #ifdef __cplusplus
 } // extern "C"

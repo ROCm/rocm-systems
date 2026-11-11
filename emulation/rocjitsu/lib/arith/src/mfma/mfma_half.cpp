@@ -6,7 +6,7 @@
 #include "common/float_formats.h"
 #include "common/internal.h"
 #include "mfma/backends.h"
-#include "mfma/layout.h"
+#include "mfma/reduction.h"
 #include "rj_arith/rj_arith.h"
 
 namespace {
@@ -37,8 +37,6 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  constexpr int Regs = M * M * Batch / 64;
-  uint32_t result[Regs][64];
   // Convert each source once, even when multiple output rows reuse it.
   float left[M * K * Batch], right[M * K * Batch];
   for (int i = 0; i < M * K * Batch; ++i) {
@@ -47,33 +45,7 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
     left[i] = Bf16 ? bf16_to_float(x) : f16_to_float(x);
     right[i] = Bf16 ? bf16_to_float(y) : f16_to_float(y);
   }
-  for (int batch = 0; batch < Batch; ++batch) {
-    for (int row = 0; row < M; ++row) {
-      for (int col = 0; col < M; ++col) {
-        auto out = mfma_output<M, Batch>(row, col, batch);
-        float acc = as_float(c[out.reg][out.lane]);
-        for (int k = 0; k < K; ++k) {
-          int ai = mfma_permute_half(mfma_half_index<M, K, Batch>(row, k, batch), instruction_flags,
-                                     true);
-          int bi = mfma_permute_half(mfma_half_index<M, K, Batch>(col, k, batch), instruction_flags,
-                                     false);
-          // Preserve BF16 cancellation even when the separate product would
-          // overflow.
-          if constexpr (Bf16) {
-            acc = __builtin_fmaf(left[ai], right[bi], acc);
-          } else {
-            acc += left[ai] * right[bi];
-          }
-        }
-        result[out.reg][out.lane] = as_bits(acc);
-      }
-    }
-  }
-  for (int reg = 0; reg < Regs; ++reg) {
-    for (int lane = 0; lane < 64; ++lane) {
-      d[reg][lane] = result[reg][lane];
-    }
-  }
+  mfma_reduce_scalar<M, K, Batch, 2, Bf16>(instruction_flags, d, left, right, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

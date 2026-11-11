@@ -28,7 +28,7 @@ inline void exec_dense_fp_matrix(Wavefront &wave, WmmaFunction function, uint64_
                                  std::optional<uint64_t> constant_c,
                                  uint64_t a_lanes = ~uint64_t{0} >> (64 - Lanes),
                                  uint64_t b_lanes = ~uint64_t{0} >> (64 - Lanes)) {
-  static_assert(FactorRegisters <= 8 && ResultRegisters <= 32 && AccumulatorRegisters <= 32);
+  static_assert(FactorRegisters <= 16 && ResultRegisters <= 32 && AccumulatorRegisters <= 32);
   static_assert(Lanes == 32 || Lanes == 64);
   if (wave.instruction_execution_failed()) {
     return;

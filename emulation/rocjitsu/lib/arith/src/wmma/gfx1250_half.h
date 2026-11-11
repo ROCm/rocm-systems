@@ -77,7 +77,8 @@ inline float gfx1250_repair_nan(float value, const float *left, const float *rig
 // Pack once with RNE in Loose; Compatibility retains legacy BF16 truncation.
 // Every source read, including NaN repair, must precede this publication step.
 template <Wmma1250Form Form>
-inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float result[16][16]) {
+inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float result[16][16],
+                                 bool saturate_f16 = false) {
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr bool packed = Form != Wmma1250Form::F32F16 && Form != Wmma1250Form::F32Bf16;
   for (int reg = 0; reg < (packed ? 4 : 8); ++reg) {
@@ -86,11 +87,11 @@ inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float
       if constexpr (packed) {
         auto narrow = [&](float x) {
           if constexpr (Form == Wmma1250Form::F16) {
-            // Follow the WMMA-specific CDNA5 §7.12 rule in Loose; legacy
-            // ignored the bit.
-            uint16_t value = float_to_f16(x, !compatibility && (flags & RJ_ARITH_FP16_OVFL));
+            // FP8 output retains its legacy saturation policy in Compatibility.
+            const bool saturate = saturate_f16 || (!compatibility && (flags & RJ_ARITH_FP16_OVFL));
+            uint16_t value = float_to_f16(x, saturate);
             // The WMMA saturation rule also applies to an infinite accumulator.
-            if (!compatibility && (flags & RJ_ARITH_FP16_OVFL) && (value & 0x7fffU) == 0x7c00U) {
+            if (saturate && (value & 0x7fffU) == 0x7c00U) {
               value = uint16_t((value & 0x8000U) | 0x7bffU);
             }
             return value;

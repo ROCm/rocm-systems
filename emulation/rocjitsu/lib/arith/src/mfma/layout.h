@@ -21,12 +21,13 @@ template <int M, int Batch> constexpr MfmaWord mfma_output(int row, int col, int
           (batch % blocks_per_reg) * M + ((row / 4) % multirows) * blocks_per_reg * M + col};
 }
 
-// Locate a halfword in a dense FP16/BF16 source, before source-lane permutation.
-template <int M, int K, int Batch> constexpr int mfma_half_index(int index, int k, int batch) {
+// Locate an element in a flat unpacked source, before source-lane permutation.
+template <int M, int K, int Batch, int PerWord>
+constexpr int mfma_input_index(int index, int k, int batch) {
   constexpr int per_lane = K / (64 / (M * Batch));
   int local = k % per_lane;
   int lane = batch * M + (k / per_lane) * M * Batch + index;
-  return (local / 2 * 64 + lane) * 2 + local % 2;
+  return (local / PerWord * 64 + lane) * PerWord + local % PerWord;
 }
 
 // Apply encoded A broadcast; reserved sizes retain the legacy identity behavior.
@@ -54,11 +55,11 @@ inline int mfma_b_lane(int lane, uint64_t controls) {
   return lane % 16 + (blgp - 4) * 16;
 }
 
-// Apply lane controls to an index in a flat unpacked halfword buffer.
-inline int mfma_permute_half(int index, uint64_t controls, bool a) {
-  int lane = index / 2 % 64;
+// Apply lane controls without changing the element position inside its source word.
+template <int PerWord> inline int mfma_permute_input(int index, uint64_t controls, bool a) {
+  int lane = index / PerWord % 64;
   int mapped = a ? mfma_a_lane(lane, controls) : mfma_b_lane(lane, controls);
-  return index + 2 * (mapped - lane);
+  return index + PerWord * (mapped - lane);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
