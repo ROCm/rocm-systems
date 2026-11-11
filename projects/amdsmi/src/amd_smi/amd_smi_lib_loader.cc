@@ -15,14 +15,15 @@ std::vector<const char*> libdrm_amdgpu_sonames() {
 
 AMDSmiLibraryLoader::AMDSmiLibraryLoader() : libHandler_(nullptr) {}
 
-amdsmi_status_t AMDSmiLibraryLoader::load(const char* filename) {
+amdsmi_status_t AMDSmiLibraryLoader::load(const char* filename, bool log_on_failure) {
   if (filename == nullptr) {
     return AMDSMI_STATUS_FAIL_LOAD_MODULE;
   }
-  return load(std::vector<const char*>{filename});
+  return load(std::vector<const char*>{filename}, log_on_failure);
 }
 
-amdsmi_status_t AMDSmiLibraryLoader::load(const std::vector<const char*>& filenames) {
+amdsmi_status_t AMDSmiLibraryLoader::load(const std::vector<const char*>& filenames,
+                                          bool log_on_failure) {
   if (filenames.empty()) {
     return AMDSMI_STATUS_FAIL_LOAD_MODULE;
   }
@@ -53,8 +54,10 @@ amdsmi_status_t AMDSmiLibraryLoader::load(const std::vector<const char*>& filena
     }
     errors += std::string(filename) + ": " + dlerror() + "; ";
   }
-  std::cerr << "Fail to open library (tried " << filenames.size() << " candidate(s)): " << errors
-            << std::endl;
+  if (log_on_failure) {
+    std::cerr << "Fail to open library (tried " << filenames.size() << " candidate(s)): " << errors
+              << std::endl;
+  }
   return AMDSMI_STATUS_FAIL_LOAD_MODULE;
 }
 

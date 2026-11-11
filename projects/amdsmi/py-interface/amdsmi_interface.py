@@ -7346,36 +7346,16 @@ def amdsmi_set_gpu_ptl_formats(
     _check_res(amdsmi_wrapper.amdsmi_set_gpu_ptl_formats(processor_handle, c_fmt1, c_fmt2))
 
 
-### Non C-Lib APIs ###
+### Non-raising APIs (return Tuple[bool, str] instead of raising AmdSmiException) ###
 
 
-def amdsmi_get_rocm_version() -> Tuple[bool, str]:
+def _amdsmi_get_rocm_version_via_ctypes() -> Tuple[bool, str]:
+    """Pre-C-API fallback: dlopen librocm-core.so directly via ctypes.
+
+    Kept for libamd_smi.so builds that predate amdsmi_get_rocm_version, so a
+    library gap doesn't regress a version direct ctypes loading could always
+    find.
     """
-    Get the ROCm version for the rocm-core library.
-
-    This function attempts to retrieve the ROCm version by loading the `librocm-core.so` shared library
-    and calling its `getROCmVersion` function. The version is returned as a string in the format "major.minor.patch".
-
-    Returns:
-        Tuple[bool, str]: A tuple containing a boolean and a string.
-            - The boolean indicates whether the operation was successful.
-            - The string contains the ROCm version if successful, or an error message if not.
-
-    Raises:
-        Exception: If there is an error loading the shared library or calling the function.
-
-    Example:
-        rocm_lib_status, version_message = amdsmi_get_rocm_version()
-        if rocm_lib_status:
-            print(f"ROCm version: {version_message}")
-        else:
-            print(f"Error: {version_message}")
-    """
-    # Resolve librocm-core.so, most specific first. Path 0 mirrors
-    # _load_library() in amdsmi_wrapper.py: this file is staged at
-    # <root>/share/amd_smi/amdsmi and the library at <root>/lib (relocatable
-    # ROCm tree / TheRock rocm-sdk wheel). The rest are best-effort fallbacks
-    # for a system install (ROCM_HOME/ROCM_PATH, /opt/rocm, then the linker).
     try:
         possible_locations = list()
         # 0. Relocatable tree: <root>/lib relative to this file.
@@ -7395,16 +7375,14 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         for librocm_core_file_path in possible_locations:
             try:
                 librocm_core = ctypes.CDLL(librocm_core_file_path)
-                VerErrors = ctypes.c_uint32
                 get_rocm_core_version = librocm_core.getROCmVersion
-                get_rocm_core_version.restype = VerErrors
+                get_rocm_core_version.restype = ctypes.c_uint32
                 get_rocm_core_version.argtypes = [
                     POINTER(ctypes.c_uint32),
                     POINTER(ctypes.c_uint32),
                     POINTER(ctypes.c_uint32),
                 ]
 
-                # call the function
                 major = ctypes.c_uint32()
                 minor = ctypes.c_uint32()
                 patch = ctypes.c_uint32()
@@ -7425,6 +7403,48 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         return False, "Could not find librocm-core.so"
     except Exception as e:
         return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
+
+
+def amdsmi_get_rocm_version() -> Tuple[bool, str]:
+    """
+    Get the ROCm version for the rocm-core library.
+
+    Calls the `amdsmi_get_rocm_version` C API, which locates `librocm-core.so`
+    and reads its version. The version is returned as a string in the format
+    "major.minor.release".
+
+    Returns:
+        Tuple[bool, str]: A tuple containing a boolean and a string.
+            - The boolean indicates whether the operation was successful.
+            - The string contains the ROCm version if successful, or an error message if not.
+
+    Example:
+        rocm_lib_status, version_message = amdsmi_get_rocm_version()
+        if rocm_lib_status:
+            print(f"ROCm version: {version_message}")
+        else:
+            print(f"Error: {version_message}")
+    """
+    version = amdsmi_wrapper.amdsmi_version_t()
+    try:
+        status = amdsmi_wrapper.amdsmi_get_rocm_version(ctypes.byref(version))
+    except AttributeError:
+        # This build's libamd_smi.so loaded fine but predates the C API; the
+        # wrapper module never bound the symbol at all. Fall back to the
+        # pre-C-API direct librocm-core.so load so this doesn't regress a
+        # version that always used to be found.
+        return _amdsmi_get_rocm_version_via_ctypes()
+    except OSError:
+        # libamd_smi.so itself failed to load; amdsmi_wrapper installs a
+        # sentinel for every symbol that raises OSError on any call.
+        return False, "libamd_smi.so failed to load"
+
+    if status == amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+        return False, "Could not find librocm-core.so"
+    if status != amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
+        return False, "Failed to unpack ROCm version"
+
+    return True, f"{version.major}.{version.minor}.{version.release}"
 
 
 def amdsmi_get_esmi_err_msg(status: AmdSmiStatus) -> str:
