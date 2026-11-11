@@ -306,17 +306,13 @@ namespace RcclUnitTesting
 
   // Device-data mode (ON by default; UT_DEVICE_DATA=0 to disable). Per-collective prep
   // funcs consult this to build input/expected on the GPU and validate device-side, but
-  // ONLY where that yields a measured speedup. Cached once for the process.
+  // ONLY where that yields a measured speedup. The env var is read once per process; the
+  // kernel check runs once per device, since the current device is the one that launches.
   bool UtDeviceDataEnabled()
   {
-    // ON by default; set UT_DEVICE_DATA=0 to force the host reference path.
-    static int cached = -1;
-    if (cached < 0)
-    {
-      char const* e = getenv("UT_DEVICE_DATA");
-      cached = (e && e[0] == '0') ? 0 : 1;
-    }
-    return cached == 1;
+    static KernelLoadCache kernels;
+    return UtDeviceDataRequested() &&
+           kernels.Loadable(reinterpret_cast<void const*>(&FillKernel<uint8_t>), "Device-data");
   }
 
   bool UtDeviceDtypeSupported(ncclDataType_t const /*dataType*/)
