@@ -2325,25 +2325,25 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
 
-  // Rects to or from another GPU of the hive go on that link's engine, as DmaCopy does for
-  // linear copies; the blit queues are shared by every peer and copy direction.
+  // On platforms with dedicated xGMI engines, rects to another GPU of the hive go on
+  // that link's engine, as DmaCopy does for linear copies; the blit queues are shared by every
+  // peer and copy direction, and a host-facing engine cannot drive the xGMI link. Elsewhere
+  // (PCIe peers, gfx125+ where every engine is equivalent) rects keep the blit queues.
   const bool use_peer_engine =
       dir != hsaHostToDevice && peer_agent != nullptr &&
       peer_agent->device_type() == core::Agent::kAmdGpuDevice &&
       peer_agent->public_handle().handle != public_handle_.handle && peer_agent->HiveId() &&
-      peer_agent->HiveId() == HiveId() && num_p2p_engines_ &&
+      peer_agent->HiveId() == HiveId() && properties_.NumSdmaXgmiEngines &&
       core::Runtime::runtime_singleton_->flag().enable_peer_sdma() != Flag::SDMA_DISABLE;
   lazy_ptr<core::Blit>* blit = nullptr;
   if (use_peer_engine) {
     uint32_t rec_mask = 0;
     DmaPreferredEngine(*peer_agent, *this, &rec_mask);
     const uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
-    if (rec_sdma_eng) {
-      blit = &GetBlitObject(rec_sdma_eng);
-    } else if (properties_.NumSdmaXgmiEngines) {
-      blit = &GetXgmiBlit(*peer_agent);
-    }
-    if (blit != nullptr && !(*blit)->isSDMA()) blit = nullptr;
+    blit = (rec_sdma_eng >= DefaultBlitCount && rec_sdma_eng < blits_.size())
+               ? &GetBlitObject(rec_sdma_eng)
+               : &GetXgmiBlit(*peer_agent);
+    if (!(*blit)->isSDMA()) blit = nullptr;
   }
   if (blit == nullptr) {
     blit = &GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev : BlitDevToHost);
