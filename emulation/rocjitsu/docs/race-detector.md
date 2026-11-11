@@ -437,7 +437,8 @@ permutes (`ds_permute_b32`, `ds_bpermute_b32`, `ds_bpermute_fi_b32`) and
 `ds_swizzle_b32` use the LDS hardware without LDS memory (CDNA5 ISA 11.2.3),
 and LDS operations count on DScnt and are kept in order (CDNA5 ISA 5.7.1.4), so
 each applies DScnt backpressure when it issues and keeps its slot in order with
-LDS operations. Tensor
+LDS operations. `ds_nop` does the same, following the core memory-wait
+checker's model, since the ISA describes it only as "Do nothing". Tensor
 DMA instructions apply TENSORcnt backpressure when they issue, before their LDS
 bytes are checked, so the oldest transfer a full TENSORcnt completes does not
 conflict with the new one. Every generic FLAT applies backpressure to both DScnt

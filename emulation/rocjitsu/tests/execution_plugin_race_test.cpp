@@ -1514,9 +1514,9 @@ protected:
        {"ds_bpermute_fi_b32", cdna5::kDsBpermuteFiB32Vds},
        {"ds_swizzle_b32", cdna5::kDsSwizzleB32Vds}}};
 
-  /// Issue a decoded LDS lane permute or swizzle, which reaches only the issue
-  /// hook because it accesses no LDS memory.
-  void lane_permute(int wave, uint16_t op) {
+  /// Issue a decoded DS instruction that accesses no LDS memory, such as a lane
+  /// permute, a swizzle or DS_NOP, which reaches only the issue hook.
+  void ds_counter_only(int wave, uint16_t op) {
     const auto words = cdna5::build_vds(op, {.addr = 8, .data0 = 9, .vdst = 10});
     issue_words(wave, {words[0], words[1], 0x00000000u});
   }
@@ -2136,7 +2136,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteAdvancesDscnt) {
   ds_read(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 1; ++index)
     ds_read(0, kYoungerAddress);
-  ASSERT_NO_FATAL_FAILURE(lane_permute(0, cdna5::kDsBpermuteB32Vds));
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsBpermuteB32Vds));
   EXPECT_FALSE(tensor_load_oldest());
 }
 
@@ -2144,7 +2144,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteBelowCapacityKeepsOldestDsRead
   ds_read(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 2; ++index)
     ds_read(0, kYoungerAddress);
-  ASSERT_NO_FATAL_FAILURE(lane_permute(0, cdna5::kDsBpermuteB32Vds));
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsBpermuteB32Vds));
   EXPECT_TRUE(tensor_load_oldest());
 }
 
@@ -2154,7 +2154,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, EachLanePermuteAdvancesDscnt) {
     const int oldest = next_event();
     for (int index = 0; index < kCapacity; ++index)
       ds_read(0, kYoungerAddress);
-    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
     EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
     wait_dscnt(0, 0);
@@ -2169,7 +2169,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, LanePermutesHoldADscntSlot) {
     const int oldest = next_event();
     for (int index = 0; index < kCapacity - 1; ++index)
       ds_read(0, kYoungerAddress);
-    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
     ds_read(0, kYoungerAddress);
     EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
@@ -2184,11 +2184,37 @@ TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsLanePermutes) {
     SCOPED_TRACE(permute.name);
     const int read = next_event();
     ds_read(0, kYoungerAddress);
-    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, permute.op));
     wait_dscnt(0, 1);
     EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
     wait_dscnt(0, 0);
   }
+}
+
+// DS_NOP holds an ordered DScnt slot, as the core memory-wait checker models it
+// (see MemoryWaitExecutionTest.InlineDsResultAndCounterOnlyNopUseOrderedQueue).
+TEST_F(Gfx1250CounterCapacityRaceTest, DsNopAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, DsNopBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsDsNop) {
+  const int read = next_event();
+  ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(ds_counter_only(0, cdna5::kDsNopVds));
+  wait_dscnt(0, 1);
+  EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
 }
 
 // A buffer instruction whose descriptor TYPE is not 0 is ignored (CDNA5 ISA
