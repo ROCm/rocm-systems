@@ -66,6 +66,7 @@ set(SRC_FILES
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
   device/ll128Layout.h
+  device/ll128RecvWait.h
   device/onerank.cu
   device/op128.h
   device/primitives.h
