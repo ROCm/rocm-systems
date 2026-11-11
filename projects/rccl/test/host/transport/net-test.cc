@@ -29,8 +29,7 @@
 #include <utility>
 #include <vector>
 
-// gdrwrap.h implements wc_store_fence() as _mm_sfence() on x86_64. Include the intrinsics first so their
-// declaration stays intact, then route every fence net.cc issues through ObserveSfence().
+// Include immintrin.h before the macro so gdrwrap.h's wc_store_fence() reaches ObserveSfence() on x86_64.
 static void ObserveSfence();
 #if defined(__x86_64__)
 #include <immintrin.h>
@@ -2879,9 +2878,7 @@ TEST_F(NetSendProxyConnectMicrotest, GdrCopy_HeadLivesInGdcMemory) {
   EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].size, (ssize_t)sizeof(uint64_t));
 }
 
-// The CPU writes the initial credit through the GDRCopy write-combining mapping, so it must be fenced out before
-// the proxy moves on. Shared mode withholds credits as -NCCL_STEPS, which the zeroed sync word cannot hold before
-// that write.
+// The initial credit is written through the GDRCopy WC mapping, so wc_store_fence() must follow it.
 TEST_F(NetSendProxyConnectMicrotest, GdrCopy_InitialCreditIsFencedOut) {
 #if !defined(__x86_64__)
   GTEST_SKIP() << "wc_store_fence() is observed through _mm_sfence(), x86_64 only";

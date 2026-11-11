@@ -22,8 +22,7 @@
 #include <utility>
 #include <vector>
 
-// gdrwrap.h implements wc_store_fence() as _mm_sfence() on x86_64. Include the intrinsics first so their
-// declaration stays intact, then route every fence coll_net.cc issues through ObserveSfence().
+// wc_store_fence() is _mm_sfence() on x86_64: include the intrinsic first, then route coll_net.cc's fences here.
 static void ObserveSfence();
 #if defined(__x86_64__)
 #include <immintrin.h>
