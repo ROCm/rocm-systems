@@ -20,6 +20,14 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
+rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
+rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
+
 # One explicit source, executable and arithmetic test per instruction.
 foreach(
     instruction
@@ -175,6 +183,12 @@ foreach(
 )
     set(target "rj_arith_math_${family}_test")
     rj_arith_add_test(${target} math/${family}_test.cpp)
+endforeach()
+
+# VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
+foreach(family IN ITEMS alu fused dot)
+    set(target "rj_arith_dual_${family}_test")
+    rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
 
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.

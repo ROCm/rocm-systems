@@ -3143,64 +3143,6 @@ class CodeGenerator:
             .replace('@VOPD_REGISTRATION_DECL@', vopd_registration_decl)
         )
 
-        execution_helpers = (
-            textwrap.dedent('''\
-            @VOPD_REGISTRATION_DEF@
-            bool Vopd::uses_src_neg_modifier(uint16_t op) {
-              switch (op) {
-            @VOPD_SRC_NEG_CASES@
-                return true;
-              default:
-                return false;
-              }
-            }
-
-            uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
-              return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
-            }
-
-            uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
-              return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
-            }
-            @VOPD3_F64_HELPERS@
-
-            uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
-                                        uint32_t lane) {
-              uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
-              if (uses_src_neg_modifier(slot.op))
-                src0 = apply_neg(src0, slot.neg, 0);
-              // MOV has no src1: its unused encoding bits may name a pending register.
-              if (slot.op == kVopdMovB32)
-                return src0;
-              uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
-              uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
-                                                     : slot.src2_imm;
-              if (uses_src_neg_modifier(slot.op)) {
-                src1 = apply_neg(src1, slot.neg, 1);
-                src2 = apply_neg(src2, slot.neg, 2);
-              }
-
-              switch (slot.op) {
-            @VOPD_EXECUTE_SLOT_CASES@
-              default:
-                wf.report_instruction_execution_error(
-                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
-                return 0;
-              }
-            }
-            ''')
-            .replace('@VOPD_REGISTRATION_DEF@', vopd_registration_def)
-            .replace('@VOPD_SRC_NEG_CASES@', vopd_src_neg_case_labels)
-            .replace('@VOPD3_F64_HELPERS@', vopd3_f64_helpers)
-            .replace('@VOPD_EXECUTE_SLOT_CASES@', vopd_execute_slot_cases)
-        )
-        vopd_integer_simd_probe = ''
-        if all(has_op(op) for op in ('VopdMovB32', 'VopdAddNcU32', 'VopdLshlrevB32')):
-            vopd_integer_simd_probe = cpp_block('''\
-              if (amdgpu::try_execute_vopd_integer_pair_simd<
-                      kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(wf, x_, y_))
-                return;
-            ''')
         wave64_guard = (
             'return;'
             if logical_arch in ('rdna3', 'rdna3_5')
@@ -3208,20 +3150,98 @@ class CodeGenerator:
             '    amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
             'return;'
         )
-        execution_method = (
-            textwrap.dedent('''\
-            void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-              if (wf.wf_size() != 32) {
-            @WAVE64_GUARD@
-              }
-            @VOPD_INTEGER_SIMD_PROBE@
-            @EXECUTE_IMPL_BODY@
-            }
-            ''')
-            .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
-            .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
-            .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
-        )
+        from amdisa.codegen.execute.rj_arith_vopd import gen_vopd_execution
+
+        rj_arith_vopd = gen_vopd_execution(logical_arch, vopd_slot_ops, wave64_guard)
+        if rj_arith_vopd is None:
+            execution_helpers = (
+                textwrap.dedent('''\
+                @VOPD_REGISTRATION_DEF@
+                bool Vopd::uses_src_neg_modifier(uint16_t op) {
+                  switch (op) {
+                @VOPD_SRC_NEG_CASES@
+                    return true;
+                  default:
+                    return false;
+                  }
+                }
+
+                uint32_t Vopd::apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx) {
+                  return (neg_bits & (1u << src_idx)) ? (value ^ 0x80000000u) : value;
+                }
+
+                uint32_t Vopd::bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table) {
+                  return amdgpu::bitop3_words(src0, src1, uint32_t{0}, static_cast<uint8_t>(truth_table));
+                }
+                @VOPD3_F64_HELPERS@
+
+                uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
+                                            uint32_t lane) {
+                  uint32_t src0 = amdgpu::RegisterAccess(wf).read_lane(*slot.src0, lane);
+                  if (uses_src_neg_modifier(slot.op))
+                    src0 = apply_neg(src0, slot.neg, 0);
+                  // MOV has no src1: its unused encoding bits may name a pending register.
+                  if (slot.op == kVopdMovB32)
+                    return src0;
+                  uint32_t src1 = amdgpu::RegisterAccess(wf).read_lane(*slot.src1, lane);
+                  uint32_t src2 = slot.has_src2_operand ? amdgpu::RegisterAccess(wf).read_lane(*slot.src2, lane)
+                                                         : slot.src2_imm;
+                  if (uses_src_neg_modifier(slot.op)) {
+                    src1 = apply_neg(src1, slot.neg, 1);
+                    src2 = apply_neg(src2, slot.neg, 2);
+                  }
+
+                  switch (slot.op) {
+                @VOPD_EXECUTE_SLOT_CASES@
+                  default:
+                    wf.report_instruction_execution_error(
+                        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+                    return 0;
+                  }
+                }
+                ''')
+                .replace('@VOPD_REGISTRATION_DEF@', vopd_registration_def)
+                .replace('@VOPD_SRC_NEG_CASES@', vopd_src_neg_case_labels)
+                .replace('@VOPD3_F64_HELPERS@', vopd3_f64_helpers)
+                .replace('@VOPD_EXECUTE_SLOT_CASES@', vopd_execute_slot_cases)
+            )
+            vopd_integer_simd_probe = ''
+            if all(
+                has_op(op) for op in ('VopdMovB32', 'VopdAddNcU32', 'VopdLshlrevB32')
+            ):
+                vopd_integer_simd_probe = cpp_block('''\
+                  if (amdgpu::try_execute_vopd_integer_pair_simd<
+                          kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(wf, x_, y_))
+                    return;
+                ''')
+            execution_method = (
+                textwrap.dedent('''\
+                void Vopd::execute_impl(amdgpu::Wavefront &wf) {
+                  if (wf.wf_size() != 32) {
+                @WAVE64_GUARD@
+                  }
+                @VOPD_INTEGER_SIMD_PROBE@
+                @EXECUTE_IMPL_BODY@
+                }
+                ''')
+                .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
+                .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
+                .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
+            )
+
+        if rj_arith_vopd is not None:
+            execution_helpers = ''
+            execution_method = rj_arith_vopd
+            header = header.replace(
+                '  static bool uses_src_neg_modifier(uint16_t op);\n'
+                '  static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);\n'
+                '  static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,\n'
+                '                               uint32_t lane);\n',
+                '',
+            ).replace(
+                '  static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);\n',
+                '',
+            )
 
         vopd_isa_diagnostics = cpp_block('''
             // Evaluate the qualified operand restrictions once, at decode.
@@ -3566,6 +3586,16 @@ class CodeGenerator:
             .replace('@VOPD_FORMAT_SLOT_CASES@', vopd_format_slot_cases)
             .replace('@VOPDXY_BITS_DECL@', vopdxy_bits_decl)
         )
+        if (
+            rj_arith_vopd is not None
+            and not self.isa_spec.profile.split_execution_sources
+        ):
+            impl = impl.replace(
+                '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n',
+                '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"\n'
+                '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"\n'
+                '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"\n',
+            )
         impl_outputs = _ImplOutputs(
             model=[impl], execution=[execution_helpers, execution_method]
         )
@@ -3606,6 +3636,17 @@ class CodeGenerator:
                 f'}} // namespace {arch}\n'
                 '} // namespace rocjitsu\n'
             )
+            if rj_arith_vopd is not None:
+                execution_file = execution_file.replace(
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n',
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"\n'
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"\n',
+                )
+                for legacy_header in ('gfx11_dot2.h', 'gfx12_dot.h'):
+                    execution_file = execution_file.replace(
+                        f'#include "rocjitsu/isa/arch/amdgpu/shared/{legacy_header}"\n',
+                        '',
+                    )
             with open(os.path.join(out_dir, 'vopd.cpp'), 'w') as f:
                 f.write(str(impl_outputs.model[0]))
             with open(os.path.join(out_dir, 'vopd_exec.cpp'), 'w') as f:
@@ -6807,8 +6848,12 @@ class CodeGenerator:
     # spelling has to be listed: an omitted one derives as `true_nop` and its
     # generated execute_impl() comes out an empty body, which leaves that ISA's
     # trap handlers unable to return at all. GFX1250 spells the return
-    # S_RFE_I64 (SOP1 opcode 74).
-    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64')
+    # S_RFE_I64 (SOP1 opcode 74). GFX9 also keeps S_RFE_RESTORE_B64 (SOP2
+    # opcode 43), which the CDNA1/2 manuals define as S_RFE_B64 with its second
+    # operand ignored. The CDNA3/4 SOP2 tables omit opcode 43, but LLVM still
+    # encodes it there (isGFX8GFX9) and the MR ISA lists it, so CDNA3/4 take
+    # the same legacy return.
+    _TRAP_RETURN_NAMES = ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64')
     _TRAP_SENDMSG_NAMES = ('S_SENDMSG', 'S_SENDMSGHALT')
 
     def _sleep_body(self, sem: InstructionSemantics) -> str:
@@ -12549,6 +12594,13 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
+                    if inst.name == 'S_RFE_RESTORE_B64':
+                        public_members.append(
+                            cgen.Statement(
+                                'bool tracks_explicit_source('
+                                'uint8_t operand_index) const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -15275,6 +15327,18 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
+                    # The return ignores ssrc1 (see _TRAP_RETURN_NAMES). It
+                    # still decodes and prints, but a result pending into it
+                    # must not be waited on at the return.
+                    if inst.name == 'S_RFE_RESTORE_B64':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'bool {inst.fmt_name}::tracks_explicit_source'
+                                f'(uint8_t operand_index) const {{\n'
+                                f'  return src_operands_[operand_index] != &ssrc1;\n'
+                                f'}}'
+                            )
+                        )
                     if tied_destination_result_name is not None:
                         inst_impls.append(
                             cgen.Line(
@@ -15628,6 +15692,16 @@ class CodeGenerator:
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
+                if any(
+                    'amdgpu::arith::exec_dense_fp_matrix<' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h',
+                            False,
+                        )
+                    )
                 if has_matrix_exec:
                     if self.isa_spec.profile.uses_rj_arith_matrix:
                         cpp_includes.append(

@@ -10,9 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
-#include <string>
-#include <string_view>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -39,8 +37,6 @@ namespace rocjitsu::plugins::race_detector {
 ///   - Slow path: when a chunk may contain a conflict, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
-  friend class Workgroup;
-
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
@@ -52,16 +48,10 @@ public:
   EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
                           std::vector<uint32_t> registers, uint64_t execMask) {
     return allocateEventId(wave, instruction, type, std::move(registers), execMask, 0xF, {},
-                           defaultWaitCounterType(type), defaultMemoryOrder(type));
+                           CounterObligations(type), defaultMemoryOrder(type));
   }
 
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId
-  allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
-                  std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                  IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
-                  MemoryOrderClass memoryOrder,
-                  std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   EventId allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
@@ -115,11 +105,6 @@ public:
   Dim3d getWorkgroupId() const { return workgroupId; }
   const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
 
-  /// Format a RaceViolation with assembly context for diagnostics.
-  /// getSourceLine(i) returns the original source text for line index i.
-  std::string decorateException(const RaceViolation &, uint64_t wavePc, int numSourceLines,
-                                std::function<std::string_view(int)> getSourceLine) const;
-
   WaveRaceState &getWaveRaceState(int waveIndex);
 
   /// Whether the workgroup has a single wave, so that no other wave can race
@@ -134,8 +119,6 @@ public:
   }
 
 private:
-  void setProfiler(ProfilerInterface &);
-
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event

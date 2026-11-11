@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -59,6 +61,20 @@ bool InstructionComputeUnitView::signal_queue_exception(
   return raw_cu().defer_queue_exception(retain_wave ? &raw_wavefront() : nullptr, queue_id,
                                         process_id, status, clear_debug_stop_on_success,
                                         retain_failure_for_debugger, delivery_policy);
+}
+
+uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                            uint32_t process_id) const {
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -540,6 +556,12 @@ void ComputeUnitCore::flush_cp_notifications() {
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.instruction_execution_failed()) {
+    fail_wave_instruction(
+        wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
+        wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
+    return;
+  }
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;

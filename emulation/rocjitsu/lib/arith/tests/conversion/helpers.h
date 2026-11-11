@@ -13,7 +13,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <bit>
 #include <cmath>

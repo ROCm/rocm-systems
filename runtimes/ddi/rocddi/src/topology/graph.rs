@@ -1,24 +1,24 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Source-qualified topology model assembled from passive hardware facts.
+//! Source-qualified graph of passive topology reports.
 //!
-//! The fact values in `crate::topology` stand alone. The records here associate
-//! them with sources and nodes in one `TopologySnapshot`. Node and source IDs
-//! are indices into that snapshot, never persistent native identities. Native
-//! node IDs are scoped by their source: a KFD node ordinal and a Linux NUMA ID
-//! remain distinct even when their numbers match.
+//! The fact values in `crate::topology` stand alone. This graph associates
+//! them with sources and nodes in one `TopologyGraphSnapshot`. Node and source
+//! IDs are indices into that snapshot, never persistent native identities.
+//! Native node IDs are scoped by their source: a KFD node ordinal and a Linux
+//! NUMA ID remain distinct even when their numbers match.
 //! `TopologyCache` binds a `CacheInfo` to a node; `ReportedRoute` binds a
 //! `MemoryLinkInfo` to two nodes. The payloads remain reusable without either
 //! association.
 //!
 //! Nodes need not have an activatable endpoint, and an endpoint may attach to
-//! more than one node. Routes are directed reports by one source, not a
-//! physical switch graph or permission to map memory. KFD sources have a
+//! more than one node. Routes are directed reports by one source; the graph
+//! does not infer paths or permission to map memory. KFD sources have a
 //! checked native generation; host OS observations are best effort and have
 //! no atomic generation in common with KFD or another driver.
 
-use super::host::HostTopologySnapshot;
+use super::host::HostTopologyGraphSnapshot;
 use super::{CacheInfo, Endpoint, MemoryLinkInfo};
 use crate::driver::DriverInstanceId;
 use crate::memory::storage::TryPush;
@@ -216,14 +216,15 @@ pub struct MemoryBank {
     pub maximum_clock_mhz: Option<u32>,
 }
 
-/// One source-qualified view of independent passive topology observations.
+/// A captured topology graph assembled from independent source observations.
+/// Generation and completeness are recorded per source.
 /// A session publishes it only after driver contributions validate.
 /// Host facts can be incomplete; their per-source `complete` flag records that.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TopologySnapshot {
+pub struct TopologyGraphSnapshot {
     /// Best-effort OS host observations, retained for CPU identity, CPU sets,
     /// and cache-sharing details beyond the generic node and cache projection.
-    pub host: HostTopologySnapshot,
+    pub host: HostTopologyGraphSnapshot,
     /// Passive activation endpoints discovered by installed drivers.
     pub endpoints: Vec<Endpoint>,
     /// Freshness and completeness of each independent contributor.
@@ -242,8 +243,8 @@ pub struct TopologySnapshot {
     pub memory_banks: Vec<MemoryBank>,
 }
 
-impl TopologySnapshot {
-    pub(crate) fn new(host: HostTopologySnapshot) -> Result<Self, Error> {
+impl TopologyGraphSnapshot {
+    pub(crate) fn new(host: HostTopologyGraphSnapshot) -> Result<Self, Error> {
         let mut result = Self {
             host,
             endpoints: Vec::new(),
@@ -644,8 +645,8 @@ mod tests {
         CacheInfo::new(level, 4096, Some(64), CacheKind::Unified)
     }
 
-    fn host() -> HostTopologySnapshot {
-        HostTopologySnapshot {
+    fn host() -> HostTopologyGraphSnapshot {
+        HostTopologyGraphSnapshot {
             memory_bytes: None,
             cpu: None,
             cpu_apic_ids: Vec::new(),
@@ -702,7 +703,7 @@ mod tests {
 
     #[test]
     fn source_qualified_nodes_allow_multiple_endpoints_and_typed_attachments() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let first = endpoint(1);
         let mut second = endpoint(2);
         second.driver_instance = first.driver_instance;
@@ -781,7 +782,7 @@ mod tests {
 
     #[test]
     fn routes_are_directed_reports_with_no_cross_source_inference() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let first = endpoint(1);
         let mut second = endpoint(2);
         second.driver_instance = first.driver_instance;
@@ -821,7 +822,7 @@ mod tests {
 
     #[test]
     fn generic_driver_nodes_keep_host_routes_and_cpu_facts() {
-        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let mut snapshot = TopologyGraphSnapshot::new(host()).unwrap();
         let endpoint = endpoint(3);
         let source = snapshot
             .add_source(
