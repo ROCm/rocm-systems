@@ -219,6 +219,33 @@ TEST(ConSanBarrierStatic, RejectUnmatchedSignalAndWaitOperations) {
   }
 }
 
+TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-21"));
+  ASSERT_FALSE(original.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  ASSERT_EQ(baseline.value().barriers.size(), 1u);
+  const BarrierFacts &barrier = baseline.value().barriers.front();
+  ASSERT_GT(barrier.original_wait, barrier.original_signal + 4);
+  // Replace the scalar comparison between signal and wait, preserving the
+  // original group and every instruction offset without introducing memory.
+  const uint32_t signal =
+      cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_M0})[0];
+  std::vector<uint8_t> changed = original;
+  ASSERT_TRUE(wire::write_u32(
+      changed, baseline.value().text_file_offset + barrier.original_wait - 4, signal));
+  EXPECT_TRUE(prepare(changed, target, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization);
+  EXPECT_EQ(error.text_offset, barrier.original_signal);
+  EXPECT_NE(error.message.find("without intervening memory operations or barriers"),
+            std::string::npos)
+      << error.message;
+}
+
 TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiValidation) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);

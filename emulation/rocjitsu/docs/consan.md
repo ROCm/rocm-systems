@@ -186,8 +186,8 @@ workgroup size no larger than one wave, since no valid dispatch could use it.
 The original `s_wait_dscnt 0` must immediately precede
 `s_barrier_signal -1`; the matching `s_barrier_wait -1` must be in the same
 basic block. Admitted arithmetic may separate signal and wait; memory operations
-may not. Each group block must dominate every exit. Repeated occurrences, dynamic IDs,
-partial/cluster barriers, loops, and paths bypassing the group are unsupported.
+or barriers may not. Each group block must dominate every exit. Repeated occurrences,
+dynamic IDs, partial/cluster barriers, loops, and paths bypassing the group are unsupported.
 These rules are established from original instructions; probe waits provide no
 guest synchronization evidence.
 
