@@ -3444,7 +3444,11 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float**)collCostTable, simInfo));
     // The CSV tuner forces its choice by writing 0 into that cost-table cell. The 0
     // selects the algorithm; it is not the cost model's time. Report that time.
-    if (simInfo != nullptr && simInfo->estimatedTime == 0.0f) {
+    // updateCollCostTable also stores 0, and does not ask the model, for one rank
+    // and for any collective at or past NCCL_NUM_FUNCTIONS. The bandwidth tables
+    // have that many rows, so those 0s stay 0.
+    if (simInfo != nullptr && simInfo->estimatedTime == 0.0f && comm->nRanks > 1 &&
+        (int)info->func < NCCL_NUM_FUNCTIONS) {
       float modelTime = NCCL_ALGO_PROTO_IGNORE;
       NCCLCHECK(ncclTopoGetAlgoTime(comm, info->func, info->algorithm, info->protocol, nBytes, numPipeOps, &modelTime));
       if (modelTime > 0.0f) simInfo->estimatedTime = modelTime;
