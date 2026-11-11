@@ -514,6 +514,31 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_BelowSplitThreshold_SendsEverythingOnTh
   EXPECT_EQ(Chain(0, 5)[0].sge.length, 233u);
 }
 
+// Raising the threshold must leave the even split intact for everything above it, addresses included: 3000 bytes
+// over 3 QPs chunks to DIVUP(1000) rounded up to 128 = 1024, so 1024 + 1024 + 952 tiling the buffer with no gap and
+// no overlap at either end. Lengths alone do not catch an offset that advances by the wrong chunk.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_AboveRaisedSplitThreshold_TilesTheBufferExactly) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_IB_SPLIT_DATA_THRESHOLD", 2048}}));
+  WireSend(3);
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(3000, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 3u);
+
+  const uint32_t lens[] = {1024, 1024, 952};
+  uint64_t offset = 0;
+  for (int i = 0; i < 3; i++) {
+    const auto& c = Chain(0, i)[0];
+    ASSERT_TRUE(c.hasSge) << i;
+    EXPECT_EQ(c.sge.length, lens[i]) << i;
+    EXPECT_EQ(c.sge.addr, (uint64_t)buf_ + offset) << i;
+    EXPECT_EQ(c.wr.wr.rdma.remote_addr, kRemoteAddr + offset) << i;
+    offset += lens[i];
+  }
+  EXPECT_EQ(offset, 3000u);  // every byte covered exactly once
+  EXPECT_EQ(Req(req)->events[0], 3);
+}
+
 // The threshold only applies with the scheduler off: a weighted split still splits a send below it.
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_BelowSplitThresholdWithScheduler_KeepsTheWeightedSplit) {
   ScopedHook param(g_loadParam, ParamOverride({{"RCCL_IB_SPLIT_DATA_THRESHOLD", 4096}}));
@@ -796,6 +821,32 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterTwoSkippedQps_P
 TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SkipAfterEmptyRepost_AdvancesWithoutSgList) {
   SendThenLose(3, 1, 100);
   EXPECT_FALSE(Chain(0, 0)[0].hasSge);
+}
+
+// A sub-threshold send puts the whole payload on QP 0 and leaves every later QP at length 0, so a delivered QP
+// sitting after one of those zero-length positions makes the skip run on a work request whose sg_list was cleared
+// by the empty post. Three QPs with only the middle one undelivered is the smallest such arrangement.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SubThresholdRetransmitAcrossAZeroLengthQp_PostsOnlyTheGap) {
+  WireSend(3);
+  send_->base.resiliency = res_.get();
+  Cts(0, 1, 1, 4096);
+  void* req = nullptr;
+  ASSERT_EQ(Isend(32, 1, &req), ncclSuccess);
+  ASSERT_EQ(verbs_[0].sends.size(), 3u);
+  verbs_[0].sends.clear();
+  Req(req)->send.sentData[0] = true;
+  Req(req)->send.sentData[1] = false;
+  Req(req)->send.sentData[2] = true;
+
+  ncclResult_t r = ncclInternalError;
+  CaptureLog([&] { r = IbCastMultiSend(send_.get(), 0, 3, 0, false, false); });
+  ASSERT_EQ(r, ncclSuccess);
+
+  // Only the undelivered QP reposts, and it carries nothing: QP 0 already took the whole payload.
+  ASSERT_EQ(verbs_[0].sends.size(), 1u);
+  EXPECT_EQ(verbs_[0].sends[0].qp, &verbs_[0].qps[1]);
+  EXPECT_FALSE(Chain(0, 0)[0].hasSge);
+  EXPECT_EQ(Chain(0, 0)[0].wr.num_sge, 0);
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreRequestsThanAMultiRecvHolds_IsRejected) {
