@@ -747,8 +747,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     return std::nullopt;
   }
 
-  // The bank analysis proves the state before the anchor. A bank-changing
-  // anchor would invalidate that proof before an AfterInst callback runs.
+  // The bank analysis proves the state before the anchor. On CDNA5, a bank-changing
+  // anchor can make the envelope's encoded v0 name v256 instead, invalidating
+  // that addressing proof before an AfterInst callback runs.
   if (pt.kind == InstrumentationKind::AfterInst &&
       (pt.probe_obj == nullptr || may_change_vgpr_msb(anchor, arch, setreg_vgpr_msb_fixup))) {
     fail("AfterInst requires a callable probe and an anchor preserving VGPR bank selection");
@@ -776,6 +777,14 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   }
   if (pt.kind == InstrumentationKind::AfterInst && anchor.is_mfma()) {
     fail("AfterInst cannot satisfy MFMA software-managed register hazards");
+    return std::nullopt;
+  }
+  // CDNA5 ISA 5.7.2 / 7.12.1 require independent VALUs for co-execution hazards;
+  // scalar waits do not provide that spacing before argument copies or spills.
+  // Reject whole families conservatively; these flags are not latency classes.
+  if (pt.kind == InstrumentationKind::AfterInst && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+      ((anchor.flags() & MATRIX_REGISTER_ACCESSES) != 0 || anchor.is_transcendental())) {
+    fail("AfterInst requires proven VALU spacing for CDNA5 matrix or transcendental anchors");
     return std::nullopt;
   }
   if (pt.kind == InstrumentationKind::BeforeInst || pt.kind == InstrumentationKind::AfterInst) {

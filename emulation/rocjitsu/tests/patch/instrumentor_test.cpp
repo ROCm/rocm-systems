@@ -5652,6 +5652,131 @@ TEST(InstrumentorProbePatch, AfterInstRejectsMfmaAnchorsWithoutHazardScheduling)
   }
 }
 
+TEST(InstrumentorProbePatch, AfterInstRejectsCdna5AnchorsWithoutValuSpacing) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::array<uint32_t, 2> dense = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x32F16Vop3p, {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264});
+  const std::array<uint32_t, 2> sparse = cdna5::build_vop3p(
+      cdna5::kVSwmmacF3216x16x64F16Vop3p, {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 288});
+  const std::array<uint32_t, 2> exp_e64 =
+      cdna5::build_vop3(cdna5::kVExpF32Vop3, {.vdst = 8, .src0 = 265});
+  struct Case {
+    std::vector<uint32_t> words;
+    std::string_view mnemonic;
+    bool matrix;
+  };
+  const std::array<Case, 5> cases = {{
+      {.words = {dense[0], dense[1]}, .mnemonic = "v_wmma_f32_16x16x32_f16", .matrix = true},
+      {.words = {sparse[0], sparse[1]}, .mnemonic = "v_swmmac_f32_16x16x64_f16", .matrix = true},
+      {.words = {cdna5::build_vop1(cdna5::kVExpF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+       .mnemonic = "v_exp_f32_e32",
+       .matrix = false},
+      {.words = {exp_e64[0], exp_e64[1]}, .mnemonic = "v_exp_f32", .matrix = false},
+      {.words = {cdna5::build_vop1(cdna5::kVRcpF64Vop1, {.src0 = 266, .vdst = 8})[0]},
+       .mnemonic = "v_rcp_f64_e32",
+       .matrix = false},
+  }};
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> read_argument = build_v_mov_b32_src(1, 256, kArch);
+  ASSERT_TRUE(ret.succeeded() && end.succeeded() && read_argument.succeeded());
+  for (const uint32_t flags : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    for (const Case &test_case : cases) {
+      SCOPED_TRACE(flags);
+      SCOPED_TRACE(test_case.mnemonic);
+      const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+      ASSERT_NE(decoder, nullptr);
+      const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, test_case.words.data()));
+      ASSERT_NE(anchor, nullptr);
+      ASSERT_EQ(anchor->mnemonic(), test_case.mnemonic);
+      ASSERT_FALSE(anchor->is_mfma());
+      ASSERT_EQ((anchor->flags() & MATRIX_REGISTER_ACCESSES) != 0, test_case.matrix);
+      ASSERT_EQ(anchor->is_transcendental(), !test_case.matrix);
+      std::vector<uint32_t> guest = test_case.words;
+      guest.push_back(end.value());
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_amdgpu_kernel_elf(guest, 64, 3, flags, 7, 0, false, false, false, false, true),
+          {{"test_kernel", 0, 32, 64, 0}});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      for (const bool reads_result : {false, true}) {
+        SCOPED_TRACE(reads_result);
+        const std::vector<uint32_t> probe_words =
+            reads_result ? std::vector<uint32_t>{read_argument.value(), ret.value()}
+                         : std::vector<uint32_t>{ret.value()};
+        const std::vector<uint8_t> body = make_amdgpu_probe_elf("spacing", probe_words, flags);
+        const AmdGpuCodeObject probe(body.data(), body.size());
+        for (const InstrumentationKind kind :
+             {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+          SCOPED_TRACE(static_cast<int>(kind));
+          Instrumentor instrumentor(object, kArch);
+          InstrumentationPoint point = {
+              .kind = kind, .probe_obj = &probe, .probe_symbol = "spacing", .probe_args = {}};
+          if (reads_result)
+            point.probe_args = {probe_arg_vgpr(8)};
+          instrumentor.add_point(point);
+          const InstrumentedCodeObject result = instrumentor.patch();
+          if (kind == InstrumentationKind::BeforeInst) {
+            EXPECT_TRUE(result.errors.empty())
+                << (result.errors.empty() ? "" : result.errors.front());
+            EXPECT_FALSE(result.elf_bytes.empty());
+          } else {
+            EXPECT_EQ(result.errors.size(), 1u);
+            if (!result.errors.empty()) {
+              EXPECT_NE(result.errors.front().find("VALU spacing"), std::string::npos)
+                  << result.errors.front();
+            }
+            EXPECT_TRUE(result.elf_bytes.empty());
+            EXPECT_TRUE(result.sites.empty());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstValuSpacingGuardPreservesUnaffectedAdmission) {
+  struct Case {
+    uint32_t flags;
+    rj_code_arch_t arch;
+    uint32_t anchor;
+  };
+  const std::array<Case, 3> cases = {{
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .anchor = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 265, .vdst = 8})[0]},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1251,
+       .arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .anchor = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 265, .vdst = 8})[0]},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .anchor = rdna4::build_vop1(rdna4::kVExpF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(test_case.arch);
+    const util::FailureOr<uint32_t> read_argument = build_v_mov_b32_src(1, 256, test_case.arch);
+    ASSERT_TRUE(ret.succeeded() && end.succeeded() && read_argument.succeeded());
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_amdgpu_kernel_elf({test_case.anchor, end.value()}, 64, 3, test_case.flags, 7, 0, false,
+                               false, false, false, true),
+        {{"test_kernel", 0, 32, 64, 0}});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+        "spacing_control", {read_argument.value(), ret.value()}, test_case.flags);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    Instrumentor instrumentor(object, test_case.arch);
+    const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "spacing_control",
+                                        .probe_args = {probe_arg_vgpr(8)}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+    EXPECT_FALSE(result.elf_bytes.empty());
+  }
+}
+
 TEST(InstrumentorProbePatch, StorageProofIncludesJoinsBackedgesAndUnprovenCalls) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
   constexpr uint32_t kNop = rdna4::build_sopp(rdna4::kSNopSopp)[0];

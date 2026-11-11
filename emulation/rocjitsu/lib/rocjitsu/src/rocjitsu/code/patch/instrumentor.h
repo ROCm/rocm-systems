@@ -115,11 +115,11 @@ struct InstrumentationPoint {
   // naming one probe and describing it differently is an error, not two probes.
   // Immediate values and the source indices of guest-register arguments are per-site.
   std::vector<ProbeArgValue> probe_args;
-  // Run the probe body with every lane enabled rather than under the mask the
-  // guest had at the anchor. For a uniform probe whose work does not depend on
-  // which lanes were active; a probe that reads per-lane guest state wants the
-  // anchor mask instead, which is the default. Declared per probe, like the
-  // argument shape, and relayed through this point for the same reason.
+  // Run the probe body with every lane enabled rather than under EXEC at the
+  // selected observation point. For AfterInst, the default mask is the EXEC
+  // produced by the anchor. Intended for uniform probes; probes reading per-lane
+  // guest state want the default observation mask instead. Declared per probe,
+  // like the argument shape, and relayed through this point for the same reason.
   //
   // The envelope already widens EXEC around the spill and argument writes; this
   // holds that window open across the call instead of closing it first.
@@ -270,10 +270,10 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///   - @p pt.kind is BeforeInst, AfterInst, KernelEntry, or KernelExit. Boundaries require
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
 ///     that KernelEntry names the sole kernel's descriptor entry.
-///   - AfterInst requires a callable probe and an anchor that preserves VGPR
-///     bank selection, cannot enable GPR indexing or VSKIP, does not change the
-///     VGPR allocation, and does not deallocate VGPRs or scratch. Liveness proves addressing state
-///     before the anchor.
+///   - AfterInst requires a callable probe and a supported post-anchor state.
+///     See emulation/rocjitsu/docs/dbi-design.md, "Key design constraint", for
+///     the complete admission rules. Liveness proves addressing state before
+///     the anchor.
 ///     @p setreg_vgpr_msb_fixup selects the concrete target's MODE-write behavior;
 ///     the default conservatively applies gfx1250's clobber semantics on CDNA5.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
