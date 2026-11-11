@@ -333,6 +333,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
+    //! Keeps a submitted signal from being rearmed until a later wait has read it
+    void PinUntilWait(ProfilingSignal* signal) { NoteGpuWait(signal); }
+
    protected:
     //! Returns the signal attributes for the requested scope and updates interrupt
     uint64_t SignalAttributes(bool& interrupt) const;
