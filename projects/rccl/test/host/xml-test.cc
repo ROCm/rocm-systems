@@ -64,12 +64,12 @@ class XmlMicrotest : public ::testing::Test {
     return value ? value : "<unset>";
   }
 
-  static void ExpectTerminatedAttribute(const ncclXmlNode* node) {
+  static void ExpectTerminatedAttribute(const ncclXmlNode* node, const std::string& value) {
     ASSERT_EQ(1, node->nAttrs);
     ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
-    ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
+    ASSERT_EQ('\0', node->attrs[0].value[value.size()]);
     EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
-    EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
+    EXPECT_EQ(value, node->attrs[0].value);
     EXPECT_EQ('Z', node->attrs[1].key[0]);
   }
 };
@@ -499,28 +499,37 @@ TEST_F(XmlMicrotest, AttrSetters_FullNodeStillUpdatesExistingAttributes) {
   EXPECT_EQ(std::to_string(MAX_ATTR_COUNT - 1), Attr(node, std::to_string(MAX_ATTR_COUNT - 1).c_str()));
 }
 
-TEST_F(XmlMicrotest, SetAttr_LongKeyAndValueAreTerminatedAtCapacity) {
-  ncclXmlNode* node = Add(nullptr, "n");
+TEST_F(XmlMicrotest, AttrSetters_TerminateLongKeysAndValuesWithoutOverwritingNeighbors) {
   const std::string key(MAX_STR_LEN + 9, 'k');
   const std::string value(MAX_STR_LEN + 13, 'v');
-  std::memset(node->attrs, 'Z', sizeof(node->attrs));
-
-  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), value.c_str()));
-
-  ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node));
-  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), "short"));
-  EXPECT_EQ(1, node->nAttrs);
-  EXPECT_STREQ("short", node->attrs[0].value);
-}
-
-TEST_F(XmlMicrotest, SetAttrIfUnset_LongKeyAndValueAreTerminatedAtCapacity) {
-  ncclXmlNode* node = Add(nullptr, "n");
-  std::memset(node->attrs, 'Z', sizeof(node->attrs));
-
-  ASSERT_EQ(ncclSuccess, xmlSetAttrIfUnset(node, std::string(MAX_STR_LEN + 1, 'k').c_str(),
-                                         std::string(MAX_STR_LEN + 1, 'v').c_str()));
-
-  ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node));
+  struct Case {
+    const char* name;
+    ncclResult_t (*set)(ncclXmlNode*, const char*, const char*);
+    std::string expected;
+  };
+  const Case cases[] = {
+      {"string", xmlSetAttr, std::string(MAX_STR_LEN, 'v')},
+      {"if unset", xmlSetAttrIfUnset, std::string(MAX_STR_LEN, 'v')},
+      {"int", [](ncclXmlNode* node, const char* name, const char*) { return xmlSetAttrInt(node, name, -17); }, "-17"},
+      {"float", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrFloat(node, name, 1.5f);
+       }, "1.5"},
+      {"long", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrLong(node, name, INT64_C(0x123456789abcdef));
+       }, "0x123456789abcdef"},
+      {"uint64", [](ncclXmlNode* node, const char* name, const char*) {
+         return xmlSetAttrUint64(node, name, UINT64_MAX);
+       }, "0xffffffffffffffff"}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    ncclXmlNode* node = Add(nullptr, "n");
+    std::memset(node->attrs, 'Z', sizeof(node->attrs));
+    ASSERT_EQ(ncclSuccess, test.set(node, key.c_str(), value.c_str()));
+    ASSERT_NO_FATAL_FAILURE(ExpectTerminatedAttribute(node, test.expected));
+    ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), "short"));
+    EXPECT_EQ(1, node->nAttrs);
+    EXPECT_STREQ("short", node->attrs[0].value);
+  }
 }
 
 TEST_F(XmlMicrotest, FindNode_ReorderedAttributesMatchButMissingKeysDoNot) {
