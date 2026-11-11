@@ -41,6 +41,8 @@ set(SRC_FILES
   algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu
   algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu
   algorithms/dda/alltoall/dda_alltoall_ipc.cu
+  algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu
+  algorithms/dda/broadcast/dda_broadcast_fabric_ll128.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu
   algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu
@@ -162,6 +164,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_tdm.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
@@ -200,6 +203,7 @@ set(SRC_FILES
   algorithms/dda/all_gather/dda_all_gather.h
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
+  algorithms/dda/broadcast/dda_broadcast.h
   algorithms/dda/dda_init_detail.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
@@ -227,6 +231,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_type_env.h
   include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
@@ -441,6 +446,7 @@ set(SRC_FILES
   include/tuner.h
   include/tuning.h
   include/utils.h
+  include/warp_speed_plan.h
   init.cc
   init_nvtx.cc
   algorithms/dda/ipc/ipc_gpu_barrier.cu
@@ -1015,6 +1021,8 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_broadcast_fabric_ll128\\.cu\\.cpp$")
   # ce_reduce.cc is now pure host code (a dispatcher calling into the
   # per-instantiation launchers generated under gensrc/ce_reduce/, which are
   # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
