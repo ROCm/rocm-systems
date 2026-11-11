@@ -3274,6 +3274,43 @@ TEST(Cdna3DecodeTest, AccVgprMovesDoNotRenderPackedSourceModifiers) {
   EXPECT_EQ(inst->disassemble(), "v_accvgpr_write acc15, 0");
 }
 
+TEST(Cdna1DecodeTest, MfmaAccumulatorSourceHasCanonicalRegisterIdentity) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  for (uint16_t index : {0, 32, 252}) {
+    const auto words = cdna1::build_vop3p_mfma(
+        cdna1::kVMfmaF324x4x1f32Vop3pMfma,
+        {.vdst = 64, .src0 = 256, .src1 = 272, .src2 = static_cast<uint16_t>(256 + index)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const auto &source = *inst->src_operand(2);
+    EXPECT_EQ(source.to_register_ref(), (RegisterRef{RegClass::ACC_VGPR, index, 4}));
+    EXPECT_EQ(source.decoded_vgpr(),
+              (RegisterRef{RegClass::VGPR, static_cast<uint16_t>(256 + index), 4}));
+    EXPECT_EQ(source.name(), std::format("acc[{}:{}]", index, index + 3));
+    InstDefUse def_use(*inst, 64);
+    EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, index, 4}));
+    EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, index, 4}));
+    EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 64, 4}));
+  }
+}
+
+TEST(Cdna1DecodeTest, MfmaAccumulatorCanonicalizationPreservesInlineConstants) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  for (uint16_t selector : {128, 192, 193, 208, 240, 248}) {
+    const auto words =
+        cdna1::build_vop3p_mfma(cdna1::kVMfmaF324x4x1f32Vop3pMfma,
+                                {.vdst = 64, .src0 = 256, .src1 = 272, .src2 = selector});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const auto &source = *inst->src_operand(2);
+    EXPECT_EQ(source.encoding_value(), selector);
+    EXPECT_FALSE(source.to_register_ref());
+    EXPECT_FALSE(source.decoded_vgpr());
+  }
+}
+
 TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
   const uint32_t words[] = {
       0xD3E08088u,

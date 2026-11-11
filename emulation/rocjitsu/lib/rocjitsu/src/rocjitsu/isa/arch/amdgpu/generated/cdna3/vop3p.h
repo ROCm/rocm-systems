@@ -347,6 +347,9 @@ class VMfmaF3216x16x8Xf32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x8Xf32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -357,6 +360,9 @@ class VMfmaF3232x32x4Xf32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x4Xf32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -367,6 +373,9 @@ class VMfmaF3232x32x12bF32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -377,6 +386,9 @@ class VMfmaF3216x16x14bF32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x14bF32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -387,6 +399,9 @@ class VMfmaF324x4x116bF32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF324x4x116bF32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -397,6 +412,9 @@ class VMfmaF3232x32x2F32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -407,6 +425,9 @@ class VMfmaF3216x16x4F32Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x4F32Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -417,6 +438,9 @@ class VMfmaF3232x32x42bF16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -427,6 +451,9 @@ class VMfmaF3216x16x44bF16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x44bF16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -437,6 +464,9 @@ class VMfmaF324x4x416bF16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF324x4x416bF16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -447,6 +477,9 @@ class VMfmaF3232x32x8F16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -457,6 +490,9 @@ class VMfmaF3216x16x16F16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x16F16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -467,6 +503,9 @@ class VMfmaI3232x32x42bI8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -477,6 +516,9 @@ class VMfmaI3216x16x44bI8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaI3216x16x44bI8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -487,6 +529,9 @@ class VMfmaI324x4x416bI8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaI324x4x416bI8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -497,6 +542,9 @@ class VMfmaI3232x32x16I8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaI3232x32x16I8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -507,6 +555,9 @@ class VMfmaI3216x16x32I8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaI3216x16x32I8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -517,6 +568,9 @@ class VMfmaF3232x32x42bBf16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -527,6 +581,9 @@ class VMfmaF3216x16x44bBf16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x44bBf16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -537,6 +594,9 @@ class VMfmaF324x4x416bBf16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF324x4x416bBf16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -547,6 +607,9 @@ class VMfmaF3232x32x8Bf16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x8Bf16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -557,6 +620,9 @@ class VMfmaF3216x16x16Bf16Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x16Bf16Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -647,6 +713,9 @@ class VMfmaF3216x16x32Bf8Bf8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x32Bf8Bf8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -657,6 +726,9 @@ class VMfmaF3216x16x32Bf8Fp8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x32Bf8Fp8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -667,6 +739,9 @@ class VMfmaF3216x16x32Fp8Bf8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x32Fp8Bf8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -677,6 +752,9 @@ class VMfmaF3216x16x32Fp8Fp8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3216x16x32Fp8Fp8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -687,6 +765,9 @@ class VMfmaF3232x32x16Bf8Bf8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x16Bf8Bf8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -697,6 +778,9 @@ class VMfmaF3232x32x16Bf8Fp8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x16Bf8Fp8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -707,6 +791,9 @@ class VMfmaF3232x32x16Fp8Bf8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x16Fp8Bf8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -717,6 +804,9 @@ class VMfmaF3232x32x16Fp8Fp8Vop3pMfma : public Vop3pMfma {
 public:
   VMfmaF3232x32x16Fp8Fp8Vop3pMfma(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.mfma = {inst_.cbsz, inst_.abid, inst_.blgp, 0};
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
