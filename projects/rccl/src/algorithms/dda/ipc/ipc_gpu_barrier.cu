@@ -28,7 +28,11 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks == NRANKS);
-  /* Exported via cudaIpcGetMemHandle: a suballocated mailbox breaks peers' later opens of its chunk. */
+  /* HIP pools fine-grained buffers under its fragment-pool cutoff into one
+   * exported chunk (ROCM-34219). After peers close one mailbox from that
+   * chunk, hipIpcOpenMemHandle of a later mailbox in it returns
+   * hipErrorInvalidDevicePointer. Pad to CUDA_IPC_MIN so each mailbox is its
+   * own allocation, and drop the pad once ROCM-34219 is fixed. */
   size_t allocBytes = nRanks * nBlocks * sizeof(FlagType);
   ALIGN_SIZE(allocBytes, CUDA_IPC_MIN);
   auto flagBuf = std::make_unique<DeviceBuffer>(allocBytes);
