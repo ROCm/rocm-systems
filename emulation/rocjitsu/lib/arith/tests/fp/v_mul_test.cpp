@@ -6,6 +6,7 @@
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "fp/binary_arithmetic_test.h"
+#include "fp/captured_gfx11_test.h"
 #include "fp/elementwise.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
@@ -393,4 +394,50 @@ TEST(FpMulF64, NanPriority) {
     check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, sample[0], sample[1], expected);
     check_binary64_rounding<64>(rj_arith_v_mul_f64_w64_gfx12, sample[0], sample[1], expected);
   }
+}
+
+namespace {
+
+using rocjitsu::arith::test::CapturedGfx11;
+
+// gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source is
+// returned unquieted, also under directed rounding and OMOD.
+const CapturedGfx11 mul_f16_lanes[] = {
+    {"E32Mode00", 0, 0x00, 0x6b007c01, 0x4f160000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x5a, 0x323e0000, 0xd51d7c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0xf0, 0xde7e0000, 0xa4cc7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x32a07c01, 0xab200000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+     0xfdc50400, 0x5e2a0000, 0, 0xfdc5a5a5},
+};
+
+// gfx1100 MUL_F64 returns the first NaN source with its modifiers applied, quieted only when
+// MODE.IEEE is set. IEEE-set lanes are from the gfx1100 v2 capture (hw2-gfx1100).
+const CapturedGfx11 mul_f64_lanes[] = {
+    {"SignalingFirst", 0, 0xf0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
+    {"NegativeQuietFirst", 0, 0xf0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
+    {"SignalingSecondRoundZero", 0, 0xff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
+     0xfff8000000000000},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"IeeeSetSignalingFirst", 0, 0x2f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
+     0x7ff8000000000001},
+    {"IeeeSetNegativeQuietFirst", 0, 0x2f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
+     0xfff8000000000000},
+};
+
+} // namespace
+
+// Compatibility reproduces captured gfx1100 FP16 MUL lanes.
+TEST(FpMulF16Gfx11, CapturedSignalingNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
+}
+
+// Compatibility reproduces captured gfx1100 FP64 MUL NaN lanes.
+TEST(FpMulF64Gfx11, CapturedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
+  check_captured_gfx11<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
 }
