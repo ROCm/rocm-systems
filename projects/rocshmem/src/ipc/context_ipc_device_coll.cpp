@@ -359,7 +359,8 @@ __device__ void IPCContext::broadcastmem_linear_thread_puts_wave(
   // Monotonic and never reset, so a fast root cannot outrun a slow poller.
   long expected = static_cast<long>(team_obj->bcast_sequence_number + 1);
 
-  int tid = get_flat_block_id();
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Root: each lane puts src to its assigned subset of dest PEs, then signals.
@@ -562,7 +563,8 @@ __device__ void IPCContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
   // min(get_flat_block_size(), WF_SIZE)
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
@@ -607,7 +609,8 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   size_t fcollect_pSync_offset = (team_obj->fcollect_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Each lane puts this PE's src to its assigned subset of dest PEs.

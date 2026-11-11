@@ -507,7 +507,8 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -631,7 +632,8 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  int tid = get_flat_block_id();
+  // Lane id within the calling wave, so waves other than wave 0 also work.
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
