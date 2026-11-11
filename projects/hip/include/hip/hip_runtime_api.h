@@ -6867,10 +6867,12 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
  *
  * @param [in] ctx Context to destroy
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext
  *
  * @see hipCtxCreate, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,hipCtxSetCurrent,
  * hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
+ * @warning Returns #hipErrorInvalidContext when the context was not created by a prior
+ * hipCtxCreate.
  *
  * @warning  This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on the
  * NVIDIA platform.
