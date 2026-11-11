@@ -1588,6 +1588,15 @@ memory:
   Unit_hipMemcpyPeerAsync_Negative_Parameters:
     <<: *level_default
     tags: [multigpu, transfer, P1]
+  Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation:
+    <<: *level_default
+    tags: [multigpu, transfer, P1]
+  Unit_hipMemcpyPeerAsync_VmmSegmentedPeerAccess:
+    <<: *level_default
+    tags: [multigpu, transfer, P1]
+  Unit_hipMemcpyPeerAsync_VmmConcurrentLazyGrantCache:
+    <<: *level_default
+    tags: [multigpu, transfer, P1]
   Unit_hipMemcpyPeerAsync_Capture:
     <<: *level_default
     tags: [multigpu, transfer]

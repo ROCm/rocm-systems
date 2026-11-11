@@ -548,9 +548,14 @@ Device* Memory::GetDeviceById() {
 }
 
 // =================================================================================================
-bool Memory::ValidateMemAccess(const Device& dev, bool read_write) {
+std::recursive_mutex& Memory::VmmAccessMutex() {
+  static std::recursive_mutex mutex;
+  return mutex;
+}
+
+bool Memory::ValidateMemAccess(const Device& dev, bool read_write, bool grant) {
   if (flags_ & CL_MEM_VA_RANGE_AMD) {
-    return dev.ValidateMemAccess(*this, read_write);
+    return dev.ValidateMemAccess(*this, read_write, grant);
   }
   return true;
 }

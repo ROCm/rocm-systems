@@ -13,7 +13,7 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 631
+contract_tests: 632
 contract_domains: 118
 declared_apis: 505
 covered_apis: 492
@@ -21,9 +21,9 @@ uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 631
+- Snapshot date: 2026-11-10
+- Snapshot commit: `932127334a`
+- Contract tests: 632
 - Contract domains: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505
 - Declared HIP runtime APIs directly exercised by contract tests: 492

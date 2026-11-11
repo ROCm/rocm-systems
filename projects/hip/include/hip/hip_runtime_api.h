@@ -5285,6 +5285,10 @@ hipError_t hipHostFree(void* ptr);
  * the hipMemcpy will still work, but will perform the copy using a staging buffer on the host.
  *  Calling hipMemcpy with dst and src pointers that do not match the hipMemcpyKind results in
  *  undefined behavior.
+ *  For VMM mappings, peer access can lazily grant the copying device read access to src and
+ *  read-write access to dst after validating the entire copy. An explicit hipMemSetAccess
+ *  restriction is never upgraded; insufficient access returns #hipErrorInvalidValue. A lazy
+ *  grant persists until changed explicitly or the mapping is unmapped.
  *
  *  @param[out]  dst Data being copy to
  *  @param[in]  src Data being copy from
@@ -5305,6 +5309,10 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
  *  It allows single or multiple devices to do memory copy on single or multiple streams.
  *  The operation is akin to hipMemcpyAsync + hipStreamSynchronize.
  *  Since it is a sync API, it is not allowed during graph capture.
+ *  For VMM mappings, peer access can lazily grant the copying device read access to src and
+ *  read-write access to dst after validating the entire copy. An explicit hipMemSetAccess
+ *  restriction is never upgraded; insufficient access returns #hipErrorInvalidValue. A lazy
+ *  grant persists until changed explicitly or the mapping is unmapped.
  *
  *  @param[out]  dst Data being copy to
  *  @param[in]  src Data being copy from
@@ -5688,6 +5696,10 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
  *
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously. For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
+ *  For VMM mappings, peer access can lazily grant the copying device read access to src and
+ *  read-write access to dst after validating the entire copy. An explicit hipMemSetAccess
+ *  restriction is never upgraded; insufficient access returns #hipErrorInvalidValue. A lazy
+ *  grant persists until changed explicitly or the mapping is unmapped.
  *
  *  @param[out] dst Data being copy to
  *  @param[in]  src Data being copy from
@@ -6598,6 +6610,10 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
 
 /**
  * @brief Copies memory between two devices.
+ * For VMM mappings, peer access can lazily grant the copying device read access to src and
+ * read-write access to dst after validating the entire copy. An explicit hipMemSetAccess
+ * restriction is never upgraded; insufficient access returns #hipErrorInvalidValue. A lazy
+ * grant persists until changed explicitly or the mapping is unmapped.
  *
  * @param [out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device
@@ -6611,6 +6627,10 @@ hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDev
                          size_t sizeBytes);
 /**
  * @brief Copies memory between two devices asynchronously.
+ * For VMM mappings, peer access can lazily grant the copying device read access to src and
+ * read-write access to dst after validating the entire copy. An explicit hipMemSetAccess
+ * restriction is never upgraded; insufficient access returns #hipErrorInvalidValue. A lazy
+ * grant persists until changed explicitly or the mapping is unmapped.
  *
  * @param [out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device

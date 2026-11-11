@@ -55,6 +55,7 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -2955,9 +2956,75 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
+bool Device::ValidateMemAccess(amd::Memory& mem, bool read_write, bool grant) const {
+  std::lock_guard<std::recursive_mutex> lock(amd::Memory::VmmAccessMutex());
+  auto has_access = [read_write](VmmAccess access) {
+    return read_write ? (access == VmmAccess::kReadWrite)
+                      : (access == VmmAccess::kReadWrite || access == VmmAccess::kReadOnly);
+  };
+
+  void* va_addr = mem.getSvmPtr();
+
+  // The mapped segment owns this cache. Explicit access changes update it and
+  // unmap destroys it; a repeated copy therefore avoids an HSA query.
+  uint32_t cached_access = static_cast<uint32_t>(VmmAccess::kNone);
+  if (!mem.getCachedVmmAccess(this, &cached_access)) {
+    hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+    if (Hsa::vmem_get_access(va_addr, &perms, getBackendDevice()) == HSA_STATUS_SUCCESS) {
+      cached_access = static_cast<uint32_t>(perms);
+    }
+    mem.cacheVmmAccess(this, cached_access);
+  }
+  const VmmAccess access = static_cast<VmmAccess>(cached_access);
+  if (has_access(access)) {
+    return true;
+  }
+
+  // The owner of a mapped VMM range is the physical allocation recorded in
+  // phys_mem_obj; Memory::parent() is the VA reservation object, which is not
+  // device-owned.
+  amd::Memory* phys = mem.getUserData().phys_mem_obj;
+  amd::Device* owner = (phys != nullptr) ? phys->GetDeviceById() : mem.GetDeviceById();
+
+  // An explicit hipMemSetAccess permission takes precedence over peer enable.
+  if (mem.hasExplicitVmmAccess(this)) {
+    return false;
+  }
+
+  // hipDeviceEnablePeerAccess() updates regular allocations through
+  // hsa_amd_agents_allow_access, but VMM mappings need an explicit per-agent
+  // hsa_amd_vmem_set_access() descriptor. Grant the current device access
+  // lazily here so a peer copy over VMM memory actually transfers data instead
+  // of silently succeeding with zero bytes copied.
+  if (!owner->isPeerAccessEnabled(this)) {
+    return false;
+  }
+
+  // Preflight checks every source and destination segment before any grant.
+  if (!grant) return true;
+
+  const VmmAccess required = read_write ? VmmAccess::kReadWrite : VmmAccess::kReadOnly;
+  if (!const_cast<Device*>(this)->SetMemAccess(va_addr, mem.getSize(), required,
+                                               VmmLocationType::kDevice)) {
+    return false;
+  }
+
+  hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+  if (Hsa::vmem_get_access(va_addr, &perms, getBackendDevice()) != HSA_STATUS_SUCCESS ||
+      !has_access(static_cast<VmmAccess>(perms))) {
+    // A successful set must also be observable before a copy is submitted.
+    const_cast<Device*>(this)->SetMemAccess(va_addr, mem.getSize(), access,
+                                            VmmLocationType::kDevice);
+    return false;
+  }
+  mem.cacheVmmAccess(this, static_cast<uint32_t>(perms));
+  return true;
+}
+
+// ================================================================================================
 amd::Device::VmmExportStatus Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                                void* shareableHandle,
-                                                amd::Memory::HandleType handle_type) {
+                                                              void* shareableHandle,
+                                                              amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;

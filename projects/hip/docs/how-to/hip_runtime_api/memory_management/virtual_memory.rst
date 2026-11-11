@@ -143,11 +143,23 @@ as with virtual memory. When memory is allocated with :cpp:func:`hipMalloc`,
 :cpp:func:`hipDeviceEnablePeerAccess` is used to enable peer access. This
 function enables access between two devices, but it means that every call to
 :cpp:func:`hipMalloc` takes more time to perform the checks and the mapping
-between the devices. When using virtual memory management, peer access is
-enabled by :cpp:func:`hipMemSetAccess`, which provides a finer level of
-control over what is shared. This has no performance impact on memory allocation
+between the devices. For virtual memory management,
+:cpp:func:`hipMemSetAccess` provides a finer level of control over what is
+shared. This has no performance impact on memory allocation
 and gives you more control over what memory buffers are shared with which
 devices.
+
+For :cpp:func:`hipMemcpy`, :cpp:func:`hipMemcpyAsync`,
+:cpp:func:`hipMemcpyWithStream`, :cpp:func:`hipMemcpyPeer`,
+:cpp:func:`hipMemcpyPeerAsync`, and :cpp:func:`hipMemcpyBatchAsync`, enabling peer
+access also lets the runtime grant the copying device access to VMM mappings as
+needed. The runtime checks every mapped segment of both operands before granting
+access. A rejected copy does not grant access. An access permission explicitly
+set with :cpp:func:`hipMemSetAccess` takes precedence; the runtime does not
+upgrade an explicit denial or read-only permission for a write. To configure
+access independently of a copy, use :cpp:func:`hipMemSetAccess`. A lazy grant
+remains until changed with :cpp:func:`hipMemSetAccess` or the mapping is
+unmapped; :cpp:func:`hipDeviceDisablePeerAccess` does not revoke it.
 
 .. code-block:: cpp
 

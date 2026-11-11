@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -196,6 +197,93 @@ HIP_TEST_CASE(Contract_PeerCopy_HipMemcpy3DPeerAsync_SelfDevice3DAsync_CopiesExt
   HIP_CHECK(hipMemcpy3D(&down));
 
   REQUIRE(dst == src);
+}
+
+// @asserts: hipMemcpyPeer - a VMM peer copy without destination write access returns hipErrorInvalidValue without changing access or data
+HIP_TEST_CASE(Contract_PeerCopy_HipMemcpyPeer_VmmDeniedDestination_IsRejectedWithoutGrant) {
+  if (DeviceCount() < 2) HIP_SKIP_TEST("Two GPUs are required for a VMM peer copy.");
+  for (int device = 0; device < 2; ++device) {
+    int supported = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeVirtualMemoryManagementSupported,
+                                    device));
+    if (!supported) HIP_SKIP_TEST("VMM is unsupported on a selected GPU.");
+    HIP_CHECK(hipDeviceCanAccessPeer(&supported, device, 1 - device));
+    if (!supported) HIP_SKIP_TEST("Bidirectional peer access is unavailable.");
+  }
+
+  hip::contract::ContractCleanup cleanup;
+  const int original_device = CurrentDevice();
+  cleanup.Add([original_device] { (void)hipSetDevice(original_device); });
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  size_t granularity[2]{};
+  for (int device = 0; device < 2; ++device) {
+    prop.location.id = device;
+    HIP_CHECK(hipMemGetAllocationGranularity(&granularity[device], &prop,
+                                             hipMemAllocationGranularityMinimum));
+  }
+  const size_t size = std::lcm(granularity[0], granularity[1]);
+  void* mapped[2]{};
+  for (int device = 0; device < 2; ++device) {
+    HIP_CHECK(hipSetDevice(device));
+    prop.location.id = device;
+    HIP_CHECK(hipMemAddressReserve(&mapped[device], size, 0, nullptr, 0));
+    cleanup.Add([address = mapped[device], size, device] {
+      (void)hipSetDevice(device);
+      (void)hipMemAddressFree(address, size);
+    });
+    hipMemGenericAllocationHandle_t handle{};
+    HIP_CHECK(hipMemCreate(&handle, size, &prop, 0));
+    cleanup.Add([handle, device] {
+      (void)hipSetDevice(device);
+      (void)hipMemRelease(handle);
+    });
+    HIP_CHECK(hipMemMap(mapped[device], size, 0, handle, 0));
+    cleanup.Add([address = mapped[device], size, device] {
+      (void)hipSetDevice(device);
+      (void)hipMemUnmap(address, size);
+    });
+    hipMemAccessDesc access{};
+    access.location.type = hipMemLocationTypeDevice;
+    access.location.id = device;
+    access.flags = hipMemAccessFlagsProtReadWrite;
+    HIP_CHECK(hipMemSetAccess(mapped[device], size, &access, 1));
+  }
+
+  const auto source = MakePattern(0x51);
+  const auto poison = MakePattern(0xA3);
+  std::array<uint8_t, kByteCount> actual{};
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemcpy(mapped[0], source.data(), source.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemcpy(mapped[1], poison.data(), poison.size(), hipMemcpyHostToDevice));
+  HIP_CHECK(hipSetDevice(0));
+  const hipError_t enabled = hipDeviceEnablePeerAccess(1, 0);
+  REQUIRE((enabled == hipSuccess || enabled == hipErrorPeerAccessAlreadyEnabled));
+  if (enabled == hipSuccess) {
+    cleanup.Add([] {
+      (void)hipSetDevice(0);
+      (void)hipDeviceDisablePeerAccess(1);
+    });
+  }
+  (void)hipGetLastError();
+
+  hipMemAccessDesc deny{};
+  deny.location.type = hipMemLocationTypeDevice;
+  deny.location.id = 0;
+  deny.flags = hipMemAccessFlagsProtNone;
+  HIP_CHECK(hipMemSetAccess(mapped[1], size, &deny, 1));
+  HIP_CHECK_ERROR(hipMemcpyPeer(mapped[1], 1, mapped[0], 0, kByteCount), hipErrorInvalidValue);
+  (void)hipGetLastError();
+
+  hipMemLocation copy_location{hipMemLocationTypeDevice, 0};
+  unsigned long long access_after = ~0ULL;
+  HIP_CHECK(hipMemGetAccess(&access_after, &copy_location, mapped[1]));
+  REQUIRE(access_after == hipMemAccessFlagsProtNone);
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemcpy(actual.data(), mapped[1], actual.size(), hipMemcpyDeviceToHost));
+  REQUIRE(actual == poison);
 }
 
 // @asserts: hipMemcpyPeer - rejects an out-of-range device ordinal and leaves a matching sticky last error that clears once consumed
