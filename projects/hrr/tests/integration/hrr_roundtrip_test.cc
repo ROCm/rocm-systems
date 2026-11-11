@@ -46,6 +46,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
 
 // fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
 // read_text_file, hrr_run_playback, hrr_run_roundtrip, hrr_capture_direct,
@@ -200,6 +201,71 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   //   stored blob.  Any mismatch → exit 1.
   // -------------------------------------------------------------------------
   hrr_run_playback(cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - `hrr-playback --gen-signing-key` writes a key pair. Capture runs with
+ *     HIP_HRR_SIGNING_KEY set and leaves hrr.manifest and a 64-byte hrr.sig in the
+ *     process archive; the manifest lists every file under it.
+ *   - Replay with --trusted-key accepts the archive and validates the D2H blobs.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_signed_gpu"};
+  ScopedDir keys{fs::temp_directory_path() / "hrr_signed_gpu_keys"};
+  fs::create_directories(keys.path);
+  const fs::path seed = keys.path / "capture.seed", pub = keys.path / "capture.pub";
+  {
+    hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+    set_proc_search_path(proc);
+    REQUIRE(proc.run("--gen-signing-key " + hrr_quote_path(seed) + " " + hrr_quote_path(pub)) == 0);
+  }
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", cap.path, 5,
+                     {{"HIP_HRR_SIGNING_KEY", seed.string()}});
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::file_size(archive / "hrr.sig") == 64);
+  const std::string manifest = read_text_file(archive / "hrr.manifest");
+  size_t listed = 0, files = 0;
+  for (const auto& e : fs::recursive_directory_iterator(archive))
+    if (e.is_regular_file() && e.path().filename() != "hrr.manifest" &&
+        e.path().filename() != "hrr.sig") {
+      ++files;
+      const std::string rel = fs::relative(e.path(), archive).generic_string();
+      if (manifest.find("  " + rel + "\n") != std::string::npos) ++listed;
+    }
+  REQUIRE(files >= 3);
+  CHECK(listed == files);
+
+  // The GPU case: replay under the trusted key. That it is refused for a changed,
+  // added or missing file is Unit_HRR_Sign_*, which needs no GPU.
+  hrr_run_playback(cap.path, "--trusted-key " + hrr_quote_path(pub));
+
+  // A missing or world-readable HIP_HRR_SIGNING_KEY is refused in writer::open()
+  // before the workload runs, leaving no archive directory behind (the capture
+  // above with the 0600 seed is the negative control).
+  auto run_with_key = [&](const fs::path& out_dir, const fs::path& key_file) {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", out_dir.string());
+    proc.setEnv("HIP_HRR_SIGNING_KEY", key_file.string());
+    set_proc_search_path(proc);
+    proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    return proc.getOutput();
+  };
+  ScopedDir bad_cap{fs::temp_directory_path() / "hrr_signed_gpu_bad"};
+  fs::create_directories(bad_cap.path);
+  const std::string out_missing = run_with_key(bad_cap.path, keys.path / "no_such.seed");
+  INFO(out_missing);
+  CHECK(out_missing.find("[HRR capture] Capture disabled:") != std::string::npos);
+  CHECK(hrr_process_archives(bad_cap.path).empty());
+#ifndef _WIN32
+  REQUIRE(::chmod(seed.c_str(), 0644) == 0);
+  const std::string out_mode = run_with_key(bad_cap.path, seed);
+  INFO(out_mode);
+  CHECK(out_mode.find("[HRR capture] Capture disabled:") != std::string::npos);
+  CHECK(out_mode.find("chmod 600") != std::string::npos);
+  CHECK(hrr_process_archives(bad_cap.path).empty());
+#endif
 }
 
 /**

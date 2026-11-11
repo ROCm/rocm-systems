@@ -34,6 +34,14 @@ if(EXISTS ${HRR_CAPTURE_SRC}/hip_capture_scrub.cpp)
   target_compile_definitions(hrr-unit-tests PRIVATE HRR_HAVE_CAPTURE_SCRUB=1)
 endif()
 
+# Archive signing tests (hrr_sign_test.cc) need hrr::sign, which playback/CMakeLists.txt
+# builds from CLR's hrr_archive_sign.cpp and shared/sha256. Without them the cases
+# register as skipped, as for the scrubber.
+target_sources(hrr-unit-tests PRIVATE hrr_sign_test.cc)
+if(TARGET hrr_sign)
+  target_link_libraries(hrr-unit-tests PRIVATE hrr::sign)
+endif()
+
 # ../include makes the local harness headers (hrr_test_common.hh,
 # hrr_test_process.hh) available. hrr_reader.h, hip_playback.h, and
 # hrr/hrr_api_args.h come transitively from hrr::reader.
