@@ -64,6 +64,8 @@ size_t
 rocprofiler_test_c_replay_offset_replay_start_context(void);
 size_t
 rocprofiler_test_c_replay_offset_replay_stop_context(void);
+size_t
+rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(void);
 int
 rocprofiler_test_c_replay_operation_last(void);
 int
@@ -126,7 +128,9 @@ TEST(kernel_replay_abi, members_are_in_declaration_order)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_LT(offsetof(replay_data_t, replay_start_context),
               offsetof(replay_data_t, replay_stop_context));
-    EXPECT_LT(offsetof(replay_data_t, replay_stop_context), sizeof(replay_data_t));
+    EXPECT_LT(offsetof(replay_data_t, replay_stop_context),
+              offsetof(replay_data_t, replay_set_thread_trace_parameters));
+    EXPECT_LT(offsetof(replay_data_t, replay_set_thread_trace_parameters), sizeof(replay_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -150,8 +154,11 @@ TEST(kernel_replay_abi, members_do_not_overlap_and_fit)
               offsetof(replay_data_t, replay_start_context) +
                   sizeof(replay_data_t{}.replay_start_context));
     EXPECT_GE(
-        sizeof(replay_data_t),
+        offsetof(replay_data_t, replay_set_thread_trace_parameters),
         offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context));
+    EXPECT_GE(sizeof(replay_data_t),
+              offsetof(replay_data_t, replay_set_thread_trace_parameters) +
+                  sizeof(replay_data_t{}.replay_set_thread_trace_parameters));
 }
 
 // Pass counters are documented as uint64_t. A tool reading them through the header's type must see
@@ -164,7 +171,7 @@ TEST(kernel_replay_abi, pass_counters_are_64_bit)
     EXPECT_EQ(sizeof(replay_data_t{}.total_passes), 8u);
 }
 
-// The four callback members are function pointers the tool either reads or writes. Their exact
+// The five callback members are function pointers the tool either reads or writes. Their exact
 // signatures are the contract; a changed parameter list here is an ABI break that the compiler
 // would not otherwise flag at the tool.
 TEST(kernel_replay_abi, callback_signatures_are_pinned)
@@ -172,12 +179,16 @@ TEST(kernel_replay_abi, callback_signatures_are_pinned)
     using pass_count_fn = uint64_t (*)(rocprofiler_kernel_dispatch_info_t, rocprofiler_user_data_t);
     using continue_fn =
         int (*)(rocprofiler_kernel_dispatch_info_t, uint64_t, uint64_t, rocprofiler_user_data_t);
-    using toggle_fn = rocprofiler_status_t (*)(rocprofiler_context_id_t);
+    using toggle_fn              = rocprofiler_status_t (*)(rocprofiler_context_id_t);
+    using thread_trace_params_fn = rocprofiler_status_t (*)(
+        rocprofiler_context_id_t, const rocprofiler_thread_trace_parameter_t*, size_t);
 
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_pass_count), pass_count_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_continue), continue_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_start_context), toggle_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_stop_context), toggle_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(replay_data_t{}.replay_set_thread_trace_parameters),
+                              thread_trace_params_fn>::value));
 }
 
 // A zeroed record must mean "do not replay this dispatch". The header documents a NULL
@@ -190,6 +201,7 @@ TEST(kernel_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
+    EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
     EXPECT_EQ(rec.current_pass, 0u);
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.size, 0u);
@@ -203,7 +215,21 @@ TEST(kernel_replay_abi, size_member_carries_the_layout_prefix)
     replay_data_t rec = {};
     rec.size          = sizeof(replay_data_t);
     EXPECT_EQ(rec.size, sizeof(replay_data_t));
-    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_stop_context));
+    EXPECT_GT(rec.size, offsetof(replay_data_t, replay_set_thread_trace_parameters));
+}
+
+// replay_set_thread_trace_parameters was appended after replay_stop_context. A record from an SDK
+// that predates it ends at replay_stop_context, so a tool must be able to tell the two apart from
+// size alone before it calls the pointer.
+TEST(kernel_replay_abi, size_gates_the_thread_trace_parameters_member)
+{
+    const size_t old_size =
+        offsetof(replay_data_t, replay_stop_context) + sizeof(replay_data_t{}.replay_stop_context);
+    const size_t needed = offsetof(replay_data_t, replay_set_thread_trace_parameters) +
+                          sizeof(replay_data_t{}.replay_set_thread_trace_parameters);
+
+    EXPECT_LT(old_size, needed);
+    EXPECT_LE(needed, sizeof(replay_data_t));
 }
 
 // A record is passed by pointer and read field-by-field; it must be aligned for its widest member
@@ -366,6 +392,8 @@ TEST(kernel_replay_abi, c_and_cxx_agree_on_every_field_offset)
               offsetof(replay_data_t, replay_start_context));
     EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_stop_context(),
               offsetof(replay_data_t, replay_stop_context));
+    EXPECT_EQ(rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(),
+              offsetof(replay_data_t, replay_set_thread_trace_parameters));
 }
 
 TEST(kernel_replay_abi, c_and_cxx_agree_on_enum_values)
@@ -394,4 +422,5 @@ TEST(kernel_replay_abi, record_written_by_c_reads_back_in_cxx)
     EXPECT_EQ(rec.replay_continue, nullptr);
     EXPECT_EQ(rec.replay_start_context, nullptr);
     EXPECT_EQ(rec.replay_stop_context, nullptr);
+    EXPECT_EQ(rec.replay_set_thread_trace_parameters, nullptr);
 }

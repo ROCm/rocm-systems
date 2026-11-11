@@ -100,6 +100,12 @@ rocprofiler_test_c_replay_offset_replay_stop_context(void)
     return offsetof(replay_data_c_t, replay_stop_context);
 }
 
+size_t
+rocprofiler_test_c_replay_offset_replay_set_thread_trace_parameters(void)
+{
+    return offsetof(replay_data_c_t, replay_set_thread_trace_parameters);
+}
+
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
 // show up as a mismatch here rather than as a wrong branch taken at runtime in a tool.
 int

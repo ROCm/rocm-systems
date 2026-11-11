@@ -308,8 +308,9 @@ execute_pass_phase_enter(const replay_plan_t&    plan,
     // Localized context control: the tool may call these from its PASS PHASE_ENTER callback to
     // enable/disable a context for the current replay loop (see kernel_replay/local_context.hpp).
     // They are only legal while armed, so bracket the tool callback with the arm window.
-    pass_data.replay_start_context = &replay_local_enable_context;
-    pass_data.replay_stop_context  = &replay_local_disable_context;
+    pass_data.replay_start_context               = &replay_local_enable_context;
+    pass_data.replay_stop_context                = &replay_local_disable_context;
+    pass_data.replay_set_thread_trace_parameters = &replay_local_set_thread_trace_parameters;
 
     // Disarm through a scope guard: execute_phase_enter_callbacks can throw (std::out_of_range from
     // an .at() lookup, or a throwing tool callback), and the armed flag must not leak past this
