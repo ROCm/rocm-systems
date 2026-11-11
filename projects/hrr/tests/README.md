@@ -80,8 +80,10 @@ as CI does.
 Tests labelled `cpu-only` (unit, handler, generator rules) need no GPU.
 Configure with `-DHRR_BUILD_TESTS=ON -DHRR_INSTALL_TESTS=ON`, then run
 `cmake --install` and `ctest --test-dir <prefix>/share/hrr/test -L cpu-only`.
-The installed tree holds the unit and handler binaries and finds
-`<prefix>/bin/hrr-playback` itself. Integration tests are not installed.
+The installed tree holds the unit and any built handler binary. It preserves a
+caller-provided `HRR_PLAYBACK_BIN`; otherwise it uses the platform's
+`hrr-playback` executable under `<prefix>/bin`, or finds it on `PATH` when that
+executable was not installed. Integration tests are not installed.
 
 ## Running the integration tests
 

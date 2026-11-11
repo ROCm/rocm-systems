@@ -219,11 +219,11 @@ class SpawnProc {
 
 #if defined(_WIN32)
   int run_windows(const std::vector<std::string>& tokens) {
-    // Build a command line: the executable followed by the raw tokens. Callers
-    // are responsible for quoting paths that contain spaces (CreateProcess does
-    // not use a shell). Rejoining with single spaces preserves the caller's
-    // quoting.
-    std::string cmdline = exe_;
+    // Pass the executable separately so a path containing spaces is unambiguous.
+    // argv[0] still belongs in the command line; Windows executable paths cannot
+    // contain a quote, so wrapping it is sufficient here. Callers remain
+    // responsible for quoting argument paths that contain spaces.
+    std::string cmdline = "\"" + exe_ + "\"";
     for (const auto& t : tokens) {
       cmdline += " ";
       cmdline += t;
@@ -262,7 +262,7 @@ class SpawnProc {
     cmd_mutable.push_back('\0');
 
     BOOL ok = CreateProcessA(
-        nullptr, cmd_mutable.data(), nullptr, nullptr,
+        exe_.c_str(), cmd_mutable.data(), nullptr, nullptr,
         /*bInheritHandles=*/capture_stdout_ ? TRUE : FALSE, 0,
         env_block.empty() ? nullptr : env_block.data(), nullptr, &si, &pi);
 

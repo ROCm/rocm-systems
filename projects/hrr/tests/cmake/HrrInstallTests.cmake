@@ -8,9 +8,9 @@
 #   ctest --test-dir <prefix>/share/hrr/test -L cpu-only
 #
 # The tree holds the test binaries and one CTestTestfile.cmake that locates
-# itself and, when <prefix>/bin/hrr-playback exists, points the tests at it
-# through HRR_PLAYBACK_BIN (read by hrr_playback_bin() in
-# tests/include/hrr_test_common.hh).
+# itself and, when the platform's hrr-playback executable exists under
+# <prefix>/bin, points the tests at it through HRR_PLAYBACK_BIN (read by
+# hrr_playback_bin() in tests/include/hrr_test_common.hh).
 # The GPU integration suite and the Python generator-rules test are not
 # installed: they need a GPU or the source tree.
 
@@ -28,14 +28,19 @@ string(CONCAT _hrr_testfile_text
 foreach(_t hrr-unit-tests hrr-handler-tests)
   if(TARGET ${_t})
     list(APPEND _hrr_installed_targets ${_t})
-    # Point the tests at <prefix>/bin/hrr-playback only when the install has one.
-    # Without it (HRR_BUILD_PLAYBACK=OFF) the tests keep their lookup of
-    # hrr-playback on PATH, as in the build tree.
+    # Include the platform executable suffix in both installed executable paths.
+    # Preserve a caller's HRR_PLAYBACK_BIN. Otherwise use the packaged playback,
+    # or explicitly fall back to PATH when a component-only install omits it.
     string(APPEND _hrr_testfile_text
-      "add_test(${_t} \"\${_hrr_test_dir}/${_t}\")\n"
+      "add_test(${_t} \"\${_hrr_test_dir}/${_t}${CMAKE_EXECUTABLE_SUFFIX}\")\n"
       "set(_hrr_env)\n"
-      "if(EXISTS \"\${_hrr_prefix}/bin/hrr-playback\")\n"
-      "  list(APPEND _hrr_env \"HRR_PLAYBACK_BIN=\${_hrr_prefix}/bin/hrr-playback\")\n"
+      "if(\"\$ENV{HRR_PLAYBACK_BIN}\" STREQUAL \"\")\n"
+      "  if(EXISTS \"\${_hrr_prefix}/bin/hrr-playback${CMAKE_EXECUTABLE_SUFFIX}\")\n"
+      "    list(APPEND _hrr_env "
+      "\"HRR_PLAYBACK_BIN=\${_hrr_prefix}/bin/hrr-playback${CMAKE_EXECUTABLE_SUFFIX}\")\n"
+      "  else()\n"
+      "    list(APPEND _hrr_env \"HRR_PLAYBACK_BIN=hrr-playback${CMAKE_EXECUTABLE_SUFFIX}\")\n"
+      "  endif()\n"
       "endif()\n"
       "set_tests_properties(${_t} PROPERTIES LABELS \"cpu-only\"\n"
       "  ENVIRONMENT \"\${_hrr_env}\")\n")

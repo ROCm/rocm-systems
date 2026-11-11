@@ -24,9 +24,8 @@
  *   Unit_HRR_GraphRoundtrip:
  *     Same as Unit_HRR_CaptureReplayRoundtrip but for the HIP graph workload.
  *
- * HRR_TEST_EXE and HRR_PLAYBACK_BIN are required; CMakeLists.txt fails at
- * configure time if HRR_PLAYBACK_BIN is not found. Pass -DHRR_PLAYBACK_BIN=<path>
- * if hrr-playback is not installed under CMAKE_INSTALL_PREFIX or ROCM_PATH.
+ * HRR_TEST_EXE and HRR_PLAYBACK_BIN are compile-time paths supplied by CMake.
+ * Building the integration tests requires the in-tree hrr-playback target.
  */
 
 #include "hrr_test_common.hh"

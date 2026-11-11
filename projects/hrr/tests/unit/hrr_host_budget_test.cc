@@ -42,10 +42,16 @@ hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl);
 
 // AddressSanitizer defaults for all of hrr-handler-tests. A failed allocation
 // aborts unless told to return null, which the allocation-failure case below
-// needs. Leak detection is off because the HSA runtime that libamdhip64 loads
-// leaves allocations at exit; memory-error checks stay on.
+// needs.
 extern "C" const char* __asan_default_options() {
-  return "allocator_may_return_null=1:detect_leaks=0";
+  return "allocator_may_return_null=1";
+}
+
+// The HSA runtime that libamdhip64 loads leaves process-lifetime allocations.
+// Suppress only leaks whose stack names that external runtime, retaining
+// LeakSanitizer coverage for HRR and the rest of the handler-test process.
+extern "C" const char* __lsan_default_suppressions() {
+  return "leak:libhsa-runtime64.so\n";
 }
 
 namespace fs = std::filesystem;
