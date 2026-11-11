@@ -387,15 +387,20 @@ AllocateCounter(counter_des_t&                                          counter_
                 const sq_spm_policy_t&                                  sq_policy,
                 std::map<block_des_t, spm_counter_des_t, lt_block_des>& index_map)
 {
-    const auto block_info        = counter_des.block_info;
-    const auto block_des         = counter_des.block_des;
-    const auto is_32bit          = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
-    const auto is_gfx12_sqc      = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+    const auto block_info = counter_des.block_info;
+    const auto block_des  = counter_des.block_des;
+    const auto is_32bit   = counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_32_BITS;
+    const auto is_sqc_even_mirror =
+        (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+         (block_info->attr & CounterBlockSqAttr) &&
+         block_des.id != static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+    const auto is_gfx12_sqc = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
                                block_des.id == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-    auto       spm_counter_count = block_info->spm_counter_count;
-    const auto ret               = index_map.insert({block_des, {0, is_32bit}});
-    auto       reg_index         = ret.first->second.index;
-    const auto is_first_16bit    = !is_32bit && ret.first->second.is_32bit;
+    const auto is_odd_only_sqattr_16bit =
+        (is_sqc_even_mirror && !is_32bit && !sq_policy.spm_enable_sq_even_lane);
+    const auto ret            = index_map.insert({block_des, {0, is_32bit}});
+    auto       reg_index      = ret.first->second.index;
+    const auto is_first_16bit = !is_32bit && ret.first->second.is_32bit;
 
     ret.first->second.is_32bit = is_32bit;
 
@@ -405,16 +410,14 @@ AllocateCounter(counter_des_t&                                          counter_
     if(block_info->spm_counter_count == 0)
         throw std::runtime_error(std::string("SPM not supported for block ") + block_info->name);
 
-    if(is_gfx12_sqc && !is_32bit && !sq_policy.spm_enable_sq_even_lane) spm_counter_count /= 2;
-
-    if(reg_index >= spm_counter_count)
+    if(reg_index >= block_info->spm_counter_count)
         throw std::runtime_error(
             std::string("Event is out of block counter registers number limit for ") +
             block_info->name);
 
     counter_des.index = reg_index;
 
-    ret.first->second.index++;
+    ret.first->second.index += is_odd_only_sqattr_16bit ? 2 : 1;
 
     if(is_32bit) ret.first->second.index++;
 }

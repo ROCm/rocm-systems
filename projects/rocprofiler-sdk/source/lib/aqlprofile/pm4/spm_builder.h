@@ -380,7 +380,9 @@ public:
                     const auto& counter_des = counters_vec[index];
                     const bool  is_sqc_even_mirror =
                         (Primitives::GFXIP_LEVEL >= 11 &&
-                         (counter_des.block_info->attr & CounterBlockSqAttr));
+                         (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                         counter_des.block_des.id !=
+                             static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
                     const bool map_even_lane =
                         config->spm_enable_sq_even_lane || !is_sqc_even_mirror;
                     if(counter_des.spm_depth != depth[n]) continue;
