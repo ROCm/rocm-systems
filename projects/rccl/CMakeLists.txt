@@ -145,10 +145,6 @@ option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode inje
 if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
-# Without the device linker, objects extracted from HIP-RDC librocshmem.a link with duplicate __hip_cuid_* symbols.
-if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_DEVICE_LINKER)
-  message(FATAL_ERROR "ENABLE_ROCSHMEM_GIN requires ENABLE_DEVICE_LINKER=ON (do not pass --no-device-linker with --rocshmem-gin)")
-endif()
 set(ROCSHMEM_CMAKE_OPTIONS "" CACHE STRING     "Extra cmake options passed to the rocSHMEM ExternalProject build")
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 option(ENABLE_RCCL_EP_TESTS                    "Build rccl_ep multi-GPU tests; needs ENABLE_MPI_TESTS and a runtime with working cuMem symmetric memory" OFF)
