@@ -1653,6 +1653,15 @@ amd-smi process --pid 12345
 amd-smi process --name python3
 ```
 
+In a container that does not share the host's PID namespace (for example, one
+started without `docker run --pid=host`), `amd-smi process` lists only the
+container's processes, by their PIDs in the container, and `--pid` takes such a
+PID. The driver reports `CU_OCCUPANCY`, `EVICTED_TIME` and `SDMA_USAGE` by host
+PID only, so they show `N/A` there. Other users' processes are listed only when
+`amd-smi` has the `CAP_SYS_PTRACE` capability, as root on the host or in a
+privileged container does. Share the host's PID namespace to see host processes
+and these values.
+
 Use the `--general` flag to display only pid, process name, and memory usage, or
 `--engine` flag to display engine usage:
 
