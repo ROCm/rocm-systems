@@ -286,10 +286,35 @@ TEST_F(RasDiagnosticsPathsMicrotest, Summarize_NotReadyAndIncompleteSuppressSucc
       "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}), output_.lines);
 }
 
+TEST_F(RasDiagnosticsPathsMicrotest, Summarize_MissingGpuRankSetIsBoundedAndRetainsTotal) {
+  const rasCommId id{0x123, 0x456, 0x789};
+  const int rankCount = RAS_DIAG_RANK_SET_MAX + 2;
+  std::vector<Row> rows;
+  for (int rank = rankCount - 1; rank >= 0; rank--) {
+    rows.push_back({rank, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING, id, rankCount});
+  }
+
+  ASSERT_EQ(ncclSuccess, Summarize(rows));
+
+  EXPECT_EQ((std::vector<std::string>{
+              "[INFO] Paths: could not locate the rank's own GPU in the topology, so its paths are unknown -- "
+              "{0,1,2,3,4,5,6,7,...} (N=10) in comm 0x123"}),
+            output_.lines);
+}
+
 TEST_F(RasDiagnosticsPathsMicrotest, Summarize_IncompleteReadyRanksSuppressSuccessSummary) {
   ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC}}));
   EXPECT_EQ((std::vector<std::string>{
       "[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}), output_.lines);
+}
+
+TEST_F(RasDiagnosticsPathsMicrotest, Summarize_IncompleteRanksSuppressMissingGpuReport) {
+  const rasCommId id{0x123, 0x456, 0x789};
+  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC, RAS_DIAG_PATHS_AVAILABLE, id, 3},
+                                   {1, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING, id, 3}}));
+  EXPECT_EQ((std::vector<std::string>{
+              "[INFO] Paths: diagnostics incomplete, gathered 2/3 ranks in comm 0x123/0x456/0x789"}),
+            output_.lines);
 }
 
 TEST_F(RasDiagnosticsPathsMicrotest, Summarize_CompleteRanksWithUnavailableTopologySuppressSuccessSummary) {
