@@ -411,10 +411,7 @@ def test_rocpd_schema_path_follows_the_tool_prefix():
     )
     if not os.path.exists(tool_library):
         # The source-tree script has no libraries beside it. CTest passes the built script.
-        print(
-            "skip schema-path launch: tool library is not installed beside "
-            f"{script}"
-        )
+        print(f"skip schema-path launch: tool library is not installed beside {script}")
         return
 
     schema = os.path.join(prefix, "share", "rocprofiler-sdk-rocpd")
