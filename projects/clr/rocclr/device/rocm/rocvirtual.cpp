@@ -3852,7 +3852,10 @@ void VirtualGPU::updateCommandsState(amd::Command* list) const {
       current->setStatus(CL_RUNNING, startTimeStamp);
       current->setStatus(CL_COMPLETE, endTimeStamp);
     } else if (current->status() != CL_COMPLETE) {
-      LogPrintfError("Unexpected command status - %d.", current->status());
+      // A command terminated before it ran holds its resources until this point
+      if (!current->ReleaseDeferredResources()) {
+        LogPrintfError("Unexpected command status - %d.", current->status());
+      }
     }
 
     next = current->getNext();
