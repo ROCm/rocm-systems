@@ -468,6 +468,101 @@ TEST_F(XmlMicrotest, AttrSetters_FailOnceTheNodeIsFull) {
   EXPECT_TRUE(Logged("too many XML attributes (max 16)"));
 }
 
+TEST_F(XmlMicrotest, AttrSetters_FullNodeStillUpdatesExistingAttributes) {
+  ncclXmlNode* node = Add(nullptr, "n");
+  for (int index = 0; index < MAX_ATTR_COUNT; index++) {
+    ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, std::to_string(index).c_str(), index));
+  }
+
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, "0", "changed"));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrIfUnset(node, "0", "ignored"));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, "1", -17));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrFloat(node, "2", 1.5f));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrLong(node, "3", INT64_C(0x123456789abcdef)));
+  ASSERT_EQ(ncclSuccess, xmlSetAttrUint64(node, "4", UINT64_MAX));
+
+  EXPECT_EQ(MAX_ATTR_COUNT, node->nAttrs);
+  EXPECT_EQ("changed", Attr(node, "0"));
+  EXPECT_EQ("-17", Attr(node, "1"));
+  EXPECT_EQ("1.5", Attr(node, "2"));
+  EXPECT_EQ("0x123456789abcdef", Attr(node, "3"));
+  EXPECT_EQ("0xffffffffffffffff", Attr(node, "4"));
+  EXPECT_EQ(std::to_string(MAX_ATTR_COUNT - 1), Attr(node, std::to_string(MAX_ATTR_COUNT - 1).c_str()));
+}
+
+TEST_F(XmlMicrotest, SetAttr_LongKeyAndValueAreTerminatedAtCapacity) {
+  ncclXmlNode* node = Add(nullptr, "n");
+  const std::string key(MAX_STR_LEN + 9, 'k');
+  const std::string value(MAX_STR_LEN + 13, 'v');
+  std::memset(node->attrs, 0x5a, sizeof(node->attrs));
+
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), value.c_str()));
+
+  ASSERT_EQ(1, node->nAttrs);
+  ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
+  ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
+  EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
+  EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
+  EXPECT_EQ('Z', node->attrs[1].key[0]);
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(node, key.c_str(), "short"));
+  EXPECT_EQ(1, node->nAttrs);
+  EXPECT_STREQ("short", node->attrs[0].value);
+}
+
+TEST_F(XmlMicrotest, SetAttrIfUnset_LongKeyAndValueAreTerminatedAtCapacity) {
+  ncclXmlNode* node = Add(nullptr, "n");
+  std::memset(node->attrs, 0x5a, sizeof(node->attrs));
+
+  ASSERT_EQ(ncclSuccess, xmlSetAttrIfUnset(node, std::string(MAX_STR_LEN + 1, 'k').c_str(),
+                                         std::string(MAX_STR_LEN + 1, 'v').c_str()));
+
+  EXPECT_EQ(1, node->nAttrs);
+  ASSERT_EQ('\0', node->attrs[0].key[MAX_STR_LEN]);
+  ASSERT_EQ('\0', node->attrs[0].value[MAX_STR_LEN]);
+  EXPECT_EQ(std::string(MAX_STR_LEN, 'k'), node->attrs[0].key);
+  EXPECT_EQ(std::string(MAX_STR_LEN, 'v'), node->attrs[0].value);
+  EXPECT_EQ('Z', node->attrs[1].key[0]);
+}
+
+TEST_F(XmlMicrotest, FindNode_ReorderedAttributesMatchButMissingKeysDoNot) {
+  ncclXmlNode* parent = Add(nullptr, "system");
+  Add(parent, "cpu", {{"numaid", "3"}, {"other", "x"}});
+  ncclXmlNode* expected = Add(parent, "cpu", {{"arch", "x"}, {"numaid", "3"}});
+  ncclXmlNode* query = Add(nullptr, "cpu", {{"numaid", "3"}, {"arch", "x"}});
+  ncclXmlNode* found = parent;
+
+  ASSERT_EQ(ncclSuccess, xmlFindNode(parent, query, &found));
+  EXPECT_EQ(expected, found);
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(query, "arch", "different"));
+  ASSERT_EQ(ncclSuccess, xmlFindNode(parent, query, &found));
+  EXPECT_EQ(nullptr, found);
+}
+
+TEST_F(XmlMicrotest, AddTree_CopiedChildrenBelongToDestinationAndDoNotAliasSource) {
+  XmlPtr source = NewXml(4);
+  ncclXmlNode* root = nullptr;
+  ncclXmlNode* child = nullptr;
+  ncclXmlNode* leaf = nullptr;
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), nullptr, "cpu", &root));
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), root, "pci", &child));
+  ASSERT_EQ(ncclSuccess, xmlAddNode(source.get(), child, "gpu", &leaf));
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(leaf, "rank", "7"));
+  ncclXmlNode* parent = Add(nullptr, "system");
+
+  ASSERT_EQ(ncclSuccess, xmlAddTree(xml_.get(), parent, root));
+
+  ASSERT_EQ(4, xml_->maxIndex);
+  ASSERT_EQ(1, parent->nSubs);
+  EXPECT_EQ(xml_->nodes + 1, parent->subs[0]);
+  EXPECT_EQ(parent, xml_->nodes[1].parent);
+  EXPECT_EQ(xml_->nodes + 1, xml_->nodes[2].parent);
+  EXPECT_EQ(xml_->nodes + 2, xml_->nodes[3].parent);
+  EXPECT_EQ(xml_->nodes + 2, xml_->nodes[1].subs[0]);
+  EXPECT_EQ(xml_->nodes + 3, xml_->nodes[2].subs[0]);
+  ASSERT_EQ(ncclSuccess, xmlSetAttr(leaf, "rank", "9"));
+  EXPECT_EQ("7", Attr(xml_->nodes + 3, "rank"));
+}
+
 TEST_F(XmlMicrotest, FindAndGetSub_MatchByNameAndAttribute) {
   ncclXmlNode* system = Add(nullptr, "system");
   ncclXmlNode* cpu0 = Add(system, "cpu", {{"numaid", "0"}});
