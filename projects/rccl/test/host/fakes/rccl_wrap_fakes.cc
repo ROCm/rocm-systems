@@ -27,6 +27,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSetCeAllReduceFastPath, rcclSetCeAllReduceFastPath);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetRegSegmentCount, rcclNetRegSegmentCount);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetGraphRegSegmentCount, rcclNetGraphRegSegmentCount);
 ASSERT_HOOK_MATCHES_PROD(g_rcclCeArNonRegCap, rcclCeArNonRegCap);
@@ -313,6 +314,12 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   return g_rcclUseReduceScatterDirect(comm, msgSize);
 }
 
+static void DefaultSetCeAllReduceFastPath(struct ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
+}
+std::function<void(struct ncclComm*)> g_rcclSetCeAllReduceFastPath = DefaultSetCeAllReduceFastPath;
+void rcclSetCeAllReduceFastPath(struct ncclComm* comm) { g_rcclSetCeAllReduceFastPath(comm); }
+
 int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
 int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
 int64_t g_rcclParamDdaLL = 1;                     // RCCL_PARAM(DdaLL) default
@@ -419,6 +426,7 @@ void ResetRcclWrapFakes() {
   g_rcclGetAlgoName = DefaultGetAlgoName;
   g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
   g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
+  g_rcclSetCeAllReduceFastPath = DefaultSetCeAllReduceFastPath;
   g_rcclParamDdaEnable = 1;
   g_rcclNetRegSegmentCount = DefaultNetRegSegmentCount;
   g_rcclNetGraphRegSegmentCount = DefaultNetRegSegmentCount;
@@ -464,9 +472,6 @@ int64_t rcclParamHierarchicalLazyInit() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclParamHierarchicalLazyInit");
 }
 void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rcclSetPxn"); }
-void rcclSetCeAllReduceFastPath(struct ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
-}
 // rcclCeAllReduceEnabled and rcclForceCeAllReduceEnabled have controllable fakes above.
 bool rcclForceCeScratchEnabled(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
