@@ -31,8 +31,8 @@ void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 
-// Shards up to 1 MiB are copied in the kernel; larger ones are staged by the host first.
-constexpr size_t kInKernelMaxFloats = (1u << 20) / sizeof(float);
+// Shards at or below kDdaRsIpcKernelCopyMaxBytes are copied in the kernel.
+constexpr size_t kInKernelMaxFloats = dda::common::kDdaRsIpcKernelCopyMaxBytes / sizeof(float);
 
 template <typename T, bool kCopyInKernel = true>
 const void* Kernel() {
@@ -188,7 +188,7 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
   ExpectLaunchOf<bf16>(g_ddaLaunches[2], 16);
 }
 
-TEST_F(DdaReduceScatterIpcMicrotest, Launch_ShardUpTo1MiBIsCopiedInTheKernel) {
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_ShardAtTheKernelCopyCapIsCopiedInTheKernel) {
   ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
   EXPECT_TRUE(copies_.empty());
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
