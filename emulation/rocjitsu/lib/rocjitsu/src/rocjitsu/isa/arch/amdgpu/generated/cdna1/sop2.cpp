@@ -1535,6 +1535,10 @@ DecodeResult decodeSRfeRestoreB64Sop2(const MachineInst *opcode,
 }
 } // namespace detail
 
+bool SRfeRestoreB64Sop2::tracks_explicit_source(uint8_t operand_index) const {
+  return src_operands_[operand_index] != &ssrc1;
+}
+
 SMulHiU32Sop2::SMulHiU32Sop2(const MachineInst *inst)
     : Sop2("s_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SMulHiU32Sop2)),

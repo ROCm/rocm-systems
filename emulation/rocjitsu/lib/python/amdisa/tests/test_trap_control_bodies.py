@@ -14,6 +14,7 @@ previously been able to silently drop.
 from types import SimpleNamespace
 
 from amdisa.codegen import CodeGenerator
+from amdisa.semantics import derive_semantics
 
 
 def _body(name: str) -> str:
@@ -58,13 +59,27 @@ class TestSRfeBody:
         assert 'wf.set_debug_halted(true);' in body
 
     def test_every_spelling_of_the_return_gets_a_body(self):
-        """GFX1250 spells it S_RFE_I64 (SOP1 opcode 74). Omitting a spelling
-        leaves that ISA's generated execute_impl() an empty no-op, so its trap
-        handlers can never return."""
-        for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64'):
+        """GFX1250 spells it S_RFE_I64 (SOP1 opcode 74), and GFX9 also has the
+        legacy SOP2 S_RFE_RESTORE_B64. Omitting a spelling leaves that ISA's
+        generated execute_impl() an empty no-op, so its trap handlers can never
+        return."""
+        for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64'):
             body = _body(name)
             assert 'kPcAddressMask' in body, f'{name} has no trap-return body'
             assert 'wf.set_exec(wf.trap_saved_exec());' in body, name
+
+    def test_rfe_restore_is_rfe_with_its_second_operand_ignored(self):
+        """The GFX9 manuals define S_RFE_RESTORE_B64 as `PRIV = 0; PC = S0.u64`
+        and say the second argument is ignored."""
+        assert _body('S_RFE_RESTORE_B64') == _body('S_RFE_B64')
+        assert 'ssrc1' not in _body('S_RFE_RESTORE_B64')
+
+    def test_rfe_restore_derives_as_true_nop(self):
+        """It used to fall through to the unrecognised-SOP2 `nop`, which the
+        generator emits as an unimplemented-instruction stub."""
+        sem = derive_semantics('S_RFE_RESTORE_B64', 'ENC_SOP2')
+        assert sem is not None
+        assert sem.semantic_class == 'true_nop'
 
     def test_gfx12_restores_application_status_and_gfx1250_restores_the_full_pc(self):
         body = _body('S_RFE_I64')

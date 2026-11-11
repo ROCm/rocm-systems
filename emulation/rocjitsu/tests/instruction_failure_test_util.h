@@ -3,15 +3,20 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <format>
 #include <string>
 
 namespace rocjitsu::test {
 
-// s_rfe_restore_b64 s[0:1], s0 decodes on CDNA3/4 but has no execution implementation.
-inline constexpr uint32_t kUnimplementedInstruction = 0x95800000u;
-inline constexpr char kUnimplementedInstructionMnemonic[] = "s_rfe_restore_b64";
+// ds_add_u32 v0, v0 gds. It decodes, and the generated DS body rejects gds=1
+// with UnimplementedInstruction before any side effect (_gen_ds_gds_guard();
+// test_ds_mode_rejection_precedes_execution pins it for CDNA4 DS_ADD_U32).
+// Callers assert that diagnostic, so they depend on that guard, not merely on
+// CDNA4 reserving the GDS bit.
+inline constexpr std::array<uint32_t, 2> kUnimplementedInstruction = {0xd8010000u, 0x00000000u};
+inline constexpr char kUnimplementedInstructionMnemonic[] = "ds_add_u32";
 inline constexpr uint32_t kUndecodableInstruction = 0xbfff0000u;
 // Formatted like the instruction words in the compute unit's decode diagnostic.
 inline const std::string kUndecodableInstructionText =
