@@ -545,15 +545,20 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_SaturateP2pSkipsTheGfx942Cap) {
   task.collAPI = ncclFuncAlltoAll;
   task.root = 1;
 
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? int64_t(1) : deft;
-  };
-  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate set";
-
-  g_loadParam = [](const char* env, int64_t deft) {
-    return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? int64_t(0) : deft;
-  };
-  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate off";
+  // paths.cc turns saturation on for every value other than 0 and UNSET (-2),
+  // including -1. A <= 0 gate caps -1 and still passes a test that only sets 1 and 0.
+  for (int64_t on : {int64_t(1), int64_t(-1)}) {
+    g_loadParam = [on](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? on : deft;
+    };
+    EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << on;
+  }
+  for (int64_t off : {int64_t(0), int64_t(RCCL_VALUE_UNSET)}) {
+    g_loadParam = [off](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? off : deft;
+    };
+    EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << off;
+  }
 }
 
 // ===========================================================================
