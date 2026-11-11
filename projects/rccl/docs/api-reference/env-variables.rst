@@ -1347,6 +1347,13 @@ threshold table introduced for gfx1250.
         | ``SPX``: Use the SPX table.
         | ``DPX``: Use the DPX table.
 
+    * - | ``RCCL_DDA_ENABLE``
+        | Master switch for the DDA paths of every collective. When off, every
+          collective skips DDA and takes its non-DDA path, regardless of the
+          threshold variables below.
+      - | ``1``: DDA allowed, subject to the per-collective thresholds (default).
+        | ``0``: Disable DDA for all collectives.
+
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.
           Messages above this size exit DDA and fall through to Ring, CE, or the
@@ -1423,6 +1430,18 @@ threshold table introduced for gfx1250.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
 
+    * - | ``RCCL_DDA_BC``
+        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table, which has no
+          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
+          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
+          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
+          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+          ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
+      - | ``-1``: Follow the per-arch table; currently off (default).
+        | ``0``: Disable DDA Broadcast.
+        | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
+          ceilings and eligibility checks.
     * - | ``RCCL_DDA_LL128_A2A_THREADS``
         | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
           When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
@@ -1431,6 +1450,28 @@ threshold table introduced for gfx1250.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``256``.
+
+    * - | ``RCCL_DDA_BC_MAX_BLOCKS``
+        | Lowers the per-rank block budget of the DDA Broadcast kernels. The
+          budget is otherwise the DDA fabric block cap (``RCCL_DDA_FABRIC_MAXBLOCKS``)
+          or the CU count; this variable cannot raise it. The root still launches
+          at least one block per peer.
+      - | ``0``: Keep the CU-derived budget (default).
+        | ``N``: Use at most ``N`` blocks per rank when ``N`` is below the budget.
+
+    * - | ``RCCL_DDA_LL_BC_THREADS``
+        | Block size (threads per block) of the DDA LL one-shot Broadcast kernel.
+          A value that is not a multiple of the GPU wave size, or is larger than
+          512, is ignored and the default is used.
+      - | ``256``: Default.
+        | ``N``: A multiple of the wave size, at most ``512``.
+
+    * - | ``RCCL_DDA_BC_ALLOW_IPC``
+        | Development only; not intended for production use. Lets the Broadcast
+          selector also consider the DDA LL tier on the non-fabric (IPC) path.
+          Requires ``RCCL_DDA_BC`` to be enabled.
+      - | ``0``: Fabric path only (default).
+        | ``1``: Also consider DDA LL on the IPC path.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

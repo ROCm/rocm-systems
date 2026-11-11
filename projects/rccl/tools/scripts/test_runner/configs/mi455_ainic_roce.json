@@ -3286,7 +3286,7 @@
         {
           "name": "AbortDda_IncompleteCollective",
           "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
-          "test_filter": "AbortDdaMPITest.*"
+          "test_filter": "AbortDdaMPITest.*-AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
         },
         {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
@@ -6950,6 +6950,65 @@
       "extends": "dda_fabric_allreduce_ll_base",
       "num_ranks": 8,
       "num_gpus": 8
+    },
+    "dda_fabric_broadcast_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1",
+        "RCCL_DDA_BC": "1",
+        "RCCL_DDA_LL_THRESHOLD": "262144"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_Broadcast_LL_AllRootsOutOfPlace",
+          "description": "DDA fabric Broadcast LL: every root, 16 B to the 256 KiB cap, out of place, every rank checks payload and guards",
+          "test_filter": "DdaMPI_BroadcastLL.AllRootsOutOfPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_AllRootsInPlace",
+          "description": "DDA fabric Broadcast LL: every root, 16 B to the 256 KiB cap, in place",
+          "test_filter": "DdaMPI_BroadcastLL.AllRootsInPlace"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_RepeatedLaunches",
+          "description": "DDA fabric Broadcast LL: odd and even runs of launches, checked after each",
+          "test_filter": "DdaMPI_BroadcastLL.RepeatedLaunches"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_UnalignedBuffers",
+          "description": "DDA fabric Broadcast LL: buffers off 16-byte and off 4-byte alignment (kAligned=false)",
+          "test_filter": "DdaMPI_BroadcastLL.UnalignedBuffers"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL_BackToBackNoSync",
+          "description": "DDA fabric Broadcast LL: seven launches with no sync between them, roots repeated and changed, slowed ranks varied",
+          "test_filter": "DdaMPI_BroadcastLL.BackToBackNoSync"
+        },
+        {
+          "name": "AbortDda_IncompleteCollective_BroadcastLl",
+          "description": "Rank np-1 skips a DDA fabric LL Broadcast (root 0); asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
+          "test_filter": "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+        }
+      ]
+    },
+    "dda_fabric_broadcast_2rank": {
+      "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_broadcast_4rank": {
+      "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_broadcast_8rank": {
+      "extends": "dda_fabric_broadcast_base",
+      "num_ranks": 8,
+      "num_gpus": 8
     }
   },
   "test_suites": [
@@ -8023,6 +8082,24 @@
       "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
       "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_allreduce_ll_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 2-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 2 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 4-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 4 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric Broadcast LL - 8-Rank",
+      "description": "DDA fabric Broadcast one-shot data checks on 8 GPUs (RCCL_DDA_BC=1, own process: RCCL_PARAM caches the caps). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_broadcast_8rank",
       "enabled": true
     }
   ]

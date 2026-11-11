@@ -637,7 +637,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # src/algorithms/dda/{all_gather,all_reduce,alltoall,reduce_scatter}/dda_*.cu launchers. Own binary:
+  # src/algorithms/dda/{all_gather,all_reduce,alltoall,broadcast,reduce_scatter}/dda_*.cu launchers. Own binary:
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same DDA entry points.
   set(TEST_MICRO_DDA_COLL_SOURCE_FILES
     algorithms/dda/all_gather/dda-all-gather-fabric-test.cc
@@ -651,6 +651,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/alltoall/dda-alltoall-fabric-ll-test.cc
     algorithms/dda/alltoall/dda-alltoall-fabric-ll128-test.cc
     algorithms/dda/alltoall/dda-alltoall-ipc-test.cc
+    algorithms/dda/broadcast/dda-broadcast-fabric-ll-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
@@ -1191,6 +1192,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/fabric/fabric-gpu-barrier-test.cc
     algorithms/dda/fabric/fabric-init-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
+    algorithms/dda/ipc/ipc-init-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
@@ -2045,6 +2047,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
     DDA_ALLTOALL_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp"
     DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
     DDA_ALLTOALL_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp"
+    DDA_BROADCAST_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp"
@@ -2602,6 +2605,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
     FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
+    IPC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_init.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # ---------------------------------------------------------------------------
