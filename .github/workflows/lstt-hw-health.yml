@@ -1,16 +1,15 @@
-# Reports the BIOS and GPU state of each LSTT lab machine and compares the BIOS
-# with the expected value in the matrix, so an undocumented firmware or driver
-# change on a CI host shows up as a red job naming the host and the layer.
+# Reports the BIOS and GPU state of each LSTT CI host, so a firmware or driver
+# change on a host shows up in the job summary naming the host and the layer.
+# Nothing is recorded or compared: the job reads the current state and checks
+# that the host is the one the matrix row names, that the amdgpu module is
+# loaded, and that ROCm sees the expected GPU.
 #
 # This repository is public. System BIOS firmware is a public release, so its
-# expected value lives in the matrix below, and a value is printed only when it
-# equals the one committed there. A difference is reported without either
-# value. The amdgpu driver on the lab hosts is an internal build: its version
-# is never read into a log, only whether the module is loaded.
+# version is printed. The amdgpu driver on these hosts is an internal build: its
+# version is never read into a log, only whether the module is loaded.
 #
-# An empty or missing expected value is reported as not recorded and not
-# enforced, which is how a host is onboarded. To record or bump one, read it on
-# the host (cat /sys/class/dmi/id/bios_version) and change the matrix.
+# The checks live in .github/scripts/lstt_hw_health.py, so the same command
+# can be run by hand on a host and gives the same result as this job.
 #
 # There is no BMC step yet: no host in the matrix has a BMC. Add one with the
 # first host that does, together with a green run. It needs ipmitool and
@@ -22,9 +21,10 @@ on:
   pull_request:
     paths:
       - '.github/workflows/lstt-hw-health.yml'
+      - '.github/scripts/lstt_hw_health.py'
   workflow_dispatch:
   schedule:
-    # Nightly drift check. Schedules only run from the default branch, so this
+    # Nightly report. Schedules only run from the default branch, so this
     # starts firing after merge, not on the PR.
     - cron: '17 6 * * *'
 
@@ -38,7 +38,7 @@ concurrency:
 jobs:
   health:
     name: ${{ matrix.host }}
-    # Self-hosted lab hardware: never auto-run untrusted fork-PR code on it.
+    # Self-hosted hardware: never auto-run untrusted fork-PR code on it.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     strategy:
       fail-fast: false
@@ -47,102 +47,26 @@ jobs:
           - host: lsttstrix
             label: lstt-gfx1151
             gfx: gfx1151
-            bios: 'X53 Ver. 01.08.00'
     runs-on:
-      - self-hosted
       - ${{ matrix.label }}
       - ${{ matrix.host }}
     timeout-minutes: 20
 
     steps:
-      # runs-on selects the host by its own name as well as its GPU label, since
-      # a GPU label can be on several hosts (lstt-gfx90a is on three). Check
-      # anyway that this is the host the matrix row describes, so a runner with
-      # the wrong label fails here instead of being compared with the values of
-      # another machine.
-      - name: Host identity
-        id: host
-        shell: bash
-        env:
-          HOST: ${{ matrix.host }}
-        run: |
-          set -euo pipefail
-          echo "### ${HOST}" >> "$GITHUB_STEP_SUMMARY"
-          got="$(hostname -s)"
-          if [ "$got" != "${HOST}" ]; then
-            echo "- host: ran on ${got}, not ${HOST}" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::This row is for ${HOST} but the job ran on ${got}. Check that the runner labelled ${HOST} is the one on that machine."
-            exit 1
-          fi
+      # Only the script is needed, so the fetch is sparse.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/lstt_hw_health.py
+          sparse-checkout-cone-mode: false
 
       # Host-level, so no container: /sys/class/dmi is what the firmware
-      # exposes to the booted kernel. Nothing here reads the repository, so
-      # there is no checkout.
-      - name: BIOS
+      # exposes to the booted kernel. The script checks the host identity first
+      # (a GPU label can be on several hosts, so runs-on also selects by host
+      # name), then BIOS, the amdgpu module and the GPU, and reports every
+      # layer even when one fails.
+      - name: Hardware health
         shell: bash
         env:
           HOST: ${{ matrix.host }}
-          EXPECT_BIOS: ${{ matrix.bios }}
-        run: |
-          set -euo pipefail
-          got="$(cat /sys/class/dmi/id/bios_version)"
-          if [ -z "${EXPECT_BIOS}" ]; then
-            echo "- BIOS: not recorded for this host" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$got" = "${EXPECT_BIOS}" ]; then
-            echo "- BIOS: $got (matches)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- BIOS: differs from the expected value" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::BIOS on ${HOST} differs from the value in the matrix of lstt-hw-health.yml. Read it on the host, and change the matrix if the update was intended."
-            exit 1
-          fi
-
-      # Whether the module the GPU step below depends on is loaded. The version
-      # is never printed: it is an internal build. Test the module's directory,
-      # not its version file: only the DKMS driver exports a version, so the
-      # inbox driver would otherwise be reported as not loaded.
-      # The checks after the host check run even when an earlier one fails, so
-      # a run reports every layer; they are skipped on the wrong host.
-      - name: amdgpu driver
-        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -d /sys/module/amdgpu ]; then
-            echo "- amdgpu: not loaded" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::The amdgpu module is not loaded, so no GPU test can run on this host."
-            exit 1
-          fi
-          echo "- amdgpu: loaded" >> "$GITHUB_STEP_SUMMARY"
-
-      # The same container shape the real CI jobs use, so this proves what they
-      # need: the devices are passed through and ROCm sees the right ASIC. The
-      # output of rocminfo and docker is never printed, because it includes the
-      # kernel driver version; instead each cause gets its own message.
-      - name: GPU
-        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
-        shell: bash
-        env:
           GFX: ${{ matrix.gfx }}
-        run: |
-          set -euo pipefail
-          fail() {
-            echo "- GPU: $1" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::$1"
-            exit 1
-          }
-          [ -c /dev/kfd ] || fail "/dev/kfd is missing on the host, so no container can reach the GPU"
-          [ -d /dev/dri ] || fail "/dev/dri is missing on the host"
-          rc=0
-          out="$(docker run --rm \
-            --device=/dev/kfd --device=/dev/dri --group-add video \
-            rocm/dev-ubuntu-22.04:7.2 rocminfo 2>/dev/null)" || rc=$?
-          case "$rc" in
-            0) ;;
-            125) fail "docker could not start the container (daemon down, or the image could not be pulled)" ;;
-            126 | 127) fail "the container started but could not run rocminfo (exit $rc)" ;;
-            *) fail "rocminfo failed inside the container (exit $rc): a broken ROCm stack or driver" ;;
-          esac
-          if ! grep -q "$GFX" <<< "$out"; then
-            fail "rocminfo ran but did not report $GFX: a different ASIC, or the GPU is not visible"
-          fi
-          echo "- GPU: $GFX visible" >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/lstt_hw_health.py --host "$HOST" --gfx "$GFX"

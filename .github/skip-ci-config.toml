@@ -45,6 +45,7 @@ common = [
     ".github/workflows/hipfile-*.yml",
     ".github/workflows/kpack-*.yml",
     ".github/workflows/lstt-*.yml",
+    ".github/scripts/lstt_*.py",
     ".github/workflows/media-libs-*.yml",
     ".github/workflows/profiler-hub-*.yml",
     ".github/workflows/rccl-*.yml",
