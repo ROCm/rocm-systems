@@ -21,10 +21,13 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
@@ -206,19 +209,335 @@ TEST(Validator, RejectsOffsetThatWouldOverflow) {
   EXPECT_FALSE(err.empty());
 }
 
-TEST(Validator, RejectsNonBeforeInstKind) {
+TEST(Validator, RejectsReservedBlockBoundaryKinds) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
-  auto text = dummy_text();
+  const std::vector<uint8_t> text = dummy_text();
 
-  for (auto kind : {InstrumentationKind::AfterInst, InstrumentationKind::BlockEntry,
-                    InstrumentationKind::BlockExit}) {
-    InstrumentationPoint pt;
-    pt.kind = kind;
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::BlockEntry, InstrumentationKind::BlockExit}) {
+    const InstrumentationPoint pt = {.kind = kind, .probe_symbol = {}, .probe_args = {}};
     std::string err;
     EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
-        << "kind != BeforeInst must be rejected";
-    EXPECT_FALSE(err.empty());
+        << "reserved block boundary must be rejected";
+    EXPECT_NE(err.find("kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit"),
+              std::string::npos);
+  }
+}
+
+TEST(Validator, AfterInstRequiresACallableProbe) {
+  constexpr uint32_t raw = 0xDEADBEEF;
+  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &raw);
+  const InstrumentationPoint point = {
+      .kind = InstrumentationKind::AfterInst, .probe_symbol = {}, .probe_args = {}};
+  std::string error;
+  EXPECT_FALSE(validate_anchor(anchor, 0, dummy_text(), point, ROCJITSU_CODE_ARCH_CDNA4, &error));
+  EXPECT_NE(error.find("AfterInst requires a callable probe"), std::string::npos);
+}
+
+TEST(Validator, AfterInstRejectsBankSelectionAndMissingHwregOperands) {
+  constexpr uint32_t raw = 0xDEADBEEF;
+  const std::vector<uint8_t> text = dummy_text();
+  for (const char *name : {"s_set_vgpr_msb", "s_setreg_b32", "s_setreg_imm32_b32"}) {
+    TestInstruction anchor(name, 4, 0, std::nullopt, &raw);
+    const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                        .probe_obj =
+                                            reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                        .probe_symbol = "after",
+                                        .probe_args = {}};
+    std::string error;
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, point, ROCJITSU_CODE_ARCH_CDNA5, &error));
+    EXPECT_NE(error.find("bank selection"), std::string::npos);
+  }
+}
+
+TEST(Validator, AfterInstRejectsEnablingGprIndexing) {
+  const std::array<uint32_t, 1> words =
+      cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8});
+  const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+  ASSERT_NE(anchor, nullptr);
+  ASSERT_EQ(anchor->mnemonic(), "s_set_gpr_idx_on");
+  const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                      sizeof(words));
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+    const InstrumentationPoint point = {.kind = kind,
+                                        .probe_obj =
+                                            reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                        .probe_symbol = "after",
+                                        .probe_args = {}};
+    std::string error;
+    EXPECT_EQ(
+        validate_anchor(*anchor, 0, text, point, ROCJITSU_CODE_ARCH_CDNA4, &error).has_value(),
+        kind == InstrumentationKind::BeforeInst);
+    if (kind == InstrumentationKind::AfterInst) {
+      EXPECT_NE(error.find("GPR indexing"), std::string::npos);
+    }
+  }
+}
+
+TEST(Validator, AfterInstQualifiesGprIndexModeWritesByArchitectureSliceAndLiteral) {
+  constexpr uint16_t kOtherHwreg = 2;
+  constexpr uint16_t kModeBit26 = amdgpu::MODE_HWREG | (26u << 6);
+  constexpr uint16_t kModeBit27 = amdgpu::MODE_HWREG | (27u << 6);
+  constexpr uint16_t kModeBits26And27 = amdgpu::MODE_HWREG | (26u << 6) | (1u << 11);
+  const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                      .probe_symbol = "after",
+                                      .probe_args = {}};
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const uint16_t hwreg : {kOtherHwreg, kModeBit26, kModeBit27, kModeBits26And27}) {
+      for (const bool immediate : {false, true}) {
+        for (const uint32_t literal : {0u, 1u, 2u}) {
+          std::array<uint32_t, 2> words = {0, literal};
+          if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+            words[0] =
+                cdna4::build_sopk(immediate ? cdna4::kSSetregImm32B32Sopk : cdna4::kSSetregB32Sopk,
+                                  {.simm16 = hwreg})[0];
+          else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+            words[0] =
+                rdna4::build_sopk(immediate ? rdna4::kSSetregImm32B32Sopk : rdna4::kSSetregB32Sopk,
+                                  {.simm16 = hwreg})[0];
+          else
+            words[0] =
+                cdna5::build_sopk(immediate ? cdna5::kSSetregImm32B32Sopk : cdna5::kSSetregB32Sopk,
+                                  {.simm16 = hwreg})[0];
+          const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+          ASSERT_NE(anchor, nullptr);
+          const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                              sizeof(words));
+          const bool overlaps = hwreg == kModeBit27 || hwreg == kModeBits26And27;
+          const uint32_t enable_mask = hwreg == kModeBit27 ? 1u : 2u;
+          const bool enables = arch == ROCJITSU_CODE_ARCH_CDNA4 && overlaps &&
+                               (!immediate || (literal & enable_mask) != 0);
+          SCOPED_TRACE(::testing::Message() << arch << " hwreg=" << hwreg << " immediate="
+                                            << immediate << " literal=" << literal);
+          std::string error;
+          // Disable gfx1250's unrelated full-MODE bank clobber to isolate indexing.
+          EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error, false).has_value(),
+                    !enables)
+              << error;
+          if (enables) {
+            EXPECT_NE(error.find("GPR indexing"), std::string::npos);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Validator, AfterInstReadsTheModeLiteralAtTheExplicitOffset) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const uint32_t setreg = cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk,
+                                            {.simm16 = amdgpu::MODE_HWREG | (27u << 6)})[0];
+  const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  for (const uint32_t literal : {0u, 1u}) {
+    const std::array<uint32_t, 4> words = {0, literal ^ 1u, setreg, literal};
+    // Direct decoder calls default src_loc to zero even for this byte-8 anchor.
+    const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data() + 2));
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_EQ(anchor->src_loc(), 0u);
+    const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                        sizeof(words));
+    const InstrumentationPoint point = {.anchor_offset = 8,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj =
+                                            reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                        .probe_symbol = "after",
+                                        .probe_args = {}};
+    std::string error;
+    EXPECT_EQ(validate_anchor(*anchor, 8, text, point, kArch, &error).has_value(), literal == 0)
+        << error;
+  }
+}
+
+TEST(Validator, AfterInstRejectsVskipEnable) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  for (const bool setreg : {false, true}) {
+    for (const uint32_t enabled : {0u, 1u}) {
+      const std::array<uint32_t, 2> words = {
+          setreg
+              ? cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk,
+                                  {.simm16 = amdgpu::MODE_HWREG | (28u << 6)})[0]
+              : cdna4::build_sopc(cdna4::kSSetvskipSopc,
+                                  {.ssrc0 = static_cast<uint8_t>(128 + enabled), .ssrc1 = 128})[0],
+          enabled};
+      const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+      ASSERT_NE(anchor, nullptr);
+      const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                          sizeof(words));
+      const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                          .probe_obj =
+                                              reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                          .probe_symbol = "after",
+                                          .probe_args = {}};
+      std::string error;
+      EXPECT_EQ(validate_anchor(*anchor, 0, text, point, kArch, &error).has_value(), enabled == 0)
+          << error;
+    }
+  }
+}
+
+TEST(Validator, AfterInstRejectsHaltingAndAmbiguousDeallocationMessages) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool halt : {false, true}) {
+      for (const uint16_t message : {uint16_t{1}, uint16_t{3}, uint16_t{0x103}}) {
+        const uint32_t word = rdna4::build_sopp(
+            halt ? rdna4::kSSendmsghaltSopp : rdna4::kSSendmsgSopp, {.simm16 = message})[0];
+        const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, &word));
+        ASSERT_NE(anchor, nullptr);
+        const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(&word), sizeof(word));
+        const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                            .probe_obj =
+                                                reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                            .probe_symbol = "after",
+                                            .probe_args = {}};
+        std::string error;
+        EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error).has_value(), message == 1)
+            << error;
+      }
+    }
+  }
+}
+
+TEST(Validator, AfterInstRejectsDynamicVgprAllocation) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const uint8_t count : {uint8_t{128}, uint8_t{4}}) {
+      const uint32_t word = rdna4::build_sop1(rdna4::kSAllocVgprSop1, {.ssrc0 = count})[0];
+      const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, &word));
+      ASSERT_NE(anchor, nullptr);
+      const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(&word), sizeof(word));
+      const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                          .probe_obj =
+                                              reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                          .probe_symbol = "after",
+                                          .probe_args = {}};
+      std::string error;
+      EXPECT_FALSE(validate_anchor(*anchor, 0, text, point, arch, &error));
+    }
+  }
+}
+
+TEST(Validator, AfterInstRejectsUnprovenGprIndexModeWrites) {
+  const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                      .probe_symbol = "after",
+                                      .probe_args = {}};
+  const std::array<uint32_t, 2> words = {
+      cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = 1u | (27u << 6)})[0], 0};
+  const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+  ASSERT_NE(anchor, nullptr);
+  const std::span<const uint8_t> missing_literal(reinterpret_cast<const uint8_t *>(words.data()),
+                                                 sizeof(uint32_t));
+  std::string error;
+  EXPECT_FALSE(
+      validate_anchor(*anchor, 0, missing_literal, point, ROCJITSU_CODE_ARCH_CDNA4, &error));
+  EXPECT_NE(error.find("GPR indexing"), std::string::npos);
+  for (const char *name : {"s_setreg_b32", "s_setreg_imm32_b32"}) {
+    TestInstruction missing_hwreg(name, 4, 0, std::nullopt, words.data());
+    error.clear();
+    EXPECT_FALSE(validate_anchor(missing_hwreg, 0, missing_literal, point, ROCJITSU_CODE_ARCH_CDNA4,
+                                 &error));
+    EXPECT_NE(error.find("GPR indexing"), std::string::npos);
+  }
+}
+
+TEST(Validator, AfterInstRejectsVgprDeallocationOnSupportingArchitectures) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const uint16_t message : {uint16_t{1}, uint16_t{3}}) {
+      const uint32_t word = arch == ROCJITSU_CODE_ARCH_CDNA4
+                                ? cdna4::build_sopp(cdna4::kSSendmsgSopp, {.simm16 = message})[0]
+                                : rdna4::build_sopp(rdna4::kSSendmsgSopp, {.simm16 = message})[0];
+      const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, &word));
+      ASSERT_NE(anchor, nullptr);
+      ASSERT_EQ(anchor->mnemonic(), "s_sendmsg");
+      const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(&word), sizeof(word));
+      for (const InstrumentationKind kind :
+           {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+        const InstrumentationPoint point = {.kind = kind,
+                                            .probe_obj =
+                                                reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                            .probe_symbol = "after",
+                                            .probe_args = {}};
+        const bool deallocates = arch != ROCJITSU_CODE_ARCH_CDNA4 && message == 3 &&
+                                 kind == InstrumentationKind::AfterInst;
+        SCOPED_TRACE(::testing::Message()
+                     << arch << " message=" << message << " kind=" << int(kind));
+        std::string error;
+        EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error).has_value(), !deallocates);
+        if (deallocates) {
+          EXPECT_NE(error.find("deallocates VGPRs"), std::string::npos);
+        }
+      }
+    }
+  }
+}
+
+TEST(Validator, AfterInstQualifiesSetregByArchitectureHwregAndTargetCapability) {
+  constexpr uint16_t kOtherHwreg = 2;
+  constexpr uint16_t kModeBankBit = amdgpu::MODE_HWREG | (amdgpu::VGPR_MSB_MODE_SHIFT << 6);
+  constexpr uint16_t kModeOutsideBankBit = amdgpu::MODE_HWREG | (25 << 6);
+  const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                      .probe_symbol = "after",
+                                      .probe_args = {}};
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const uint16_t hwreg : {kOtherHwreg, kModeBankBit, kModeOutsideBankBit}) {
+      for (const bool immediate : {false, true}) {
+        std::array<uint32_t, 2> words = {0, 1};
+        if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+          words[0] =
+              cdna4::build_sopk(immediate ? cdna4::kSSetregImm32B32Sopk : cdna4::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          words[0] =
+              rdna4::build_sopk(immediate ? rdna4::kSSetregImm32B32Sopk : rdna4::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        else
+          words[0] =
+              cdna5::build_sopk(immediate ? cdna5::kSSetregImm32B32Sopk : cdna5::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+        ASSERT_NE(anchor, nullptr);
+        const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                            words.size() * sizeof(uint32_t));
+        for (const bool fixup : {false, true}) {
+          SCOPED_TRACE(::testing::Message() << arch << " hwreg=" << hwreg
+                                            << " immediate=" << immediate << " fixup=" << fixup);
+          const bool changes_bank = arch == ROCJITSU_CODE_ARCH_CDNA5 && hwreg != kOtherHwreg &&
+                                    (fixup || hwreg == kModeBankBit);
+          std::string error;
+          EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error, fixup).has_value(),
+                    !changes_bank)
+              << error;
+          if (changes_bank) {
+            EXPECT_NE(error.find("bank selection"), std::string::npos);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -5236,6 +5555,705 @@ TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterB
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     ASSERT_FALSE(result.elf_bytes.empty());
     EXPECT_EQ(result.sites.size(), 1u);
+  }
+}
+
+TEST(InstrumentorProbePatch, GprIndexingProofIncludesClearsJoinsBackedgesAndUnknownRoots) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
+  constexpr uint32_t kEnd = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
+  constexpr uint32_t kOn = cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0];
+  constexpr uint32_t kOff = cdna4::build_sopp(cdna4::kSSetGprIdxOffSopp)[0];
+  struct Case {
+    std::vector<uint32_t> words;
+    uint64_t anchor_offset;
+    bool admitted;
+  };
+  const std::vector<Case> cases = {
+      {.words = {kEnd, kNop, cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 0xfffe})[0]},
+       .anchor_offset = 4,
+       .admitted = false},
+      {.words = {kOn, kOff, kNop, kEnd}, .anchor_offset = 8, .admitted = true},
+      {.words = {kOn, kNop, kOff, kEnd}, .anchor_offset = 4, .admitted = false},
+      {.words = {kOn, kOff, kEnd}, .anchor_offset = 4, .admitted = true},
+      {.words = {kNop, kNop, kOn,
+                 cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 0xfffd})[0], kOff, kEnd},
+       .anchor_offset = 4,
+       .admitted = false},
+  };
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("mode", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const Case &test_case : cases) {
+    const std::vector<uint8_t> image = make_gfx950_kernel_elf(test_case.words, 64);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = test_case.anchor_offset,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "mode",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const Instrumentor::ValidationResult result = instrumentor.validate_points();
+    EXPECT_EQ(result.errors.empty(), test_case.admitted);
+  }
+  for (const bool clears : {false, true}) {
+    const std::vector<uint32_t> words = {
+        cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 2})[0],
+        kNop,
+        cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 2})[0],
+        kOn,
+        clears ? kOff : kNop,
+        kNop,
+        kOff,
+        kEnd};
+    const std::vector<uint8_t> image = make_gfx950_kernel_elf(words, 64);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = 20,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "mode",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    EXPECT_EQ(instrumentor.validate_points().errors.empty(), clears);
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstProvesModePreservationAcrossResolvedCalls) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
+  constexpr uint32_t kEnd = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
+  constexpr uint32_t kCall = cdna4::build_sopk(cdna4::kSCallB64Sopk, {.simm16 = 2, .sdst = 4})[0];
+  constexpr util::FailureOr<uint32_t> ret = build_s_setpc_b64(4, kArch);
+  static_assert(ret.succeeded());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("callee_mode", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool enables : {false, true}) {
+    const uint32_t callee =
+        enables ? cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0] : kNop;
+    const std::vector<uint8_t> image =
+        make_gfx950_kernel_elf({kCall, kNop, kEnd, callee, ret.value()}, 64);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = 4,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "callee_mode",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const Instrumentor::ValidationResult result = instrumentor.validate_points();
+    EXPECT_EQ(result.errors.empty(), !enables);
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsModeStateFromIncompleteControlFlow) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint32_t> jump = build_s_setpc_b64(4, kArch);
+  static_assert(jump.succeeded());
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf(
+      {cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 2})[0],
+       cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0], jump.value(),
+       cdna4::build_sopp(cdna4::kSNopSopp)[0], cdna4::build_sopp(cdna4::kSEndpgmSopp)[0]},
+      64);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("unknown_mode", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch);
+  const InstrumentationPoint point = {.anchor_offset = 12,
+                                      .kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = &probe,
+                                      .probe_symbol = "unknown_mode",
+                                      .probe_args = {}};
+  instrumentor.add_point(point);
+  const Instrumentor::ValidationResult result = instrumentor.validate_points();
+  EXPECT_FALSE(result.errors.empty());
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsAllocationWithDynamicDescriptors) {
+  for (const uint32_t flags : {EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1250}) {
+    const rj_code_arch_t arch = flags == EF_AMDGPU_MACH_AMDGCN_GFX1200 ? ROCJITSU_CODE_ARCH_RDNA4
+                                                                       : ROCJITSU_CODE_ARCH_CDNA5;
+    for (const uint8_t count : {uint8_t{128}, uint8_t{4}}) {
+      std::vector<uint8_t> image = make_amdgpu_kernel_elf(
+          {rdna4::build_sop1(rdna4::kSAllocVgprSop1, {.ssrc0 = count})[0],
+           rdna4::build_sopp(rdna4::kSNopSopp)[0], rdna4::build_sopp(rdna4::kSEndpgmSopp)[0]},
+          64, 3, flags, 3, 0, false, false, false, false, true);
+      const AmdGpuCodeObject original(image.data(), image.size());
+      ASSERT_TRUE(original.is_valid());
+      ASSERT_EQ(original.rodata_sections().size(), 1u);
+      const uint64_t offset = original.rodata_sections().front()->sectionOffset();
+      amdhsa::kernel_descriptor_t descriptor = {};
+      std::memcpy(&descriptor, image.data() + offset, sizeof(descriptor));
+      // LLVM AMDHSAKernelDescriptor.h: gfx120 RSRC2 bit 6; gfx125 RSRC3 bit 17.
+      if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+        descriptor.compute_pgm_rsrc2 |= 1u << 6;
+      else
+        descriptor.compute_pgm_rsrc3 |= 1u << 17;
+      std::memcpy(image.data() + offset, &descriptor, sizeof(descriptor));
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, arch);
+      ASSERT_TRUE(setpc.succeeded());
+      const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+          "allocation", {test::make_mov_vgpr_inline(3, 5), setpc.value()}, flags);
+      const AmdGpuCodeObject probe(body.data(), body.size());
+      for (const uint64_t anchor_offset : {0u, 4u}) {
+        SCOPED_TRACE(anchor_offset);
+        Instrumentor instrumentor(object, arch);
+        const InstrumentationPoint point = {.anchor_offset = anchor_offset,
+                                            .kind = InstrumentationKind::AfterInst,
+                                            .probe_obj = &probe,
+                                            .probe_symbol = "allocation",
+                                            .probe_args = {}};
+        instrumentor.add_point(point);
+        const InstrumentedCodeObject result = instrumentor.patch();
+        ASSERT_EQ(result.errors.size(), 1u);
+        EXPECT_NE(result.errors.front().find("VGPR allocation"), std::string::npos);
+        EXPECT_TRUE(result.elf_bytes.empty());
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, CallableSitesRejectReleasedStorageAtTheObservationPoint) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kNop = rdna4::build_sopp(rdna4::kSNopSopp)[0];
+  constexpr uint32_t kWait = rdna4::build_sopp(rdna4::kSWaitStorecntSopp)[0];
+  constexpr uint32_t kEnd = rdna4::build_sopp(rdna4::kSEndpgmSopp)[0];
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "released", {test::make_mov_vgpr_inline(3, 5), setpc.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const uint16_t message : {1u, 3u}) {
+    const uint32_t send = rdna4::build_sopp(rdna4::kSSendmsgSopp, {.simm16 = message})[0];
+    const std::vector<uint8_t> image =
+        make_amdgpu_kernel_elf({kNop, send, kWait, kEnd}, 64, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 3,
+                               0, false, false, false, false, true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    for (const InstrumentationKind kind :
+         {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst,
+          InstrumentationKind::KernelExit}) {
+      for (const bool before_release : {false, true}) {
+        if (before_release && kind == InstrumentationKind::KernelExit)
+          continue;
+        SCOPED_TRACE(message);
+        SCOPED_TRACE(static_cast<int>(kind));
+        SCOPED_TRACE(before_release);
+        Instrumentor instrumentor(object, kArch);
+        const InstrumentationPoint point = {.anchor_offset =
+                                                before_release                            ? 0u
+                                                : kind == InstrumentationKind::KernelExit ? 12u
+                                                                                          : 8u,
+                                            .kind = kind,
+                                            .probe_obj = &probe,
+                                            .probe_symbol = "released",
+                                            .probe_args = {}};
+        instrumentor.add_point(point);
+        const InstrumentedCodeObject result = instrumentor.patch();
+        const bool admitted = before_release || message != 3;
+        ASSERT_EQ(result.errors.empty(), admitted)
+            << (result.errors.empty() ? "" : result.errors.front());
+        if (admitted) {
+          EXPECT_FALSE(result.elf_bytes.empty());
+        } else {
+          EXPECT_NE(result.errors.front().find("VGPR allocation"), std::string::npos);
+          EXPECT_TRUE(result.elf_bytes.empty());
+          EXPECT_TRUE(result.sites.empty());
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, KernelEntryUsesDispatchModeStateDespiteGuestBackedges) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint32_t kNop = cdna4::build_sopp(cdna4::kSNopSopp)[0];
+  constexpr uint32_t kEnd = cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
+  constexpr uint32_t kBack = cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 0xfffc})[0];
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("entry_mode", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const bool vskip : {false, true}) {
+    const uint32_t enable =
+        vskip ? cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0]
+              : cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0];
+    const uint32_t disable =
+        vskip ? cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0]
+              : cdna4::build_sopp(cdna4::kSSetGprIdxOffSopp)[0];
+    for (const bool clears : {false, true}) {
+      const std::vector<uint8_t> image =
+          make_gfx950_kernel_elf({kNop, enable, clears ? disable : kNop, kBack, kEnd}, 64);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      for (const InstrumentationKind kind :
+           {InstrumentationKind::KernelEntry, InstrumentationKind::BeforeInst,
+            InstrumentationKind::AfterInst}) {
+        SCOPED_TRACE(vskip);
+        SCOPED_TRACE(clears);
+        SCOPED_TRACE(static_cast<int>(kind));
+        Instrumentor instrumentor(object, kArch);
+        const InstrumentationPoint point = {
+            .kind = kind, .probe_obj = &probe, .probe_symbol = "entry_mode", .probe_args = {}};
+        instrumentor.add_point(point);
+        const InstrumentedCodeObject result = instrumentor.patch();
+        const bool admitted = kind == InstrumentationKind::KernelEntry || clears;
+        ASSERT_EQ(result.errors.empty(), admitted)
+            << (result.errors.empty() ? "" : result.errors.front());
+        if (!admitted) {
+          EXPECT_TRUE(result.elf_bytes.empty());
+          continue;
+        }
+        ASSERT_FALSE(result.elf_bytes.empty());
+        if (kind == InstrumentationKind::KernelEntry) {
+          const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+          const std::optional<uint64_t> entry = test::patched_entry_text_offset(patched);
+          ASSERT_TRUE(entry.has_value());
+          EXPECT_NE(*entry, 0u);
+          const std::vector<uint32_t> words = section_words(patched, ".text");
+          ASSERT_GT(words.size(), 3u);
+          EXPECT_EQ(words[0], kNop);
+          EXPECT_EQ(words[3], kBack);
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsMfmaAnchorsWithoutHazardScheduling) {
+  struct Case {
+    uint32_t flags;
+    rj_code_arch_t arch;
+    std::array<uint32_t, 2> anchor;
+    uint16_t argument_vgpr;
+  };
+  const std::array<Case, 3> cases = {{
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .arch = ROCJITSU_CODE_ARCH_CDNA4,
+       .anchor = cdna4::build_vop3p_mfma(cdna4::kVMfmaF6416x16x4F64Vop3pMfma,
+                                         {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 264}),
+       .argument_vgpr = 8},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX942,
+       .arch = ROCJITSU_CODE_ARCH_CDNA3,
+       .anchor = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3232x32x8F16Vop3pMfma,
+                                         {.vdst = 0, .src0 = 272, .src1 = 274, .src2 = 256}),
+       .argument_vgpr = 0},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX950,
+       .arch = ROCJITSU_CODE_ARCH_CDNA4,
+       .anchor = cdna4::build_vop3p_mfma(cdna4::kVSmfmacF3216x16x64Bf16Vop3pMfma,
+                                         {.vdst = 0, .src0 = 272, .src1 = 274, .src2 = 256}),
+       .argument_vgpr = 0},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(test_case.arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    ASSERT_TRUE(end.succeeded() && ret.succeeded());
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_amdgpu_kernel_elf({test_case.anchor[0], test_case.anchor[1], end.value()}, 64, 3,
+                               test_case.flags, 7, 7),
+        {{"test_kernel", 0, 32, 32, 0}});
+    const std::unique_ptr<Decoder> decoder = Decoder::create(test_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, test_case.anchor.data()));
+    ASSERT_NE(anchor, nullptr);
+    ASSERT_TRUE(anchor->is_mfma());
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+        "matrix", {test::make_mov_vgpr_inline(0, 5), ret.value()}, test_case.flags);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    for (const bool reads_result : {false, true}) {
+      SCOPED_TRACE(reads_result);
+      Instrumentor instrumentor(object, test_case.arch);
+      InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                    .probe_obj = &probe,
+                                    .probe_symbol = "matrix",
+                                    .probe_args = {}};
+      if (reads_result)
+        point.probe_args = {
+            {.source = ProbeArgSource::AnchorVgpr, .register_index = test_case.argument_vgpr}};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      ASSERT_EQ(result.errors.size(), 1u);
+      EXPECT_NE(result.errors.front().find("MFMA"), std::string::npos) << result.errors.front();
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstRejectsCdna5AnchorsWithoutValuSpacing) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const std::array<uint32_t, 2> dense = cdna5::build_vop3p(
+      cdna5::kVWmmaF3216x16x32F16Vop3p, {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264});
+  const std::array<uint32_t, 2> sparse = cdna5::build_vop3p(
+      cdna5::kVSwmmacF3216x16x64F16Vop3p, {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 288});
+  const std::array<uint32_t, 2> exp_e64 =
+      cdna5::build_vop3(cdna5::kVExpF32Vop3, {.vdst = 8, .src0 = 265});
+  struct Case {
+    std::vector<uint32_t> words;
+    std::string_view mnemonic;
+    bool matrix;
+  };
+  const std::array<Case, 5> cases = {{
+      {.words = {dense[0], dense[1]}, .mnemonic = "v_wmma_f32_16x16x32_f16", .matrix = true},
+      {.words = {sparse[0], sparse[1]}, .mnemonic = "v_swmmac_f32_16x16x64_f16", .matrix = true},
+      {.words = {cdna5::build_vop1(cdna5::kVExpF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+       .mnemonic = "v_exp_f32_e32",
+       .matrix = false},
+      {.words = {exp_e64[0], exp_e64[1]}, .mnemonic = "v_exp_f32", .matrix = false},
+      {.words = {cdna5::build_vop1(cdna5::kVRcpF64Vop1, {.src0 = 266, .vdst = 8})[0]},
+       .mnemonic = "v_rcp_f64_e32",
+       .matrix = false},
+  }};
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> read_argument = build_v_mov_b32_src(1, 256, kArch);
+  ASSERT_TRUE(ret.succeeded() && end.succeeded() && read_argument.succeeded());
+  for (const uint32_t flags : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    for (const Case &test_case : cases) {
+      SCOPED_TRACE(flags);
+      SCOPED_TRACE(test_case.mnemonic);
+      const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+      ASSERT_NE(decoder, nullptr);
+      const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, test_case.words.data()));
+      ASSERT_NE(anchor, nullptr);
+      ASSERT_EQ(anchor->mnemonic(), test_case.mnemonic);
+      ASSERT_FALSE(anchor->is_mfma());
+      ASSERT_EQ((anchor->flags() & MATRIX_REGISTER_ACCESSES) != 0, test_case.matrix);
+      ASSERT_EQ(anchor->is_transcendental(), !test_case.matrix);
+      std::vector<uint32_t> guest = test_case.words;
+      guest.push_back(end.value());
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_amdgpu_kernel_elf(guest, 64, 3, flags, 7, 0, false, false, false, false, true),
+          {{"test_kernel", 0, 32, 64, 0}});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      for (const bool reads_result : {false, true}) {
+        SCOPED_TRACE(reads_result);
+        const std::vector<uint32_t> probe_words =
+            reads_result ? std::vector<uint32_t>{read_argument.value(), ret.value()}
+                         : std::vector<uint32_t>{ret.value()};
+        const std::vector<uint8_t> body = make_amdgpu_probe_elf("spacing", probe_words, flags);
+        const AmdGpuCodeObject probe(body.data(), body.size());
+        for (const InstrumentationKind kind :
+             {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+          SCOPED_TRACE(static_cast<int>(kind));
+          Instrumentor instrumentor(object, kArch);
+          InstrumentationPoint point = {
+              .kind = kind, .probe_obj = &probe, .probe_symbol = "spacing", .probe_args = {}};
+          if (reads_result)
+            point.probe_args = {probe_arg_vgpr(8)};
+          instrumentor.add_point(point);
+          const InstrumentedCodeObject result = instrumentor.patch();
+          if (kind == InstrumentationKind::BeforeInst) {
+            EXPECT_TRUE(result.errors.empty())
+                << (result.errors.empty() ? "" : result.errors.front());
+            EXPECT_FALSE(result.elf_bytes.empty());
+          } else {
+            EXPECT_EQ(result.errors.size(), 1u);
+            if (!result.errors.empty()) {
+              EXPECT_NE(result.errors.front().find("VALU spacing"), std::string::npos)
+                  << result.errors.front();
+            }
+            EXPECT_TRUE(result.elf_bytes.empty());
+            EXPECT_TRUE(result.sites.empty());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstValuSpacingGuardPreservesUnaffectedAdmission) {
+  struct Case {
+    uint32_t flags;
+    rj_code_arch_t arch;
+    uint32_t anchor;
+  };
+  const std::array<Case, 3> cases = {{
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .anchor = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 265, .vdst = 8})[0]},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1251,
+       .arch = ROCJITSU_CODE_ARCH_CDNA5,
+       .anchor = cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 265, .vdst = 8})[0]},
+      {.flags = EF_AMDGPU_MACH_AMDGCN_GFX1200,
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .anchor = rdna4::build_vop1(rdna4::kVExpF32Vop1, {.src0 = 265, .vdst = 8})[0]},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.flags);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(test_case.arch);
+    const util::FailureOr<uint32_t> read_argument = build_v_mov_b32_src(1, 256, test_case.arch);
+    ASSERT_TRUE(ret.succeeded() && end.succeeded() && read_argument.succeeded());
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_amdgpu_kernel_elf({test_case.anchor, end.value()}, 64, 3, test_case.flags, 7, 0, false,
+                               false, false, false, true),
+        {{"test_kernel", 0, 32, 64, 0}});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+        "spacing_control", {read_argument.value(), ret.value()}, test_case.flags);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    Instrumentor instrumentor(object, test_case.arch);
+    const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "spacing_control",
+                                        .probe_args = {probe_arg_vgpr(8)}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+    EXPECT_FALSE(result.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorProbePatch, StorageProofIncludesJoinsBackedgesAndUnprovenCalls) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kNop = rdna4::build_sopp(rdna4::kSNopSopp)[0];
+  constexpr uint32_t kEnd = rdna4::build_sopp(rdna4::kSEndpgmSopp)[0];
+  constexpr uint32_t kRelease = rdna4::build_sopp(rdna4::kSSendmsgSopp, {.simm16 = 3})[0];
+  constexpr util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  static_assert(ret.succeeded());
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "storage", {test::make_mov_vgpr_inline(3, 5), ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  struct Case {
+    std::vector<uint32_t> words;
+    uint64_t anchor_offset;
+    bool admitted;
+  };
+  const std::vector<Case> cases = {
+      {.words = {rdna4::build_sopp(rdna4::kSCbranchScc1Sopp, {.simm16 = 1})[0], kRelease, kNop,
+                 kEnd},
+       .anchor_offset = 8,
+       .admitted = false},
+      {.words = {kNop, kRelease, rdna4::build_sopp(rdna4::kSCbranchScc1Sopp, {.simm16 = 0xfffd})[0],
+                 kEnd},
+       .anchor_offset = 0,
+       .admitted = false},
+      {.words = {rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 1})[0], kRelease, kNop, kEnd},
+       .anchor_offset = 8,
+       .admitted = true},
+      {.words = {kRelease, rdna4::build_sop1(rdna4::kSAllocVgprSop1, {.ssrc0 = 132})[0], kNop,
+                 kEnd},
+       .anchor_offset = 8,
+       .admitted = false},
+  };
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.anchor_offset);
+    const std::vector<uint8_t> image =
+        make_amdgpu_kernel_elf(test_case.words, 64, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 3, 0, false,
+                               false, false, false, true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = test_case.anchor_offset,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "storage",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_EQ(result.errors.empty(), test_case.admitted)
+        << (result.errors.empty() ? "" : result.errors.front());
+    EXPECT_EQ(result.elf_bytes.empty(), !test_case.admitted);
+  }
+  constexpr util::FailureOr<uint32_t> return_helper = build_s_setpc_b64(4, kArch);
+  constexpr util::FailureOr<uint32_t> call = build_s_call_b64(4, 2, kArch);
+  static_assert(return_helper.succeeded() && call.succeeded());
+  for (const bool releases : {false, true}) {
+    const std::vector<uint8_t> image = make_amdgpu_kernel_elf(
+        {call.value(), kNop, kEnd, releases ? kRelease : kNop, return_helper.value()}, 64, 3,
+        EF_AMDGPU_MACH_AMDGCN_GFX1200, 3, 0, false, false, false, false, true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = 4,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "storage",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_EQ(result.errors.empty(), !releases)
+        << (result.errors.empty() ? "" : result.errors.front());
+  }
+}
+
+TEST(InstrumentorProbePatch, StorageProofBoundsRewrittenReturnsAndRejectsUnknownTransfers) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr uint32_t kNop = rdna4::build_sopp(rdna4::kSNopSopp)[0];
+  constexpr uint32_t kEnd = rdna4::build_sopp(rdna4::kSEndpgmSopp)[0];
+  constexpr util::FailureOr<uint32_t> call = build_s_call_b64(4, 1, kArch);
+  constexpr util::FailureOr<uint32_t> unknown_call = build_s_swappc_b64(4, 6, kArch);
+  constexpr util::FailureOr<uint32_t> low = build_s_add_u32(4, 4, 255, kArch);
+  constexpr util::FailureOr<uint32_t> high = build_s_addc_u32(5, 5, 193, kArch);
+  constexpr util::FailureOr<uint32_t> bad_high = build_s_addc_u32(5, 5, 128, kArch);
+  constexpr util::FailureOr<uint32_t> clobber = build_s_mov_b32(4, 128, kArch);
+  constexpr util::FailureOr<uint32_t> ret = build_s_setpc_b64(4, kArch);
+  constexpr util::FailureOr<uint32_t> probe_ret = build_s_setpc_b64(30, kArch);
+  constexpr util::FailureOr<uint32_t> getpc = build_s_getpc_b64(4, kArch);
+  static_assert(call.succeeded() && unknown_call.succeeded() && low.succeeded() &&
+                high.succeeded() && bad_high.succeeded() && clobber.succeeded() &&
+                ret.succeeded() && probe_ret.succeeded() && getpc.succeeded());
+  const std::vector<uint8_t> body =
+      make_amdgpu_probe_elf("bounded_return", {probe_ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  struct Case {
+    int32_t delta = -8;
+    bool releases = false;
+    bool wrong_high = false;
+    bool clobbers_link = false;
+    bool unknown = false;
+    bool from_getpc = false;
+    bool falls_off = false;
+    bool admitted = false;
+  };
+  const std::array<Case, 9> cases = {{
+      {.admitted = true},
+      {.delta = -9},
+      {.releases = true},
+      {.wrong_high = true},
+      {.clobbers_link = true},
+      {.unknown = true},
+      {.from_getpc = true, .admitted = true},
+      {.delta = -9, .from_getpc = true},
+      {.falls_off = true},
+  }};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.delta);
+    SCOPED_TRACE(test_case.releases);
+    SCOPED_TRACE(test_case.wrong_high);
+    SCOPED_TRACE(test_case.clobbers_link);
+    SCOPED_TRACE(test_case.unknown);
+    SCOPED_TRACE(test_case.from_getpc);
+    SCOPED_TRACE(test_case.falls_off);
+    std::vector<uint32_t> words = {
+        test_case.releases ? rdna4::build_sopp(rdna4::kSSendmsgSopp, {.simm16 = 3})[0] : kNop,
+        test_case.unknown ? unknown_call.value() : call.value(), kEnd};
+    if (test_case.from_getpc)
+      words = {kNop, getpc.value()};
+    if (test_case.clobbers_link)
+      words.push_back(clobber.value());
+    words.insert(words.end(),
+                 {low.value(), static_cast<uint32_t>(test_case.delta),
+                  test_case.wrong_high ? bad_high.value() : high.value(), ret.value()});
+    if (test_case.falls_off) {
+      std::vector<uint32_t> open_text = {
+          rdna4::build_sopp(rdna4::kSCbranchScc1Sopp, {.simm16 = 7})[0],
+          kNop,
+          call.value(),
+          kEnd,
+          low.value(),
+          static_cast<uint32_t>(-12),
+          high.value(),
+          ret.value(),
+          kNop};
+      words.swap(open_text);
+    }
+    const std::vector<uint8_t> image = make_amdgpu_kernel_elf(
+        words, 64, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 3, 0, false, false, false, false, true);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = test_case.falls_off ? 4u : 0u,
+                                        .kind = InstrumentationKind::BeforeInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "bounded_return",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_EQ(result.errors.empty(), test_case.admitted)
+        << (result.errors.empty() ? "" : result.errors.front());
+    EXPECT_EQ(result.elf_bytes.empty(), !test_case.admitted);
+  }
+
+  // A hidden return into another helper does not establish that helper's link.
+  // The first conditional path skips the call that would initialize s[6:7].
+  constexpr util::FailureOr<uint32_t> call_b = build_s_call_b64(6, 1, kArch);
+  constexpr util::FailureOr<uint32_t> return_b = build_s_setpc_b64(6, kArch);
+  static_assert(call_b.succeeded() && return_b.succeeded());
+  const std::vector<uint8_t> foreign_image = make_amdgpu_kernel_elf(
+      {rdna4::build_sopp(rdna4::kSCbranchScc1Sopp, {.simm16 = 1})[0], call_b.value(),
+       rdna4::build_sopp(rdna4::kSBranchSopp, {.simm16 = 1})[0], return_b.value(), kNop,
+       call.value(), kEnd, low.value(), static_cast<uint32_t>(-12), high.value(), ret.value()},
+      64, 3, EF_AMDGPU_MACH_AMDGCN_GFX1200, 3, 0, false, false, false, false, true);
+  const AmdGpuCodeObject foreign_object(foreign_image.data(), foreign_image.size());
+  Instrumentor foreign_instrumentor(foreign_object, kArch);
+  const InstrumentationPoint foreign_point = {.anchor_offset = 16,
+                                              .kind = InstrumentationKind::BeforeInst,
+                                              .probe_obj = &probe,
+                                              .probe_symbol = "bounded_return",
+                                              .probe_args = {}};
+  foreign_instrumentor.add_point(foreign_point);
+  const InstrumentedCodeObject foreign_result = foreign_instrumentor.patch();
+  EXPECT_FALSE(foreign_result.errors.empty());
+  EXPECT_TRUE(foreign_result.elf_bytes.empty());
+}
+
+TEST(InstrumentorProbePatch, AfterInstUsesTheConcreteTargetsModeWriteCapability) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(endpgm.succeeded() && setpc.succeeded() && nop.succeeded());
+  // This write misses MODE[19:12]. gfx1250 still changes VGPR bank selection;
+  // gfx1251 preserves it. Exercise target discovery and forwarding, not just
+  // validate_anchor() with a capability supplied directly by the test.
+  constexpr uint16_t kModeBit25 = amdgpu::MODE_HWREG | (25u << 6);
+  const std::array<uint32_t, 1> write =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBit25});
+  for (const uint32_t e_flags : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    SCOPED_TRACE(e_flags);
+    const std::vector<uint8_t> image =
+        make_amdgpu_kernel_elf({write[0], 0, endpgm.value()}, 0, 3, e_flags);
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf("after_mode", {setpc.value()}, e_flags);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "after_mode",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const Instrumentor::ValidationResult result = instrumentor.validate_points();
+    if (e_flags == EF_AMDGPU_MACH_AMDGCN_GFX1251) {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_EQ(result.sites.size(), 1u);
+    } else {
+      ASSERT_EQ(result.errors.size(), 1u);
+      EXPECT_NE(result.errors.front().find("bank selection"), std::string::npos);
+      EXPECT_TRUE(result.sites.empty());
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, AfterInstUsesConcreteTargetBankStateAtALaterSite) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(endpgm.succeeded() && setpc.succeeded() && nop.succeeded());
+  constexpr uint16_t kModeBit25 = amdgpu::MODE_HWREG | (25u << 6);
+  const std::array<uint32_t, 1> write =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBit25});
+  for (const uint32_t e_flags : {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251}) {
+    SCOPED_TRACE(e_flags);
+    const std::vector<uint8_t> image =
+        make_amdgpu_kernel_elf({write[0], 0x1000, nop.value(), endpgm.value()}, 0, 3, e_flags);
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf("after_mode", {setpc.value()}, e_flags);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    Instrumentor instrumentor(object, kArch);
+    const InstrumentationPoint point = {.anchor_offset = 8,
+                                        .kind = InstrumentationKind::AfterInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "after_mode",
+                                        .probe_args = {}};
+    instrumentor.add_point(point);
+    const Instrumentor::ValidationResult result = instrumentor.validate_points();
+    if (e_flags == EF_AMDGPU_MACH_AMDGCN_GFX1251) {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_EQ(result.sites.size(), 1u);
+    } else {
+      ASSERT_FALSE(result.errors.empty());
+      EXPECT_NE(result.errors.front().find("VGPR_MSB"), std::string::npos);
+      EXPECT_TRUE(result.sites.empty());
+    }
   }
 }
 

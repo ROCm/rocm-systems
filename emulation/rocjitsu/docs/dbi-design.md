@@ -13,9 +13,10 @@ predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
 
 This document describes the DBI subsystem as implemented. The instrumentor can
 insert an inline nop or call a verified, copied probe body. Calls pass explicit
-arguments, preserve guest state, and share one body across sites. Before-placement
-and callable kernel entry/exit observations are supported; after-placement and
-block boundaries remain reserved. Existing scratch spills coexist with an
+arguments, preserve guest state, and share one body across sites. Before-placement,
+callable `AfterInst`, and callable kernel entry/exit observations are supported,
+subject to the [admission contract](#key-design-constraint). Block boundaries
+remain reserved. Existing scratch spills coexist with an
 explicit register-growth policy that uses disjoint register backups. The shared
 code-object layer updates the resource note and descriptor together. General HWREG/MODE preservation, scratch enablement
 from zero, arbitrary composed instrumentation, and streaming transport remain
@@ -97,7 +98,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
@@ -108,6 +109,33 @@ current limits.
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
 
 ### Key design constraint
+
+Callable `AfterInst` requires an ordinary relocatable anchor and a supported
+post-anchor state. Pre-anchor liveness alone cannot justify a callback after
+the instruction; addressing and storage must be valid at the observation point.
+
+| Requirement | Current admission boundary |
+|---|---|
+| Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
+| Allocated storage | Required VGPRs and scratch must remain available. Unproven `s_alloc_vgpr` or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet. |
+| Register hazards | MFMA/SMFMAC anchors are rejected. On CDNA5, WMMA/SWMMAC and transcendental families are also conservatively excluded until the envelope can provide the required VALU spacing. |
+
+Storage availability also constrains callable instruction and exit observations.
+Descriptors describe the initial allocation, not storage after guest allocation
+changes. `KernelEntry` uses dispatch-entry state: guest backedges to the original
+entry do not execute its descriptor stub again.
+
+Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
+the envelope uses vector instructions for restoration, even with `force_full_exec`.
+These checks do not provide general hazard scheduling or prove readiness at
+arbitrary later observation points.
+
+ISA-specific recognition and control-flow proof details belong to the
+[Instrumentor implementation](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.cpp)
+and its [admission tests](../tests/patch/instrumentor_test.cpp).
+For CDNA5 spacing requirements, see the
+[ISA reference](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf),
+sections 5.7.2 and 7.12.1.
 
 The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), the mixed-wave-size refusal of probe calls, the probe live-in gate in `resolve_points()`, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
@@ -120,8 +148,8 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes` (see [Data Types](#data-types)). Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope preceding or following the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
 
 The low-level `probe_after_original` plan option places the relocated instruction
-before its callable envelope. It defaults to false; the Instrumentor still
-rejects `AfterInst` requests. A caller selecting this layout must supply
+before its callable envelope. It defaults to false; the Instrumentor selects it
+for callable `AfterInst` requests. A caller selecting this layout must supply
 preservation requirements for the state after the instruction, including its
 definitions; the builder does not compute liveness. An emitted original must
 fall through into the envelope, so a branch or terminator is not a valid choice
@@ -146,6 +174,10 @@ emitted bytes without deriving their range from a particular layout.
 The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` inputs. `plan_probe_call()` reserves an EXEC temp when `preserve_exec || needs_full_mask`; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or `force_full_exec`. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in [Special state](#special-state-preservation).
 
 The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the guest-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point.
+
+For `AfterInst`, the Instrumentor includes the original instruction's definitions
+in the preservation set so the callback observes and preserves the instruction's
+results.
 
 ### Spill bracket
 
@@ -468,7 +500,8 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
 
-The default callable layout places the envelope before the relocated original:
+The relocated original precedes the call envelope for `AfterInst` and follows
+it for `BeforeInst`:
 
 ```
 .text:
@@ -480,6 +513,7 @@ The default callable layout places the envelope before the relocated original:
   [s_nop padding]           <-- only with an entry prologue: to the entry's residue mod 256
   [entry stub]              <-- descriptor enters here: prologue, then s_branch <original entry>
   [trampoline]              @ trampoline_offset:
+    <relocated original word(s)>        <-- AfterInst only: before the envelope
     <in-flight-load drain>              <-- s_wait_loadcnt / s_waitcnt; also emitted on no-spill sites
     s_mov_b64    <exec_temp>, exec      <-- EXEC save (preserve_exec || needs_full_mask)
     s_mov_b64    <vcc_temp>,  vcc       <-- VCC save  (preserve_vcc)
@@ -509,12 +543,12 @@ The default callable layout places the envelope before the relocated original:
     s_mov_b32    m0,   <m0_temp>        <-- M0 restore
     s_nop        <n>                    <-- GFX9 wait-state pad after an SGPR or M0 restore
     s_wait_alu 0xf1fc                   <-- RDNA4: completed restores before guest resume
-    <relocated original word(s)>
+    <relocated original word(s)>        <-- BeforeInst only: after the envelope
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
-The diagram shows the default placement (`probe_after_original=false`). With
-`probe_after_original=true`, the relocated original moves to the trampoline
+The diagram labels both placements. With `probe_after_original=true`, the
+relocated original executes at the trampoline
 start, before the first in-flight-load drain; the envelope's internal order stays
 the same, and the return branch still follows it. With `emit_original=false`,
 both placements omit the original and start with the envelope. Post placement
@@ -538,7 +572,16 @@ shared DBI envelope; it does not require an analysis-specific lowering path.
 
 ### Mask policy
 
-By default the probe runs under the guest EXEC mask observed at envelope entry: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at that observation point is inactive inside the probe. When `probe_after_original && emit_original` is true, the relocated instruction executes first; if it changes EXEC, the probe sees the new mask. With the original omitted, the saved mask is the guest mask at trampoline entry regardless of the placement flag. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The observed guest mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
+By default the probe runs under EXEC at the selected observation point: before
+the anchor for `BeforeInst`, and after it for `AfterInst`. The envelope saves
+that mask at entry and restores `<exec_temp>` before the `s_swappc` to the probe.
+With the original omitted, the observed mask is the guest mask at trampoline
+entry regardless of the placement flag.
+
+`InstrumentationPoint::force_full_exec` keeps the full-mask window used for
+spills and argument writes open across the call, so the probe body runs with
+every lane enabled. The observed guest mask is restored afterwards before the
+guest resumes.
 
 This permits uniform bookkeeping and probes that consume an explicitly saved guest mask as data. A probe relying on execution under the original mask uses the default; per-lane operands passed under full EXEC must be interpreted using the saved mask.
 

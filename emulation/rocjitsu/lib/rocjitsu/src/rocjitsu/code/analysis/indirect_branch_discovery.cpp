@@ -2468,21 +2468,6 @@ constexpr size_t kBlockScaffoldingBytes =
     sizeof(std::vector<size_t>) + 2 * sizeof(VectorLaneFlowState) + sizeof(CallEdgeInfo) +
     6 * sizeof(void *) + 3 * sizeof(size_t) + 2 * sizeof(uint8_t);
 
-[[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
-  if (slice.id != amdgpu::MODE_HWREG)
-    return false;
-  const uint16_t end = static_cast<uint16_t>(
-      std::min<uint32_t>(32, static_cast<uint32_t>(slice.begin) + slice.width));
-  return slice.begin < amdgpu::VGPR_MSB_MODE_SHIFT + 8 && end > amdgpu::VGPR_MSB_MODE_SHIFT;
-}
-
-[[nodiscard]] constexpr bool hwreg_slice_overlaps_mode_bit(uint16_t hwreg, uint16_t bit) {
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
-  return slice.id == amdgpu::MODE_HWREG && slice.begin <= bit &&
-         static_cast<uint32_t>(slice.begin) + slice.width > bit;
-}
-
 [[nodiscard]] std::optional<uint8_t> vgpr_bank_for_role(std::optional<uint8_t> mode,
                                                         amdgpu::VgprMsbRole role) {
   return amdgpu::vgpr_msb_bank_for_role(mode, role);
@@ -2535,7 +2520,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     return;
   }
   if (mnemonic == "s_setreg_b32") {
-    if (hwreg_slice_overlaps_vgpr_msb(hwreg))
+    if (amdgpu::hwreg_slice_overlaps_vgpr_msb(hwreg))
       mode = std::nullopt;
     return;
   }
@@ -2566,7 +2551,7 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  if (!hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
+  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
     return;
   if (mnemonic == "s_setreg_b32") {
     enabled = std::nullopt;

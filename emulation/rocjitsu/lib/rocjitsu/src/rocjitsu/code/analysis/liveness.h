@@ -34,6 +34,22 @@ class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
 
+/// @brief Whether an instruction may enable displaced VGPR addressing.
+/// @details Returns false for unrelated instructions or a MODE write proven to
+/// clear GPR_IDX_EN, and true for an enabling or unknown write. Missing required
+/// operands or literal bytes return true. Text is the entire .text section;
+/// instruction_offset is its byte offset, defaulting to inst.src_loc(). Direct
+/// decoder callers must supply the offset when src_loc() does not describe text.
+[[nodiscard]] bool
+may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+                        std::optional<uint64_t> instruction_offset = std::nullopt);
+
+/// @brief Whether an instruction may enable vector-instruction suppression.
+/// @details The result and .text offset convention match may_enable_gpr_indexing.
+[[nodiscard]] bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                                    rj_code_arch_t arch,
+                                    std::optional<uint64_t> instruction_offset = std::nullopt);
+
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
 
