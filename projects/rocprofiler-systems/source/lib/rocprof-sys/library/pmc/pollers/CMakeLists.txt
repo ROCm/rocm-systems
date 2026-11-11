@@ -15,3 +15,7 @@ set(pmc_pollers_sources
 )
 
 set(pmc_pollers_sources ${pmc_pollers_sources} PARENT_SCOPE)
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
