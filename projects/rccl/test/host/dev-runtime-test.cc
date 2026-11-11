@@ -6092,7 +6092,7 @@ TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
   ncclAsyncJob* job = nullptr;
   void (*jobFree)(void*) = nullptr;
   ncclComm* jobComm = nullptr;
-  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
     job = j;
     jobFree = d;
     jobComm = c;
@@ -6116,7 +6116,7 @@ TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
 TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
   ScopedHook rearch(g_loadParam, ParamOverride({{"ENQUEUE_REARCH_ENABLE", 1}}));
   int destroyed = 0;
-  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
+  g_ncclMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
     d(j);
     ++destroyed;
     return ncclInvalidArgument;

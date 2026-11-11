@@ -73,10 +73,10 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 // g_microFree lets a test observe which entries a dequeue loop releases.
 #include "fakes/alloc_seam.h"
 
-#include "fakes/alloc_seam_undef.h"
-
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
+
+#include "fakes/alloc_seam_undef.h"
 
 #include "dev_runtime.h"
 #include "dev_runtime_internal.h"
