@@ -570,6 +570,24 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
   }
 }
 
+TEST_F(PerfsimPluginTest, InterestsRequireSynchronousInstructionInspection) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  ASSERT_TRUE(group.add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+  EXPECT_FALSE(group.supports_async_instructions());
+  EXPECT_TRUE(group.observes_before_execute_instruction());
+  EXPECT_TRUE(group.observes_memory_routing());
+  EXPECT_TRUE(group.observes_tensor_dma_memory_access());
+  EXPECT_FALSE(group.observes_after_execute_instruction());
+  EXPECT_FALSE(group.observes_async_instruction_issued());
+  EXPECT_FALSE(group.observes_memory_instruction_routing());
+  EXPECT_FALSE(group.observes_vgpr_reads());
+  EXPECT_FALSE(group.observes_vgpr_writes());
+  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_writes());
+  EXPECT_FALSE(group.observes_tensor_dma_issue());
+  EXPECT_FALSE(group.observes_register_hazards());
+}
+
 TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   WaveFixture fixture;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());

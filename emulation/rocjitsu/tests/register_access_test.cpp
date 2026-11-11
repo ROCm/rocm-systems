@@ -131,6 +131,12 @@ struct WriteEvent {
 
 class RecordingPlugin : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   RecordingPlugin() : ExecutionPlugin("register_access_recorder") {}
 
   void onAmdgpuReadVgprLanes(const Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
@@ -1427,6 +1433,8 @@ TEST(RegisterAccessTest, IssuedScalarReturningAtomicChecksTtmpWritePermission) {
   class ChangePrivilege final : public ExecutionPlugin {
   public:
     ChangePrivilege() : ExecutionPlugin("change_privilege") {}
+    bool observes_after_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
     void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, Wavefront &wave) override {
       wave.set_in_trap_handler(!wave.in_trap_handler());
     }

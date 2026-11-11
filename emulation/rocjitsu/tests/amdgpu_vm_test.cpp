@@ -770,6 +770,9 @@ enum class SubmitTrigger { DispatchBegin, AfterInstruction };
 
 class SubmitDispatchDuringWorkerPlugin final : public ExecutionPlugin {
 public:
+  bool observes_after_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   SubmitDispatchDuringWorkerPlugin(test::AqlQueue &queue,
                                    const hsa_kernel_dispatch_packet_t &packet,
                                    SubmitTrigger trigger)
@@ -2038,6 +2041,9 @@ TEST(AqlDispatchTest, InvalidatedAdmissionSnapshotRecapturesBeforeFirstFetch) {
 TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   class InvalidateAfterFirstInstruction final : public ExecutionPlugin {
   public:
+    bool observes_after_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     InvalidateAfterFirstInstruction(amdgpu::GpuVm &gpu_vm, amdgpu::AddressSpaceHandle address_space,
                                     amdgpu::GpuMemory &memory, uint64_t next_pc)
         : ExecutionPlugin("invalidate_cached_dispatch_vm_snapshot"), gpu_vm_(gpu_vm),
@@ -2382,6 +2388,9 @@ TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot
 
   class InstructionGate final : public ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     InstructionGate() : ExecutionPlugin("dispatch_vm_replacement_gate") {}
 
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
@@ -10382,6 +10391,9 @@ public:
 
 class LiveHotHookSubscriptionPlugin final : public ExecutionPlugin {
 public:
+  bool observes_sgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   explicit LiveHotHookSubscriptionPlugin(bool observes)
       : ExecutionPlugin(observes ? "live_subscribed_hot_hook" : "live_unsubscribed_hot_hook"),
         observes_(observes) {}
@@ -10389,13 +10401,6 @@ public:
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *) const override {
     return observes_;
   }
-  bool observes_before_execute_instruction() const override { return false; }
-  bool observes_after_execute_instruction() const override { return false; }
-  bool observes_async_instruction_issued() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++sgpr_reads; }
 
   uint32_t sgpr_reads = 0;
@@ -10651,6 +10656,9 @@ TEST(AqlDispatchTest, PoolTracksIndependentCuDueTicks) {
 
 class BlockingInstructionPlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   BlockingInstructionPlugin() : ExecutionPlugin("blocking_instruction") {}
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
@@ -11311,6 +11319,10 @@ TEST(AqlDispatchTest, WorkerExceptionLeavesQueueFailureForTeardown) {
 
 class ThrowingIssuePlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   enum Hook { Before, After, Halt };
   explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
 

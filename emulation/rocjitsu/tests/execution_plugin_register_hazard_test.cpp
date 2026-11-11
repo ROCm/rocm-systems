@@ -55,15 +55,12 @@ std::vector<Report> reports(const std::string &output) {
 
 class HazardProbe final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_async_instruction_issued() const override { return true; }
+
   explicit HazardProbe(bool interested, std::string name = "hazard_probe")
       : ExecutionPlugin(std::move(name)), interested(interested) {}
   bool observes_register_hazards() const override { return interested; }
-  bool observes_vgpr_reads() const override { return false; }
-  bool observes_vgpr_writes() const override { return false; }
-  bool observes_sgpr_reads() const override { return false; }
-  bool observes_scalar_register_writes() const override { return false; }
-  bool observes_memory_instruction_routing() const override { return false; }
-  bool observes_after_execute_instruction() const override { return false; }
   bool supports_async_instructions() const override { return true; }
   bool observes_hot_hooks_for_wavefront(const Wavefront *) const override { return subscribed; }
   void onAmdgpuRegisterHazard(const RegisterHazardObservation &hazard, const Wavefront &) override {

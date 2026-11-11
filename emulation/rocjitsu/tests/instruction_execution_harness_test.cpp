@@ -619,6 +619,10 @@ using Cdna4MemoryTestCu = MemoryTestCu<cdna4::Isa>;
 
 class Gfx1250VgprReadRecorder final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   Gfx1250VgprReadRecorder() : ExecutionPlugin("gfx1250_vgpr_read_recorder") {}
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t physical_reg, uint64_t,
@@ -3958,6 +3962,9 @@ TEST(Cdna4Permlane16SwapExecutionTest, Wave64SwapsAllFourGroups) {
 
 class PermlaneSwapWriteRecorder final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   PermlaneSwapWriteRecorder() : ExecutionPlugin("permlane_swap_writes") {}
 
   void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *, uint32_t reg, uint64_t lanes,

@@ -34,6 +34,9 @@ constexpr uint32_t kMoveVector = 0x7E000281u; // v_mov_b32 v0, 1
 
 class IssueRecorder final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   IssueRecorder() : ExecutionPlugin("vskip_recorder") {}
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &) override {
     issued.emplace_back(inst.mnemonic());

@@ -102,6 +102,12 @@ namespace {
 
 class WriteRecorder : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   WriteRecorder() : ExecutionPlugin("rj_arith_write_recorder") {}
   struct Write {
     uint32_t reg;
@@ -1126,6 +1132,9 @@ TEST(ArithBridgeTest, ReverseSubtractDppScalarSourceIsZero) {
 TEST(ArithBridgeTest, EmptyMad64SkipsScalarAccumulatorAndClearsCarry) {
   class ScalarReads : public ExecutionPlugin {
   public:
+    bool observes_sgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     ScalarReads() : ExecutionPlugin("scalar_reads") {}
     void onAmdgpuReadSgpr(const Wavefront *, uint32_t) override { ++count; }
     int count = 0;

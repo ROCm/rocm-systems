@@ -39,6 +39,9 @@ private:
 
 class VgprReadRecorder final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   VgprReadRecorder() : ExecutionPlugin("vgpr_read_recorder") {}
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
@@ -50,6 +53,8 @@ public:
 
 class MemoryAccessRecorder final : public ExecutionPlugin {
 public:
+  bool supports_async_instructions() const override { return false; }
+
   MemoryAccessRecorder() : ExecutionPlugin("memory_access_recorder") {}
 
   bool observes_memory_routing() const override { return true; }

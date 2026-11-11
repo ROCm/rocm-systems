@@ -100,21 +100,11 @@ not active-lane operations — the same convention as the throughput plugin. Bot
 plugins classify through the shared `plugins/instruction_family.h`, so the two
 reports join on mnemonic and agree family for family.
 
-Offloaded instructions are counted too. The plugin opts in to async
-instructions and counts an issue notification exactly as it counts a
-synchronous execution, because the group ANDs that capability across its
-members: a plugin that stayed with the default would switch MMA offload off for
-every plugin loaded beside it, so a report meant to describe a run would have
-changed how the run executed.
-
-It subscribes to nothing else. Before-execute and async-issue are where the mix
-is counted, so the plugin opts out of after-execute, memory-instruction
-routing, and the scalar- and vector-register callbacks, none of which it reads.
-These are ORed across the group, so a plugin that does want them still gets
-them -- throughput keeps after-execute for its timing. Declining them matters
-when instruction-mix runs alone: the register hooks in particular keep
-`ComputeUnit::observes_register_access_` enabled, which puts an ownership check
-and a callback dispatch on every register access.
+The plugin subscribes only to before-execute and async-issue. Offloaded
+instructions count exactly as synchronous instructions, without requiring
+synchronous execution. Other plugins can request additional hooks; throughput,
+for example, also subscribes to after-execute for timing. None of these
+counting plugins enables register-access observation.
 
 It emits one JSON object per line using the `rocjitsu.instruction_mix.v1`
 schema: one `"record":"dispatch"` object per completed dispatch and one
@@ -476,7 +466,8 @@ every high-frequency callback, serializing it with the infrequent callbacks
 without a per-instruction scan of the plugin list. Plugins that protect their
 own shared state should retain the parallel default.
 
-Plugins can opt out of individual high-frequency hooks by overriding
+Every high-frequency hook is opt-in. Override its callback and return `true`
+from the corresponding interest method:
 `observes_before_execute_instruction()`,
 `observes_after_execute_instruction()`,
 `observes_async_instruction_issued()`,
@@ -484,9 +475,12 @@ Plugins can opt out of individual high-frequency hooks by overriding
 `observes_vgpr_writes()`, `observes_sgpr_reads()`,
 `observes_scalar_register_writes()`, `observes_memory_routing()`,
 `observes_tensor_dma_memory_access()`, `observes_tensor_dma_issue()`, or
-`observes_register_hazards()`. The
-group samples these stable flags when the plugin is added and avoids both
-fanout and upstream observation work when no contained plugin consumes a hook.
+`observes_register_hazards()`. All default to `false`; overriding a callback
+alone does not subscribe to it. The group samples these stable flags once when
+the plugin is added and avoids both fanout and upstream observation work when
+no contained plugin consumes a hook. Lifecycle callbacks need no interest
+declaration. A no-op or lifecycle-only plugin enables no hot paths and leaves
+async execution enabled.
 
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
@@ -562,12 +556,8 @@ address, `pre_routing_addresses` contains the original per-lane span and
 changed; when present, both spans have `wavefront_size` entries and only lanes
 in `valid_lane_mask` are meaningful.
 
-Building the observation is real work on the per-instruction path, so it is
-skipped entirely unless a contained plugin asks for it. A plugin that overrides
-`onAmdgpuMemoryAccessRouted` must also override `observes_memory_routing()` to
-return `true`; the group samples this policy when each plugin is added, and its
-conservative default is `false`. Overriding the hook alone is silent — the
-plugin simply never sees an access.
+Resolved memory views are built only when a subscribed plugin requests them
+through `observes_memory_routing()`.
 
 The routed-memory callback has a source-compatible overload chain. Existing
 plugins may override the observation-only
@@ -625,11 +615,8 @@ still writes zeros to its global destination. Consumers must opt in through
 `observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
-register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
-`onAmdgpuReadSgpr` should override
-`observes_sgpr_reads()` to return `false`. The group samples this policy when
-each plugin is added. Its conservative default is `true`, so existing plugins
-continue receiving SGPR read callbacks unless they explicitly opt out.
+register reads. `observes_sgpr_reads()` enables both
+`onAmdgpuReadScalarRegister` and legacy `onAmdgpuReadSgpr` callbacks.
 
 Pass the complete sink configuration to the group constructor and add plugins
 before publishing the group to simulation components. `add()` is not
@@ -665,6 +652,9 @@ struct LastInstruction : WavefrontState {
   std::array<uint32_t, 5> words{};
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
+
+bool observes_before_execute_instruction() const override { return true; }
+bool supports_async_instructions() const override { return false; }
 
 void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                       amdgpu::Wavefront &wf) override {
@@ -738,29 +728,29 @@ from this hook.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Override the per-hook `observes_*()` methods for the high-frequency hooks the
-   plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
+6. Return `true` from the per-hook `observes_*()` methods for every high-frequency
+   hook the plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
-   thread-safe, and stable after dispatch. A consumer of
-   `onAmdgpuMemoryAccessRouted`, `onAmdgpuTensorDmaMemoryAccess`, or
-   `onAmdgpuTensorDmaIssued` must explicitly return `true` from the corresponding
-   interest method because those conservative defaults are `false`.
+   thread-safe, and stable after dispatch.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
-8. Return `true` from `supports_async_instructions()` only when the plugin accepts
-   issuer-thread issue notifications and concurrent same-wave helper register
-   hooks. Keep the default `false` for ordered event state or complete
-   architectural snapshots. One non-opted-in plugin disables async execution
-   for the entire group.
+8. Return `false` from `supports_async_instructions()` when the plugin requires
+   synchronous state inspection or the before/after pair for every instruction.
+   One such plugin disables offload for the entire group. An instruction
+   observer that supports async must subscribe to accepted-issue notifications
+   as well as synchronous callbacks, and accommodate concurrent same-wave
+   helper register hooks when it subscribes to register accesses.
 9. Copy any instruction data that the plugin keeps beyond a callback; see
    [Retaining instruction information](#retaining-instruction-information).
 
 ## Asynchronous arithmetic
 
-Plugins default to synchronous execution. `supports_async_instructions()` opts
-into `onAmdgpuAsyncInstructionIssued`, replacing the ordinary before/after
-pair for offloaded instructions. The group samples this capability on `add()`;
-all contained plugins must opt in.
+`supports_async_instructions()` defaults to `true`, leaving the scheduler's
+offload policy unchanged. A plugin requiring synchronous inspection returns
+`false`. The group samples this requirement on `add()`; any such plugin
+disables offload for the group. This policy is independent of subscriptions:
+`observes_async_instruction_issued()` requests the accepted-issue notification,
+which replaces the ordinary before/after pair for offloaded instructions.
 
 The notification runs on the issuer after a helper accepts the instruction;
 helper register hooks may already have run. Issue callbacks may read metadata,

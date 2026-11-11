@@ -28644,6 +28644,9 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
   ASSERT_TRUE(process->queue_snapshot_map_.at(create.queue_id).has_runtime_exception_signal);
   class RevokeBeforeLoad final : public rocjitsu::ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     RevokeBeforeLoad(rocjitsu::amdgpu::GpuVm &vm, rocjitsu::amdgpu::AddressSpaceHandle handle)
         : ExecutionPlugin("revoke-runtime-load"), vm_(vm), handle_(handle) {}
     void onAmdgpuBeforeExecuteInstruction(uint64_t, const rocjitsu::Instruction &,

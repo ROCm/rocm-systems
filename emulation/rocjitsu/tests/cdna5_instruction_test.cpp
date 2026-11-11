@@ -20,6 +20,10 @@ using namespace rocjitsu::test::cdna5;
 
 class BarrierSpanPlugin final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   BarrierSpanPlugin() : ExecutionPlugin("barrier_span") {}
 
   struct Resolution {

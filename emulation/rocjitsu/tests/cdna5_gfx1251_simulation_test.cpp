@@ -54,6 +54,9 @@ struct Gfx1251E2eCase {
 
 class MnemonicExecutionCounter final : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   explicit MnemonicExecutionCounter(std::string_view expected)
       : ExecutionPlugin("gfx1251_e2e_mnemonic_counter"), expected_(expected) {}
 

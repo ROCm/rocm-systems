@@ -103,6 +103,9 @@ struct DispatchPoolFixture {
 // execution and keep submissions open until every waiter is explicitly released.
 class GatedInstructionPlugin final : public ExecutionPlugin {
 public:
+  bool observes_sgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   GatedInstructionPlugin() : ExecutionPlugin("gated_instruction") {}
 
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
@@ -148,6 +151,9 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
 // remaining CUs. The caller identity is published before run() queues work.
 class DrainingWorkerGate final : public ExecutionPlugin {
 public:
+  bool observes_sgpr_reads() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   DrainingWorkerGate() : ExecutionPlugin("draining_worker_gate") {}
   void set_caller() {
     std::lock_guard lock(mutex_);

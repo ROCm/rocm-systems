@@ -769,19 +769,19 @@ private:
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
     SinkBundle sink;
-    bool observes_before_execute_instruction = true;
-    bool observes_after_execute_instruction = true;
-    bool observes_async_instruction_issued = true;
-    bool observes_memory_instruction_routing = true;
-    bool observes_vgpr_reads = true;
-    bool observes_vgpr_writes = true;
-    bool observes_sgpr_reads = true;
-    bool observes_scalar_register_writes = true;
-    bool observes_memory_routing = false;
-    bool observes_tensor_dma_memory_access = false;
-    bool observes_tensor_dma_issue = false;
-    bool observes_lds_direct_reads = false;
-    bool observes_register_hazards = false;
+    bool observes_before_execute_instruction;
+    bool observes_after_execute_instruction;
+    bool observes_async_instruction_issued;
+    bool observes_memory_instruction_routing;
+    bool observes_vgpr_reads;
+    bool observes_vgpr_writes;
+    bool observes_sgpr_reads;
+    bool observes_scalar_register_writes;
+    bool observes_memory_routing;
+    bool observes_tensor_dma_memory_access;
+    bool observes_tensor_dma_issue;
+    bool observes_lds_direct_reads;
+    bool observes_register_hazards;
     OwnedPlugin plugin;
   };
 

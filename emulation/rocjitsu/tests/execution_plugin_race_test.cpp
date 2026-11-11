@@ -3209,6 +3209,9 @@ TEST(RaceDetectorPluginOutputTest, ExecutedInstructionsHaveExactPcsIncludingExpi
 
 class RewriteRaceCode : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   RewriteRaceCode(GpuMemory &memory, uint64_t rewrite_pc)
       : ExecutionPlugin("rewrite_race_code"), memory_(memory), rewrite_pc_(rewrite_pc) {}
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &) override {

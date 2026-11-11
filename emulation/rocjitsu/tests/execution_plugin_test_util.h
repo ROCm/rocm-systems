@@ -323,6 +323,9 @@ struct CapturedAccess {
 ///        told with what routing decided.
 class MemoryObservationPlugin final : public ExecutionPlugin {
 public:
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   /// @param wants_hook What observes_memory_routing() answers. False models a
   ///        plugin that implements the hook but never opts in, which must
   ///        receive nothing.
@@ -417,6 +420,15 @@ public:
 /// A plugin that records an ordered event log for ordering assertions.
 class OrderingPlugin : public ExecutionPlugin {
 public:
+  bool observes_before_execute_instruction() const override { return true; }
+  bool observes_after_execute_instruction() const override { return true; }
+  bool observes_memory_instruction_routing() const override { return true; }
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   OrderingPlugin() : ExecutionPlugin("ordering") {}
   std::vector<HookEvent> events;
 

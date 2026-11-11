@@ -42,6 +42,8 @@ struct CapturedTensorDmaAccess {
 
 class TensorDmaObservationPlugin final : public ExecutionPlugin {
 public:
+  bool supports_async_instructions() const override { return false; }
+
   explicit TensorDmaObservationPlugin(std::string name = "tensor_dma_observation",
                                       bool wants_hook = true)
       : ExecutionPlugin(std::move(name)), wants_hook_(wants_hook) {}
@@ -95,6 +97,8 @@ TensorDmaObservationPlugin &install_tensor_dma_observer(Gfx1250Sim &sim, bool wa
 /// Records every tensor DMA issue observation, copying its LDS ranges.
 class TensorDmaIssuePlugin final : public ExecutionPlugin {
 public:
+  bool supports_async_instructions() const override { return false; }
+
   explicit TensorDmaIssuePlugin(std::string name = "tensor_dma_issue", bool wants_hook = true)
       : ExecutionPlugin(std::move(name)), wants_hook_(wants_hook) {}
 

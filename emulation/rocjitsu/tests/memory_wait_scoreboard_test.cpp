@@ -1977,6 +1977,10 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
 TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyRegisterAccess) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_sgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("flat_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
@@ -3232,6 +3236,9 @@ TEST(MemoryWaitExecutionTest, SdwaExplicitCompareDoesNotOverwriteItsTemporaryVcc
 TEST(MemoryWaitExecutionTest, ScratchAddressChecksDoNotObserveGlobalOrInactiveLanes) {
   class AddressObserver final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     AddressObserver() : ExecutionPlugin("scratch_planning_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadVgprLanes(const Wavefront *, uint32_t, uint64_t, uint8_t) override { ++reads; }
@@ -4431,6 +4438,10 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
 // and computes the footprint before executing the instruction.
 class MemoryWaitFootprintObserver final : public ExecutionPlugin {
 public:
+  bool observes_vgpr_reads() const override { return true; }
+  bool observes_vgpr_writes() const override { return true; }
+  bool supports_async_instructions() const override { return false; }
+
   MemoryWaitFootprintObserver() : ExecutionPlugin("wait_footprint_test") {}
   struct Access {
     std::array<uint64_t, 4> read{};
@@ -5581,6 +5592,9 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
   using namespace rocjitsu::amdhsa;
   class BeforeObserver final : public ExecutionPlugin {
   public:
+    bool observes_before_execute_instruction() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
         : ExecutionPlugin("wait_before_test"), target(pc), cu(cu) {}
     void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
@@ -5995,6 +6009,9 @@ TEST(MemoryWaitExecutionTest, ModernRejectedBufferReadsOnlyItsRequiredDescriptor
 TEST(MemoryWaitExecutionTest, BufferTypeSuppressesResultsButKeepsEncodedSourceDependencies) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_sgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("planning_observer") {}
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
     unsigned reads = 0;
@@ -6210,6 +6227,10 @@ TEST(MemoryWaitExecutionTest, DecodedScalarIssueUsesArchitecturalWaitDomain) {
 TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
   class ScalarObserver final : public ExecutionPlugin {
   public:
+    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_writes() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     ScalarObserver() : ExecutionPlugin("scalar_relative_footprint") {}
     std::vector<RegisterRef> reads, writes;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef reg) override {
@@ -7033,6 +7054,10 @@ TEST(MemoryWaitExecutionTest,
      BufferResourceAliasesAndEncodedAddressInputsArePlannedBeforeExecution) {
   class Observer final : public ExecutionPlugin {
   public:
+    bool observes_vgpr_reads() const override { return true; }
+    bool observes_sgpr_reads() const override { return true; }
+    bool supports_async_instructions() const override { return false; }
+
     Observer() : ExecutionPlugin("buffer_alias_observer") {}
     unsigned reads = 0;
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override { ++reads; }
