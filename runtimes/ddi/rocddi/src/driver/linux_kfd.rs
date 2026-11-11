@@ -119,6 +119,19 @@ struct ProcessSlot {
     changed: Condvar,
 }
 
+fn ensure_native_connection_process() -> Result<(), Error> {
+    crate::os::linux::process_identity::require_runtime_image().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::Unsupported {
+            error(
+                ErrorKind::Unsupported,
+                "a fork child must exec before opening a KFD connection",
+            )
+        } else {
+            native_error("KFD connection process identity", source)
+        }
+    })
+}
+
 impl ProcessSlot {
     /// Waits for the current disable transaction without holding the mutex
     /// across the native ioctl.
@@ -364,6 +377,7 @@ impl KfdContextResources {
     }
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
+        ensure_native_connection_process()?;
         if self.kfd.get().is_none() {
             let _guard = self
                 .initialization
@@ -712,6 +726,7 @@ impl Driver for LinuxKfdDriver {
                 "the Linux KFD driver activates only GPU endpoints",
             ));
         }
+        ensure_native_connection_process()?;
         let current = self.open_endpoint(endpoint.id)?;
         if !endpoint.matches_discovery(&current) {
             return Err(error(
@@ -754,6 +769,7 @@ impl Driver for LinuxKfdDriver {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(unsafe_code)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -815,6 +831,35 @@ mod tests {
 
         native.process = ProcessIdentity::capture().unwrap();
         native.shutdown().unwrap();
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fork_child_rejects_new_kfd_connection_before_inherited_lock() {
+        ensure_native_connection_process().unwrap();
+        let resources = KfdContextResources::new(ProcessIdentity::capture().unwrap());
+        let held = resources.initialization.lock().unwrap();
+        // SAFETY: The child only checks the process fence, then exits without
+        // dropping inherited Rust owners or entering a test-harness lock.
+        let child = unsafe { libc::syscall(libc::SYS_fork) };
+        assert!(child >= 0);
+        if child == 0 {
+            // SAFETY: Bound a regression if an inherited mutex is entered.
+            unsafe { libc::alarm(3) };
+            let rejected = resources
+                .kfd()
+                .err()
+                .is_some_and(|error| error.kind() == ErrorKind::Unsupported);
+            // SAFETY: _exit avoids inherited Rust destructors.
+            unsafe { libc::_exit(i32::from(!rejected)) }
+        }
+        let pid = i32::try_from(child).unwrap();
+        let mut status = 0;
+        // SAFETY: This waits only for the child created above.
+        assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+        assert_eq!(status, 0);
+        drop(held);
+        assert!(ensure_native_connection_process().is_ok());
     }
 
     #[test]

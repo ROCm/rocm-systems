@@ -697,22 +697,26 @@ TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_Retransmit_ResendsOnlyTheUndel
   EXPECT_EQ(Chain(0, 0)[0].sge.length, 512u);
 }
 
-// Pins AICOMRCCL-3080; a fix flips this pin.
-// Skipping a delivered QP advances the addresses but not sendOffsets, so the resent chunk keeps the full chunk
-// length and runs past the end of the message: of 800 bytes, 512 from offset 512 (should be 288), and of 1000
-// bytes over three QPs, 384 from offset 768 (should be 232).
-TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_KnownBug_RetransmitAfterSkippedQpsOverruns) {
+// Skipping the delivered QP leaves the 288-byte tail at offset 512.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterSkippedQp_PostsOnlyTheUnsentTail) {
   SendThenLose(2, 1, 800);
   EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_ + 512);
   EXPECT_EQ(Chain(0, 0)[0].wr.wr.rdma.remote_addr, kRemoteAddr + 512);
-  EXPECT_EQ(Chain(0, 0)[0].sge.length, 512u);
+  EXPECT_EQ(Chain(0, 0)[0].sge.length, 288u);
 }
 
-TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_KnownBug_RetransmitAfterTwoSkippedQpsOverruns) {
+// Skipping two delivered QPs leaves the 232-byte tail at offset 768.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_RetransmitAfterTwoSkippedQps_PostsOnlyTheUnsentTail) {
   SendThenLose(3, 2, 1000);
   EXPECT_EQ(Chain(0, 0)[0].sge.addr, (uint64_t)buf_ + 768);
   EXPECT_EQ(Chain(0, 0)[0].wr.wr.rdma.remote_addr, kRemoteAddr + 768);
-  EXPECT_EQ(Chain(0, 0)[0].sge.length, 384u);
+  EXPECT_EQ(Chain(0, 0)[0].sge.length, 232u);
+}
+
+// An empty repost clears sg_list; the following skip must still advance.
+TEST_F(NetIbCastP2pRetransmitMicrotest, MultiSend_SkipAfterEmptyRepost_AdvancesWithoutSgList) {
+  SendThenLose(3, 1, 100);
+  EXPECT_FALSE(Chain(0, 0)[0].hasSge);
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, MultiSend_MoreRequestsThanAMultiRecvHolds_IsRejected) {

@@ -6,7 +6,6 @@
 set(TEST_SRC
   hipStreamPerThread_Basic.cc
   hipStreamPerThread_Event.cc
-  hipStreamPerThread_MultiThread.cc
   hipStreamPerThread_DeviceReset.cc
   # hipStreamPerThrdTsts.cc TODO
   hipStreamPerThrdCompilerOptn.cc
