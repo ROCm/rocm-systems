@@ -238,6 +238,15 @@ struct RegisterModifiers {
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
 
+  /// Broadcast controls only for MFMA forms where these fields select lanes.
+  /// F64, mixed-format, and sparse forms keep the identity defaults.
+  struct MfmaBroadcast {
+    uint8_t cbsz = 0;
+    uint8_t abid = 0;
+    uint8_t blgp = 0;
+    uint8_t a_block_lanes = 0; ///< CDNA2 uses M-lane groups; zero selects full-wave broadcast.
+  } mfma;
+
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   std::optional<ShaderExportOperands> shader_export;
