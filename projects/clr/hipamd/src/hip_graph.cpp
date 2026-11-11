@@ -57,6 +57,27 @@ static inline hip::Graph* ihipResolveGraphHandle(hipGraph_t graph) {
   return (g != nullptr) ? g->ResolveMoved() : nullptr;
 }
 
+//! True when `graph` is a node's embedded graph rather than a standalone object the caller
+//! owns. hipGraphChildGraphNodeGetGraph returns one for a cloned child; moving it would
+//! hand over a node the parent still owns.
+static inline bool ihipGraphIsEmbedded(hip::Graph* graph) {
+  return dynamic_cast<hip::ChildGraphNode*>(graph) != nullptr;
+}
+
+//! True when `dst` is `src` or sits beneath it: an embedded graph is a ChildGraphNode, so
+//! GetParentGraph() walks up one level, and moved handles resolve to their adopting node.
+//! Moving `src` under such a `dst` would make it contain itself and recurse unboundedly.
+static bool ihipGraphIsSelfOrDescendant(hip::Graph* dst, hip::Graph* src) {
+  for (hip::Graph* g = dst; g != nullptr;) {
+    g = g->ResolveMoved();
+    if (g == src) {
+      return true;
+    }
+    auto* embedded = dynamic_cast<hip::ChildGraphNode*>(g);
+    g = (embedded != nullptr) ? embedded->GetParentGraph() : nullptr;
+  }
+  return false;
+}
 
 // Accepts a linear 3D description (no arrays, unit height/depth, zero positions) on a 1D-family node.
 inline bool ihipMemcpy3DParmsAsLinear(const hipMemcpy3DParms* params, void** dst,
@@ -3488,6 +3509,14 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
           childGraph->IsMoved() ||
           (ownership != hipGraphChildGraphOwnershipClone &&
            ownership != hipGraphChildGraphOwnershipMove)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      // MOVE takes the caller's graph object itself, so it is only legal for a standalone
+      // graph that is not already owned by a node, and only when it does not already
+      // contain the destination. CLONE copies instead and stays unrestricted.
+      if (ownership == hipGraphChildGraphOwnershipMove &&
+          (ihipGraphIsEmbedded(childGraph) ||
+           ihipGraphIsSelfOrDescendant(reinterpret_cast<hip::Graph*>(graph), childGraph))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
       node = new hip::ChildGraphNode(childGraph,

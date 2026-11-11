@@ -988,3 +988,142 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
   HIP_CHECK(hipFree(S_d));
 }
 #endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
+
+/*
+   Ownership MOVE hands the parent the caller's graph object itself, so it is legal only
+   for a standalone graph that no node already owns, and only when that graph does not
+   already contain the destination. Both rejected shapes would otherwise corrupt the tree:
+
+     - Moving a node's embedded graph (what hipGraphChildGraphNodeGetGraph returns for a
+       cloned child) would give one node two owners, so destroying both parents frees it
+       twice.
+     - Moving a graph into something it already contains would make it transitively
+       contain itself, recursing without bound when instantiate clones the tree.
+
+   CLONE copies rather than adopts, so it stays legal in both shapes and is checked here
+   as a control to confirm the new validation is not over-broad.
+ */
+#if HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
+HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipNegative) {
+  SECTION("Move of a graph already embedded in a cloned child node is rejected") {
+    hipGraph_t childGraph, parentA, parentB;
+    HIP_CHECK(hipGraphCreate(&childGraph, 0));
+    HIP_CHECK(hipGraphCreate(&parentA, 0));
+    HIP_CHECK(hipGraphCreate(&parentB, 0));
+
+    hipGraphNode_t childEmpty;
+    HIP_CHECK(hipGraphAddEmptyNode(&childEmpty, childGraph, nullptr, 0));
+
+    hipGraphNode_t clonedChildNode;
+    HIP_CHECK(hipGraphAddChildGraphNode(&clonedChildNode, parentA, nullptr, 0, childGraph));
+
+    // For a cloned child this is the node's own graph, not the caller's handle.
+    hipGraph_t embeddedGraph = nullptr;
+    HIP_CHECK(hipGraphChildGraphNodeGetGraph(clonedChildNode, &embeddedGraph));
+    REQUIRE(embeddedGraph != nullptr);
+    REQUIRE(embeddedGraph != childGraph);
+
+    hipGraphNodeParams moveParams{};
+    moveParams.type = hipGraphNodeTypeGraph;
+    moveParams.graph.graph = embeddedGraph;
+    moveParams.graph.ownership = hipGraphChildGraphOwnershipMove;
+
+    hipGraphNode_t movedNode;
+    HIP_CHECK_ERROR(hipGraphAddNode(&movedNode, parentB, nullptr, 0, &moveParams),
+                    hipErrorInvalidValue);
+
+    // The rejection left ownership untouched: parentA still owns the embedded node, so
+    // tearing both parents down must not free it twice.
+    HIP_CHECK(hipGraphDestroy(parentB));
+    HIP_CHECK(hipGraphDestroy(parentA));
+    HIP_CHECK(hipGraphDestroy(childGraph));
+  }
+
+  SECTION("Move of a graph into its own descendant is rejected") {
+    hipGraph_t outer, inner;
+    HIP_CHECK(hipGraphCreate(&outer, 0));
+    HIP_CHECK(hipGraphCreate(&inner, 0));
+
+    hipGraphNode_t innerEmpty;
+    HIP_CHECK(hipGraphAddEmptyNode(&innerEmpty, inner, nullptr, 0));
+
+    hipGraphNode_t childNode;
+    HIP_CHECK(hipGraphAddChildGraphNode(&childNode, outer, nullptr, 0, inner));
+
+    hipGraph_t embeddedInner = nullptr;
+    HIP_CHECK(hipGraphChildGraphNodeGetGraph(childNode, &embeddedInner));
+    REQUIRE(embeddedInner != nullptr);
+
+    // outer already contains embeddedInner, so moving outer underneath it would make
+    // outer contain itself.
+    hipGraphNodeParams moveParams{};
+    moveParams.type = hipGraphNodeTypeGraph;
+    moveParams.graph.graph = outer;
+    moveParams.graph.ownership = hipGraphChildGraphOwnershipMove;
+
+    hipGraphNode_t cycleNode;
+    HIP_CHECK_ERROR(hipGraphAddNode(&cycleNode, embeddedInner, nullptr, 0, &moveParams),
+                    hipErrorInvalidValue);
+
+    // outer is still instantiable, so the rejected call did not disturb it.
+    hipGraphExec_t graphExec;
+    HIP_CHECK(hipGraphInstantiate(&graphExec, outer, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+
+    HIP_CHECK(hipGraphDestroy(outer));
+    HIP_CHECK(hipGraphDestroy(inner));
+  }
+
+  SECTION("Move of a graph into itself is rejected") {
+    hipGraph_t graph;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+
+    hipGraphNode_t emptyNode;
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
+
+    hipGraphNodeParams moveParams{};
+    moveParams.type = hipGraphNodeTypeGraph;
+    moveParams.graph.graph = graph;
+    moveParams.graph.ownership = hipGraphChildGraphOwnershipMove;
+
+    hipGraphNode_t selfNode;
+    HIP_CHECK_ERROR(hipGraphAddNode(&selfNode, graph, nullptr, 0, &moveParams),
+                    hipErrorInvalidValue);
+
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  SECTION("Clone of an embedded graph is still accepted") {
+    hipGraph_t childGraph, parentA, parentB;
+    HIP_CHECK(hipGraphCreate(&childGraph, 0));
+    HIP_CHECK(hipGraphCreate(&parentA, 0));
+    HIP_CHECK(hipGraphCreate(&parentB, 0));
+
+    hipGraphNode_t childEmpty;
+    HIP_CHECK(hipGraphAddEmptyNode(&childEmpty, childGraph, nullptr, 0));
+
+    hipGraphNode_t clonedChildNode;
+    HIP_CHECK(hipGraphAddChildGraphNode(&clonedChildNode, parentA, nullptr, 0, childGraph));
+
+    hipGraph_t embeddedGraph = nullptr;
+    HIP_CHECK(hipGraphChildGraphNodeGetGraph(clonedChildNode, &embeddedGraph));
+
+    // Same handle the MOVE case rejects; CLONE copies it, so it stays legal.
+    hipGraphNodeParams cloneParams{};
+    cloneParams.type = hipGraphNodeTypeGraph;
+    cloneParams.graph.graph = embeddedGraph;
+    cloneParams.graph.ownership = hipGraphChildGraphOwnershipClone;
+
+    hipGraphNode_t clonedNode;
+    HIP_CHECK(hipGraphAddNode(&clonedNode, parentB, nullptr, 0, &cloneParams));
+
+    hipGraphExec_t graphExec;
+    HIP_CHECK(hipGraphInstantiate(&graphExec, parentB, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+
+    HIP_CHECK(hipGraphDestroy(parentB));
+    HIP_CHECK(hipGraphDestroy(parentA));
+    HIP_CHECK(hipGraphDestroy(childGraph));
+  }
+}
+#endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)

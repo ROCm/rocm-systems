@@ -2032,3 +2032,6 @@ graph:
   Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnershipNegative:
+    <<: *level_default
+    tags: [node]
