@@ -1,7 +1,7 @@
 {
   "archs": ["gfx950"],
   "description": "MI350: CU, L1s, L2, Data Fabric, MALL, UMC, HBM; xGMI above and PCIe below the fabric.",
-  "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
+  "scope": [{"label": "GPU (XCD)", "columns": [0, 2]}, {"label": "Fabric / Memory", "columns": [3, 6]}],
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},

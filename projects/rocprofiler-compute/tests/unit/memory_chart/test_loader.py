@@ -65,6 +65,14 @@ def gfx950_data():
     return common.memory_chart_layout_data("gfx950")
 
 
+def scopes(*column_ranges):
+    """A scope list with one label per [first, last] column range."""
+    return [
+        {"label": f"Scope {i}", "columns": columns}
+        for i, columns in enumerate(column_ranges)
+    ]
+
+
 def write_layout(tmp_path, data, name="layout.json"):
     path = tmp_path / name
     path.write_text(json.dumps(data), encoding="utf-8")
@@ -203,8 +211,15 @@ def test_block_list_order_does_not_matter(tmp_path):
     [
         (changed(schema_version=3), "unknown keys"),
         ({k: v for k, v in gfx950_data().items() if k != "scope"}, "missing ['scope']"),
-        (changed(scope={"labels": ["a"], "split": "l2"}), "two labels"),
-        (changed(scope={"labels": ["a", "b"], "split": "cu"}), "scope split"),
+        (changed(scope=[]), "at least one label"),
+        (changed(scope=[{"label": "GPU", "columns": [0, 6], "x": 1}]), "unknown keys"),
+        (changed(scope=[{"label": "", "columns": [0, 6]}]), "non-empty string"),
+        (changed(scope=[{"label": "GPU", "columns": [0]}]), "[first, last]"),
+        (changed(scope=[{"label": "GPU", "columns": [6, 0]}]), "end before"),
+        (changed(scope=scopes([0, 2], [4, 6])), "without gaps or overlaps"),
+        (changed(scope=scopes([0, 3], [3, 6])), "without gaps or overlaps"),
+        (changed(scope=scopes([0, 2], [3, 5])), "cover columns 0 to 6"),
+        (changed(scope=scopes([3, 6], [0, 2])), "in order"),
         (with_block_change("vl1d", note="x"), "unknown keys"),
         (with_block_change("vl1d", order=True), "order of 'vl1d'"),
         (with_block_change("vl1d", stall_level="L3"), "stall_level"),
@@ -247,8 +262,15 @@ def test_block_list_order_does_not_matter(tmp_path):
     ids=[
         "unknown-top-level-key",
         "missing-key",
-        "scope-labels",
-        "scope-split-in-first-column",
+        "scope-empty",
+        "scope-unknown-key",
+        "scope-empty-label",
+        "scope-columns-not-a-pair",
+        "scope-columns-reversed",
+        "scope-gap",
+        "scope-overlap",
+        "scope-short-of-the-last-column",
+        "scope-out-of-order",
         "unknown-block-key",
         "order-not-a-number",
         "stall-level",

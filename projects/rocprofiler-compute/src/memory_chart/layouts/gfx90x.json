@@ -1,7 +1,7 @@
 {
   "archs": ["gfx908", "gfx90a"],
   "description": "MI100/MI200: CU, L1s, L2, Data Fabric, UMC, HBM; xGMI above the fabric.",
-  "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
+  "scope": [{"label": "GPU (XCD)", "columns": [0, 2]}, {"label": "Fabric / Memory", "columns": [3, 5]}],
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},
