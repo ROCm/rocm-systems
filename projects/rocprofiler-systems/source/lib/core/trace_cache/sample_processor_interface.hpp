@@ -5,12 +5,6 @@
 #include "core/trace_cache/counter_samples.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
-#include "library/pmc/collectors/cpu/sample.hpp"
-#include "library/pmc/collectors/gpu/sample.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
-#include "library/pmc/collectors/hipfile/sample.hpp"
-#include "library/pmc/collectors/nic/sample.hpp"
-
 namespace rocprofsys::trace_cache
 {
 
@@ -30,11 +24,6 @@ public:
     virtual void handle(const region_sample& sample)           = 0;
     virtual void handle(const in_time_sample& sample)          = 0;
     virtual void handle(const pmc_event_with_sample& sample)   = 0;
-    virtual void handle(const gpu_pmc_sample& sample)          = 0;
-    virtual void handle(const ainic_pmc_sample& sample)        = 0;
-    virtual void handle(const cpu_pmc_sample& sample)          = 0;
-    virtual void handle(const gpu_perf_counter_sample& sample) = 0;
-    virtual void handle(const hipfile_pmc_sample& sample)      = 0;
     virtual void handle(const backtrace_region_sample& sample) = 0;
     virtual void handle(const kfd_sample& sample)              = 0;
     virtual void handle(const counter_batch& batch)            = 0;

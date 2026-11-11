@@ -8,7 +8,6 @@ endif()
 # PMC CPU Collector Sources
 set(pmc_cpu_sources
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample.hpp
     ${CMAKE_CURRENT_LIST_DIR}/device.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu_traits.hpp
 )
