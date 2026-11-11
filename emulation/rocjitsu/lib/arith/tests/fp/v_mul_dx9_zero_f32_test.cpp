@@ -180,7 +180,51 @@ template <typename Call> void check_zero_lanes(Call call) {
   }
 }
 
+// One subnormal lane in an otherwise normal wave: only guest input flushing makes it a DX9
+// zero. Without flushing, the largest subnormal times 2 is the exact product 0x00fffffe.
+template <typename Call> void check_subnormal_lane(Call call) {
+  constexpr int subnormal_lane = 5;
+  uint32_t a[32], b[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    a[lane] = 0x3fc00000U + uint32_t(lane) * 0x00012345U;
+    b[lane] = (lane & 1 ? 0xc0000000U : 0x40000000U) + uint32_t(lane) * 0x00054321U;
+  }
+  a[subnormal_lane] = 0x007fffffU;
+  b[subnormal_lane] = 0x40000000U;
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (uint64_t flush : {uint64_t(0), uint64_t(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)}) {
+      SCOPED_TRACE(::testing::Message() << cpu << '/' << flush);
+      uint32_t d[32];
+      const uint32_t *ap[] = {a}, *bp[] = {b};
+      uint32_t *dp[] = {d};
+      uint32_t fp_status = 0;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | flush, ~0U, 0, dp,
+                     ap, bp, &fp_status),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 32; ++lane) {
+        uint32_t expected =
+            lane != subnormal_lane
+                ? std::bit_cast<uint32_t>(
+                      float(double(std::bit_cast<float>(a[lane])) * std::bit_cast<float>(b[lane])))
+            : flush ? 0U
+                    : 0x00fffffeU;
+        EXPECT_EQ(d[lane], expected) << lane;
+      }
+    }
+  }
+}
+
 } // namespace
+
+// Check FP32 multiplication with DX9 zero-product rules.
+TEST(FpMulDx9ZeroF32W32Gfx12, SubnormalLaneFollowsInputFlushing) {
+  check_subnormal_lane(rj_arith_v_mul_dx9_zero_f32_w32_gfx12);
+}
+
+// Check FP32 multiplication with DX9 zero-product rules.
+TEST(FpMulDx9ZeroF32W32Gfx11, SubnormalLaneFollowsInputFlushing) {
+  check_subnormal_lane(rj_arith_v_mul_dx9_zero_f32_w32);
+}
 
 // Check FP32 multiplication with DX9 zero-product rules.
 TEST(FpMulDx9ZeroF32W32Gfx12, ZeroLanesInNormalWave) {
