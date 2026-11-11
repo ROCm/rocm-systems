@@ -503,6 +503,7 @@ HIP_TEST_CASE(Unit_hipGraphAddNodeTypeMemAlloc_Positive_Basic) {
  *    -# Duplicate node in dependencies
  *    -# Nullptr params
  *    -# params type is invalid
+ *    -# params type is not supported, the node is set to nullptr (AMD only)
  * Test source
  * ------------------------
  *  - /unit/graph/hipGraphAddNode.cc
@@ -533,6 +534,14 @@ HIP_TEST_CASE(Unit_hipGraphAddNode_Negative_Parameters) {
     node_params.type = static_cast<hipGraphNodeType>(0x20);
     HIP_CHECK_ERROR(hipGraphAddNode(&node, graph, nullptr, 0, &node_params), hipErrorInvalidValue);
   }
+
+#if HT_AMD
+  SECTION("params type is not supported") {
+    node_params.type = hipGraphNodeTypeExtSemaphoreSignal;
+    HIP_CHECK_ERROR(hipGraphAddNode(&node, graph, nullptr, 0, &node_params), hipErrorNotSupported);
+    REQUIRE(node == nullptr);
+  }
+#endif
 
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipEventDestroy(event));
