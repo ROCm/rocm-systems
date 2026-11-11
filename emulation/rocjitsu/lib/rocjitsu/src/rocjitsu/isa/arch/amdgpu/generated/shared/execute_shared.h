@@ -2315,6 +2315,49 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 }
 
 template <typename Inst>
+inline void execute_s_rfe_restore_b64_sop2([[maybe_unused]] Inst &inst,
+                                           [[maybe_unused]] Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - inst.size();
+
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
+
+  // Returning from the handler puts the interrupted EXEC back. The handler runs
+  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
+  // MSG_INTERRUPT -- and restoring that is part of returning, not part of
+  // stopping for a debugger: a handler that returns without stopping the wave
+  // used to leave its mask installed, so the application ran on with every lane
+  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees
+  // lanes that converged out of a branch reported active again) and is
+  // permanent, because nothing later puts the application's mask back.
+  if (wf.in_trap_handler())
+    wf.set_exec(wf.trap_saved_exec());
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  if (keep_halted) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
+  }
+}
+
+template <typename Inst>
 inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::rndne_scalar(
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));

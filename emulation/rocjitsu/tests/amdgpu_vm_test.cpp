@@ -10041,7 +10041,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &test::kUnimplementedInstruction,
+  uint64_t kernel = f.write_kernel(0x1000, test::kUnimplementedInstruction.data(),
                                    sizeof(test::kUnimplementedInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
@@ -10060,7 +10060,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
 
 TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   struct InstructionCase {
-    uint32_t word;
+    std::span<const uint32_t> words;
     std::string_view detail;
     std::string_view diagnostic;
   };
@@ -10069,8 +10069,8 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
   for (const auto instruction :
        {InstructionCase{test::kUnimplementedInstruction, test::kUnimplementedInstructionMnemonic,
                         "unimplemented instruction"},
-        InstructionCase{test::kUndecodableInstruction, test::kUndecodableInstructionText,
-                        "could not decode"}}) {
+        InstructionCase{std::span(&test::kUndecodableInstruction, 1),
+                        test::kUndecodableInstructionText, "could not decode"}}) {
     SCOPED_TRACE(instruction.diagnostic);
     for (uint32_t threads : {1u, 2u}) {
       // The larger grid leaves queued workgroups behind the resident waves.
@@ -10084,7 +10084,8 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
         auto *observations = probe.get();
         ASSERT_TRUE(group->add(std::move(probe)));
         f.soc_ptr->set_plugin_group(group);
-        const uint64_t kernel = f.write_kernel(0x1000, &instruction.word, sizeof(instruction.word));
+        const uint64_t kernel =
+            f.write_kernel(0x1000, instruction.words.data(), instruction.words.size_bytes());
         test::AqlQueue queue(f.mem(), f.cp());
         init_completion_signal(f.mem(), kCompletionSignal);
         queue.submit(make_dispatch_packet(kernel, kCompletionSignal, grid_size));
@@ -10229,7 +10230,7 @@ TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
         EXPECT_TRUE(failed_wave->is_halted());
         return true;
       });
-  const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUnimplementedInstruction,
+  const uint64_t kernel = fixture.write_kernel(0x1000, test::kUnimplementedInstruction.data(),
                                                sizeof(test::kUnimplementedInstruction));
   init_completion_signal(fixture.mem(), 0x3000);
   test::AqlQueue queue(fixture.mem(), fixture.cp());
@@ -10350,9 +10351,10 @@ TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
   ASSERT_TRUE(group->add(std::move(lifecycle)));
   fixture.soc_ptr->set_plugin_group(group);
 
-  std::array<uint32_t, 34> failing_code;
+  std::array<uint32_t, 35> failing_code;
   failing_code.fill(SOPP_S_NOP);
-  failing_code[32] = vm_fault ? SOPP_S_NOP : test::kUnimplementedInstruction;
+  if (!vm_fault)
+    std::ranges::copy(test::kUnimplementedInstruction, failing_code.begin() + 32);
   failing_code.back() = SOPP_S_ENDPGM;
   const uint64_t failing_kernel =
       fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));
