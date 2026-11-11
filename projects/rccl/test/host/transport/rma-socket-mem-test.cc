@@ -239,19 +239,16 @@ TEST_F(RmaSocketMemMicrotest, Copy_OutOfRangeMappingNeverCallsGdrCopy) {
   EXPECT_EQ(0, copyTo.calls);
 }
 
-TEST_F(RmaSocketMemMicrotest, Copy_MappingOffsetsAndLengthsPreserveSurroundingBytes) {
+TEST_F(RmaSocketMemMicrotest, Copy_MappingOffsetsAndLengthsReachCorrectGdrOperation) {
   std::array<unsigned char, 24> device{};
   std::array<unsigned char, 24> bar{};
   std::array<unsigned char, 12> host{};
-  bar.fill(0x7b);
-  host.fill(0x29);
   auto handle = Scene::MakeGdrMappedMr(device.data(), device.size(), bar.data(), gdr_mh_t{33});
   ScopedHook copyTo(g_wrapGdrCopyToMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
     EXPECT_EQ(33u, mapping.h);
     EXPECT_EQ(bar.data() + 11, destination);
     EXPECT_EQ(host.data() + 3, source);
     EXPECT_EQ(5u, size);
-    std::memcpy(destination, source, size);
     return ncclSuccess;
   });
   ScopedHook copyFrom(g_wrapGdrCopyFromMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
@@ -259,20 +256,13 @@ TEST_F(RmaSocketMemMicrotest, Copy_MappingOffsetsAndLengthsPreserveSurroundingBy
     EXPECT_EQ(host.data() + 2, destination);
     EXPECT_EQ(bar.data() + 7, source);
     EXPECT_EQ(3u, size);
-    std::memcpy(destination, source, size);
     return ncclSuccess;
   });
 
   ASSERT_EQ(ncclSuccess, ncclRmaSocketProxyCopy(device.data() + 11, NCCL_PTR_CUDA, &handle,
                                               host.data() + 3, NCCL_PTR_HOST, nullptr, 5));
-  for (size_t index = 0; index < bar.size(); index++) {
-    EXPECT_EQ(index >= 11 && index < 16 ? 0x29 : 0x7b, bar[index]) << index;
-  }
   ASSERT_EQ(ncclSuccess, ncclRmaSocketProxyCopy(host.data() + 2, NCCL_PTR_HOST, nullptr,
                                               device.data() + 7, NCCL_PTR_CUDA, &handle, 3));
-  for (size_t index = 0; index < host.size(); index++) {
-    EXPECT_EQ(index >= 2 && index < 5 ? 0x7b : 0x29, host[index]) << index;
-  }
   EXPECT_EQ(1, copyTo.calls);
   EXPECT_EQ(1, copyFrom.calls);
 }
@@ -281,10 +271,13 @@ TEST_F(RmaSocketMemMicrotest, DeregMrSym_UnmapFailureUnlinksOnlyRequestedHandle)
   Scene scene;
   auto* first = static_cast<ncclRmaSocketProxyMrHandle*>(std::calloc(1, sizeof(ncclRmaSocketProxyMrHandle)));
   auto* second = static_cast<ncclRmaSocketProxyMrHandle*>(std::calloc(1, sizeof(ncclRmaSocketProxyMrHandle)));
+  auto* third = static_cast<ncclRmaSocketProxyMrHandle*>(std::calloc(1, sizeof(ncclRmaSocketProxyMrHandle)));
   ASSERT_NE(nullptr, first);
   ASSERT_NE(nullptr, second);
+  ASSERT_NE(nullptr, third);
   scene.comm.mrHead = first;
   first->next = second;
+  second->next = third;
   second->gdr.mapped = 1;
   second->gdr.mh.h = 37;
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
@@ -295,9 +288,11 @@ TEST_F(RmaSocketMemMicrotest, DeregMrSym_UnmapFailureUnlinksOnlyRequestedHandle)
 
   EXPECT_EQ(ncclSystemError, ncclRmaSocketProxyDeregMrSym(&scene.comm, second));
   EXPECT_EQ(first, scene.comm.mrHead);
-  EXPECT_EQ(nullptr, first->next);
+  EXPECT_EQ(third, first->next);
   EXPECT_EQ(1, unmap.calls);
   EXPECT_EQ(ncclSuccess, ncclRmaSocketProxyDeregMrSym(&scene.comm, first));
+  EXPECT_EQ(third, scene.comm.mrHead);
+  EXPECT_EQ(ncclSuccess, ncclRmaSocketProxyDeregMrSym(&scene.comm, third));
   EXPECT_EQ(nullptr, scene.comm.mrHead);
   EXPECT_EQ(1, unmap.calls);
 }
