@@ -2264,11 +2264,28 @@ TEST(HostDispatchSchedulerMicrotest, ARunThatIsNeverStoppedSignalsNothing)
 // The two tests below run real processes: the behaviour under test is the kernel's grouping of
 // them, which no fake can stand in for.
 
+// Whether *pid* is a zombie: dead, but not yet reaped by whoever inherited it.
+//
+// /proc/<pid>/stat is "<pid> (<comm>) <state> ..." and comm can itself hold spaces and
+// parentheses, so the state is read from the LAST ')' rather than by splitting on spaces.
+bool isZombie(pid_t pid)
+{
+    const std::string stat = readFile(fmt::format("/proc/{}/stat", pid));
+    const size_t paren = stat.rfind(')');
+    return paren != std::string::npos && stat.compare(paren, 3, ") Z") == 0;
+}
+
 // Wait up to a second for *pid* to be gone, and say whether it is.
+//
+// A zombie counts as gone, and is in fact the clearest proof the signal landed. The grandchild
+// below is orphaned by the same kill that ends it, so it is reparented to PID 1 and stays a
+// zombie until PID 1 reaps it -- which a container started on `sleep infinity` or
+// `tail -f /dev/null`, with no `--init`, never does. kill(pid, 0) keeps succeeding on it, so
+// without this the test would fail for the process having died exactly as it was asked to.
 bool waitUntilGone(pid_t pid)
 {
     for (int attempt = 0; attempt < 100; ++attempt) {
-        if (::kill(pid, 0) != 0 && errno == ESRCH) {
+        if ((::kill(pid, 0) != 0 && errno == ESRCH) || isZombie(pid)) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
@@ -2348,6 +2365,52 @@ TEST(HostDispatchSignalMicrotest, AChildWithNoGroupOfItsOwnIsStillSignalled)
     }
     EXPECT_EQ(reaped, pid) << "the child outlived a signal aimed at a group it was not in";
     EXPECT_TRUE(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+}
+
+// ── reapAnyChild ────────────────────────────────────────────────────
+//
+// Real processes again: what the bounded wait has to get right is that it does NOT block in
+// waitpid(), which only a child that outlives the bound can show. A fake scheduler stands in
+// for this everywhere else, so dropping the WNOHANG would otherwise cost nothing here and a
+// timed run would wait for the hung binary it exists to time out.
+
+TEST(HostDispatchReapMicrotest, ABoundedWaitComesBackWhileTheChildIsStillRunning)
+{
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "sleep 5"});
+    ASSERT_GT(pid, 0);
+
+    int status = -1;
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    const pid_t reaped = reapAnyChild(status, std::chrono::milliseconds{50});
+    const std::chrono::milliseconds elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                              start);
+
+    signalChildGroup(pid, SIGKILL);
+    int discarded = 0;
+    waitpid(pid, &discarded, 0);
+
+    EXPECT_EQ(reaped, 0) << "a wait that elapsed reported a child as finished";
+    EXPECT_EQ(status, 0);
+    // Generous, so a loaded machine cannot fail it, and still far below the five seconds the
+    // child runs for: anything near that means the wait blocked on the child after all.
+    EXPECT_LT(elapsed, std::chrono::seconds{2}) << "the bounded wait blocked for "
+                                                << elapsed.count() << " ms";
+}
+
+TEST(HostDispatchReapMicrotest, ABoundedWaitStillReapsAChildThatFinishesWithinIt)
+{
+    // The other half of the same path: the bound is a ceiling on the wait, not a replacement
+    // for it, so a child that exits inside the window is still reaped and still carries its
+    // exit status back.
+    const pid_t pid = spawnChild("/bin/sh", {"-c", "exit 7"});
+    ASSERT_GT(pid, 0);
+
+    int status = 0;
+    const pid_t reaped = reapAnyChild(status, std::chrono::seconds{5});
+
+    EXPECT_EQ(reaped, pid);
+    EXPECT_EQ(status, 7);
 }
 
 }  // namespace
