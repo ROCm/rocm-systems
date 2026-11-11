@@ -36,12 +36,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(libc_passthrough_test PRIVATE "-Wl,--wrap=dlsym")
     rj_configure_target(libc_passthrough_test WARNINGS)
     add_test(NAME LibcPassthrough.NativeStat COMMAND libc_passthrough_test)
-    add_test(
-        NAME LibcPassthrough.LegacyStat
-        COMMAND
-            ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
-            $<TARGET_FILE:libc_passthrough_test>
-    )
+    # Force the old ABI only on hosts for which the resolver knows the
+    # stat version even when the build headers omit _STAT_VER.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|aarch64|arm64)$")
+        add_test(
+            NAME LibcPassthrough.LegacyStat
+            COMMAND
+                ${CMAKE_COMMAND} -E env RJ_TEST_LEGACY_STAT=1
+                $<TARGET_FILE:libc_passthrough_test>
+        )
+    endif()
     add_test(
         NAME MemoryKeeper.ScrubbedEnvironmentStartup
         COMMAND

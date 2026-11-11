@@ -1101,10 +1101,11 @@ TEST(XcdPartitioningTest, CApiDefaultsFollowExecutionThreadBudgetAndRuns) {
   // The shipped allocation table shares the budget with dispatch workers; a
   // two-CPU host gets one engine, not min(host CPUs, XCDs). Pin the budgets so
   // both small CI runners and large developer machines exercise this rule.
-  for (const auto [budget, engines] :
+  for (const auto &[budget, engines] :
        {std::pair{1u, 1u}, std::pair{2u, 1u}, std::pair{4u, 2u}, std::pair{16u, 8u}}) {
     SCOPED_TRACE(budget);
-    auto json = config_json_with_num_threads(CONFIG_PATH, 0);
+    std::string json;
+    ASSERT_TRUE(config_json_with_num_threads(json, CONFIG_PATH, 0));
     json.insert(json.find('{') + 1, "\"cpu_thread_budget\":" + std::to_string(budget) + ",");
     rj_vm_t *raw_vm = nullptr;
     testing::internal::CaptureStderr();

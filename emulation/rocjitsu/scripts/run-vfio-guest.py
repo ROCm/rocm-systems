@@ -28,6 +28,7 @@ SocketIdentity = tuple[int, int]
 DEFAULT_PROBE_TIMEOUT_SECONDS = 10.0
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
 SERVER_SHUTDOWN_GRACE_SECONDS = 5.0
+PIDFD_SYSCALL_ARCHES = ("x86_64", "aarch64")
 MANAGED_TERMINATION_SIGNALS = frozenset((signal.SIGTERM, signal.SIGINT))
 
 
@@ -42,7 +43,7 @@ def open_pidfd(pid: int) -> int:
         return os.pidfd_open(pid)
     # manylinux Python lacks os.pidfd_open despite the runtime kernel supporting
     # it. These are the same Linux syscall numbers used by simulated_kfd.cpp.
-    if platform.machine() not in ("x86_64", "aarch64"):
+    if platform.machine() not in PIDFD_SYSCALL_ARCHES:
         raise GuestRunError("this host requires Python with os.pidfd_open")
     libc = ctypes.CDLL(None, use_errno=True)
     syscall = libc.syscall
