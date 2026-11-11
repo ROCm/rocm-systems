@@ -206,8 +206,9 @@ LTO_IR_CXX_STD ?= $(BITCODE_CXX_STD)
 LTO_IR_RAW := $(OBJDIR)/librccl_device.ltoir.raw
 
 ##### Compiler flags #####
-# AMDGPU analogue of --ltoir: -O1 avoids -O0's optnone, -disable-llvm-passes defers inlining.
-LTO_IR_CLANG_FLAGS := -c -emit-llvm -O1 -Xclang -disable-llvm-passes \
+# AMDGPU analogue of --ltoir: -disable-llvm-passes defers inlining. -O3, not -O1: -O0 stamps
+# optnone and -O1 stamps llvm.loop.unroll.disable, both of which bind the consumer's link.
+LTO_IR_CLANG_FLAGS := -c -emit-llvm -O3 -Xclang -disable-llvm-passes \
 	-std=$(LTO_IR_CXX_STD) \
 	-x hip \
 	--rocm-path=$(ROCM_PATH) \

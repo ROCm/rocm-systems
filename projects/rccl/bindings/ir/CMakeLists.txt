@@ -308,12 +308,13 @@ endif() # EMIT_LLVM_IR
 # ===========================================================================
 # LTO IR (NCCL_EMIT_LTO_IR) -> librccl_device.ltoir
 # ===========================================================================
-# Same TU as the .bc; -O1 -Xclang -disable-llvm-passes defers inlining to the consumer's link.
+# Same TU as the .bc; -O3 -Xclang -disable-llvm-passes defers inlining to the consumer's link
+# (-O3, not -O1: -O1 stamps llvm.loop.unroll.disable; see bindings/ir/Makefile).
 if(NCCL_EMIT_LTO_IR)
 
 ##### Compiler flags #####
 set(LTO_IR_CLANG_FLAGS
-  -c -emit-llvm -O1 -Xclang -disable-llvm-passes
+  -c -emit-llvm -O3 -Xclang -disable-llvm-passes
   -std=${LTO_IR_CXX_STD}
   -x hip
   --rocm-path=${ROCM_PATH}

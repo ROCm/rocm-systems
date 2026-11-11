@@ -9,7 +9,7 @@ The LTO IR artifact is a *variant* of the bitcode library: the same
 translation unit, the same public C surface, the same defines plus one, but
 compiled with
 
-    -O1 -Xclang -disable-llvm-passes
+    -O3 -Xclang -disable-llvm-passes
 
 so the optimizer has not run and inlining is deferred to the consumer's
 device link. That is the AMDGPU analogue of what `nvcc -dlto --ltoir` gives
@@ -354,7 +354,7 @@ def test_inlining_is_deferred(facts):
     assert n_lto > 10 * n_bc, (
         f"librccl_device.ltoir defines {n_lto} functions vs the .bc's {n_bc} "
         f"(measured baseline: 4742 vs 99). A ratio this low means the "
-        "optimizer ran -- check for -O1 without -Xclang -disable-llvm-passes, "
+        "optimizer ran -- check for -O3 without -Xclang -disable-llvm-passes, "
         "or for `inline`/`globaldce` added to the opt invocation."
     )
 
@@ -473,7 +473,7 @@ def test_ltoir_macro_requires_bitcode_lib_macro(ir_artifacts, paths, tmp_path):
     out = str(tmp_path / "defective.bc")
     argv = [
         paths.AMDCLANGPP,
-        "-c", "-emit-llvm", "-O1", "-Xclang", "-disable-llvm-passes",
+        "-c", "-emit-llvm", "-O3", "-Xclang", "-disable-llvm-passes",
         "-std=gnu++17", "-x", "hip",
         f"--rocm-path={paths.ROCM_PATH}",
         "--offload-device-only",
