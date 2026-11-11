@@ -134,8 +134,7 @@ Class to spawn a process in isolation and test its standard output and return st
 How to use:
   hip::SpawnProc proc("ExeName", true);  // true = capture stdout
   proc.setEnv("MY_VAR", "value");        // optional: set env vars for child
-  proc.setEnv("EMPTY_VAR", "");          // present, with an empty value
-  proc.clearEnv("REMOVED_VAR");          // absent in the child
+  proc.clearEnv("REMOVED_VAR");          // optional: remove env vars from the child
   int exitCode = proc.run("optional args");
   std::string output = proc.getOutput();
 
@@ -377,14 +376,13 @@ class SpawnProc {
     }
   }
 
-  // An empty value stays empty. On Windows it is stored as "KEY=" in the
-  // environment block. SetEnvironmentVariable and _putenv_s delete that key.
+  // Sets an environment variable on the child.
   void setEnv(const std::string& key, const std::string& value) {
     clearedEnv_.erase(key);
     envVars_[key] = value;
   }
 
-  // Drop the variable in the child, including a value inherited from this process.
+  // Removes an environment variable from the child.
   void clearEnv(const std::string& key) {
     envVars_.erase(key);
     clearedEnv_.insert(key);
