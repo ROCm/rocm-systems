@@ -10329,6 +10329,9 @@ amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handl
  *  app_modes/<profile_name>/, merging in guidance bounds from
  *  limits/min/<field> and limits/max/<field> when present. Field names are
  *  not a fixed compile-time list; treat each as an opaque string from sysfs.
+ *  A "node_"-prefixed field (e.g. "node_power_limit") is node-wide rather
+ *  than per-GPU, and is only returned for the primary GPU of the node
+ *  (oam_id == 0); it is silently omitted on any other GPU.
  *  Follows the "query size first" idiom: call once with @p fields == NULL to
  *  learn the required array size.
  *
@@ -10411,6 +10414,11 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *  function requires @p fields to be non-NULL with @p num_fields >= 1 and
  *  returns ::AMDSMI_STATUS_INVAL proactively rather than relying on that
  *  kernel -EINVAL bubbling up uninterpreted.
+ *
+ *  A "node_"-prefixed field (e.g. "node_power_limit") is node-wide rather
+ *  than per-GPU, and can only be staged/committed from the primary GPU of
+ *  the node (oam_id == 0); on any other GPU, @p fields containing such a
+ *  name is rejected with ::AMDSMI_STATUS_INVAL before any sysfs write.
  *
  *  @param[in] processor_handle Device to modify
  *
