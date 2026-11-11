@@ -372,17 +372,15 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
                              : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
                              : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
                                                                 : BufferFormatEncoding::Gfx11;
-  d.buffer_format = format < 0
-                        ? (word3 >> 12) & (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x3f : 0x7f)
-                        : static_cast<uint32_t>(format);
+  d.buffer_format = format < 0 ? addr_calc::rdna_buffer_resource_format(arch, word3)
+                               : static_cast<uint32_t>(format);
   if (format < 0 && d.buffer_format_encoding == BufferFormatEncoding::Gfx9)
     d.buffer_format = ((word3 >> 15) & 15) | (((word3 >> 12) & 7) << 4);
   d.buffer_selectors = format < 0 ? word3 & 0xfff : 4 | (5 << 3) | (6 << 6) | (7 << 9);
   // An explicit typed format cannot bind an INVALID resource descriptor.
-  const uint32_t resource_format =
-      d.buffer_format_encoding == BufferFormatEncoding::Gfx9
-          ? (word3 >> 15) & 15
-          : (word3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 63 : 127);
+  const uint32_t resource_format = d.buffer_format_encoding == BufferFormatEncoding::Gfx9
+                                       ? (word3 >> 15) & 15
+                                       : addr_calc::rdna_buffer_resource_format(arch, word3);
   if (resource_format == 0)
     return false;
   const auto prepared = prepare_buffer_format_state(d);
