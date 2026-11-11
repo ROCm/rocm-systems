@@ -39,12 +39,13 @@
  * each blobs/<xx> relative to blobs/ for every blob write. Every file inside the
  * archive is created, opened, renamed and removed relative to those
  * descriptors, so a directory renamed on the path after the check cannot
- * redirect a write. Only finding pid-<pid> and the root manifest in the base
- * directory go by path. On Windows none of this applies: every file is opened
- * by path and gets the access the base directory passes on.
+ * redirect a write. Only finding pid-<pid>, the root manifest and NOTICE.txt
+ * in the base directory go by path. On Windows none of this applies: every file
+ * is opened by path and gets the access the base directory passes on.
  */
 
 #include "hip_capture_writer.h"
+#include "hrr/hrr_archive_notice.h"
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
 #include "hip_capture_scrub.h"
@@ -602,6 +603,12 @@ static FILE* fopen_read_regular(const std::string& path) {
 
 static bool atomic_write_file(int dir_fd, const std::string& dir, const std::string& name,
                               const void* data, size_t len);
+// The dir_fd that makes atomic_write_file() write at the archive root, g_base_dir.
+#ifdef _WIN32
+static constexpr int kBaseDir = -1;
+#else
+static constexpr int kBaseDir = AT_FDCWD;
+#endif
 
 static bool is_json_object_fragment(const std::string& json) {
   const auto begin = json.find_first_not_of(" \t\r\n");
@@ -852,11 +859,6 @@ static void update_root_manifest() {
   json += "  ]\n";
   json += "}\n";
 
-#ifdef _WIN32
-  constexpr int kBaseDir = -1;
-#else
-  constexpr int kBaseDir = AT_FDCWD;
-#endif
   (void)atomic_write_file(kBaseDir, g_base_dir, "manifest.json", json.data(), json.size());
 }
 
@@ -1311,6 +1313,12 @@ bool open(const char* output_dir) {
     g_blob_claims.clear();
   }
 
+  // Every process sharing the root writes the same text; the rename is atomic.
+  if (!atomic_write_file(kBaseDir, g_base_dir, "NOTICE.txt", kHrrArchiveNotice.data(),
+                         kHrrArchiveNotice.size()))
+    LogPrintfWarning("[HRR capture] Cannot write %s/NOTICE.txt: %s", g_base_dir.c_str(),
+                     strerror(errno));
+
   // The last step before the archive is published.
   if (!publish_active_marker(dirs.dir, out_dir)) {
     const int err = errno;
@@ -1707,7 +1715,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
 //
 // On POSIX a file inside the archive is written in the directory `dir_fd` as
 // <name>.tmp through open_private_fd, and renamed relative to it. The root
-// manifest, with dir_fd AT_FDCWD, takes its temp file from mkostemps: an
+// manifest and NOTICE.txt, with dir_fd AT_FDCWD, take its temp file from mkostemps: an
 // unpredictable name, created exclusively with mode 0600. This matters because
 // its directory is whatever HIP_HRR_CAPTURE_OUTPUT names and may be shared.
 // ---------------------------------------------------------------------------
