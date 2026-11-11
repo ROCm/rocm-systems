@@ -1,10 +1,21 @@
-#include <gtest/gtest.h>
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Host-only microtests for src/ras/diagnostics_paths.cc.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include "alloc.h"
 #include "comm.h"
@@ -51,18 +62,15 @@ class RasDiagnosticsPathsMicrotest : public ::testing::Test {
   }
 
   std::vector<char> Records(const std::vector<Row>& rows) {
-    const size_t stride = rasDiagnosticsLocalRecordStride(sizeof(rasDiagnosticsPathsData));
-    std::vector<char> records(stride * rows.size());
-    for (size_t index = 0; index < rows.size(); index++) {
+    std::vector<std::pair<rasDiagnosticsRankHeader, rasDiagnosticsPathsData>> records;
+    for (const auto& row : rows) {
       rasDiagnosticsRankHeader rank{};
-      rank.commId = rows[index].commId;
-      rank.commRank = rows[index].rank;
-      rank.commNRanks = rows[index].nRanks;
-      rasDiagnosticsPathsData payload{rows[index].mask, rows[index].state};
-      std::memcpy(records.data() + index * stride, &rank, sizeof(rank));
-      std::memcpy(records.data() + index * stride + sizeof(rank), &payload, sizeof(payload));
+      rank.commId = row.commId;
+      rank.commRank = row.rank;
+      rank.commNRanks = row.nRanks;
+      records.push_back({rank, {row.mask, row.state}});
     }
-    return records;
+    return ras_test::BuildRecords(records);
   }
 
   ncclResult_t Summarize(const std::vector<Row>& rows) {
@@ -89,7 +97,7 @@ TEST_F(RasDiagnosticsPathsMicrotest, Usage_MapsRankThroughTopologyAndClassifiesR
   EXPECT_EQ((1u << PATH_LOC) | (1u << PATH_PIX) | (1u << PATH_NET) | (1u << PATH_DIS), data.pathMask);
   paths[2].type = -1;
   rasDiagnosticsPathsUsage(topology.get(), 2, 4, &data);
-  EXPECT_NE(0u, data.pathMask & (1u << PATH_DIS));
+  EXPECT_EQ((1u << PATH_LOC) | (1u << PATH_PIX) | (1u << PATH_NET) | (1u << PATH_DIS), data.pathMask);
 }
 
 TEST_F(RasDiagnosticsPathsMicrotest, Usage_MissingPathTableIsDisconnected) {
@@ -177,6 +185,46 @@ TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_InProgressWithoutReadyTopology
   }
 }
 
+TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_UnfilteredInProgressCommDoesNotReadAvailableTopology) {
+  ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
+  auto topology = std::make_unique<ncclTopoSystem>();
+  topology->nodes[GPU].count = 1;
+  topology->nodes[GPU].nodes[0].gpu.rank = 0;
+  comm.comm->topo = topology.get();
+  comm.comm->nRanks = 1;
+  comm.comm->initState = ncclInProgress;
+  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
+  rasDiagnosticsLocalData local{};
+
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
+  std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
+
+  ASSERT_EQ(1, local.nRecords);
+  EXPECT_EQ(RAS_DIAG_PATHS_TOPOLOGY_NOT_READY, rasDiagnosticsPathsDataFromRecord(local.records)->state);
+  EXPECT_EQ(0u, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
+}
+
+TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_FilteredFailedCommStillUsesAvailableTopology) {
+  ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
+  auto topology = std::make_unique<ncclTopoSystem>();
+  topology->nodes[GPU].count = 1;
+  topology->nodes[GPU].nodes[0].gpu.rank = 0;
+  comm.comm->topo = topology.get();
+  comm.comm->nRanks = 1;
+  comm.comm->initState = ncclSystemError;
+  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
+  context_.hasCommFilter = true;
+  context_.commFilter = {0x123, 0x456, 0x789};
+  rasDiagnosticsLocalData local{};
+
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
+  std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
+
+  ASSERT_EQ(1, local.nRecords);
+  EXPECT_EQ(RAS_DIAG_PATHS_AVAILABLE, rasDiagnosticsPathsDataFromRecord(local.records)->state);
+  EXPECT_EQ(1u << PATH_LOC, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
+}
+
 TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_NoEligibleCommsPublishesNoRecords) {
   ras_test::OwnedComm comm(1, 2, 3, 0);
   comm.comm->initState = ncclSystemError;
@@ -235,6 +283,18 @@ TEST_F(RasDiagnosticsPathsMicrotest, Summarize_NotReadyAndIncompleteSuppressSucc
   ASSERT_EQ(ncclSuccess, Summarize({{1, 1u << PATH_LOC, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}}));
   EXPECT_EQ((std::vector<std::string>{
       "[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789",
+      "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}), output_.lines);
+}
+
+TEST_F(RasDiagnosticsPathsMicrotest, Summarize_IncompleteReadyRanksSuppressSuccessSummary) {
+  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC}}));
+  EXPECT_EQ((std::vector<std::string>{
+      "[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}), output_.lines);
+}
+
+TEST_F(RasDiagnosticsPathsMicrotest, Summarize_CompleteRanksWithUnavailableTopologySuppressSuccessSummary) {
+  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC}, {1, 0, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}}));
+  EXPECT_EQ((std::vector<std::string>{
       "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}), output_.lines);
 }
 

@@ -381,7 +381,7 @@ function(rccl_define_micro_source_lists)
     rma-ce-test.cc
     ras-test.cc
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
-    ras-diagnostics-paths-test.cc
+    ras-diagnostics-paths-test.cc       # src/ras/diagnostics_paths.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     rasnet-test.cc                       # src/ras/rasnet.cc
