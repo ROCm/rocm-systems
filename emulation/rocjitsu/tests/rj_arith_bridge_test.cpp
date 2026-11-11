@@ -7679,9 +7679,7 @@ TEST(ArithBridgeTest, PseudoScalarIgnoresExecAndStagesScalarOutputs) {
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->scalar_reads.clear();
             fixture.recorder->scalar_writes.clear();
-            const bool rejected = semantics == ArithmeticSemantics::BitExactEmpirical ||
-                                  (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus &&
-                                   (op == 1 || op == 3));
+            const bool rejected = semantics == ArithmeticSemantics::BitExactEmpirical;
             EXPECT_EQ(
                 fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
                 rejected);

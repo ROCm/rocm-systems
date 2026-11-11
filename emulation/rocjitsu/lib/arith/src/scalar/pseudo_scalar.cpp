@@ -25,17 +25,15 @@ template <rocjitsu::arith::Unary Op, bool Half>
 int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t raw) {
   const uint32_t known =
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
-  constexpr bool supports_exact = !Half || rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>;
+  // FP16 EXP/LOG have no separate exact model: the path below already matches the gfx1201
+  // captures, including the OMOD underflow signs, so exact requests share it.
+  constexpr bool exact_model = !Half || rocjitsu::arith::half_unary_rcp_rsq_sqrt<Op>;
   if (int error = rocjitsu::arith::validate(flags, mode & ~known,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
   }
-  if (!(supports_exact) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
-  if constexpr (supports_exact) {
+  if constexpr (exact_model) {
     if (rocjitsu::arith::is_exact(flags)) {
       if constexpr (Half) {
         *d = rocjitsu::arith::half_unary_exact_value<Op>(flags, mode, uint16_t(raw));
@@ -158,7 +156,8 @@ int rj_arith_v_s_exp_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // require it.
 int rj_arith_v_s_exp_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                          [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -195,7 +194,8 @@ int rj_arith_v_s_log_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d
 // require it.
 int rj_arith_v_s_log_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
                          [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

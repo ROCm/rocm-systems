@@ -945,8 +945,9 @@ int rj_arith_s_mulk_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
 // of EXEC, including zero. a is a scalar value; d must always be writable.
 // FP16 reads a's low half, ignores its high half, and zeros d's upper half.
 // Supports ABS_A, NEG_A, OMOD and CLAMP, with ABS before NEG. No half selectors.
-// All FP32 operations and FP16 RCP/RSQ/SQRT support empirical-exact semantics.
-// FP16 EXP/LOG remain loose-only.
+// All operations support empirical-exact semantics, to which Compatibility resolves.
+// FP16 EXP/LOG use one host-libm path for every mode, which requires host
+// nearest-even rounding and enabled denormals.
 // Mode 3 FP status reporting is unsupported. Loose calls leave state unchanged.
 // FP32 always flushes input/output denormals. FP16 follows the guest input/output
 // flush flags and FP16_OVFL. Rounding precedes OMOD; nonzero OMOD flushes tiny

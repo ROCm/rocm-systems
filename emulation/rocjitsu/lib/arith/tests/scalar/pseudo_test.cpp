@@ -11,6 +11,8 @@ using namespace rocjitsu::arith::test;
 
 // Check scalar-result special functions and semantics support for the supplied entry point.
 template <bool Half, typename Call> void check_pseudo(Call call, int op) {
+  // Every operation accepts exact requests. FP16 EXP/LOG share their loose path, so they are
+  // checked against the tolerant reference here and pinned by captured cases below.
   bool exact = !Half || (op >= 4 && op <= 6);
   for (auto cpu : supported_cpu_levels()) {
     for (auto semantics : semantics_modes()) {
@@ -40,8 +42,6 @@ template <bool Half, typename Call> void check_pseudo(Call call, int op) {
           uint32_t d = 123, status = 0x80000000U;
           int wanted = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                            ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                       : !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                           ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
                            : RJ_ARITH_SUCCESS;
           ASSERT_EQ(call(cpu | semantics, mode, &d, a, &status), wanted);
           EXPECT_EQ(status, 0x80000000U);
@@ -119,3 +119,39 @@ TEST(v_s_rsq_f16, Arithmetic) { check_pseudo<true>(rj_arith_v_s_rsq_f16, 6); }
 
 // Check scalar-result special functions and semantics support.
 TEST(v_s_sqrt_f16, Arithmetic) { check_pseudo<true>(rj_arith_v_s_sqrt_f16, 4); }
+
+// gfx1201 captures: overflow and log of zero saturate with FP16_OVFL, signaling NaNs are quieted,
+// negative inputs give the default NaN, input flushing applies before LOG, and OMOD flushes a
+// result that becomes subnormal. Check Compatibility and strict exact mode.
+TEST(v_s_exp_log_f16, ExactMatchesHardware) {
+  const struct {
+    decltype(&rj_arith_v_s_exp_f16) call;
+    uint64_t flags;
+    uint32_t modifiers, a, expected;
+  } cases[] = {
+      {rj_arith_v_s_exp_f16, 0, 0, 0x7c01, 0x7e01},
+      {rj_arith_v_s_exp_f16, 0, 0, 0x4c00, 0x7c00},
+      {rj_arith_v_s_exp_f16, RJ_ARITH_FP16_OVFL, 0, 0x4c00, 0x7bff},
+      {rj_arith_v_s_exp_f16, 0, RJ_ARITH_ALU_OMOD_HALF, 0xca00, 0x0800},
+      {rj_arith_v_s_exp_f16, 0, RJ_ARITH_ALU_OMOD_HALF, 0xcb00, 0},
+      {rj_arith_v_s_log_f16, 0, 0, 0x0000, 0xfc00},
+      {rj_arith_v_s_log_f16, RJ_ARITH_FP16_OVFL, 0, 0x0000, 0xfbff},
+      {rj_arith_v_s_log_f16, 0, 0, 0xbc00, 0xfe00},
+      {rj_arith_v_s_log_f16, 0, 0, 0x0001, 0xce00},
+      {rj_arith_v_s_log_f16, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       0, 0x0001, 0xfc00},
+      {rj_arith_v_s_log_f16, 0, 0, 0x83ff, 0xfe00},
+  };
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto semantics : hardware_semantics()) {
+      for (const auto &test : cases) {
+        SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << (&test - cases));
+        uint32_t d = 0xa5a5a5a5U;
+        ASSERT_EQ(test.call(cpu | semantics | test.flags, test.modifiers, &d, 0xa5a50000U | test.a,
+                            nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(d, test.expected);
+      }
+    }
+  }
+}
