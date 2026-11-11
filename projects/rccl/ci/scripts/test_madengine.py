@@ -32,10 +32,12 @@ import json
 import logging
 import math
 import os
+import pwd
 import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -812,27 +814,59 @@ def ignored_mad_knobs(work_dir: Path) -> list[str]:
     ]
 
 
-def rccl_banner_logs(work_dir: Path) -> list[Path]:
+def _trusted_server_logs(log_dir: Path, slurm_job_id: str) -> list[Path]:
+    """The sglang server logs of *slurm_job_id* that no other user could plant.
+
+    run_logs is world-writable so the container's root, squashed to nobody on
+    NFS, can write there. Its sticky bit stops other users from replacing the
+    job's directory but not from creating it first, so the directory and each
+    log must be a real directory or file owned by the runner, root or nobody.
+    """
+    if not slurm_job_id:
+        return []
+    owners = {os.getuid(), 0}
+    try:
+        owners.add(pwd.getpwnam("nobody").pw_uid)
+    except KeyError:
+        pass
+    job_dir = log_dir / "run_logs" / slurm_job_id
+    try:
+        job_stat = job_dir.lstat()
+    except FileNotFoundError:
+        return []
+    if not stat.S_ISDIR(job_stat.st_mode) or job_stat.st_uid not in owners:
+        log.warning("Ignoring %s: not a directory this run created", job_dir)
+        return []
+    logs = []
+    for path in sorted(job_dir.glob("*_NODE*.log")):
+        if not path.name.startswith(("prefill_", "decode_")):
+            continue
+        path_stat = path.lstat()
+        if not stat.S_ISREG(path_stat.st_mode) or path_stat.st_uid not in owners:
+            log.warning("Ignoring %s: not a file this run wrote", path)
+            continue
+        logs.append(path)
+    return logs
+
+
+def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
     """One log per node of a phase, the one its RCCL version banner lands in.
 
     madengine's per-node logs, unless the phase has sglang server logs: that
-    launcher sends the servers' output, and with it the banner, to /run_logs
-    (one prefill or decode log per node) instead.
+    launcher sends the servers' output, and with it the banner, to
+    /run_logs/$SLURM_JOB_ID (one prefill or decode log per node) instead.
     """
     log_dir = work_dir / "slurm_output"
     if not log_dir.is_dir():
         return []
-    server_logs = sorted(
-        p for p in log_dir.glob("run_logs/*/*_NODE*.log")
-        if p.name.startswith(("prefill_", "decode_"))
-    )
+    server_logs = _trusted_server_logs(log_dir, slurm_job_id)
     return server_logs or sorted(log_dir.glob("*node_*.out"))
 
 
-def runtime_rccl_versions(work_dir: Path) -> list[str]:
+def runtime_rccl_versions(work_dir: Path, slurm_job_id: str = "") -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
     versions: list[str] = []
-    for log_file in rccl_banner_logs(work_dir):
+    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
@@ -856,7 +890,7 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    node_logs = rccl_banner_logs(work_dir)
+    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
     logged = {
@@ -1624,10 +1658,11 @@ def generate_manifest(
         # candidate is verified by, to /run_logs/$SLURM_JOB_ID. Both phases
         # share one job id, so each gets its own directory. It must be shared
         # storage and world-writable: Docker runs as root, which a
-        # root-squashed NFS maps to nobody.
+        # root-squashed NFS maps to nobody, and nobody cannot chmod it itself.
+        # Sticky, so no other user can rename or replace what the job writes.
         run_logs = (run_dir or work_dir) / "slurm_output" / "run_logs"
         run_logs.mkdir(parents=True, exist_ok=True)
-        run_logs.chmod(0o777)
+        run_logs.chmod(0o1777)
         docker_run_opts += f" -v {run_logs}:/run_logs"
         # Read-only: run.sh downloads the weights into MODEL_PATH when they
         # look incomplete, and that must fail rather than fill shared storage.
@@ -1985,7 +2020,7 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 
 - The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
   of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
-- An sglang-disagg run also needs `mkdir -m 0777 -p slurm_output/run_logs` in
+- An sglang-disagg run also needs `mkdir -m 1777 -p slurm_output/run_logs` in
   each copy before `salloc`, and the weights under `/models` as the manifest
   mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
@@ -3111,6 +3146,7 @@ def main() -> None:
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
+            slurm_job_id=allocation["job_id"],
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -3298,7 +3334,7 @@ def main() -> None:
         nodelist=allocation["nodelist"],
         job_id=allocation["job_id"],
         phase_rccl={
-            phase: ", ".join(runtime_rccl_versions(run_dir))
+            phase: ", ".join(runtime_rccl_versions(run_dir, allocation["job_id"]))
             for phase, run_dir in phases
         },
         unit=workload_config.get("metric_unit", "tok/s/GPU"),

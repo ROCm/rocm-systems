@@ -94,7 +94,7 @@ class GenerateManifestTest(TempWork):
                 "additional_docker_run_options"]
             run_logs = self.work / "ab" / phase / "slurm_output" / "run_logs"
             self.assertIn(f"-v {run_logs}:/run_logs", opts)
-            self.assertEqual(stat.S_IMODE(run_logs.stat().st_mode), 0o777)
+            self.assertEqual(stat.S_IMODE(run_logs.stat().st_mode), 0o1777)
             mounts[phase] = run_logs
         self.assertNotEqual(mounts[tm.BASELINE], mounts[tm.CANDIDATE])
 
@@ -172,21 +172,90 @@ class BannerLogsTest(unittest.TestCase):
                          "decode_NODE2.log", "decode_NODE3.log"):
                 (logs / name).write_text(banner)
             (logs / "proxy_NODE0.log").write_text("router\n")
-            self.assertEqual([p.name for p in tm.rccl_banner_logs(run_dir)],
+            self.assertEqual([p.name for p in tm.rccl_banner_logs(run_dir, "79405")],
                              ["decode_NODE2.log", "decode_NODE3.log",
                               "prefill_NODE0.log", "prefill_NODE1.log"])
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertTrue(ok, msg)
             (logs / "decode_NODE3.log").write_text("died before init\n")
             ok, _ = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
             (logs / "decode_NODE3.log").unlink()
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
             self.assertIn("node(s) 3 of 4", msg)
+
+
+class PlantedServerLogsTest(unittest.TestCase):
+    """run_logs is world-writable; only what this run's job wrote counts."""
+
+    BANNER = "h:1:1 [0] NCCL INFO RCCL version : 2.32.3-develop:2b88119\n"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.run_dir = Path(tmp.name)
+        self.run_logs = self.run_dir / "slurm_output" / "run_logs"
+        self.run_logs.mkdir(parents=True)
+
+    def write_logs(self, job: str) -> Path:
+        logs = self.run_logs / job
+        logs.mkdir()
+        for name in ("prefill_NODE0.log", "decode_NODE1.log"):
+            (logs / name).write_text(self.BANNER)
+        return logs
+
+    def names(self, job: str = "79405") -> list[str]:
+        return [p.name for p in tm.rccl_banner_logs(self.run_dir, job)]
+
+    def test_another_jobs_logs_are_ignored(self):
+        self.write_logs("11111")
+        self.assertEqual(self.names(), [])
+        self.assertEqual(self.names(""), [])
+
+    def owned_by_someone_else(self, name: str):
+        real_lstat = Path.lstat
+        stranger = max(os.getuid(), 65534) + 1
+
+        def lstat(path):
+            st = real_lstat(path)
+            if path.name != name:
+                return st
+            fields = list(st)
+            fields[stat.ST_UID] = stranger
+            return os.stat_result(fields)
+
+        return mock.patch.object(Path, "lstat", lstat)
+
+    def test_a_directory_another_user_created_is_ignored(self):
+        self.write_logs("79405")
+        with self.owned_by_someone_else("79405"):
+            self.assertEqual(self.names(), [])
+
+    def test_a_log_another_user_wrote_is_ignored(self):
+        self.write_logs("79405")
+        with self.owned_by_someone_else("decode_NODE1.log"):
+            self.assertEqual(self.names(), ["prefill_NODE0.log"])
+
+    def test_a_symlinked_job_directory_is_ignored(self):
+        real = self.write_logs("elsewhere")
+        (self.run_logs / "79405").symlink_to(real)
+        self.assertEqual(self.names(), [])
+
+    def test_a_symlinked_log_is_ignored(self):
+        logs = self.write_logs("79405")
+        target = self.run_dir / "planted.log"
+        target.write_text(self.BANNER)
+        (logs / "decode_NODE1.log").unlink()
+        (logs / "decode_NODE1.log").symlink_to(target)
+        self.assertEqual(self.names(), ["prefill_NODE0.log"])
+        ok, msg = tm.verify_rccl_replacement(
+            self.run_dir, {"version": "2.32.3-develop:2b88119"}, 2, "79405")
+        self.assertFalse(ok)
+        self.assertIn("node(s) 1 of 2", msg)
 
 
 class AllocationScriptTest(TempWork):
