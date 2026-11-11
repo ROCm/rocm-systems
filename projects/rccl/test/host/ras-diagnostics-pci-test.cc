@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +21,7 @@
 #include "alloc.h"
 #include "comm.h"
 #include "ScopedHook.h"
+#include "HostAllocLedger.h"
 #include "fakes/diagnostics_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/ras_diagnostics_test_support.h"
@@ -31,13 +33,18 @@
 
 namespace {
 
-int g_pciAllocationCalls = 0;
-int g_pciFailAllocation = 0;
+template <typename Value>
+ncclResult_t PciTestCalloc(Value** pointer, size_t count) {
+  return g_hostAllocs.Calloc(pointer, count);
+}
 
-template <typename... Args>
-ncclResult_t PciTestCalloc(Args&&... arguments) {
-  if (++g_pciAllocationCalls == g_pciFailAllocation) return ncclSystemError;
-  return ncclCallocDebug(std::forward<Args>(arguments)..., __FILE__, __LINE__, __func__, false);
+template <typename Value>
+ncclResult_t PciTestCalloc(ncclUniquePtr<Value>& pointer, size_t count) {
+  Value* allocated = nullptr;
+  const ncclResult_t result = g_hostAllocs.Calloc(&allocated, count);
+  g_hostAllocs.live.erase(allocated);
+  pointer.reset(allocated);
+  return result;
 }
 
 }
@@ -50,6 +57,21 @@ ncclResult_t PciTestCalloc(Args&&... arguments) {
 #undef ncclCalloc
 
 namespace {
+
+template <typename Payload>
+std::optional<Payload> CollectOne(
+    const rasDiagnosticsContext* context,
+    ncclResult_t (*collect)(const rasDiagnosticsContext*, rasDiagnosticsLocalData*),
+    const Payload* (*decode)(const char*)) {
+  rasDiagnosticsLocalData data{};
+  const ncclResult_t result = collect(context, &data);
+  ncclUniquePtr<char> records(data.records);
+  EXPECT_EQ(ncclSuccess, result);
+  EXPECT_EQ(1, data.nRecords);
+  EXPECT_NE(nullptr, data.records);
+  if (result != ncclSuccess || data.nRecords != 1 || !data.records) return std::nullopt;
+  return *decode(data.records);
+}
 
 class RasDiagnosticsPciMicrotest : public ::testing::Test {
  protected:
@@ -64,8 +86,8 @@ class RasDiagnosticsPciMicrotest : public ::testing::Test {
     ResetUtilsFakes();
     EXPECT_EQ(RAS_DIAG_RDMA_TOPO_UNAVAILABLE, rasDiagnosticsRdmaTopoResult()->state);
     g_realpath = [](const char*, char*) -> char* { return nullptr; };
-    g_pciAllocationCalls = 0;
-    g_pciFailAllocation = 0;
+    g_hostAllocs.Reset();
+    g_free = [](void* pointer) { g_hostAllocs.Free(pointer); };
   }
 
   void TearDown() override {
@@ -73,23 +95,23 @@ class RasDiagnosticsPciMicrotest : public ::testing::Test {
     ResetTopoStubs();
     ResetDiagnosticsFakes();
     ResetLibcFakes();
-    g_pciFailAllocation = 0;
+    EXPECT_TRUE(g_hostAllocs.Clean()) << g_hostAllocs.Summary();
+    for (const auto& allocation : g_hostAllocs.live) std::free(allocation.first);
+    g_hostAllocs.Reset();
     ResetUtilsFakes();
   }
 
   template <typename Payload>
   std::vector<char> Records(const std::vector<Payload>& payloads) {
-    const size_t stride = rasDiagnosticsLocalRecordStride(sizeof(Payload));
-    std::vector<char> records(stride * payloads.size());
+    std::vector<std::pair<rasDiagnosticsRankHeader, Payload>> records;
     for (size_t index = 0; index < payloads.size(); index++) {
       rasDiagnosticsRankHeader rank{};
       rank.commId = {0x123, 0x456, 0x789};
       rank.commRank = payloads.size() - index - 1;
       rank.commNRanks = payloads.size();
-      std::memcpy(records.data() + index * stride, &rank, sizeof(rank));
-      std::memcpy(records.data() + index * stride + sizeof(rank), &payloads[index], sizeof(Payload));
+      records.push_back({rank, payloads[index]});
     }
-    return records;
+    return ras_test::BuildRecords(records);
   }
 
   using Summarizer = ncclResult_t (*)(const rasDiagnosticsContext*, const rasDiagnosticsReporter*, const char*, int);
@@ -174,24 +196,19 @@ TEST(RasDiagnosticsPciIsolatedTest, Collect_ConclusiveToolResultSkipsFallbackAnd
       return -1;
     });
     rasDiagnosticsContext context{};
-    rasDiagnosticsLocalData data{};
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsRdmaTopoCollectLocal(&context, &data));
-    ncclUniquePtr<char> rdmaRecords(data.records);
-    ASSERT_EQ(1, data.nRecords);
-    const auto* rdma = rasDiagnosticsRdmaTopoDataFromRecord(data.records);
+    const auto rdma = CollectOne(&context, rasDiagnosticsRdmaTopoCollectLocal, rasDiagnosticsRdmaTopoDataFromRecord);
+    ASSERT_TRUE(rdma);
     EXPECT_EQ(RAS_DIAG_RDMA_TOPO_SOURCE_TOOL, rdma->source);
     EXPECT_EQ(RAS_DIAG_RDMA_TOPO_RAN, rdma->rdmaTopoState);
     EXPECT_EQ(0, rdma->rdmaTopo.exitCode);
     EXPECT_FALSE(rdma->rdmaTopo.reportedIssue);
     EXPECT_STREQ("OK\tlink", rdma->rdmaTopo.sample);
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsIommuCollectLocal(&context, &data));
-    ncclUniquePtr<char> iommuRecords(data.records);
-    ASSERT_EQ(1, data.nRecords);
-    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, rasDiagnosticsIommuDataFromRecord(data.records)->fallbackState);
-    ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context, &data));
-    ncclUniquePtr<char> atsRecords(data.records);
-    ASSERT_EQ(1, data.nRecords);
-    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, rasDiagnosticsAtsDataFromRecord(data.records)->fallbackState);
+    const auto iommu = CollectOne(&context, rasDiagnosticsIommuCollectLocal, rasDiagnosticsIommuDataFromRecord);
+    ASSERT_TRUE(iommu);
+    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, iommu->fallbackState);
+    const auto ats = CollectOne(&context, rasDiagnosticsAtsCollectLocal, rasDiagnosticsAtsDataFromRecord);
+    ASSERT_TRUE(ats);
+    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, ats->fallbackState);
     EXPECT_EQ(RAS_DIAG_RDMA_TOPO_RAN, rasDiagnosticsRdmaTopoResult()->state);
     EXPECT_EQ(1, child.calls);
     EXPECT_EQ(0, properties.calls);
@@ -275,29 +292,41 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuMode_RetriesInterruptedReadsAndChecksCom
     EXPECT_EQ(O_RDONLY | O_CLOEXEC, flags);
     return 41;
   });
-  for (const auto& item : std::vector<std::pair<std::string, rasDiagnosticsIommuMode>>{
+  struct ReadCase {
+    std::string input;
+    rasDiagnosticsIommuMode expected;
+    bool extraByte = false;
+  };
+  const ReadCase cases[] = {
          {"identity\n", RAS_DIAG_IOMMU_MODE_PASSTHROUGH}, {"DMA \t\n", RAS_DIAG_IOMMU_MODE_ON},
          {"DMA-FQ", RAS_DIAG_IOMMU_MODE_ON}, {"unknown", RAS_DIAG_IOMMU_MODE_UNAVAILABLE},
-         {"", RAS_DIAG_IOMMU_MODE_UNAVAILABLE}}) {
+         {"", RAS_DIAG_IOMMU_MODE_UNAVAILABLE},
+         {"identity" + std::string(23, ' '), RAS_DIAG_IOMMU_MODE_UNAVAILABLE, true}};
+  for (const auto& item : cases) {
+    SCOPED_TRACE(item.input);
     HookOf<decltype(g_read)> read(g_read, [&](int fd, void* target, size_t capacity) -> ssize_t {
       EXPECT_EQ(41, fd);
       if (read.calls == 1 || read.calls == 3) { errno = EINTR; return -1; }
-      if (read.calls > 2) { EXPECT_EQ(1u, capacity); return 0; }
+      if (read.calls > 2) {
+        EXPECT_EQ(1u, capacity);
+        if (item.extraByte) *static_cast<char*>(target) = ' ';
+        return item.extraByte ? 1 : 0;
+      }
       EXPECT_EQ(31u, capacity);
-      std::memcpy(target, item.first.data(), item.first.size());
-      return item.first.size();
+      std::memcpy(target, item.input.data(), item.input.size());
+      return item.input.size();
     });
-    EXPECT_EQ(item.second, rasDiagnosticsIommuReadMode(&group));
-    EXPECT_EQ(item.first.empty() || item.first.back() == '\n' ? 2 : 4, read.calls);
+    EXPECT_EQ(item.expected, rasDiagnosticsIommuReadMode(&group));
+    EXPECT_EQ(item.input.empty() || item.input.back() == '\n' ? 2 : 4, read.calls);
   }
-  EXPECT_EQ(5, open.calls);
-  EXPECT_EQ((std::vector<int>(5, 41)), g_closedFds);
+  EXPECT_EQ(6, open.calls);
+  EXPECT_EQ((std::vector<int>(6, 41)), g_closedFds);
   group.state = RAS_DIAG_IOMMU_GROUP_NONE;
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, rasDiagnosticsIommuReadMode(&group));
   group.state = RAS_DIAG_IOMMU_GROUP_UNAVAILABLE;
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_UNAVAILABLE, rasDiagnosticsIommuReadMode(&group));
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_UNAVAILABLE, rasDiagnosticsIommuReadMode(nullptr));
-  EXPECT_EQ(5, open.calls);
+  EXPECT_EQ(6, open.calls);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, RdmaRun_ClassifiesToolResultsWithoutSpawningProcesses) {
@@ -370,7 +399,7 @@ TEST_F(RasDiagnosticsPciMicrotest, AddPair_ResolvesPhysicalDeviceAndDeduplicates
     return target;
   });
   rasDiagnosticsPciCommSnapshot snapshot{};
-  rasDiagnosticsPciAddPair(0x41000, "mlx5_7", "/wrong", &snapshot);
+  rasDiagnosticsPciAddPair(0x41000, "mlx5_7", "0000:99:00.0", &snapshot);
   rasDiagnosticsPciAddPair(0x41000, nullptr, "0000:81:00.0", &snapshot);
   rasDiagnosticsPciAddPair(0x42000, "bad/name", "0000:81:00.0", &snapshot);
   EXPECT_EQ(1, resolve.calls);
@@ -623,9 +652,9 @@ TEST_F(RasDiagnosticsPciMicrotest, Summaries_RejectMalformedHeadersContextsAndAl
     records = inputs[index];
     records.insert(records.end(), inputs[index].begin(), inputs[index].end());
     EXPECT_EQ(ncclInternalError, summarize(&context_, &reporter_, records.data(), records.size()));
-    g_pciFailAllocation = g_pciAllocationCalls + 1;
+    g_hostAllocs.failCall = g_hostAllocs.calls + 1;
     EXPECT_EQ(ncclSystemError, summarize(&context_, &reporter_, inputs[index].data(), inputs[index].size()));
-    g_pciFailAllocation = 0;
+    g_hostAllocs.failCall = 0;
   }
   EXPECT_EQ(0, output_.calls);
 }
@@ -831,15 +860,31 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
     });
   std::vector<std::string> opened;
   ScopedHook open(g_open, [&](const char* path, int flags, mode_t) {
-    EXPECT_EQ(O_RDONLY | O_DIRECTORY | O_CLOEXEC, flags);
     opened.emplace_back(path);
-    return 51;
+    if (opened.back() == "/sys/kernel/iommu_groups/93/type") {
+      EXPECT_EQ(O_RDONLY | O_CLOEXEC, flags);
+      return 53;
+    }
+    EXPECT_EQ(O_RDONLY | O_DIRECTORY | O_CLOEXEC, flags);
+    return opened.back() == "/sys/bus/pci/devices/0000:41:00.0" ? 51 : 52;
   });
-  ScopedHook link(g_readlinkat, [](int fd, const char* name, char*, size_t) -> ssize_t {
-    EXPECT_EQ(51, fd);
+  ScopedHook link(g_readlinkat, [](int fd, const char* name, char* target, size_t capacity) -> ssize_t {
     EXPECT_STREQ("iommu_group", name);
+    if (fd == 51) {
+      const std::string group = "../../../kernel/iommu_groups/93";
+      EXPECT_GE(capacity, group.size());
+      std::memcpy(target, group.data(), group.size());
+      return group.size();
+    }
+    EXPECT_EQ(52, fd);
     errno = ENOENT;
     return -1;
+  });
+  ScopedHook read(g_read, [](int fd, void* target, size_t capacity) -> ssize_t {
+    EXPECT_EQ(53, fd);
+    EXPECT_EQ(31u, capacity);
+    std::memcpy(target, "identity\n", 9);
+    return 9;
   });
   rasDiagnosticsLocalData data{};
   ScopedHook busId(g_int64ToBusId, [](int64_t id, char* output) {
@@ -847,21 +892,23 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
     std::strcpy(output, "0000:41:00.0");
     return ncclSuccess;
   });
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsIommuCollectLocal(&context_, &data));
-  ncclUniquePtr<char> iommuRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  const auto* iommu = rasDiagnosticsIommuDataFromRecord(data.records);
+  const auto iommu = CollectOne(&context_, rasDiagnosticsIommuCollectLocal, rasDiagnosticsIommuDataFromRecord);
+  ASSERT_TRUE(iommu);
   EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_COLLECTED, iommu->fallbackState);
   ASSERT_EQ(1, iommu->nPairs);
   EXPECT_STREQ("0000:41:00.0", iommu->pairs[0].gpu.bdf);
   EXPECT_STREQ("0000:81:00.0", iommu->pairs[0].nic.bdf);
-  EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, iommu->pairs[0].gpu.mode);
+  EXPECT_EQ(RAS_DIAG_IOMMU_GROUP_AVAILABLE, iommu->pairs[0].gpu.group.state);
+  EXPECT_EQ(93, iommu->pairs[0].gpu.group.id);
+  EXPECT_EQ(RAS_DIAG_IOMMU_MODE_PASSTHROUGH, iommu->pairs[0].gpu.mode);
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, iommu->pairs[0].nic.mode);
   EXPECT_EQ((std::vector<std::string>{
-              "/sys/bus/pci/devices/0000:41:00.0", "/sys/bus/pci/devices/0000:81:00.0"}), opened);
+              "/sys/bus/pci/devices/0000:41:00.0", "/sys/kernel/iommu_groups/93/type",
+              "/sys/bus/pci/devices/0000:81:00.0"}), opened);
   EXPECT_EQ(2, link.calls);
+  EXPECT_EQ(1, read.calls);
   EXPECT_EQ(1, busId.calls);
-  EXPECT_EQ((std::vector<int>{51, 51}), g_closedFds);
+  EXPECT_EQ((std::vector<int>{51, 53, 52}), g_closedFds);
   int lspciExit = 0;
   ScopedHook child(g_ncclDiagChildRun, [&](const char* command, int timeout, char* target, int size, bool* truncated) {
     EXPECT_STREQ("lspci -D -vvv", command);
@@ -870,10 +917,8 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
     DeliverChildOutput("0000:81:00.0 NIC\n\tATSCtl: Enable+\n", target, size, nullptr, nullptr, truncated);
     return lspciExit;
   });
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context_, &data));
-  ncclUniquePtr<char> atsRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  const auto* ats = rasDiagnosticsAtsDataFromRecord(data.records);
+  const auto ats = CollectOne(&context_, rasDiagnosticsAtsCollectLocal, rasDiagnosticsAtsDataFromRecord);
+  ASSERT_TRUE(ats);
   EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_COLLECTED, ats->fallbackState);
   ASSERT_EQ(1, ats->nNics);
   EXPECT_STREQ("0000:81:00.0", ats->nics[0].bdf);
@@ -883,18 +928,16 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
   EXPECT_EQ(2, properties.calls);
   EXPECT_EQ(2, select.calls);
   lspciExit = 1;
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context_, &data));
-  ncclUniquePtr<char> failedAtsRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  const auto* failedAts = rasDiagnosticsAtsDataFromRecord(data.records);
+  const auto failedAts = CollectOne(&context_, rasDiagnosticsAtsCollectLocal, rasDiagnosticsAtsDataFromRecord);
+  ASSERT_TRUE(failedAts);
   ASSERT_EQ(1, failedAts->nNics);
   EXPECT_EQ(RAS_DIAG_ATS_UNAVAILABLE, failedAts->nics[0].state);
   EXPECT_EQ(1, failedAts->lspciUnavailable);
   EXPECT_EQ(2, child.calls);
   for (int failCall : {1, 2, 3}) {
     SCOPED_TRACE(failCall);
-    g_pciAllocationCalls = 0;
-    g_pciFailAllocation = failCall;
+    g_hostAllocs.calls = 0;
+    g_hostAllocs.failCall = failCall;
     const int previousCalls = child.calls;
     EXPECT_EQ(ncclSystemError, rasDiagnosticsAtsCollectLocal(&context_, &data));
     EXPECT_EQ(nullptr, data.records);
@@ -917,22 +960,19 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_RecordsTopologyNotReadyAndFiltersComm
       return ncclInProgress;
     });
   rasDiagnosticsLocalData data{};
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsIommuCollectLocal(&context_, &data));
-  ncclUniquePtr<char> iommuRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_TOPOLOGY_NOT_READY, rasDiagnosticsIommuDataFromRecord(data.records)->fallbackState);
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context_, &data));
-  ncclUniquePtr<char> atsRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_TOPOLOGY_NOT_READY, rasDiagnosticsAtsDataFromRecord(data.records)->fallbackState);
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsRdmaTopoCollectLocal(&context_, &data));
-  ncclUniquePtr<char> rdmaRecords(data.records);
-  ASSERT_EQ(1, data.nRecords);
-  EXPECT_EQ(RAS_DIAG_RDMA_TOPO_SOURCE_FALLBACK, rasDiagnosticsRdmaTopoDataFromRecord(data.records)->source);
+  const auto iommu = CollectOne(&context_, rasDiagnosticsIommuCollectLocal, rasDiagnosticsIommuDataFromRecord);
+  ASSERT_TRUE(iommu);
+  EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_TOPOLOGY_NOT_READY, iommu->fallbackState);
+  const auto ats = CollectOne(&context_, rasDiagnosticsAtsCollectLocal, rasDiagnosticsAtsDataFromRecord);
+  ASSERT_TRUE(ats);
+  EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_TOPOLOGY_NOT_READY, ats->fallbackState);
+  const auto rdma = CollectOne(&context_, rasDiagnosticsRdmaTopoCollectLocal, rasDiagnosticsRdmaTopoDataFromRecord);
+  ASSERT_TRUE(rdma);
+  EXPECT_EQ(RAS_DIAG_RDMA_TOPO_SOURCE_FALLBACK, rdma->source);
   EXPECT_EQ(2, properties.calls);
   for (int failCall : {1, 2}) {
-    g_pciAllocationCalls = 0;
-    g_pciFailAllocation = failCall;
+    g_hostAllocs.calls = 0;
+    g_hostAllocs.failCall = failCall;
     EXPECT_EQ(ncclSystemError, rasDiagnosticsIommuCollectLocal(&context_, &data));
     EXPECT_EQ(nullptr, data.records);
     EXPECT_EQ(0, data.nRecords);
