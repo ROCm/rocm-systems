@@ -1,7 +1,8 @@
 # Rocjitsu Arithmetic Library
 
-Dense CDNA matrices include gfx942/gfx950 FP16/BF16 MFMA and gfx1250
-16x16x32 FP16/BF16 WMMA, including packed and mixed BF16F32 outputs.
+Dense CDNA matrices include gfx942/gfx950 FP16/BF16 and FP8/BF8 MFMA,
+gfx942 XF32 MFMA, and gfx1250 FP16/BF16 and OCP FP8/BF8 WMMA,
+including packed FP16/BF16 and mixed BF16F32 outputs.
 These use established approximate arithmetic in Loose and Compatibility;
 strict bit-exact modes remain unsupported for these new forms.
 
