@@ -712,6 +712,10 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
+  // @brief Blit kernel on queues_[QueuePCSampling], used for PC sampling setup copies.
+  // Declared after queues_ so that it is destroyed before the queue it runs on.
+  lazy_ptr<core::Blit> pcs_blit_;
+
   // @brief Hint support is read from the utility queue's caps once, on first query.
   mutable std::once_flag signal_hints_once_;
   mutable bool signal_hints_supported_ = false;
