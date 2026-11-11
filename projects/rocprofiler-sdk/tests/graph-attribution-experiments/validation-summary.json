@@ -1,0 +1,91 @@
+{
+  "upstream_prs": [
+    14204,
+    14211
+  ],
+  "upstream_head": "2e35762550e20b13efb9637619654955ca6507ff",
+  "workload": {
+    "input_tokens": 524288,
+    "output_tokens": 128,
+    "tp": 4,
+    "cuda_graph_decode": true,
+    "queue_interposition": false
+  },
+  "stages": [
+    {
+      "name": "graph mutation fix",
+      "per_rank_dispatches": 7085,
+      "per_rank_resolved": 2682
+    },
+    {
+      "name": "module naming fix",
+      "per_rank_dispatches": 6805,
+      "per_rank_resolved": 6618
+    },
+    {
+      "name": "experimental copyBuffer fix",
+      "per_rank_dispatches": 6270,
+      "per_rank_resolved": 6270,
+      "per_rank_copybuffer": 176
+    }
+  ],
+  "validation": {
+    "existing_graph_tests": 18,
+    "module_exact_id_dispatches": 18,
+    "memcpy_positive_negative_dispatches": 24
+  },
+  "limitations": [
+    "Runs have different speculative acceptance counts; not a performance comparison.",
+    "copyBuffer support is opt-in and depends on a private ROCclr ABI.",
+    "No general SDMA, array, 2D or split-copy attribution guarantee.",
+    "Resolved IDs do not prove Python layer labels or all upstream parallel-node ordering assumptions."
+  ],
+  "review_regression": {
+    "memcpy_dispatches": 30,
+    "case": "captured memcpy followed by an identical manually added node; mixed graphs must remain unattributed"
+  },
+  "post_review_long_context": {
+    "source_commit": "8bc27cb00a8bb4aa5709163b93e8fb1d04d4d327",
+    "prompt_tokens": 524288,
+    "completion_tokens": 128,
+    "cached_tokens": 0,
+    "num_retractions": 0,
+    "cuda_graph_decode": true,
+    "queue_interposition": false,
+    "experimental_copybuffer": true,
+    "ranks": [
+      {
+        "rank": "sglang::scheduler_TP0",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP1",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP2",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      },
+      {
+        "rank": "sglang::scheduler_TP3",
+        "graph_dispatches": 6513,
+        "resolved": 6513,
+        "copybuffer": 179,
+        "copybuffer_api": "hipMemcpyAsync",
+        "finalized": true
+      }
+    ]
+  }
+}
