@@ -110,6 +110,42 @@ System Speed-of-Light:
   Instruction Cache Fetch Latency:
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.
     unit: Cycles
+  Theoretical LDS Bandwidth:
+    rst: Total LDS bandwidth.
+    unit: GB/s
+  GPU Active Cycles:
+    rst: Total GPU-active cycles during the measurement window.
+    unit: Cycles
+  WGP Utilization:
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+  WMMA FLOPs (F6F4):
+    rst: Achieved mixed FP6/FP4 WMMA throughput.
+    unit: GFLOP/s
+  Pipeline Utilization - XDL:
+    rst: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+    unit: Percent
+  GL0 Utilization:
+    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    unit: Percent
+  LDS Utilization:
+    rst: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    unit: Percent
+  GL2 Cache Utilization:
+    rst: Percentage of GL2 Cache cycles when it's busy.
+    unit: Percent
+  TXA Utilization:
+    rst: Percentage of cycles the TXA is processing memory requests.
+    unit: Percent
+  TXD Utilization:
+    rst: Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+    unit: Percent
+  L1I-GL1 Read Bandwidth:
+    rst: Instruction Cache miss fill bandwidth from GL1.
+    unit: GB/s
+  sL1D-GL1 Read Bandwidth:
+    rst: Scalar Data Cache miss fill bandwidth from GL1.
+    unit: GB/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.

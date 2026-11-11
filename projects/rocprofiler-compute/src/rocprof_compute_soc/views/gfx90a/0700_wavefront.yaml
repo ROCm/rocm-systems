@@ -57,3 +57,4 @@ tables:
     label: Active Cycles
     legacy_id: 7.2.6
   - metric: wave.occupancy
+    legacy_id: 7.2.7

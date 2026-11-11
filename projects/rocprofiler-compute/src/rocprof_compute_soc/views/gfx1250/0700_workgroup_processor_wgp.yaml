@@ -16,6 +16,7 @@ tables:
   - metric: wgp.wall_clock
     legacy_id: 7.1.1
   - metric: wgp.active_wgps
+    legacy_id: 7.1.2
 - id: 702
   title: Wavefront Launch Stats
   header:

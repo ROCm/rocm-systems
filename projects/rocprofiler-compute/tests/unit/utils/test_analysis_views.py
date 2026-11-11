@@ -146,11 +146,11 @@ def test_view_metric_errors():
     broken = copy.deepcopy(views)
     rows = dict(iter_view_rows(broken))
     rows["11.2.0"]["metric"] = "compute.made_up"
-    rows["2.1.11"]["peak"] = "empirical"
+    rows["2.2.11"]["peak"] = "empirical"
     broken.append(copy.deepcopy(broken[0]))
     assert view_metric_errors(broken, metrics) == [
         "panel 0 has more than one view",
-        "2.1.11 compute.branch_util has no 'peak_empirical'",
+        "2.2.11 compute.branch_util has no 'peak_empirical'",
         "11.2.0 compute.made_up: not a metric of the arch's library",
     ]
 
@@ -163,10 +163,10 @@ def test_an_arch_reads_only_the_aliases_of_its_own_views():
 
 
 def test_metric_ids_select_every_row_that_shows_them():
-    """compute.salu_util is in Speed of Light and Compute Pipeline on gfx942; aliases
-    and numeric ids pass through."""
+    """compute.salu_util is in Compute Throughput and Compute Pipeline on gfx942;
+    aliases and numeric ids pass through."""
     assert expand_metric_ids(["compute.salu_util", "lds", "11.2.3"], "gfx942") == [
-        "2.1.7",
+        "2.2.7",
         "11.2.2",
         "lds",
         "11.2.3",
@@ -194,27 +194,27 @@ def test_unknown_metric_id_names_the_id_and_arch(monkeypatch):
 
 
 def test_typed_numeric_row_ids_are_the_ids_analyze_shows(monkeypatch):
-    """gfx908's views leave out the Speed of Light rows without a metric, so view row
-    2.1.7 shows vL1D hit rate (panel file row 2.1.16). A typed row id means the view
-    row; block and table ids are not deprecated, a row id is, naming its metric id."""
+    """On gfx942 the Speed of Light shows SALU Utilization as view row 2.2.7 (panel file
+    row 2.1.7). A typed row id means the view row; block and table ids are not
+    deprecated, a row id is, naming its metric id."""
     warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
-    tokens = ["11", "11.2", "2.1.7", "lds"]
-    assert expand_metric_ids(tokens, "gfx908") == tokens
-    warn_numeric_metric_ids(tokens, "gfx908")
+    tokens = ["11", "11.2", "2.2.7", "lds"]
+    assert expand_metric_ids(tokens, "gfx942") == tokens
+    warn_numeric_metric_ids(tokens, "gfx942")
     assert [call.args[0] for call in warning["warning"].call_args_list] == [
-        "Numeric metric id '2.1.7' is deprecated. Use 'vl1d.hit_rate' instead.",
+        "Numeric metric id '2.2.7' is deprecated. Use 'compute.salu_util' instead.",
     ]
 
 
 def test_typed_row_ids_are_saved_as_metric_ids():
     """Profile saves the metric ids of typed row ids, once each, so the workload keeps
     its rows when later views renumber them; other tokens stay as typed."""
-    tokens = ["11", "2.1.7", "lds", "compute.salu_util", "2.1.7", "99.9.9"]
-    assert row_ids_as_metric_ids(tokens, "gfx908") == [
+    tokens = ["11", "2.2.7", "lds", "compute.valu_util", "2.2.7", "99.9.9"]
+    assert row_ids_as_metric_ids(tokens, "gfx942") == [
         "11",
-        "vl1d.hit_rate",
-        "lds",
         "compute.salu_util",
+        "lds",
+        "compute.valu_util",
         "99.9.9",
     ]
 

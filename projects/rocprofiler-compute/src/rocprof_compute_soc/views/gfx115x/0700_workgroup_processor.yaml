@@ -116,6 +116,7 @@ tables:
     unit: Unit
   metrics:
   - metric: wave.wait_for_any
+    legacy_id: 7.9.0
   - metric: wave.wait_for_inst_fetch
     legacy_id: 7.9.1
   - metric: wave.wait_for_barrier

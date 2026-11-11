@@ -37,6 +37,7 @@ tables:
     legacy_id: 12.2.2
   - metric: lds.bank_conflicts_access
     label: Bank Conflicts/Access
+    legacy_id: 12.2.3
   - metric: lds.index_accesses
     label: Index Accesses
     legacy_id: 12.2.4

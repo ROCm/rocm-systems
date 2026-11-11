@@ -16,8 +16,9 @@ retired.
 
 Analyze, its listings and the memory chart read their panel configs here
 (arch_panel_configs()), and the -b panel aliases come from the views. Profile counters
-still come from analysis_configs/, whose structure tools/validate_views.py keeps equal
-to the views'.
+still come from analysis_configs/, whose structure test_analysis_views_sync.py keeps
+equal to the views', except for a replaced panel (REPLACED_PANEL_IDS), whose rows'
+counters come from the views and the metric library.
 Standard library and the vendored YAML only: profile mode imports it.
 """
 
@@ -80,6 +81,9 @@ ROW_FIELDS = (
 NO_VALUE = "None"
 # A row's "peak" that shows its metric's measured peak instead of the theoretical one.
 EMPIRICAL_PEAK = "empirical"
+# Panels whose view replaces the panel file's rows (the Speed of Light, AIPROFCOMP-821):
+# until profile reads the views, profile takes their counters from the views.
+REPLACED_PANEL_IDS = (200,)
 
 
 def default_views_dir() -> Path:
@@ -289,6 +293,31 @@ def row_metric_ids(row: Dict[str, Any]) -> List[str]:
     if "metric" in row:
         return [row["metric"]]
     return [metric_id for metric_id in row.get("metrics", {}).values() if metric_id]
+
+
+def replaced_panel_metric_ids(token: str, arch: Optional[str]) -> Optional[List[str]]:
+    """Return the metric ids a -b block, table or row id or a block alias selects in a
+    replaced panel (REPLACED_PANEL_IDS), or None if it selects another panel.
+
+    A row id is the id analyze shows.
+    """
+    if not arch or not has_views(arch):
+        return None
+    block_id = resolve_block_token(token, get_arch_alias_to_panel_id(arch))
+    if block_id is None:
+        return None
+    file_id = int(convert_metric_id_to_panel_info(block_id)[0])
+    if file_id not in REPLACED_PANEL_IDS:
+        return None
+    if _is_row_id(block_id):
+        row = _rows_by_position(arch).get(block_id)
+        return row_metric_ids(row) if row else []
+    return [
+        metric_id
+        for position, row in iter_view_rows(load_views(arch))
+        if f"{position}.".startswith(f"{block_id}.")
+        for metric_id in row_metric_ids(row)
+    ]
 
 
 def row_label(row: Dict[str, Any], metrics: Dict[str, Dict[str, Any]]) -> str:

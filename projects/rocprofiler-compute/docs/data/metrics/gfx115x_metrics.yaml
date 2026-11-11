@@ -56,6 +56,21 @@ System Speed-of-Light:
   Instruction Cache BW:
     rst: Bandwidth of instruction cache requests to the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
     unit: GB/s
+  Theoretical LDS Bandwidth:
+    rst: Estimated achieved bandwidth for Local Data Share operations. This reflects the effective throughput after accounting for bank conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared memory access.
+    unit: GB/s
+  GL0 Busy (TCP):
+    rst: Percentage of cycles the GL0 vector cache (TCP) is actively processing requests. Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate compute-bound workloads with minimal memory traffic or idle shader engines.
+    unit: Percent
+  LDS Utilization:
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    unit: Percent
+  GL2 Cache Utilization:
+    rst: ''
+    unit: Percent
+  TA Busy:
+    rst: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    unit: Percent
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
     rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.

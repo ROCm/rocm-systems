@@ -42,6 +42,7 @@ tables:
     label: Cache Hit Rate
   - metric: l1i.fetch_lat
     label: Instruction Fetch Latency
+    legacy_id: 13.2.5
 - id: 1303
   title: L1I <-> L2 interface
   header:
