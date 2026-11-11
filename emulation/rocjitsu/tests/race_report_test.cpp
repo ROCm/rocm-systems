@@ -4,6 +4,7 @@
 #include "race-detector/race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include <gtest/gtest.h>
@@ -339,9 +340,9 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
   for (const auto &test : cases) {
     SCOPED_TRACE(test.operation);
     RaceDetector detector(2, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
-    const EventId event =
-        detector.allocateEventId(WaveId{test.owner}, testInstruction(0x100), test.event_type, {2},
-                                 1, 0xf, {}, WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+    const EventId event = detector.allocateEventId(
+        WaveId{test.owner}, testInstruction(0x100), test.event_type, {2}, 1, 0xf, {},
+        CounterObligations(WaitCounterType::LGKMCNT, MemoryOrderClass::LDS), MemoryOrderClass::LDS);
     if (test.complete) {
       for (const auto obligation : detector.events().counterObligations(event))
         detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
@@ -384,7 +385,9 @@ TEST(RaceReportDescriptionTest, ReportsOnlyRemainingCounterObligationsAfterAPart
   RaceDetector detector(1, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
   const EventId event = detector.allocateEventId(
       WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
-      WaitCounterType::LOADCNT, MemoryOrderClass::UNORDERED, WaitCounterType::DSCNT);
+      CounterObligations(WaitCounterType::LOADCNT, MemoryOrderClass::UNORDERED,
+                         WaitCounterType::DSCNT),
+      MemoryOrderClass::UNORDERED);
   const RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), event};
   EXPECT_NE(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_RDNA4)
                 .find("pending counters: loadcnt, dscnt."),
@@ -423,7 +426,8 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
     RaceDetector detector(1, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
     const EventId event = detector.allocateEventId(
         WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
-        test.first, MemoryOrderClass::UNORDERED, test.second);
+        CounterObligations(test.first, MemoryOrderClass::UNORDERED, test.second),
+        MemoryOrderClass::UNORDERED);
     const RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), event};
     const std::string prefix =
         "Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).\n"
@@ -440,9 +444,9 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
 
 TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
   RaceDetector detector(2, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
-  const EventId event =
-      detector.allocateEventId(WaveId{1}, testInstruction(0x100), MemoryEventType::LDS_TO_VGPR, {2},
-                               1, 0xf, {}, WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+  const EventId event = detector.allocateEventId(
+      WaveId{1}, testInstruction(0x100), MemoryEventType::LDS_TO_VGPR, {2}, 1, 0xf, {},
+      CounterObligations(WaitCounterType::LGKMCNT, MemoryOrderClass::LDS), MemoryOrderClass::LDS);
   for (const auto obligation : detector.events().counterObligations(event))
     detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
   detector.markEventWaveComplete(event);
@@ -460,9 +464,9 @@ TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), {}};
   EXPECT_THROW(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4),
                std::out_of_range);
-  violation.conflictingEvent =
-      detector.allocateEventId(WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR,
-                               {2}, 1, 0xf, {}, WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+  violation.conflictingEvent = detector.allocateEventId(
+      WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
+      CounterObligations(WaitCounterType::VMCNT, MemoryOrderClass::VMEM), MemoryOrderClass::VMEM);
   EXPECT_THROW(
       formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_INVALID),
       std::invalid_argument);
