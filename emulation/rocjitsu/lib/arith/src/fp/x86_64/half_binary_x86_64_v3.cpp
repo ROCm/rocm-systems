@@ -101,7 +101,7 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       }
       if (m & RJ_ARITH_ALU_OMOD_MASK) {
         if (arithmetic) {
-          // OMOD turns a tiny result into +0, before Compatibility rounds the others.
+          // OMOD turns a tiny result into +0, before Compatibility or exact rounds the others.
           value = _mm256_andnot_ps(_mm256_castsi256_ps(tiny), value);
         }
         if (arithmetic && compatibility && !Packed) {

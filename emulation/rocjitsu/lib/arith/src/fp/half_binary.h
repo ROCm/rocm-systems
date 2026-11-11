@@ -13,7 +13,8 @@
 namespace rocjitsu::arith {
 
 // Evaluate FP16 binary arithmetic. Preserve destination lanes outside exec_mask.
-// compatibility preserves intermediate FP16 rounding; preserve_input_snan retains
+// compatibility (RDNA3 Compatibility or gfx12 exact semantics) applies guest NaN priority
+// and intermediate FP16 rounding before OMOD; preserve_input_snan retains
 // selected packed input NaN bits unless that half is clamped.
 // Requires the named CPU features and validated instruction controls.
 template <Binary Op, bool Packed = false>

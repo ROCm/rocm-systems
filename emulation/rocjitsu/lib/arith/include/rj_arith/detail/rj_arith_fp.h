@@ -513,9 +513,11 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // including a product rounded to minimum normal on the subnormal grid. In the RDNA3 scalar
 // guest-mode path, IEEE controls NaN quieting. Directed guest rounding uses
 // scalar FP64 arithmetic and integer narrowing. RDNA3 RJ_ARITH_FP_DX10_CLAMP_OFF uses
-// that scalar path to preserve NaNs under CLAMP. Loose and Compatibility are
-// supported; mode 1 may fall back to Loose. Explicit exact modes are unsupported.
-// Compatibility preserves selected gfx11 input NaN bits with IEEE clear in both
+// that scalar path to preserve NaNs under CLAMP. The _gfx12 forms support loose and
+// bit-exact numeric semantics and resolve Compatibility to mode 2. RDNA3 supports
+// Loose and Compatibility; mode 1 may fall back to Loose and mode 2 is unsupported.
+// Exact and Compatibility return the first NaN source, quieted on gfx12.
+// RDNA3 Compatibility preserves selected input NaN bits with IEEE clear in both
 // scalar and SIMD paths; IEEE set quiets them. Loose permits approximate NaN results.
 // ADD/MUL without _gfx12 take RDNA3 trapsts; RDNA4 variants
 // take excp_flag_user. Both reject mode 3 FP status reporting and skip loose state.
@@ -609,10 +611,12 @@ int rj_arith_v_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 // OMOD, CLAMP, RJ_ARITH_FP16_OVFL, and guest input/output flushing.
 // APIs without _gfx12 are RDNA3; _gfx12 variants are RDNA4. RDNA3 ignores OMOD
 // when output denormals are preserved or IEEE is set; RDNA4 applies it regardless.
-// Loose and Compatibility are supported; mode 1 may fall back to Loose.
-// Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
-// Loose may combine arithmetic and OMOD rounding; Compatibility rounds to FP16
-// before OMOD, preserving rocjitsu behavior (including intermediate overflow).
+// The _gfx12 forms support loose and bit-exact numeric semantics and resolve
+// Compatibility to mode 2. RDNA3 supports Loose and Compatibility; mode 1 may fall
+// back to Loose and mode 2 returns UNSUPPORTED_SEMANTICS. Mode 3 returns
+// UNSUPPORTED_FP_STATUS. Loose may combine arithmetic and OMOD rounding and need not
+// keep NaN priority; exact and Compatibility return the first NaN source and round to
+// FP16 before OMOD, as hardware does (including intermediate overflow).
 // Output flushing and OMOD test tininess after rounding: a product that reaches
 // the minimum normal only through subnormal rounding is still flushed.
 // Loose semantics require host nearest-even arithmetic with denormals enabled.

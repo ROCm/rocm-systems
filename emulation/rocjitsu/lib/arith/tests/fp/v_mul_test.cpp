@@ -230,12 +230,18 @@ TEST(FpMulF32, DirectedRounding) {
   check_mul_rounding<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
-// Compatibility preserves intermediate overflow; Loose can keep the finite wide product.
+// Compatibility and gfx12 strict exact preserve intermediate overflow, as gfx1201 does; Loose
+// can keep the finite wide product.
 TEST(FpMulF16, CompatibilityOmodRounding) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (auto call : {rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w32_gfx12}) {
-      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+        if (call == rj_arith_v_mul_f16_w32 &&
+            semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+          continue;
+        }
         for (uint64_t rounding :
              {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
           Registers<3, 32> r;
@@ -282,16 +288,19 @@ TEST(FpMulF16, TinyAfterRounding) {
       {0x9873, 0x2b31, 0, RJ_ARITH_ALU_OMOD_HALF, {0x8400, not_captured, not_captured, 0x8000}},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
       for (const auto &test : cases) {
         for (unsigned rounding = 0; rounding < 4; ++rounding) {
           if (test.expected[rounding] == not_captured) {
             continue;
           }
           const uint64_t flags = cpu | semantics | test.fp_flags | (uint64_t(rounding) << 24);
-          // gfx11 applies OMOD only when output denormals are flushed.
+          // gfx11 applies OMOD only when output denormals are flushed, and is loose-only.
           for (auto call : {rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w32_gfx12}) {
-            if (call == rj_arith_v_mul_f16_w32 && test.instruction_flags) {
+            if (call == rj_arith_v_mul_f16_w32 &&
+                (test.instruction_flags ||
+                 semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS)) {
               continue;
             }
             Registers<3, 32> r;

@@ -232,7 +232,8 @@ TEST(FpBinaryF32, NaNClampControl) {
   }
 }
 
-// Subtraction negates the subtrahend, including NaNs, without swapping source priority.
+// Subtraction negates the subtrahend, including NaNs, without swapping source priority, in
+// Compatibility and strict exact mode.
 TEST(FpSubF16, CompatibilityNanSigns) {
   using namespace rocjitsu::arith::test;
   constexpr uint16_t inputs[][4] = {
@@ -241,17 +242,17 @@ TEST(FpSubF16, CompatibilityNanSigns) {
       {0x7e00, 0x7e00, 0x7e00, 0xfe00},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (bool reverse : {false, true}) {
-      auto call = reverse ? rj_arith_v_subrev_f16_w32_gfx12 : rj_arith_v_sub_f16_w32_gfx12;
-      for (const auto &sample : inputs) {
-        Registers<3, 32> r;
-        r.v[0][0] = sample[0];
-        r.v[1][0] = sample[1];
-        uint32_t status = 0;
-        ASSERT_EQ(
-            call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, r.v + 2, r.v, r.v + 1, &status),
-            RJ_ARITH_SUCCESS);
-        EXPECT_EQ(r.v[2][0] & 0xffffU, sample[reverse ? 3 : 2]);
+    for (uint64_t semantics : hardware_semantics()) {
+      for (bool reverse : {false, true}) {
+        auto call = reverse ? rj_arith_v_subrev_f16_w32_gfx12 : rj_arith_v_sub_f16_w32_gfx12;
+        for (const auto &sample : inputs) {
+          Registers<3, 32> r;
+          r.v[0][0] = sample[0];
+          r.v[1][0] = sample[1];
+          uint32_t status = 0;
+          ASSERT_EQ(call(cpu | semantics, 1, 0, r.v + 2, r.v, r.v + 1, &status), RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[2][0] & 0xffffU, sample[reverse ? 3 : 2]);
+        }
       }
     }
   }
@@ -323,5 +324,62 @@ TEST(FpAddF64, NanPriority) {
     const uint64_t expected[] = {sample[2], sample[2], sample[2], sample[2]};
     check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample[0], sample[1], expected);
     check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample[0], sample[1], expected);
+  }
+}
+
+namespace {
+
+using BinaryF16 = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *, const uint32_t *const *,
+                          const uint32_t *const *, uint32_t *);
+
+// gfx1201 captures with IEEE set: the first NaN source wins after the operation's own negation
+// and is quieted, with its payload, in every guest rounding mode. Packed forms apply the rule to
+// each half independently.
+struct NanF16Case {
+  BinaryF16 call;
+  uint32_t a, b, expected;
+};
+
+const NanF16Case nan_f16_cases[] = {
+    {rj_arith_v_add_f16_w32_gfx12, 0x7c01, 0x7e00, 0x7e01},
+    {rj_arith_v_add_f16_w32_gfx12, 0xfe00, 0x7e00, 0xfe00},
+    {rj_arith_v_add_f16_w32_gfx12, 0x0000, 0x7c01, 0x7e01},
+    {rj_arith_v_sub_f16_w32_gfx12, 0x7c01, 0x7e00, 0x7e01},
+    {rj_arith_v_sub_f16_w32_gfx12, 0x0000, 0x7c01, 0xfe01},
+    {rj_arith_v_subrev_f16_w32_gfx12, 0x7c01, 0x7e00, 0xfe01},
+    {rj_arith_v_subrev_f16_w32_gfx12, 0xfe00, 0x7e00, 0x7e00},
+    {rj_arith_v_mul_f16_w32_gfx12, 0x7c01, 0x7e00, 0x7e01},
+    {rj_arith_v_mul_f16_w32_gfx12, 0x0000, 0x7c01, 0x7e01},
+    {rj_arith_v_pk_add_f16_w32_gfx12, 0xb8007c01U, 0x3e007e00U, 0x3c007e01U},
+    {rj_arith_v_pk_add_f16_w32_gfx12, 0xfc01fe00U, 0x3e007e00U, 0xfe01fe00U},
+    {rj_arith_v_pk_mul_f16_w32_gfx12, 0xb8007c01U, 0x3e007e00U, 0xba007e01U},
+    {rj_arith_v_pk_mul_f16_w32_gfx12, 0x80000000U, 0xfc01fe00U, 0xfe01fe00U},
+};
+
+} // namespace
+
+// Pin the captured NaN results in Compatibility and strict exact mode, so that a faster loose
+// path cannot change what default-mode RDNA4 execution returns.
+TEST(FpBinaryF16Gfx12, ExactNanMatchesHardware) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : hardware_semantics()) {
+      for (uint64_t rounding : {uint64_t(0), RJ_ARITH_FP_ROUND_ZERO}) {
+        for (const NanF16Case &test : nan_f16_cases) {
+          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << rounding << '/'
+                                            << (&test - nan_f16_cases));
+          Registers<3, 32> r;
+          r.v[0][0] = test.a;
+          r.v[1][0] = test.b;
+          r.v[2][0] = 0xa5a5a5a5U;
+          ASSERT_EQ(test.call(cpu | semantics | rounding | RJ_ARITH_FP_IEEE_MODE, 1, 0, r.v + 2,
+                              r.v, r.v + 1, nullptr),
+                    RJ_ARITH_SUCCESS);
+          const bool packed = test.call == rj_arith_v_pk_add_f16_w32_gfx12 ||
+                              test.call == rj_arith_v_pk_mul_f16_w32_gfx12;
+          EXPECT_EQ(r.v[2][0], packed ? test.expected : 0xa5a50000U | test.expected);
+        }
+      }
+    }
   }
 }

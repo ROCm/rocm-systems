@@ -86,7 +86,8 @@ TEST(FpPackedBinaryF16, TinyAfterRounding) {
   const uint32_t flushed[] = {0x43ff0000U, 0x43ff0000U, 0x43ff0000U, 0x43ff0000U};
   const uint32_t kept[] = {0x43ff0400U, 0x43ff0400U, 0x43ff03ffU, 0x43ff03ffU};
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
       for (unsigned rounding = 0; rounding < 4; ++rounding) {
         for (bool flush : {true, false}) {
           Registers<3, 32> r;

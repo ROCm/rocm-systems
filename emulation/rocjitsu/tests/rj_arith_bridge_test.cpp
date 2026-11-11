@@ -1788,9 +1788,11 @@ TEST(ArithBridgeTest, HalfBinaryVop2InlineGuestRoundingAndRejection) {
         ASSERT_TRUE(instruction.succeeded());
         const auto status =
             fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave);
-        EXPECT_EQ(status.succeeded(), policy_index == 0);
+        // RDNA4 accepts strict exact numeric requests; neither architecture reports status.
+        const bool accepted = policy_index == 0 || (policy_index == 1 && !is_rdna3);
+        EXPECT_EQ(status.succeeded(), accepted);
         EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, 0),
-                  policy_index == 0 ? 0xdead3c01U : 0xdeadbeefU);
+                  accepted ? 0xdead3c01U : 0xdeadbeefU);
         EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
       }
 }
@@ -3503,7 +3505,8 @@ TEST(ArithBridgeTest, PackedBinaryInlineRoundingAndStrictPolicy) {
                                             {.vdst = 1, .src0 = 242, .src1 = 257, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
-          const bool rejected = policy_index == 1 || policy_index == 2;
+          // RDNA4 accepts strict exact numeric requests; neither architecture reports status.
+          const bool rejected = policy_index == 2 || (policy_index == 1 && is_rdna3);
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
