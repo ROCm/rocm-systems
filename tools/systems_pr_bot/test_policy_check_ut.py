@@ -483,7 +483,7 @@ class RequiredCheckRunTests(unittest.TestCase):
         missing, failing, conclusions = pc.summarize_required_checks(self.policy, runs)
         self.assertEqual(missing, [])
         self.assertEqual(failing, [])
-        self.assertEqual(conclusions, {"pre-commit": "success, success"})
+        self.assertEqual(conclusions, {"pre-commit": "success"})
 
         result = pc.build_check_results(self.policy, runs)[0]
         self.assertTrue(result.passed)
@@ -494,7 +494,7 @@ class RequiredCheckRunTests(unittest.TestCase):
         missing, failing, conclusions = pc.summarize_required_checks(self.policy, runs)
         self.assertEqual(missing, [])
         self.assertEqual(failing, [])
-        self.assertEqual(conclusions, {"pre-commit": "null, success"})
+        self.assertEqual(conclusions, {"pre-commit": "null"})
 
         result = pc.build_check_results(self.policy, runs)[0]
         self.assertFalse(result.passed)
@@ -789,11 +789,16 @@ class RequiredCheckPollingTests(unittest.TestCase):
         branch: str = "develop",
         changed_files: Optional[int] = None,
         workflow_snapshots: Optional[List[List[Dict[str, Any]]]] = None,
+        global_snapshots: Optional[List[List[Dict[str, Any]]]] = None,
     ) -> tuple[int, int, int]:
         remaining = iter(snapshots)
         workflows = iter(workflow_snapshots) if workflow_snapshots is not None else None
         active: List[Dict[str, Any]] = []
         active_workflows: List[Dict[str, Any]] = []
+        global_remaining = (
+            iter(global_snapshots) if global_snapshots is not None else None
+        )
+        active_global: List[Dict[str, Any]] = []
         self.check_requests = []
         polls = 0
         files = [
@@ -806,7 +811,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
         ]
 
         def get(url: str, token: str) -> Any:
-            nonlocal active, active_workflows, polls
+            nonlocal active, active_workflows, active_global, polls
             parsed = urllib.parse.urlparse(url)
             query = urllib.parse.parse_qs(parsed.query)
             if parsed.path.endswith("/pulls/7"):
@@ -848,6 +853,9 @@ class RequiredCheckPollingTests(unittest.TestCase):
                             make_workflow_run(display_title=f"PR #7: {branch}@base-sha")
                         ]
                     )
+                    active_global = (
+                        next(global_remaining) if global_remaining is not None else []
+                    )
                     polls += 1
                 return {
                     "total_count": len(active_workflows),
@@ -863,6 +871,12 @@ class RequiredCheckPollingTests(unittest.TestCase):
                 return {
                     "total_count": len(active),
                     "check_runs": active[(page - 1) * 100 : page * 100],
+                }
+            if parsed.path.endswith("/commits/sha/check-runs"):
+                page = int(query["page"][0])
+                return {
+                    "total_count": len(active_global),
+                    "check_runs": active_global[(page - 1) * 100 : page * 100],
                 }
             self.fail(f"Unexpected GitHub API request: {url}")
 
@@ -893,6 +907,53 @@ class RequiredCheckPollingTests(unittest.TestCase):
             result = pc.main([])
         self.posted_comments = [call.args[2]["body"] for call in post.call_args_list]
         return result, polls, sleep.call_count
+
+    def test_reported_legacy_failure_and_pending_remain_required(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        legacy = {**make_check_run("failure"), "check_suite": {"id": 9000}}
+        self.assertEqual(self._run([passed], global_snapshots=[[legacy]]), (1, 1, 0))
+        for conclusion in (None, "success"):
+            pending = {**legacy, "status": "in_progress", "conclusion": conclusion}
+            completed = {**legacy, "status": "completed", "conclusion": "success"}
+            self.assertEqual(
+                self._run([passed, passed], global_snapshots=[[pending], [completed]]),
+                (0, 2, 1),
+            )
+
+    def test_legacy_success_cannot_replace_missing_exact_workflow(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        legacy = {**make_check_run("success"), "check_suite": {"id": 9000}}
+        old = make_workflow_run(display_title="PR #7: develop@older-base")
+        self.assertEqual(
+            self._run(
+                [passed, passed],
+                workflow_snapshots=[[old], [make_workflow_run()]],
+                global_snapshots=[[legacy], [legacy]],
+            ),
+            (0, 2, 1),
+        )
+
+    def test_old_scoped_suite_is_excluded_from_global_results(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        old = make_workflow_run(id=99, display_title="PR #7: develop@older-base")
+        stale_failure = {**make_check_run("failure"), "check_suite": {"id": 990}}
+        self.assertEqual(
+            self._run(
+                [passed],
+                workflow_snapshots=[[old, make_workflow_run()]],
+                global_snapshots=[[stale_failure]],
+            ),
+            (0, 1, 0),
+        )
 
     def test_retarget_waits_for_new_comparison_before_accepting_or_failing(
         self,
@@ -1264,7 +1325,7 @@ class LoadPolicyTests(unittest.TestCase):
                 self.assertEqual(check.workflow, "scoped-formatting.yml")
                 self.assertEqual(check.branches, [])
 
-    def test_other_workflows_do_not_publish_required_check_names(self) -> None:
+    def test_other_workflow_check_collisions_are_accounted_for(self) -> None:
         policy = pc.load_policy(THIS_DIR / "policy.yml")
         workflows = THIS_DIR.parents[1] / ".github" / "workflows"
         bot_workflow = pc.yaml.load(
@@ -1275,6 +1336,7 @@ class LoadPolicyTests(unittest.TestCase):
         for branch in bot_branches:
             self.assertRegex(branch, r"^[\w./-]+$")
         required_names = {check.name for check in policy.required_checks}
+        collisions = set()
         for path in workflows.glob("*.yml"):
             if path.name == "scoped-formatting.yml":
                 continue
@@ -1294,7 +1356,10 @@ class LoadPolicyTests(unittest.TestCase):
                         for branch in bot_branches
                     ):
                         continue
-                    self.fail(f"{path.name} duplicates formatting check {name}")
+                    collisions.add((path.name, name))
+        # The shared name is deliberately preserved during rollout. Production
+        # polling must retain this producer in addition to the pinned suite.
+        self.assertEqual(collisions, {("rccl-format-and-lint.yml", "pre-commit")})
 
     def test_workflows_pin_the_same_comparison_and_events(self) -> None:
         workflows = THIS_DIR.parents[1] / ".github" / "workflows"

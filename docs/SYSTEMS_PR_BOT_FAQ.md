@@ -210,6 +210,13 @@ its formatting run has not appeared in the API yet. It waits for the selected
 run to complete and retains passed jobs when GitHub reruns only failed jobs.
 Later pushes to the base branch do not change the event's pinned comparison.
 
+Other workflows can publish the same check name: RCCL also uses `pre-commit`.
+The bot retains their reported head-commit results alongside the selected
+formatting suite. A failure or pending producer cannot be hidden by another
+producer's success, and a legacy success cannot replace a missing scoped job.
+Checks from older comparisons of the declared workflow are excluded. This
+does not discover a legacy producer that has not reported a check yet.
+
 The required check names and owning workflow are declared in
 `tools/systems_pr_bot/policy.yml`. The formatting workflow schedules every
 named job without PR path filters or target-branch gates. Each job inspects

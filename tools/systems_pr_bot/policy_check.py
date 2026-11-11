@@ -474,24 +474,22 @@ def get_required_check_runs(
     policy: Policy,
     context: PullRequestContext,
 ) -> List[Dict[str, Any]]:
-    """Read checks only from the latest run of each pinned PR comparison.
+    """Pin declared workflow comparisons and retain other reported producers.
 
     Run titles capture the event's PR number, target ref, and target SHA;
     the API query and response also pin its head SHA and event type. Unlike
     live PR metadata or timestamps, this identity rejects other PRs and targets.
     Every PR event evaluates its exact base commit, including metadata edits.
+    Same-name results outside those workflows remain required independently.
     """
     groups: Dict[Optional[str], set[str]] = {}
     for check in policy.required_checks:
         groups.setdefault(check.workflow, set()).add(check.name)
     results: List[Dict[str, Any]] = []
+    owned_suites: set[int] = set()
+    bound_names = {check.name for check in policy.required_checks if check.workflow}
     for workflow, names in groups.items():
         if workflow is None:
-            results.extend(
-                run
-                for run in get_check_runs(owner, repo, context.head_sha, token)
-                if run.get("name") in names
-            )
             continue
         endpoint = f"https://api.github.com/repos/{owner}/{repo}/actions"
         query = urllib.parse.urlencode(
@@ -502,6 +500,9 @@ def get_required_check_runs(
             f"{endpoint}/workflows/{workflow}/runs?{query}",
             actions_token,
         ):
+            suite_id = run.get("check_suite_id")
+            if type(suite_id) is int and suite_id > 0:
+                owned_suites.add(suite_id)
             if (
                 run.get("event") == "pull_request"
                 and run.get("head_sha") == context.head_sha
@@ -515,6 +516,7 @@ def get_required_check_runs(
                     )
                 candidates.append(run)
         if not candidates:
+            results.extend({"name": name, "conclusion": None} for name in names)
             continue
         # Select by creation identity, never by completion/start time: an old
         # run may finish or be re-run after its replacement has been scheduled.
@@ -542,6 +544,15 @@ def get_required_check_runs(
             owner, repo, context.head_sha, token, check_suite_id=suite_id
         )
         results.extend(check for check in checks if check.get("name") in names)
+        present = {check.get("name") for check in checks}
+        missing_conclusion = (
+            run["conclusion"]
+            if run.get("conclusion") not in {None, "success"}
+            else None
+        )
+        results.extend(
+            {"name": name, "conclusion": missing_conclusion} for name in names - present
+        )
         # Startup failures and cancellations may leave required jobs uncreated.
         # Surface that terminal failure instead of waiting for impossible jobs.
         if run.get("conclusion") not in {None, "success"}:
@@ -556,11 +567,19 @@ def get_required_check_runs(
                 raise RuntimeError(
                     f"{workflow} concluded {run['conclusion']} but its required checks report success"
                 )
-            present = {check.get("name") for check in checks}
-            results.extend(
-                {"name": name, "conclusion": run["conclusion"]}
-                for name in names - present
-            )
+    # Other workflows can publish the same required name (for example RCCL's
+    # pre-commit). Retain their reported results without importing jobs from an
+    # older PR comparison of the workflow whose identity we pinned above.
+    for check in get_check_runs(owner, repo, context.head_sha, token):
+        name = check.get("name")
+        if name in groups.get(None, set()):
+            results.append(check)
+        elif name in bound_names:
+            suite = (check.get("check_suite") or {}).get("id")
+            if type(suite) is not int or suite <= 0:
+                raise RuntimeError("Required check run is missing a valid check suite")
+            if suite not in owned_suites:
+                results.append(check)
     return results
 
 
@@ -817,25 +836,16 @@ def summarize_required_checks(
       - failing: required checks that concluded not-success
       - conc_by_name: name -> sorted conclusions (string; 'null' if pending)
     """
-    by_name = _group_check_runs_by_name(check_runs)
-
-    conc_by_name: Dict[str, str] = {}
-    for name, runs in by_name.items():
-        conclusions = sorted(
-            str(run.get("conclusion")) if run.get("conclusion") is not None else "null"
-            for run in runs
-        )
-        conc_by_name[name] = ", ".join(conclusions)
-
+    conc_by_name = aggregate_check_conclusions(check_runs)
     missing = [
-        check.name for check in policy.required_checks if check.name not in by_name
+        check.name for check in policy.required_checks if check.name not in conc_by_name
     ]
-
-    failing: List[str] = []
-    for check in policy.required_checks:
-        _, _, failed_conclusions = _required_check_status(by_name.get(check.name, []))
-        if failed_conclusions:
-            failing.append(f"{check.name}={failed_conclusions}")
+    failing = [
+        f"{check.name}={conc_by_name[check.name]}"
+        for check in policy.required_checks
+        if check.name in conc_by_name
+        and conc_by_name[check.name] not in {"null", "success", "neutral", "skipped"}
+    ]
 
     return missing, failing, conc_by_name
 
@@ -860,26 +870,19 @@ def _required_check_status(
 ) -> Tuple[bool, bool, Optional[str]]:
     """Return passed, pending, and failed conclusions for one check name.
 
-    Each applicable workflow has a distinct required name. If the API returns
+    Each formatting scope has a distinct required name. If the API returns
     several current runs with that name, every run must be accepted. Failures
     take precedence over pending runs so they can be reported immediately.
     """
     if not check_runs:
         return False, True, None
 
-    failed_conclusions = sorted(
-        {
-            str(conclusion)
-            for run in check_runs
-            if (conclusion := run.get("conclusion")) is not None
-            and str(conclusion) not in _ACCEPTED_CHECK_CONCLUSIONS
-        }
-    )
-    if failed_conclusions:
-        return False, False, ", ".join(failed_conclusions)
-    if any(run.get("conclusion") is None for run in check_runs):
+    conclusion = next(iter(aggregate_check_conclusions(check_runs).values()))
+    if conclusion == "null":
         return False, True, None
-    return True, False, None
+    if conclusion in _ACCEPTED_CHECK_CONCLUSIONS:
+        return True, False, None
+    return False, False, conclusion
 
 
 def upsert_comment(
@@ -1511,9 +1514,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             # Check whether every required CI check has a conclusion yet.
             all_concluded = all(
                 bool(by_name.get(check.name))
-                and all(
-                    run.get("conclusion") is not None for run in by_name[check.name]
-                )
+                and not _required_check_status(by_name[check.name])[1]
                 for check in policy.required_checks
             )
             if all_concluded:
