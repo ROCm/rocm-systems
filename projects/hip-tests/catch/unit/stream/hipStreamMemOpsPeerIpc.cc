@@ -39,6 +39,14 @@ constexpr uint32_t kBarrierToken = 0x5eed0001u;
 constexpr int kSentinelValue = 0x1234;
 constexpr int kMaxBarrierDevices = 4;
 
+/* How long a gated stream is given to run before its sentinel is sampled. Long enough that a
+   stream-memory-op that never held would have let its kernel through by now. */
+constexpr std::chrono::milliseconds kGateSettleDelay{200};
+/* Upper bound on how long a released barrier may take to drain before it counts as stalled. */
+constexpr std::chrono::seconds kStreamWaitTimeout{30};
+/* How often WaitForStreams re-queries the streams it is waiting on. */
+constexpr std::chrono::milliseconds kStreamPollInterval{1};
+
 typedef int ShareableHandle;
 
 void CheckVmmSupported(int device_ordinal) {
@@ -181,7 +189,7 @@ bool WaitForStreams(const std::vector<hipStream_t>& streams, std::chrono::second
     if (all_done) {
       return true;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(kStreamPollInterval);
   } while (std::chrono::steady_clock::now() < deadline);
   return false;
 }
@@ -253,7 +261,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_WaitValueGatedByPeerWrite) {
   // while after its work has actually completed, so a query result here would pass whether or not
   // the wait held. `waiter_stream` is non-blocking, so this host copy on the null stream is not
   // ordered behind the gated kernel.
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  std::this_thread::sleep_for(kGateSettleDelay);
   int gated_sentinel = -1;
   HIP_CHECK(hipMemcpy(&gated_sentinel, sentinel, sizeof(gated_sentinel), hipMemcpyDeviceToHost));
 
@@ -262,7 +270,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_WaitValueGatedByPeerWrite) {
   HIP_CHECK(hipStreamWriteValue32(writer_stream, flag, kBarrierToken, 0));
   HIP_CHECK(hipStreamSynchronize(writer_stream));
 
-  const bool waiter_progressed = WaitForStreams({waiter_stream}, std::chrono::seconds(30));
+  const bool waiter_progressed = WaitForStreams({waiter_stream}, kStreamWaitTimeout);
 
   REQUIRE(gated_sentinel == 0);
   REQUIRE(waiter_progressed);
@@ -382,7 +390,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
     issueRank(rank);
   }
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  std::this_thread::sleep_for(kGateSettleDelay);
   std::vector<int> gated_sentinels(rank_count, -1);
   for (int rank = 1; rank < rank_count; ++rank) {
     HIP_CHECK(hipSetDevice(devices[rank]));
@@ -392,7 +400,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
 
   issueRank(0);
 
-  const bool barrier_completed = WaitForStreams(streams, std::chrono::seconds(30));
+  const bool barrier_completed = WaitForStreams(streams, kStreamWaitTimeout);
 
   if (!barrier_completed) {
     // Release the stalled barrier from an independent stream so teardown cannot hang.
@@ -401,7 +409,7 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
     HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(slots), kBarrierToken, rank_count,
                                 rescue.stream()));
     HIP_CHECK(hipStreamSynchronize(rescue.stream()));
-    (void)WaitForStreams(streams, std::chrono::seconds(30));
+    (void)WaitForStreams(streams, kStreamWaitTimeout);
   }
 
   std::vector<int> released_sentinels(rank_count, -1);
