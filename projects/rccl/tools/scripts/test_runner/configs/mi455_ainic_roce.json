@@ -6850,6 +6850,16 @@
           "name": "Symmetric_AllGather_TDM_Window",
           "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it, and 1 MiB below the window; checks the reported algorithm, the logged kernel and every rank's data",
           "test_filter": "SymWin_AllGatherTdm.*"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaStData",
+          "description": "Forced AllGather_HierLsaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaST_PositionDependentData"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaTmaStData",
+          "description": "Forced AllGather_HierLsaTmaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaTmaST_PositionDependentData"
         }
       ]
     },
