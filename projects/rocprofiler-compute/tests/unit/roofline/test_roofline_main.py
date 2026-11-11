@@ -36,7 +36,7 @@ class MockMspec:
 
 
 class MockNavi48Mspec:
-    """Minimal MachineSpecs: a Navi48, whose memory levels include MALL and DRAM."""
+    """Minimal MachineSpecs: a Navi48, whose memory levels include MALL and GDDR6."""
 
     gpu_model = "rdna4_navi48"
     gpu_series = "rdna4"
@@ -402,13 +402,13 @@ def test_canonical_frame_requires_bandwidths_and_peaks() -> None:
     assert canonical_frame([500.0], [0.0, float("inf")]) is None
 
 
-def test_gfx1201_figure_draws_the_dram_and_mall_roofs_where_mi_draws_hbm(
+def test_gfx1201_figure_draws_the_gddr6_and_mall_roofs_where_mi_draws_hbm(
     tmp_path: Path, benchmarked_roofline
 ) -> None:
-    """Navi48 names its device-memory roof DRAM and draws the measured Infinity
+    """Navi48 names its device-memory roof GDDR6 and draws the measured Infinity
     Cache bandwidth as the MALL roof. An MI roofline keeps HBM and no MALL."""
     header = (
-        "device,DRAMBw,MALLBw,L2Bw,L1Bw,L0Bw,LDSBw,FP32Flops,FP64Flops,WMMAF16Flops"
+        "device,GDDR6Bw,MALLBw,L2Bw,L1Bw,L0Bw,LDSBw,FP32Flops,FP64Flops,WMMAF16Flops"
     )
     row = "0,170,345,4800,4900,7000,5300,12900,290,71000"
     navi48_dir = tmp_path / "navi48"
@@ -433,17 +433,17 @@ def test_gfx1201_figure_draws_the_dram_and_mall_roofs_where_mi_draws_hbm(
         for trace in benchmarked_roofline().generate_plot("FP64", fig=go.Figure()).data
     ]
 
-    assert navi48_names[:6] == ["LDS", "L0", "L1", "L2", "MALL", "DRAM"]
+    assert navi48_names[:6] == ["LDS", "L0", "L1", "L2", "MALL", "GDDR6"]
     assert "HBM" not in navi48_names
     assert "HBM" in mi_names
     assert "MALL" not in mi_names
-    assert "DRAM" not in mi_names
+    assert "GDDR6" not in mi_names
 
 
-def test_dram_and_mall_traces_have_their_own_colors() -> None:
-    """DRAM shares the HBM color, and MALL is black, so neither falls back to
+def test_gddr6_and_mall_traces_have_their_own_colors() -> None:
+    """GDDR6 shares the HBM color, and MALL is black, so neither falls back to
     the default trace color."""
-    assert get_color("dram") == get_color("hbm")
+    assert get_color("gddr6") == get_color("hbm")
     assert get_color("mall") == "#000000"
 
 

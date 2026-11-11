@@ -399,7 +399,7 @@ class Bench_base(ABC):
 
     # Device-memory bandwidth benchmark. Defaults keep every HBM architecture
     # on the HBM_bw entry point and the HBM test key. gfx1201 passes DRAM_bw
-    # and the DRAM label, and registers the result under the DRAM test key.
+    # and the GDDR6 label, and registers the result under the GDDR6 test key.
     def hbm_bw_benchmark(
         self, device: int, kernel_name: str = "HBM_bw", label: str = "HBM"
     ) -> float:

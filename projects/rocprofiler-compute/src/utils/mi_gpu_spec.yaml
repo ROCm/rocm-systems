@@ -491,11 +491,11 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
-        # Device memory is DRAM (CSV column DRAMBw). The 64 MB Infinity Cache
+        # Device memory is GDDR6 (CSV column GDDR6Bw). The 64 MB Infinity Cache
         # uses the MALL column. No counter attributes traffic to the Infinity
         # Cache, so its roof is drawn without a kernel point.
         roofline:
-          bandwidth: [DRAM, MALL, L2, L1, L0, LDS]
+          bandwidth: [GDDR6, MALL, L2, L1, L0, LDS]
           plot_mall: true
           # No native support for I8 or I64. RDNA4 has no native 8-bit VALU
           # and no native 64-bit integer multiply-add.
@@ -504,7 +504,7 @@ mi_gpu_spec:
         models:
           - gpu_model: rdna4_navi48
             design:
-              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "DRAM"]
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "GDDR6"]
             chip_ids:
               physical: 30032  # 0x7550, Radeon RX 9070 and RX 9070 XT
 
