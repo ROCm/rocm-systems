@@ -15,8 +15,8 @@ results are written to --test-results-dir with well-known filenames for CI uploa
 Prerequisites
 =============
 * Python 3.8+
-* CMake >= 3.16
-* A C/C++ toolchain (gcc/g++ or clang)
+* CMake >= 3.20
+* gcc/g++, plus clang (installed when CMake would find no amdclang++/clang++)
 * Root / sudo privileges (package install touches /opt/rocm)
 * For Debian/Ubuntu: apt
 * For RHEL/AlmaLinux/Fedora: dnf
@@ -435,7 +435,8 @@ def build_prereqs_present() -> bool:
 
     cmake/make/gcc alone are not enough: a missing pkg-config, git, libdrm
     header or rpmbuild only surfaces much later, at cmake configure, at
-    FetchContent's clone, or inside `make package`.
+    FetchContent's clone, or inside `make package`. The Clang compiler is
+    checked separately by install_clang().
     """
     if not all(shutil.which(t) for t in ("cmake", "make", "pkg-config", "git", "rpmbuild")):
         return False
@@ -520,6 +521,122 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
         )
 
 
+def _compiler_runs(path: Optional[str]) -> bool:
+    """True if *path* is set and answers `--version`, as CMake checks it."""
+    if not path:
+        return False
+    try:
+        return (
+            subprocess.call(
+                [path, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            == 0
+        )
+    except OSError:
+        return False
+
+
+def _hipconfig_rocm_path() -> str:
+    """ROCm path from `hipconfig --path`, as CMakeLists.txt finds it; "" if none."""
+    hipconfig = shutil.which("hipconfig")
+    if not hipconfig:
+        return ""
+    try:
+        return subprocess.run(
+            [hipconfig, "--path"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            universal_newlines=True,
+        ).stdout.strip()
+    except OSError:
+        return ""
+
+
+def clang_toolchain_present() -> bool:
+    """True if the compiler search in CMakeLists.txt finds a working pair.
+
+    Mirrors that search: non-empty CC/CXX skip it; with hipconfig only the
+    ROCm LLVM directories are searched (amdclang, then clang); otherwise
+    clang and clang++ must both be on PATH. A name on PATH is not enough:
+    ROCm base images carry ccache links such as /usr/local/bin/amdclang++
+    -> ccache with no compiler behind them.
+    """
+    if os.environ.get("CC") or os.environ.get("CXX"):
+        return True
+    search_path = None
+    pairs = [("clang++", "clang")]
+    rocm_path = _hipconfig_rocm_path()
+    if rocm_path:
+        search_path = os.pathsep.join(
+            os.path.join(rocm_path, sub, "bin") for sub in ("lib/llvm", "llvm")
+        )
+        pairs.insert(0, ("amdclang++", "amdclang"))
+    return any(
+        all(_compiler_runs(shutil.which(name, path=search_path)) for name in pair) for pair in pairs
+    )
+
+
+def install_clang(cfg: "RunnerConfig") -> None:
+    """Install the distro clang when CMake would find no Clang compiler.
+
+    CMakeLists.txt auto-selects amdclang++ or clang++, never GCC, so an
+    image that only has GCC needs clang before configure.
+    """
+    if clang_toolchain_present():
+        return
+    rocm_path = _hipconfig_rocm_path()
+    if rocm_path:
+        # CMake then searches only ROCm's LLVM, so a distro clang would go unused.
+        print(f"No working amdclang++/clang++ under {rocm_path}; install ROCm's LLVM component")
+        return
+
+    print("Installing clang (CMake would find no working amdclang++ or clang++)...")
+    if cfg.package_manager == "apt":
+        if cfg.refresh_apt:
+            run_command(
+                ["apt-get", "update"],
+                name="apt-update-clang",
+                retries=cfg.retries,
+                log_dir=cfg.log_dir,
+            )
+        run_command(
+            ["apt-get", "install", "-y", "--no-install-recommends", "clang"],
+            name="apt-install-clang",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+    elif cfg.package_manager == "dnf":
+        cmd = dnf_install_command() + ["clang"]
+        run_command(cmd, name=f"{cmd[0]}-install-clang", retries=cfg.retries, log_dir=cfg.log_dir)
+    elif cfg.package_manager == "zypper":
+        run_command(
+            ["zypper", "--non-interactive", "install", "clang"],
+            name="zypper-install-clang",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+
+
+def dnf_install_command() -> List[str]:
+    """Return the dnf (or AzureLinux 3 tdnf) install command prefix."""
+    # AzureLinux 3 ships tdnf; prefer it when present, fall back to dnf.
+    if not shutil.which("tdnf"):
+        return ["dnf", "install", "-y", "--setopt=skip_if_unavailable=True"]
+    # AzureLinux 3 CI containers ship a tdnfrepogpgcheck plugin that
+    # rejects all repo metadata when the Azure Linux GPG keys are
+    # missing/expired, which disables every repo before install can run.
+    # --noplugins skips that check; --nogpgcheck covers package-level
+    # signing if that also trips.
+    return [
+        "tdnf",
+        "install",
+        "-y",
+        "--setopt=skip_if_unavailable=True",
+        "--noplugins",
+        "--nogpgcheck",
+    ]
+
+
 def install_netlink_deps(cfg: "RunnerConfig") -> None:
     """Install libnl-3 / libmnl development headers used by amdsmi's CMake.
 
@@ -563,21 +680,8 @@ def install_netlink_deps(cfg: "RunnerConfig") -> None:
             log_dir=cfg.log_dir,
         )
     elif cfg.package_manager == "dnf":
-        # AzureLinux 3 ships tdnf; prefer it when present, fall back to dnf.
-        is_tdnf = bool(shutil.which("tdnf"))
-        installer = "tdnf" if is_tdnf else "dnf"
-        cmd = [installer, "install", "-y", "--setopt=skip_if_unavailable=True"]
-        # AzureLinux 3 CI containers ship a tdnfrepogpgcheck plugin that
-        # rejects all repo metadata when the Azure Linux GPG keys are
-        # missing/expired, which disables every repo before install can run.
-        # --noplugins skips that check; --nogpgcheck covers package-level
-        # signing if that also trips.
-        if is_tdnf:
-            cmd += ["--noplugins", "--nogpgcheck"]
-        cmd += ["libnl3-devel", "libmnl-devel"]
-        run_command(
-            cmd, name=f"{installer}-install-netlink", retries=cfg.retries, log_dir=cfg.log_dir
-        )
+        cmd = dnf_install_command() + ["libnl3-devel", "libmnl-devel"]
+        run_command(cmd, name=f"{cmd[0]}-install-netlink", retries=cfg.retries, log_dir=cfg.log_dir)
     elif cfg.package_manager == "zypper":
         run_command(
             ["zypper", "--non-interactive", "install", "libnl3-devel", "libmnl-devel"],
@@ -1420,6 +1524,9 @@ def main() -> None:
 
     # 3c. Install libnl-3 / libmnl headers required by amdsmi's CMake config.
     install_netlink_deps(cfg)
+
+    # 3d. Add clang when CMake's compiler search would find none.
+    install_clang(cfg)
 
     # 4. Build
     if not cfg.skip_build:

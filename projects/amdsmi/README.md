@@ -38,6 +38,18 @@ The following are required to install and use the AMD SMI library through its la
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64
   ```
 
+### Build requirements
+
+Building from source uses ROCm's amdclang++ (or ROCm's clang++ if that is
+missing), and the system clang++ when ROCm is not installed. GCC is opt-in:
+
+```bash
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+```
+
+See [Build AMD SMI from source](./docs/install/build.md) for how the compiler
+is found, other compiler options and troubleshooting.
+
 ### Python interface and CLI tool prerequisites
 
 * Python 3.6.8+ (64-bit)

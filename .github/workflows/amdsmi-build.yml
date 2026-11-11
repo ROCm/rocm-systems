@@ -49,6 +49,19 @@ defaults:
     shell: bash
 
 jobs:
+  # Plain-Python tests of run_amdsmi_build.py: no GPU or root needed, so they
+  # run once on a hosted runner and a failure cannot skip the GPU steps.
+  build-script-tests:
+    name: run_amdsmi_build.py tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/amdsmi/tests/amdsmi_build
+      - name: Run the tests
+        run: python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build -v
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
@@ -67,7 +80,9 @@ jobs:
       matrix:
         include:
           - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
-          - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
+          # compiler_autodetect: build with the compiler CMake picks itself
+          # (ROCm's amdclang++) instead of the image's CC/CXX.
+          - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb, compiler_autodetect: true }
           # The internal registry has no debian-12/13, so these two use the
           # official images, pinned by digest. They ship no build tooling;
           # run_amdsmi_build.py installs it.
@@ -139,6 +154,9 @@ jobs:
           # The script autodetects package manager, format, and distro
           # quirks (RHEL10/AlmaLinux8 QA_RPATHS, AzureLinux3
           # more_itertools, etc.) from /etc/os-release.
+          if [ "${{ matrix.compiler_autodetect || false }}" = true ]; then
+            unset CC CXX
+          fi
           python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \

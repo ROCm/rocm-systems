@@ -21,8 +21,9 @@ To build the AMD SMI library, the following components are required. Note that
 the software versions specified were used during development; earlier
 versions are not guaranteed to work.
 
-* CMake (v3.15.0 or later) -- `python3 -m pip install cmake`
-* g++ (v5.4.0 or later)
+* CMake (v3.20 or later) -- `python3 -m pip install cmake`
+* amdclang++ from ROCm, or clang++ -- see [Compiler requirements](#build_compilers)
+* g++ (v5.4.0 or later) -- Clang also uses its C++ standard library
 * libdrm-dev (for Ubuntu and Debian)
 * libssl-dev (for Ubuntu and Debian)
 * libdrm-devel (for RPM-based distributions)
@@ -37,6 +38,38 @@ required:
 Users that wish to also build the AMD SMI Rust interface will also need the following components:
 
 * Rust (1.56 or later)
+
+(build_compilers)=
+## Compiler requirements
+
+AMD SMI selects a Clang compiler in the following priority order:
+
+1. **amdclang++** (recommended) - AMD's optimized Clang compiler from ROCm
+2. **clang++** - ROCm's clang++ if ROCm is installed, otherwise system clang++
+
+**GCC is supported but not auto-selected.** To build with GCC, use a toolchain file (see below).
+
+### How compilers are discovered
+
+The build uses **`hipconfig --path`** for tool-based ROCm discovery.
+
+**If ROCm is installed** (hipconfig found), only ROCm's LLVM directories,
+`<rocm-path>/lib/llvm/bin` and then `<rocm-path>/llvm/bin`, are searched:
+
+1. `amdclang++` and `amdclang`
+2. `clang++` and `clang`
+
+There is no fallback to the system clang++, so ROCm and system toolchains are
+not mixed.
+
+**If ROCm is not installed** (hipconfig not found), PATH is searched for
+`clang++` and `clang` (for example `/usr/bin/clang++`).
+
+Both compilers of a pair must run (`--version`): a name on PATH can be a ccache
+link with no compiler behind it.
+
+**Note:** The search never assumes a fixed path such as `/opt/rocm`; it uses
+the path `hipconfig --path` reports, so several ROCm installations work.
 
 ## Build steps
 
@@ -61,7 +94,7 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    ```bash
    mkdir -p build
    cd build
-   cmake ..
+   cmake ..          # Picks amdclang++, else clang++
    make -j $(nproc)
    make install
    ```
@@ -74,6 +107,76 @@ Users that wish to also build the AMD SMI Rust interface will also need the foll
    ```
 
    To build with AddressSanitizer instrumentation, see [Build with AddressSanitizer](#build_asan).
+
+## Alternative compiler options
+
+### Building with GCC
+
+To build with GCC instead of amdclang++, use the provided toolchain file:
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
+make -j $(nproc)
+```
+
+To use a specific GCC version, edit `cmake/toolchains/amdsmi-gcc-toolchain.cmake` or create your own toolchain file.
+
+Setting `CC` or `CXX` also skips the Clang auto-detection. Set both, in a new
+build directory, so C and C++ use the same toolchain: `CC=gcc CXX=g++ cmake ..`.
+
+### Building with clang++
+
+To use clang++ instead of amdclang++, explicitly specify the compiler with full path.
+
+**Using ROCm's clang++:**
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_CXX_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang++ -DCMAKE_C_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang
+make -j $(nproc)
+```
+
+**Using system clang++:**
+
+Requires clang to be installed (`sudo apt install clang` on Ubuntu/Debian).
+
+```bash
+mkdir -p build
+cd build
+cmake .. -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_C_COMPILER=/usr/bin/clang
+make -j $(nproc)
+```
+
+### Troubleshooting compiler detection
+
+**If cmake fails with "No suitable C++ compiler found (amdclang++ or clang++)":**
+
+```bash
+# ROCm installed: put hipconfig on PATH; ROCm's LLVM must be installed too
+export PATH=$PATH:/opt/rocm/bin
+"$(hipconfig --path)/lib/llvm/bin/amdclang++" --version
+
+# No ROCm: install clang
+sudo apt install clang     # Ubuntu/Debian
+sudo dnf install clang     # RHEL/AlmaLinux/Fedora
+```
+
+**To check what compiler will be used:**
+
+```bash
+# A compiler counts only if it runs; a name on PATH can be a ccache link
+amdclang++ --version
+clang++ --version
+
+# A new build directory's configure output names the compiler it picked
+cmake .. | grep 'Clang compiler'
+
+# An existing build directory keeps its compiler in the cache
+grep '^CMAKE_CXX_COMPILER:' CMakeCache.txt
+```
 
 (rebuild_py_wrapper)=
 ## Rebuild the Python wrapper
@@ -125,6 +228,21 @@ Once the tests are [built](#build_tests), you can run them by executing the
 ```bash
 cmake -DADDRESS_SANITIZER=ON ..
 make -j $(nproc)
+```
+
+With Clang, instrumented executables such as `amdsmitst` load the shared ASAN
+runtime, which is not on the default library path. Add its directory before
+running them, or configure with the GCC toolchain file instead:
+
+```bash
+# From the build directory
+AMDSMI_CXX=$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' CMakeCache.txt)
+ASAN_RT=$("$AMDSMI_CXX" -print-file-name="libclang_rt.asan-$(uname -m).so")
+if [ -f "$ASAN_RT" ]; then
+  export LD_LIBRARY_PATH="$(dirname "$ASAN_RT")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+  echo "No shared Clang ASAN runtime for $AMDSMI_CXX"
+fi
 ```
 
 `-DENABLE_ASAN_PACKAGING=ON` produces a library-only `amd-smi-lib-asan` package.
