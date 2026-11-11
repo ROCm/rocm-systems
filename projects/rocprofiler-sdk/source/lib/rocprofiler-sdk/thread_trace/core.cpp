@@ -232,13 +232,6 @@ ThreadTracerAgent::get_start_packet()
 void
 ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
 {
-    auto lock = std::unique_lock{trace_resources_mut};
-    iterate_data_locked(handle, data);
-}
-
-void
-ThreadTracerAgent::iterate_data_locked(aqlprofile_handle_t handle, rocprofiler_user_data_t data)
-{
     if(active_traces.load() <= 0) return;
 
     cbdata_t cb_dt{};
@@ -268,7 +261,7 @@ ThreadTracerAgent::iterate_data()
 
     auto lock = std::unique_lock{trace_resources_mut};
     if(!control_packet) return;
-    iterate_data_locked(control_packet->GetHandle(), params.callback_userdata);
+    iterate_data(control_packet->GetHandle(), params.callback_userdata);
     device_lease.reset();
 }
 
