@@ -390,6 +390,7 @@ For detailed vendoring workflow (adding/updating packages), see [`src/vendored/R
 This project uses AI coding assistants (Claude Code, Cursor, GitHub Copilot). All AI-specific guidelines live in [`AGENTS.md`](AGENTS.md), which serves as the single source of truth. Tool-specific adapter files (e.g., `CLAUDE.md`, `.github/copilot-instructions.md`) reference `AGENTS.md` without duplicating content.
 
 To add or update AI guidelines, edit the appropriate file under `.ai/` and add a reference in `AGENTS.md`.
+
 ## Profile Mode Dependency Policy
 
 Profile mode code should not use non-standard Python libraries.
