@@ -1,6 +1,7 @@
 name: "rocjitsu-corpus-translation-comment"
 
-on:
+# Checks out trusted develop content; candidate artifacts are data only.
+on: # zizmor: ignore[dangerous-triggers]
   workflow_run:
     workflows: ["rocjitsu-test-corpus"]
     types: [completed]
@@ -28,6 +29,7 @@ jobs:
           sparse-checkout: |
             .github/scripts
             emulation/rocjitsu/tests/corpus
+          persist-credentials: false
 
       - name: Resolve comparison inputs
         id: plan
