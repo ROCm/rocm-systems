@@ -7,6 +7,7 @@
 add_subdirectory(common)
 add_subdirectory(device_providers)
 add_subdirectory(collectors)
+add_subdirectory(pollers)
 
 # Sampler API sources
 set(pmc_sampler_sources
@@ -20,6 +21,7 @@ set(pmc_sources
     ${pmc_common_types_sources}
     ${pmc_device_provider_sources}
     ${pmc_collectors_sources}
+    ${pmc_pollers_sources}
 )
 
 # Create PMC library object

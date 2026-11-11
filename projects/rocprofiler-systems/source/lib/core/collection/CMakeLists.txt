@@ -13,6 +13,7 @@ set(collection_headers
     ${CMAKE_CURRENT_LIST_DIR}/detail/source_runner.hpp
     ${CMAKE_CURRENT_LIST_DIR}/fork_gate.hpp
     ${CMAKE_CURRENT_LIST_DIR}/guarded_read.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/metric_row.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample_batch.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample_collector.hpp
     ${CMAKE_CURRENT_LIST_DIR}/scheduler.hpp
