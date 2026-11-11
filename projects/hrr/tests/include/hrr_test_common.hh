@@ -123,7 +123,14 @@ inline std::string hrr_self_exe() {
 // hrr-playback sits next to the test binary
 // (.../hrr/playback next to .../hrr/tests/integration). Resolving it from the
 // running executable keeps it on the same mount the parent was started from.
+//
+// HRR_PLAYBACK_EXE in the environment overrides both: the installed test tree
+// (share/hrr/test) sets it, because the build-tree path compiled in below does
+// not exist there.
 inline std::string hrr_playback_exe() {
+  if (const char* env = std::getenv("HRR_PLAYBACK_EXE")) {
+    if (*env) return env;
+  }
 #if !defined(_WIN32) && defined(HRR_PLAYBACK_EXE)
   const std::string self = hrr_self_exe();
   const std::size_t slash = self.find_last_of('/');

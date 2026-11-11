@@ -51,7 +51,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
 // all. Tie it to HRR_VERSION rather than to a literal, so a future format bump
 // cannot leave the tool reporting a version it no longer reads.
 HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
-  hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
   set_proc_search_path(proc);
 
   REQUIRE(proc.run("--version") == 0);
