@@ -128,38 +128,76 @@ def test_composite_barrier_session(run_gtest):
 
 @pytest.mark.ir_device
 @pytest.mark.reduce_copy
-def test_reduce_copy_typed_exports(ir_test_binary, paths):
-    """[D0] Every typed ReduceCopy thunk is exported from librccl_device.bc.
+def test_reduce_copy_typed_exports(ir_bitcode, paths):
+    """[D0] librccl_device.bc exports exactly the typed ReduceCopy thunks.
 
-    Types follow bindings/ir/util.h on HIP: RCCL has no FP8 entry points.
+    The op and type matrix is read from where the thunks are defined (util.h
+    type lists, expanded for HIP by the preprocessor, and the
+    NCCL_IR_DEFINE_API_* lines of nccl_device_wrapper__impl.h), so a thunk the
+    Makefile/CMake public-API lists miss is reported as missing, and an
+    exported thunk outside that matrix as unexpected.
     """
-    all_types = "I8 U8 I32 U32 I64 U64 F16 F32 F64 BF16".split()
-    ops = {"ncclLsaReduceSum": all_types, "ncclLsaCopy": all_types,
-           "ncclLsaReduceSumCopy": all_types, "ncclLocalReduceSumCopy": all_types,
-           "ncclMultimemReduceSum": all_types[2:], "ncclMultimemCopy": all_types[2:],
-           "ncclMultimemReduceSumCopy": all_types[2:]}
-    expected = [f"{op}_{t}" for op, types in ops.items() for t in types]
-    llvm_dis = os.path.join(paths.LLVM_BIN, "llvm-dis")
-    ir = subprocess.run([llvm_dis, paths.BITCODE, "-o", "-"], stdout=subprocess.PIPE,
-                        universal_newlines=True, check=True).stdout
+    ir_dir = os.path.join(paths.RCCL_DIR, "bindings", "ir")
+    types = subprocess.run(
+        [os.path.join(paths.LLVM_BIN, "clang++"), "-E", "-P", "-x", "c++",
+         "-D__HIP_PLATFORM_AMD__", "-I", ir_dir, "-"],
+        input='#include "util.h"\n#define NCCL_IR_TYPE_NAME(name, type) name\n'
+              "ALL NCCL_IR_TYPES(NCCL_IR_TYPE_NAME)\n"
+              "MULTIMEM NCCL_IR_MULTIMEM_TYPES(NCCL_IR_TYPE_NAME)\n",
+        stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout
+    types = dict(line.split(None, 1) for line in types.splitlines() if line.strip())
+    types = {k: v.split() for k, v in types.items()}
+    with open(os.path.join(ir_dir, "nccl_device_wrapper__impl.h")) as fh:
+        ops = re.findall(r"^NCCL_IR_DEFINE_API_(ALL|MULTIMEM)_TYPES\((\w+)\)", fh.read(), re.M)
+    assert ops and types.get("ALL") and types.get("MULTIMEM"), (
+        f"could not read the ReduceCopy op/type matrix: ops={ops} types={types}")
+    expected = {f"{op}_{t}" for kind, op in ops for t in types[kind]}
+
+    ir = subprocess.run([os.path.join(paths.LLVM_BIN, "llvm-dis"), ir_bitcode, "-o", "-"],
+                        stdout=subprocess.PIPE, universal_newlines=True, check=True).stdout
     exported = set(re.findall(r"^define (?!internal |private )[^@\n]*@(\w+)\(", ir, re.M))
-    missing = [s for s in expected if s not in exported]
-    assert not missing, (f"{len(missing)} of {len(expected)} typed ReduceCopy thunks not "
-                         f"exported from {paths.BITCODE}: {', '.join(missing[:6])}")
+    thunk = re.compile(r"(?:%s)_[A-Z][A-Z0-9]*$" % "|".join(op for _, op in ops))
+    missing = sorted(expected - exported)
+    unexpected = sorted(s for s in exported - expected if thunk.match(s))
+    assert not missing and not unexpected, (
+        f"typed ReduceCopy thunks in {ir_bitcode}: {len(missing)} of {len(expected)} "
+        f"not exported ({', '.join(missing[:6])}); {len(unexpected)} exported but not "
+        f"defined in util.h ({', '.join(unexpected[:6])})")
 
 
 @pytest.mark.ir_device
 @pytest.mark.reduce_copy
-def test_reduce_copy_typed_local(run_gtest, monkeypatch):
+def test_reduce_copy_typed_local(run_gtest, paths, monkeypatch):
     """[D1] ncclLocalReduceSumCopy_{I8,F32,BF16}: 3 sources -> 2 destinations."""
-    # D1 runs the -O0 thunks on a 120 KiB stack. HSA_NO_SCRATCH_RECLAIM=1 makes
-    # ROCr map that for every wave slot of the GPU (~75 GiB on MI300X, over
-    # its 32 GiB scratch aperture); with reclaim it maps what this dispatch needs.
+    # D1 raises the stack limit (up to 64 KiB). HSA_NO_SCRATCH_RECLAIM=1 makes
+    # ROCr map that for every wave slot of the GPU, more than MI300X's scratch
+    # aperture holds; with reclaim it maps what this dispatch needs.
     monkeypatch.setenv("HSA_NO_SCRATCH_RECLAIM", "0")
-    proc, log = run_gtest("IRReduceCopyTest.*", "ir_reduce_copy.log")
-    _summarize_gtest(proc, log, "typed ReduceCopy thunks")
-    with open(log) as fh:  # an empty filter match would also exit 0
-        assert "[       OK ] IRReduceCopyTest.D1_" in fh.read(), f"D1 did not run, see {log}"
+    # Too small a stack can fault, return wrong sums or hang, so every failure
+    # names the stack limit the probe in IR_reduce_copy_test.cpp chose.
+    log = os.path.join(paths.LOGDIR, "ir_reduce_copy.log")
+    try:
+        proc, log = run_gtest("IRReduceCopyTest.*", "ir_reduce_copy.log")
+        timed_out = None
+    except subprocess.TimeoutExpired as e:
+        proc, timed_out = None, e
+    try:
+        with open(log) as fh:
+            out = fh.read()
+    except OSError:
+        out = ""
+    stack = re.search(r"\[IRReduceCopyTest\] (.*)", out)
+    stack = stack.group(1) if stack else "stack probe did not report"
+    if timed_out:
+        raise AssertionError(f"typed ReduceCopy thunks hung ({timed_out}) [{stack}]")
+    try:
+        _summarize_gtest(proc, log, "typed ReduceCopy thunks")
+    except AssertionError as e:
+        raise AssertionError(f"{e} [{stack}]") from None
+    # an empty filter match would also exit 0
+    for t in ("I8", "F32", "BF16"):
+        assert f"[       OK ] IRReduceCopyTest.D1_LocalReduceSumCopy_{t}" in out, (
+            f"D1 {t} did not run, see {log} [{stack}]")
 
 
 @pytest.mark.ir_device

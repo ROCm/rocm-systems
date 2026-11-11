@@ -4,14 +4,10 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// [D1] Typed ReduceCopy thunks of librccl_device.bc (NCCL 2.32.3 bindings/ir,
-// "expose typed ReduceCopy APIs"): a consumer kernel calls the purely local
-// ncclLocalReduceSumCopy_{I8,F32,BF16} and the host checks the N->M sums.
-//
-// Linked into IR_test.exe by tests/conftest.py. Each thunk also gets a weak
-// no-op definition here, so the device link still succeeds against a bitcode
-// library that does not export it (the library's definition wins when it
-// does). Without the thunk the destinations stay zero and the check fails.
+// [D1] Typed ReduceCopy thunks of librccl_device.bc: a kernel calls the local
+// ncclLocalReduceSumCopy_{I8,F32,BF16} and the host checks the N->M sums. Each
+// thunk gets a weak no-op definition here, so the link still succeeds when the
+// bitcode lacks it; the destinations then stay zero and the check fails.
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_bf16.h>
@@ -19,6 +15,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -27,13 +24,16 @@
 #include <nccl_device_wrapper.h>
 
 constexpr int kNSrc = 3, kNDst = 2;
-constexpr size_t kCount = 1000;  // not a multiple of any pack/unroll width: covers the tails
+// The stride is also the displacement, which picks the pack width: keep it
+// 16-byte aligned for every type and give the count the odd value, so the
+// copy runs its packed loops and then a scalar tail.
+constexpr size_t kStride = 1024, kCount = 1001;
 
-#define LOCAL_REDUCE_SUM_COPY(suffix, T)                                                    \
-  extern "C" __device__ __attribute__((weak)) void ncclLocalReduceSumCopy_##suffix(         \
-      ncclCoopAny, int, T*, size_t, int, T*, size_t, size_t) {}                            \
-  static __device__ void localReduceSumCopy(ncclCoopAny coop, T* src, T* dst) {             \
-    ncclLocalReduceSumCopy_##suffix(coop, kNSrc, src, kCount, kNDst, dst, kCount, kCount); \
+#define LOCAL_REDUCE_SUM_COPY(suffix, T) \
+  extern "C" __device__ __attribute__((weak)) void ncclLocalReduceSumCopy_##suffix( \
+      ncclCoopAny, int, T*, size_t, int, T*, size_t, size_t) {} \
+  static __device__ void localReduceSumCopy(ncclCoopAny coop, T* src, T* dst) { \
+    ncclLocalReduceSumCopy_##suffix(coop, kNSrc, src, kStride, kNDst, dst, kStride, kCount); \
   }
 LOCAL_REDUCE_SUM_COPY(I8, int8_t)
 LOCAL_REDUCE_SUM_COPY(F32, float)
@@ -74,9 +74,10 @@ static int get(const unsigned char* p) {
 template <typename T>
 static void checkLocalReduceSumCopy(const char* suffix) {
   SCOPED_TRACE(std::string("ncclLocalReduceSumCopy_") + suffix);
-  std::vector<unsigned char> src(kNSrc * kCount * sizeof(T)), dst(kNDst * kCount * sizeof(T));
-  for (int s = 0; s < kNSrc; ++s)
-    for (size_t i = 0; i < kCount; ++i) put<T>(&src[(s * kCount + i) * sizeof(T)], (int)((i + s) % 7));
+  std::vector<unsigned char> src(kNSrc * kStride * sizeof(T)), dst(kNDst * kStride * sizeof(T));
+  for (int s = 0; s < kNSrc; ++s) {
+    for (size_t i = 0; i < kCount; ++i) put<T>(&src[(s * kStride + i) * sizeof(T)], (int)((i + s) % 7));
+  }
   void *dSrc = nullptr, *dDst = nullptr;
   ASSERT_EQ(hipMalloc(&dSrc, src.size()), hipSuccess);
   ASSERT_EQ(hipMalloc(&dDst, dst.size()), hipSuccess);
@@ -90,28 +91,77 @@ static void checkLocalReduceSumCopy(const char* suffix) {
   ASSERT_EQ(hipFree(dDst), hipSuccess);
 
   int wrong = 0;  // every expected sum is >= 3, so a no-op leaves all of them wrong
-  for (int d = 0; d < kNDst; ++d)
+  for (int d = 0; d < kNDst; ++d) {
     for (size_t i = 0; i < kCount; ++i) {
       int want = 0;
       for (int s = 0; s < kNSrc; ++s) want += (int)((i + s) % 7);
-      wrong += get<T>(&dst[(d * kCount + i) * sizeof(T)]) != want;
+      wrong += get<T>(&dst[(d * kStride + i) * sizeof(T)]) != want;
     }
+  }
   EXPECT_EQ(wrong, 0) << "wrong sums out of " << kNDst * kCount
                       << " (all wrong: the weak fallback ran, librccl_device.bc lacks the thunk)";
 }
 
-TEST(IRReduceCopyTest, D1_LocalReduceSumCopyTyped) {
-  /* The thunks are linked in after these kernels are compiled, so the kernels
-   * run on the runtime's dynamic stack limit (1 KiB by default). At -O0 the I8
-   * thunk alone takes a ~31 KiB frame, so ask for close to the gfx9 maximum.
-   * Run it with scratch reclaim on (tests/test_ir_device.py sets
-   * HSA_NO_SCRATCH_RECLAIM=0): without reclaim ROCr maps that stack for every
-   * wave slot of the GPU, more than MI300X's scratch aperture holds. */
-  if (hipDeviceSetLimit(hipLimitStackSize, 120 * 1024) != hipSuccess) {
-    (void)hipGetLastError();
-    ASSERT_EQ(hipDeviceSetLimit(hipLimitStackSize, 64 * 1024), hipSuccess);
+/* Stack probe: the indirect call gives this kernel a dynamic stack, so the
+ * runtime sizes its scratch from hipLimitStackSize exactly as it does for the
+ * thunk kernels, whose callees are only linked in after they are compiled. */
+__device__ int stackProbeLeaf(int x) { return x + 1; }
+__device__ int (*volatile stackProbeFn)(int) = stackProbeLeaf;
+__global__ void k_stack_probe(int* out) { out[threadIdx.x] = stackProbeFn((int)threadIdx.x); }
+
+static bool stackLimitWorks(size_t bytes, int* dOut, std::ostream& log) {
+  hipError_t err = hipDeviceSetLimit(hipLimitStackSize, bytes);
+  if (err == hipSuccess) {
+    k_stack_probe<<<1, 256>>>(dOut);
+    err = hipGetLastError();
   }
+  if (err == hipSuccess) err = hipDeviceSynchronize();
+  (void)hipGetLastError();
+  log << " " << bytes / 1024 << " KiB: " << hipGetErrorName(err) << ";";
+  return err == hipSuccess;
+}
+
+/* The thunks need more than the 1 KiB default stack on gfx9 (D1 needs 8-12 KiB
+ * on gfx950), but too large a request fails at dispatch on some GPUs (120 KiB
+ * on gfx1151). The size is setup, not what D1 tests, so take the first size
+ * from 64 KiB down that the probe can dispatch, else keep the default. */
+class IRReduceCopyTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    std::ostringstream log;
+    size_t def = 0;
+    (void)hipDeviceGetLimit(&def, hipLimitStackSize);
+    int* dOut = nullptr;
+    bool chosen = false;
+    if (hipMalloc(&dOut, 256 * sizeof(int)) == hipSuccess) {
+      for (size_t bytes = 64 * 1024; bytes > def && !chosen; bytes /= 2)
+        chosen = stackLimitWorks(bytes, dOut, log);
+      (void)hipFree(dOut);
+    } else {
+      log << " probe allocation failed;";
+    }
+    (void)hipGetLastError();
+    if (!chosen) (void)hipDeviceSetLimit(hipLimitStackSize, def);
+    size_t limit = 0;
+    (void)hipDeviceGetLimit(&limit, hipLimitStackSize);
+    stackReport_ = "stack limit " + std::to_string(limit / 1024) + " KiB (" +
+                   (chosen ? "probe passed" : "no probe passed, runtime default") +
+                   "; probes:" + log.str() + ")";
+    printf("[IRReduceCopyTest] %s\n", stackReport_.c_str());
+  }
+  static std::string stackReport_;
+};
+std::string IRReduceCopyTest::stackReport_;
+
+TEST_F(IRReduceCopyTest, D1_LocalReduceSumCopy_I8) {
+  SCOPED_TRACE(stackReport_);
   checkLocalReduceSumCopy<int8_t>("I8");
+}
+TEST_F(IRReduceCopyTest, D1_LocalReduceSumCopy_F32) {
+  SCOPED_TRACE(stackReport_);
   checkLocalReduceSumCopy<float>("F32");
+}
+TEST_F(IRReduceCopyTest, D1_LocalReduceSumCopy_BF16) {
+  SCOPED_TRACE(stackReport_);
   checkLocalReduceSumCopy<__hip_bfloat16>("BF16");
 }
