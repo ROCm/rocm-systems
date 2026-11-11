@@ -68,8 +68,9 @@ jobs:
         include:
           - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
-          # The internal registry has no debian-12/13, so these two use the
-          # official images, pinned by digest. They ship no build tooling;
+          # These two default to the official images, pinned by digest. Set
+          # Debian12_DOCKER_IMAGE / Debian13_DOCKER_IMAGE to use another
+          # registry. They ship no build tooling;
           # run_amdsmi_build.py installs it.
           - { os: Debian12,    package_format: deb, arch_suffix: _amd64.deb,
               image: "debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443" } # bookworm, 2026-08-24
@@ -82,7 +83,7 @@ jobs:
           - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
-      image: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] || matrix.image }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
@@ -90,7 +91,7 @@ jobs:
       # self-hosted runner instead, unsandboxed.
       - name: Verify container image is configured
         run: |
-          if [ -z "${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}" ]; then
+          if [ -z "${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] || matrix.image }}" ]; then
             echo "::error::No image for ${{ matrix.os }}: set the ${{ matrix.os }}_DOCKER_IMAGE repository variable"
             exit 1
           fi
