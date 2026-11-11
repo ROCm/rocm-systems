@@ -1014,7 +1014,8 @@ Bits apply_fp_atomic(const VectorMemState &state, fp_mode::ScalarAtomicOp operat
                      Bits source_bits, Bits compare_bits, uint32_t denorm_mode,
                      bool local = false) {
   return fp_mode::atomic_scalar(operation, old_bits, source_bits, compare_bits, denorm_mode,
-                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first);
+                                state.atomic_legacy_minmax, local || state.atomic_source_nan_first,
+                                state.atomic_minmax_snan_wins);
 }
 
 bool is_packed_add(AtomicOp op) {

@@ -10199,6 +10199,8 @@ class CodeGenerator:
         lines.append(
             f'  d->atomic_legacy_minmax = {str(profile.atomic_legacy_minmax).lower()};'
         )
+        if profile.atomic_minmax_snan_wins and sem.operation in ('fmin', 'fmax'):
+            lines.append('  d->atomic_minmax_snan_wins = true;')
 
     def _gen_flat_atomic(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
