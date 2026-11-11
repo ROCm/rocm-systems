@@ -9977,12 +9977,9 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
 
 amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
                                                      amdsmi_power_stabilization_param_id_t param_id,
-                                                     const amdsmi_value_t* value) {
+                                                     int64_t value) {
   AMDSMI_CHECK_INIT();
 
-  if (value == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
   if (param_id > AMDSMI_POWER_STABILIZATION_PARAM_LAST) {
     return AMDSMI_STATUS_INVAL;
   }
@@ -9992,17 +9989,6 @@ amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle pro
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 #endif
-
-  // Every documented param_id takes an INT64 value except the ramp-rate
-  // params, which take DOUBLE; no other client-side validation is performed
-  // -- range/dependency checks are the driver's job. This is amdsmi-level
-  // API-contract validation, not sysfs mechanics, so it stays at this layer.
-  bool is_ramp_rate = param_id == AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE ||
-                      param_id == AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE;
-  if (is_ramp_rate ? value->type != AMDSMI_VALUE_TYPE_DOUBLE
-                   : value->type != AMDSMI_VALUE_TYPE_INT64) {
-    return AMDSMI_STATUS_INVAL;
-  }
 
   // AMDSMI_DRY_RUN is an amdsmi-level operational mode (not part of the
   // sysfs mechanics), so it is honored here rather than in rsmi_dev_
@@ -10018,30 +10004,14 @@ amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle pro
     }
 
     std::ostringstream ss;
-    ss << "[DRY_RUN] Would write "
-       << (is_ramp_rate ? std::to_string(value->data.double_value)
-                        : std::to_string(value->data.int64_value))
-       << " for power_stabilization param_id " << static_cast<int>(param_id);
+    ss << "[DRY_RUN] Would write " << value << " for power_stabilization param_id "
+       << static_cast<int>(param_id);
     LOG_INFO(ss);
     return AMDSMI_STATUS_SUCCESS;
   }
 
-  static_assert(sizeof(amdsmi_value_t) == sizeof(rsmi_value_t),
-                "amdsmi_value_t and rsmi_value_t must remain layout-compatible");
-  static_assert(offsetof(amdsmi_value_t, type) == offsetof(rsmi_value_t, type),
-                "amdsmi_value_t and rsmi_value_t type offsets must match");
-  static_assert(offsetof(amdsmi_value_t, data) == offsetof(rsmi_value_t, data),
-                "amdsmi_value_t and rsmi_value_t data offsets must match");
-  // The reinterpret_cast below carries value->type across as-is, so the two
-  // enums must also agree on their underlying values, not just their layout.
-  static_assert(
-      static_cast<int>(AMDSMI_VALUE_TYPE_INT64) == static_cast<int>(RSMI_VALUE_TYPE_INT64) &&
-          static_cast<int>(AMDSMI_VALUE_TYPE_DOUBLE) == static_cast<int>(RSMI_VALUE_TYPE_DOUBLE),
-      "amdsmi_value_type_t and rsmi_value_type_t enumerators must match");
-
   return rsmi_wrapper(rsmi_dev_power_stabilization_param_set, processor_handle, 0,
-                      static_cast<rsmi_power_stabilization_param_id_t>(param_id),
-                      reinterpret_cast<const rsmi_value_t*>(value));
+                      static_cast<rsmi_power_stabilization_param_id_t>(param_id), value);
 }
 
 // Test-only wrapper: acquires the device mutex for |seconds| seconds.

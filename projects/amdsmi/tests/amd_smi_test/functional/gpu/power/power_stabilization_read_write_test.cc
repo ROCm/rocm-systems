@@ -67,7 +67,7 @@ class ScopedPowerStabilizationRestore {
  public:
   ScopedPowerStabilizationRestore(amdsmi_processor_handle processor_handle,
                                   amdsmi_power_stabilization_param_id_t param_id,
-                                  amdsmi_value_t restore_value)
+                                  int64_t restore_value)
       : processor_handle_(processor_handle), param_id_(param_id), restore_value_(restore_value) {}
 
   ~ScopedPowerStabilizationRestore() {
@@ -76,7 +76,7 @@ class ScopedPowerStabilizationRestore {
     // especially one already running mid-unwind from an earlier fatal
     // assertion elsewhere in Run().
     amdsmi_status_t ret =
-        amdsmi_set_power_stabilization_param(processor_handle_, param_id_, &restore_value_);
+        amdsmi_set_power_stabilization_param(processor_handle_, param_id_, restore_value_);
     EXPECT_EQ(AMDSMI_STATUS_SUCCESS, ret)
         << "Failed to restore power_stabilization param_id " << param_id_;
   }
@@ -87,7 +87,7 @@ class ScopedPowerStabilizationRestore {
  private:
   amdsmi_processor_handle processor_handle_;
   amdsmi_power_stabilization_param_id_t param_id_;
-  amdsmi_value_t restore_value_;
+  int64_t restore_value_;
 };
 
 }  // namespace
@@ -177,40 +177,11 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // to set up a known value to assert against. The successful read above
     // (CHK_ERR_ASRT) is the only thing this test can verify for this field.
 
-    // value.type mismatch must be rejected with INVAL, independent of param_id.
-    amdsmi_value_t bad_value{};
-    bad_value.type = AMDSMI_VALUE_TYPE_DOUBLE;
-    bad_value.data.double_value = 1.0;
-    DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
-                       VERB(STANDARD));
-    ret = amdsmi_set_power_stabilization_param(
-        processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR, &bad_value);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
-    // Reverse direction: an INT64 value where a DOUBLE param is expected
-    // must also be rejected with INVAL.
-    amdsmi_value_t bad_value_reverse{};
-    bad_value_reverse.type = AMDSMI_VALUE_TYPE_INT64;
-    bad_value_reverse.data.int64_value = 1;
-    ret = amdsmi_set_power_stabilization_param(
-        processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,
-        &bad_value_reverse);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
-    // Nullptr value must be rejected with INVAL.
-    ret = amdsmi_set_power_stabilization_param(
-        processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR, nullptr);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
-
     // An invalid param_id must be rejected with INVAL.
-    amdsmi_value_t unused_value{};
-    unused_value.type = AMDSMI_VALUE_TYPE_INT64;
-    unused_value.data.int64_value = 1;
     int invalid_param_id = 999;
     ret = amdsmi_set_power_stabilization_param(
         processor_handles_[dv_ind],
-        static_cast<amdsmi_power_stabilization_param_id_t>(invalid_param_id), &unused_value);
+        static_cast<amdsmi_power_stabilization_param_id_t>(invalid_param_id), 1);
     ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
     // Set + read-back ENABLE, restoring the original value afterward. The
@@ -220,20 +191,16 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // block's scope unwinds (see ScopedPowerStabilizationRestore above).
     {
       bool orig_enabled = info.enabled;
-      amdsmi_value_t restore_enabled{};
-      restore_enabled.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_enabled.data.int64_value = orig_enabled ? 1 : 0;
+      int64_t restore_enabled = orig_enabled ? 1 : 0;
       ScopedPowerStabilizationRestore guard(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_ENABLE, restore_enabled);
 
-      amdsmi_value_t new_enabled{};
-      new_enabled.type = AMDSMI_VALUE_TYPE_INT64;
-      new_enabled.data.int64_value = orig_enabled ? 0 : 1;
+      int64_t new_enabled = orig_enabled ? 0 : 1;
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
-          processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_ENABLE, &new_enabled);
+          processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_ENABLE, new_enabled);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -246,9 +213,7 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // original value afterward (RAII guard, see ENABLE above).
     {
       uint32_t orig_power_floor = info.power_floor;
-      amdsmi_value_t restore_power_floor{};
-      restore_power_floor.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_power_floor.data.int64_value = static_cast<int64_t>(orig_power_floor);
+      int64_t restore_power_floor = static_cast<int64_t>(orig_power_floor);
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,
                                             restore_power_floor);
@@ -256,16 +221,14 @@ void TestPowerStabilizationReadWrite::Run(void) {
       // Toggle between two known-valid points rather than unconditionally
       // adding 5, which would write an out-of-range value (power_floor's
       // documented max is 100) if orig_power_floor is already near the top.
-      amdsmi_value_t new_power_floor{};
-      new_power_floor.type = AMDSMI_VALUE_TYPE_INT64;
-      new_power_floor.data.int64_value =
+      int64_t new_power_floor =
           static_cast<int64_t>(orig_power_floor) + (orig_power_floor >= 50 ? -5 : 5);
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(processor_handles_[dv_ind],
                                                  AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,
-                                                 &new_power_floor);
+                                                 new_power_floor);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -274,27 +237,23 @@ void TestPowerStabilizationReadWrite::Run(void) {
       ret = amdsmi_get_power_stabilization_info(processor_handles_[dv_ind], &info);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
-      ASSERT_EQ(info.power_floor, static_cast<uint32_t>(new_power_floor.data.int64_value));
+      ASSERT_EQ(info.power_floor, static_cast<uint32_t>(new_power_floor));
     }
 
     // Set + read-back DELAY, restoring the original value afterward (RAII
     // guard, see ENABLE above).
     {
       uint32_t orig_delay = info.delay;
-      amdsmi_value_t restore_delay{};
-      restore_delay.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_delay.data.int64_value = static_cast<int64_t>(orig_delay);
+      int64_t restore_delay = static_cast<int64_t>(orig_delay);
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_DELAY, restore_delay);
 
-      amdsmi_value_t new_delay_param{};
-      new_delay_param.type = AMDSMI_VALUE_TYPE_INT64;
-      new_delay_param.data.int64_value = static_cast<int64_t>(orig_delay) + 1;
+      int64_t new_delay_param = static_cast<int64_t>(orig_delay) + 1;
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
-          processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_DELAY, &new_delay_param);
+          processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_DELAY, new_delay_param);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -307,24 +266,20 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // afterward (RAII guard, see ENABLE above).
     {
       amdsmi_hawk_insertion_priority_t orig_priority = info.insertion_priority;
-      amdsmi_value_t restore_priority{};
-      restore_priority.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_priority.data.int64_value = static_cast<int64_t>(orig_priority);
+      int64_t restore_priority = static_cast<int64_t>(orig_priority);
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,
                                             restore_priority);
 
       amdsmi_hawk_insertion_priority_t new_priority =
           static_cast<amdsmi_hawk_insertion_priority_t>((static_cast<int>(orig_priority) + 1) % 3);
-      amdsmi_value_t new_priority_value{};
-      new_priority_value.type = AMDSMI_VALUE_TYPE_INT64;
-      new_priority_value.data.int64_value = static_cast<int64_t>(new_priority);
+      int64_t new_priority_value = static_cast<int64_t>(new_priority);
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,
-          &new_priority_value);
+          new_priority_value);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -337,22 +292,18 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // (RAII guard, see ENABLE above).
     {
       bool orig_ramp_enabled = info.ramp_enabled;
-      amdsmi_value_t restore_ramp_enabled{};
-      restore_ramp_enabled.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_ramp_enabled.data.int64_value = orig_ramp_enabled ? 1 : 0;
+      int64_t restore_ramp_enabled = orig_ramp_enabled ? 1 : 0;
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,
                                             restore_ramp_enabled);
 
-      amdsmi_value_t new_ramp_enabled{};
-      new_ramp_enabled.type = AMDSMI_VALUE_TYPE_INT64;
-      new_ramp_enabled.data.int64_value = orig_ramp_enabled ? 0 : 1;
+      int64_t new_ramp_enabled = orig_ramp_enabled ? 0 : 1;
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(processor_handles_[dv_ind],
                                                  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,
-                                                 &new_ramp_enabled);
+                                                 new_ramp_enabled);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -365,10 +316,8 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // afterward (RAII guard, see ENABLE above), to confirm the ramp/
     // subdirectory path is exercised too.
     {
-      double orig_ramp_up = info.ramp_max_ramp_up_rate;
-      amdsmi_value_t restore_ramp_up{};
-      restore_ramp_up.type = AMDSMI_VALUE_TYPE_DOUBLE;
-      restore_ramp_up.data.double_value = orig_ramp_up;
+      uint32_t orig_ramp_up = info.ramp_max_ramp_up_rate;
+      int64_t restore_ramp_up = static_cast<int64_t>(orig_ramp_up);
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,
                                             restore_ramp_up);
@@ -376,30 +325,26 @@ void TestPowerStabilizationReadWrite::Run(void) {
       // Toggle between two known-valid points rather than unconditionally
       // adding 5, which would write an out-of-range value (ramp rates'
       // documented max is 100) if orig_ramp_up is already near the top.
-      amdsmi_value_t new_ramp_up{};
-      new_ramp_up.type = AMDSMI_VALUE_TYPE_DOUBLE;
-      new_ramp_up.data.double_value = orig_ramp_up + (orig_ramp_up >= 50 ? -5 : 5);
+      int64_t new_ramp_up = static_cast<int64_t>(orig_ramp_up) + (orig_ramp_up >= 50 ? -5 : 5);
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,
-          &new_ramp_up);
+          new_ramp_up);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
       ret = amdsmi_get_power_stabilization_info(processor_handles_[dv_ind], &info);
       CHK_ERR_ASRT(ret)
-      ASSERT_DOUBLE_EQ(info.ramp_max_ramp_up_rate, new_ramp_up.data.double_value);
+      ASSERT_EQ(info.ramp_max_ramp_up_rate, static_cast<uint32_t>(new_ramp_up));
     }
 
     // Set + read-back RAMP_MAX_RAMP_DOWN_RATE, restoring afterward (RAII
     // guard, see ENABLE above).
     {
-      double orig_ramp_down = info.ramp_max_ramp_down_rate;
-      amdsmi_value_t restore_ramp_down{};
-      restore_ramp_down.type = AMDSMI_VALUE_TYPE_DOUBLE;
-      restore_ramp_down.data.double_value = orig_ramp_down;
+      uint32_t orig_ramp_down = info.ramp_max_ramp_down_rate;
+      int64_t restore_ramp_down = static_cast<int64_t>(orig_ramp_down);
       ScopedPowerStabilizationRestore guard(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,
           restore_ramp_down);
@@ -407,43 +352,38 @@ void TestPowerStabilizationReadWrite::Run(void) {
       // Toggle between two known-valid points rather than unconditionally
       // adding 5, which would write an out-of-range value (ramp rates'
       // documented max is 100) if orig_ramp_down is already near the top.
-      amdsmi_value_t new_ramp_down{};
-      new_ramp_down.type = AMDSMI_VALUE_TYPE_DOUBLE;
-      new_ramp_down.data.double_value = orig_ramp_down + (orig_ramp_down >= 50 ? -5 : 5);
+      int64_t new_ramp_down =
+          static_cast<int64_t>(orig_ramp_down) + (orig_ramp_down >= 50 ? -5 : 5);
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,
-          &new_ramp_down);
+          new_ramp_down);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
       ret = amdsmi_get_power_stabilization_info(processor_handles_[dv_ind], &info);
       CHK_ERR_ASRT(ret)
-      ASSERT_DOUBLE_EQ(info.ramp_max_ramp_down_rate, new_ramp_down.data.double_value);
+      ASSERT_EQ(info.ramp_max_ramp_down_rate, static_cast<uint32_t>(new_ramp_down));
     }
 
     // Set + read-back RAMP_MIN_TIME_AT_POWER_FLOOR, restoring afterward
     // (RAII guard, see ENABLE above).
     {
       uint32_t orig_ramp_min_time = info.ramp_min_time_at_power_floor;
-      amdsmi_value_t restore_ramp_min_time{};
-      restore_ramp_min_time.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_ramp_min_time.data.int64_value = static_cast<int64_t>(orig_ramp_min_time);
+      int64_t restore_ramp_min_time = static_cast<int64_t>(orig_ramp_min_time);
       ScopedPowerStabilizationRestore guard(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,
           restore_ramp_min_time);
 
-      amdsmi_value_t new_ramp_min_time{};
-      new_ramp_min_time.type = AMDSMI_VALUE_TYPE_INT64;
-      new_ramp_min_time.data.int64_value = static_cast<int64_t>(orig_ramp_min_time) + 1;
+      int64_t new_ramp_min_time = static_cast<int64_t>(orig_ramp_min_time) + 1;
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(
           processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,
-          &new_ramp_min_time);
+          new_ramp_min_time);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -456,22 +396,18 @@ void TestPowerStabilizationReadWrite::Run(void) {
     // ENABLE above).
     {
       uint32_t orig_ramp_stop_delay = info.ramp_stop_delay;
-      amdsmi_value_t restore_ramp_stop_delay{};
-      restore_ramp_stop_delay.type = AMDSMI_VALUE_TYPE_INT64;
-      restore_ramp_stop_delay.data.int64_value = static_cast<int64_t>(orig_ramp_stop_delay);
+      int64_t restore_ramp_stop_delay = static_cast<int64_t>(orig_ramp_stop_delay);
       ScopedPowerStabilizationRestore guard(processor_handles_[dv_ind],
                                             AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,
                                             restore_ramp_stop_delay);
 
-      amdsmi_value_t new_ramp_stop_delay{};
-      new_ramp_stop_delay.type = AMDSMI_VALUE_TYPE_INT64;
-      new_ramp_stop_delay.data.int64_value = static_cast<int64_t>(orig_ramp_stop_delay) + 1;
+      int64_t new_ramp_stop_delay = static_cast<int64_t>(orig_ramp_stop_delay) + 1;
 
       DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                          VERB(STANDARD));
       ret = amdsmi_set_power_stabilization_param(processor_handles_[dv_ind],
                                                  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,
-                                                 &new_ramp_stop_delay);
+                                                 new_ramp_stop_delay);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
 
@@ -500,14 +436,12 @@ void TestPowerStabilizationReadWrite::Run(void) {
         std::cout << "\t** Could not set FS_IMMUTABLE_FL on " << delay_path
                   << " (requires CAP_LINUX_IMMUTABLE / root). Skipping NO_PERM check." << std::endl;
       } else {
-        amdsmi_value_t new_delay{};
-        new_delay.type = AMDSMI_VALUE_TYPE_INT64;
-        new_delay.data.int64_value = static_cast<int64_t>(info.delay) + 1;
+        int64_t new_delay = static_cast<int64_t>(info.delay) + 1;
 
         DISPLAY_AMDSMI_API("amdsmi_set_power_stabilization_param", "gpu=" + std::to_string(dv_ind),
                            VERB(STANDARD));
         ret = amdsmi_set_power_stabilization_param(
-            processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_DELAY, &new_delay);
+            processor_handles_[dv_ind], AMDSMI_POWER_STABILIZATION_PARAM_DELAY, new_delay);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_NO_PERM);
         ASSERT_EQ(ret, AMDSMI_STATUS_NO_PERM);
       }

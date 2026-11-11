@@ -424,8 +424,8 @@ class TestConfigurePowerStabilizationFromFileNpmNote(unittest.TestCase):
             "delay": 0,
             "insertion_priority": "DYNAMIC",
             "ramp_enabled": True,
-            "ramp_max_ramp_up_rate": 10.0,
-            "ramp_max_ramp_down_rate": 10.0,
+            "ramp_max_ramp_up_rate": 10,
+            "ramp_max_ramp_down_rate": 10,
             "ramp_min_time_at_power_floor": 2,
             "ramp_stop_delay": 1,
         }
@@ -642,6 +642,26 @@ class TestParsePowerStabilizationTokenReadOnlyKeys(unittest.TestCase):
         )
         self.assertEqual(param_id.name, "POWER_FLOOR")
         self.assertEqual(value, 80)
+
+    def test_ramp_rate_key_parses_as_int(self):
+        # ramp_max_ramp_up_rate/ramp_max_ramp_down_rate used to be the only
+        # two keys parsed as float; confirm they now go through the same
+        # plain-integer branch as every other key.
+        param_id, value = self.AMDSMIHelpers.parse_power_stabilization_token(
+            "ramp_max_ramp_up_rate=5", ignore_read_only=True
+        )
+        self.assertEqual(param_id.name, "RAMP_MAX_RAMP_UP_RATE")
+        self.assertIsInstance(value, int)
+        self.assertEqual(value, 5)
+
+    def test_ramp_rate_key_rejects_decimal_value(self):
+        # The sysfs node this value is written to cannot accept a float, so
+        # a decimal string (previously accepted as a floating-point value)
+        # must now be rejected like any other integer key.
+        with self.assertRaises(ValueError):
+            self.AMDSMIHelpers.parse_power_stabilization_token(
+                "ramp_max_ramp_down_rate=5.0", ignore_read_only=True
+            )
 
 
 # ---------------------------------------------------------------------------

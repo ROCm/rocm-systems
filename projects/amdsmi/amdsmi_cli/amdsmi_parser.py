@@ -2962,11 +2962,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                     " `static --power-stabilization --json` output."
                     "\n\tenable/ramp_enable accept on/off/true/false/1/0;"
                     " insertion_priority accepts a name (OPPORTUNISTIC, GUARANTEED,"
-                    " DYNAMIC) or its integer value; ramp_max_ramp_up_rate/"
-                    "ramp_max_ramp_down_rate accept a decimal number; the rest are"
-                    " integers."
+                    " DYNAMIC) or its integer value; the rest, including"
+                    " ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers."
                     "\n\tExample: enable=on power_floor=70 insertion_priority=GUARANTEED"
-                    " ramp_max_ramp_up_rate=5.0"
+                    " ramp_max_ramp_up_rate=5"
                     "\n\tEach key is applied in order; processing stops at the first failure."
                 )
                 set_value_exclusive_group.add_argument(

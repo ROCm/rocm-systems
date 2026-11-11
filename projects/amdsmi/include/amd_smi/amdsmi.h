@@ -402,39 +402,6 @@ typedef enum {
 } amdsmi_status_t;
 
 /**
- * @brief Self-describing value type used by amdsmi_value_t
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-typedef enum {
-  AMDSMI_VALUE_TYPE_INT64 = 0,  //!< Value is held in amdsmi_value_data_t.int64_value
-  AMDSMI_VALUE_TYPE_DOUBLE      //!< Value is held in amdsmi_value_data_t.double_value
-} amdsmi_value_type_t;
-
-/**
- * @brief Data payload for amdsmi_value_t
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-typedef union {
-  int64_t int64_value;  //!< Valid when type == ::AMDSMI_VALUE_TYPE_INT64
-  double double_value;  //!< Valid when type == ::AMDSMI_VALUE_TYPE_DOUBLE
-} amdsmi_value_data_t;
-
-/**
- * @brief Tagged union used to pass a typed numeric value generically
- *
- * General-purpose and reusable by any API parameter that needs a typed
- * numeric value -- not specific to any one feature.
- *
- * @cond @tag{gpu_bm_linux} @endcond
- */
-typedef struct {
-  amdsmi_value_type_t type;  //!< Which member of data is valid
-  amdsmi_value_data_t data;  //!< Value payload
-} amdsmi_value_t;
-
-/**
  * @brief Clock types
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
@@ -11011,38 +10978,27 @@ typedef enum {
 
 /**
  * @brief Identifies a single Power Stabilization parameter for
- * amdsmi_set_power_stabilization_param(). Every parameter takes an
- * ::AMDSMI_VALUE_TYPE_INT64 amdsmi_value_t, except
- * ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE and
- * ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE, which take
- * ::AMDSMI_VALUE_TYPE_DOUBLE.
+ * amdsmi_set_power_stabilization_param(). Every parameter, including the two
+ * ramp rates below, is a plain int64_t.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
-  AMDSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,   //!< Enable/disable Power Stabilization (0/1),
-                                                 //!< type=::AMDSMI_VALUE_TYPE_INT64
+  AMDSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,   //!< Enable/disable Power Stabilization (0/1)
   AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,  //!< Power Floor, % of power limit (0-100;
-                                                 //!< 0 disables Power Stabilization),
-                                                 //!< type=::AMDSMI_VALUE_TYPE_INT64
-  AMDSMI_POWER_STABILIZATION_PARAM_DELAY,        //!< Insertion delay, milliseconds,
-                                                 //!< type=::AMDSMI_VALUE_TYPE_INT64
-  AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,  //!< ::amdsmi_hawk_insertion_priority_t
-                                                        //!< value, type=::AMDSMI_VALUE_TYPE_INT64
-  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,         //!< Enable/disable Ramp Management (0/1),
-                                                        //!< type=::AMDSMI_VALUE_TYPE_INT64
-  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,    //!< Max ramp-up rate, %PL/sec
-                                                             //!< (100 disables ramp-up management),
-                                                             //!< type=::AMDSMI_VALUE_TYPE_DOUBLE
-  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,  //!< Max ramp-down rate, %PL/sec
-                                                             //!< (100 disables ramp-down
-                                                             //!< management),
-                                                             //!< type=::AMDSMI_VALUE_TYPE_DOUBLE
+                                                 //!< 0 disables Power Stabilization)
+  AMDSMI_POWER_STABILIZATION_PARAM_DELAY,        //!< Insertion delay, milliseconds
+  AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,     //!< ::amdsmi_hawk_insertion_priority_t
+                                                           //!< value
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,            //!< Enable/disable Ramp Management (0/1)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,  //!< Max ramp-up rate, %PL/sec
+                                                           //!< (100 disables ramp-up management)
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,       //!< Max ramp-down rate, %PL/sec
+                                                                  //!< (100 disables ramp-down
+                                                                  //!< management)
   AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,  //!< Minimum time at Power Floor,
-                                                                  //!< seconds,
-                                                                  //!< type=::AMDSMI_VALUE_TYPE_INT64
-  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,  //!< Ramp stop delay, seconds,
-                                                     //!< type=::AMDSMI_VALUE_TYPE_INT64
+                                                                  //!< seconds
+  AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,               //!< Ramp stop delay, seconds
   AMDSMI_POWER_STABILIZATION_PARAM_LAST =
       AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY  //!< Highest valid parameter ID
 } amdsmi_power_stabilization_param_id_t;
@@ -11061,11 +11017,11 @@ typedef struct {
   uint32_t delay;                                       //!< Insertion delay, milliseconds
   amdsmi_hawk_insertion_priority_t insertion_priority;  //!< HAWK insertion priority
   bool ramp_enabled;                                    //!< Ramp Management enabled
-  double ramp_max_ramp_up_rate;                         //!< Max ramp-up rate, %PL/sec
-  double ramp_max_ramp_down_rate;                       //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_max_ramp_up_rate;                       //!< Max ramp-up rate, %PL/sec
+  uint32_t ramp_max_ramp_down_rate;                     //!< Max ramp-down rate, %PL/sec
   uint32_t ramp_min_time_at_power_floor;                //!< Minimum time at Power Floor, seconds
   uint32_t ramp_stop_delay;                             //!< Ramp stop delay, seconds
-  uint64_t reserved[10];                                //!< Reserved for future use
+  uint64_t reserved[11];                                //!< Reserved for future use
 } amdsmi_power_stabilization_info_t;
 
 /**
@@ -11109,29 +11065,27 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
  *  selecting the node's primary GPU handle (OAM ID 0) before calling this
  *  function. Any parameter dependency is enforced by the
  *  underlying driver write itself; this function performs no
- *  client-side dependency or range validation beyond checking that
- *  value->type matches the type documented for param_id.
+ *  client-side dependency or range validation.
  *
  *  @param[in] processor_handle GPU device handle
  *  @param[in] param_id Parameter to set
- *  @param[in] value Pointer to the typed value to write; type must be
- *  ::AMDSMI_VALUE_TYPE_DOUBLE for ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE
- *  and ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE, and
- *  ::AMDSMI_VALUE_TYPE_INT64 for every other param_id. Not retained past the call.
+ *  @param[in] value New value. Every parameter, including
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE and
+ *  ::AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE despite being a
+ *  %PL/sec rate, is a plain int64_t; this parameter's sysfs node does not
+ *  accept floating-point values.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
  *          implemented on this device, the device is multi-VF, or the
  *          driver rejects the write due to an unmet dependency,
  *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to write this parameter,
- *          ::AMDSMI_STATUS_INVAL if value is nullptr, param_id is invalid,
- *          value->type does not match the documented type for param_id, or
- *          the driver rejects the value,
+ *          ::AMDSMI_STATUS_INVAL if param_id is invalid or the driver rejects the value,
  *          ::AMDSMI_STATUS_FILE_ERROR if the write could not complete
  */
 amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
                                                      amdsmi_power_stabilization_param_id_t param_id,
-                                                     const amdsmi_value_t* value);
+                                                     int64_t value);
 
 /** @} End tagPowerStabilization */
 

@@ -13,14 +13,12 @@
 
 #include <cerrno>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <sstream>
 #include <string>
-#include <type_traits>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
@@ -151,10 +149,9 @@ rsmi_status_t classify_power_stabilization_errno(int err) {
   return RSMI_STATUS_FILE_ERROR;
 }
 
-// int64_t and double sysfs reads differ only in the type `f >> *out`
-// extracts into, so both share this template. After a successful
-// extraction, trailing non-whitespace content (e.g. "0x10", which `>>`
-// would otherwise silently parse as 0) is rejected rather than ignored.
+// After a successful extraction, trailing non-whitespace content (e.g.
+// "0x10", which `>>` would otherwise silently parse as 0) is rejected
+// rather than ignored.
 template <typename T>
 rsmi_status_t read_sysfs_value(const std::string& path, T* out) {
   std::ifstream f(path);
@@ -194,6 +191,9 @@ rsmi_status_t get_power_stabilization_info_internal(const std::string& base,
       {"power_floor", nullptr, &rsmi_power_stabilization_info_t::power_floor},
       {"delay", nullptr, &rsmi_power_stabilization_info_t::delay},
       {"ramp/enable", &rsmi_power_stabilization_info_t::ramp_enabled, nullptr},
+      {"ramp/max_ramp_up_rate", nullptr, &rsmi_power_stabilization_info_t::ramp_max_ramp_up_rate},
+      {"ramp/max_ramp_down_rate", nullptr,
+       &rsmi_power_stabilization_info_t::ramp_max_ramp_down_rate},
       {"ramp/min_time_at_power_floor", nullptr,
        &rsmi_power_stabilization_info_t::ramp_min_time_at_power_floor},
       {"ramp/stop_delay", nullptr, &rsmi_power_stabilization_info_t::ramp_stop_delay},
@@ -233,49 +233,22 @@ rsmi_status_t get_power_stabilization_info_internal(const std::string& base,
   }
   info->insertion_priority = static_cast<rsmi_hawk_insertion_priority_t>(priority);
 
-  ret = read_sysfs_value(base + "ramp/max_ramp_up_rate", &info->ramp_max_ramp_up_rate);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-  ret = read_sysfs_value(base + "ramp/max_ramp_down_rate", &info->ramp_max_ramp_down_rate);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
   return RSMI_STATUS_SUCCESS;
 }
 
-// int64_t is formatted exactly via std::to_string; double uses enough
-// precision to round-trip exactly (std::to_string(double) truncates to 6
-// decimal places, e.g. writing 5e-07 as "0.000000", which would defeat the
-// driver's range validation on the truncated value instead of the one the
-// caller asked for).
-template <typename T>
-std::string format_power_stabilization_value(T value) {
-  if constexpr (std::is_floating_point_v<T>) {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.17g", value);
-    return std::string(buf);
-  } else {
-    return std::to_string(value);
-  }
-}
-
-// int64_t and double sysfs writes differ only in value formatting, so both
-// share this template. Writes as decimal ASCII via a truncating open()+
-// write() (rather than ofstream) so a failed write's errno can be inspected
-// directly, distinguishing permission failures from driver-side
-// value/dependency rejection. O_NOFOLLOW refuses to write through a symlink
-// planted at the sysfs leaf path. write()'s short-write check is intentional
-// (treated as an error below) -- only the retry here is for EINTR.
-template <typename T>
-rsmi_status_t write_sysfs_value(const std::string& path, T value) {
+// Writes as decimal ASCII via a truncating open()+write() (rather than
+// ofstream) so a failed write's errno can be inspected directly,
+// distinguishing permission failures from driver-side value/dependency
+// rejection. O_NOFOLLOW refuses to write through a symlink planted at the
+// sysfs leaf path. write()'s short-write check is intentional (treated as
+// an error below) -- only the retry here is for EINTR.
+rsmi_status_t write_sysfs_value(const std::string& path, int64_t value) {
   ScopedFD fd(path, O_WRONLY | O_TRUNC | O_CLOEXEC | O_NOFOLLOW);
   if (!fd.valid()) {
     return classify_power_stabilization_errno(fd.open_errno());
   }
 
-  std::string text = format_power_stabilization_value(value);
+  std::string text = std::to_string(value);
   ssize_t written;
   do {
     written = write(fd.get(), text.c_str(), text.size());
@@ -317,21 +290,17 @@ rsmi_status_t rsmi_dev_power_stabilization_info_get(uint32_t dv_ind,
 
 rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
                                                      rsmi_power_stabilization_param_id_t param_id,
-                                                     const rsmi_value_t* value) {
+                                                     int64_t value) {
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
   LOG_TRACE(ss);
-
-  if (value == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   const char* relpath = power_stabilization_param_relpath(param_id);
   if (relpath == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  CHK_SUPPORT_NAME_ONLY(value)
+  GET_DEV_FROM_INDX
 
   DEVICE_MUTEX
 
@@ -340,26 +309,10 @@ rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  // All params apply directly to dv_ind's own sysfs node. No NPM-aware
-  // routing here: when NPM coordination makes a param node-wide, selecting
-  // the node's primary GPU handle (OAM ID 0) is the caller's responsibility
-  // (enforced by the CLI), not this function's.
-  bool is_ramp_rate = param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE ||
-                      param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE;
-
-  // amd_smi.cc validates value->type against param_id before reaching here,
-  // but rsmi_dev_power_stabilization_param_set is itself a public rocm_smi
-  // entry point, so a mismatched type is rejected at this layer too rather
-  // than reading the wrong union member.
-  if (is_ramp_rate) {
-    if (value->type != RSMI_VALUE_TYPE_DOUBLE) {
-      return RSMI_STATUS_INVALID_ARGS;
-    }
-    return write_sysfs_value(base + relpath, value->data.double_value);
-  }
-  if (value->type != RSMI_VALUE_TYPE_INT64) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-  return write_sysfs_value(base + relpath, value->data.int64_value);
+  // Applies directly to dv_ind's own sysfs node. No NPM-aware routing here:
+  // when NPM coordination makes a param node-wide, selecting the node's
+  // primary GPU handle (OAM ID 0) is the caller's responsibility (enforced
+  // by the CLI), not this function's.
+  return write_sysfs_value(base + relpath, value);
   CATCH
 }

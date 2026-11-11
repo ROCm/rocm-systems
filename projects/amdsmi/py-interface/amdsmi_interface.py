@@ -805,20 +805,6 @@ class AmdSmiPowerStabilizationParamId(IntEnum):
     RAMP_STOP_DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY
 
 
-# The only two Power Stabilization param_ids whose amdsmi_value_t is
-# AMDSMI_VALUE_TYPE_DOUBLE; every other param_id is AMDSMI_VALUE_TYPE_INT64.
-# amdsmi_set_power_stabilization_param() keys its type tag off this set
-# instead of the Python value's type, so an int passed for a ramp-rate
-# param (or a bool/float passed for any other param) is coerced instead of
-# failing with AMDSMI_STATUS_INVAL.
-_POWER_STABILIZATION_DOUBLE_PARAM_IDS = frozenset(
-    {
-        AmdSmiPowerStabilizationParamId.RAMP_MAX_RAMP_UP_RATE,
-        AmdSmiPowerStabilizationParamId.RAMP_MAX_RAMP_DOWN_RATE,
-    }
-)
-
-
 class AmdSmiNpmBalancingMode(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
     POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
@@ -8336,16 +8322,16 @@ def amdsmi_set_power_stabilization_param(
     Args:
         processor_handle: GPU processor handle
         param_id: Parameter to set
-        value: New value. RAMP_MAX_RAMP_UP_RATE and RAMP_MAX_RAMP_DOWN_RATE
-        require a float (sets an AMDSMI_VALUE_TYPE_DOUBLE amdsmi_value_t);
-        every other param_id accepts an int or bool (sets
-        AMDSMI_VALUE_TYPE_INT64). A float passed for one of those int64
-        params must be a whole number (e.g. 3.0, not 3.9, NaN, or inf).
+        value: New value, written as a signed 64-bit integer -- every
+        param_id, including the two ramp rates despite being a %PL/sec
+        rate, is an int64_t (this parameter's sysfs node cannot accept
+        floating-point values). A float value must be a whole number
+        (e.g. 3.0, not 3.9, NaN, or inf).
 
     Raises:
         AmdSmiParameterException: If processor_handle, param_id, or value is
         invalid, including an int64 value out of signed 64-bit range or a
-        non-whole-number float for an int64 param
+        non-whole-number float
         AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
         AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
     """
@@ -8358,28 +8344,17 @@ def amdsmi_set_power_stabilization_param(
     if not isinstance(value, (int, float)):
         raise AmdSmiParameterException(value, Union[int, float])
 
-    amdsmi_value = amdsmi_wrapper.amdsmi_value_t()
-    if param_id in _POWER_STABILIZATION_DOUBLE_PARAM_IDS:
-        amdsmi_value.type = amdsmi_wrapper.AMDSMI_VALUE_TYPE_DOUBLE
-        amdsmi_value.data.double_value = float(value)
-    else:
-        if isinstance(value, float) and not value.is_integer():
-            # Also catches NaN/inf (is_integer() is False for both), which
-            # int() would otherwise raise a raw ValueError/OverflowError on
-            # instead of the documented AmdSmiParameterException.
-            raise AmdSmiParameterException(value, int, msg=f"value {value!r} is not a whole number")
-        int_value = int(value)
-        if not -(2**63) <= int_value < 2**63:
-            raise AmdSmiParameterException(
-                value,
-                ctypes.c_int64,
-                msg=f"value {value!r} does not fit in a signed 64-bit integer",
-            )
-        amdsmi_value.type = amdsmi_wrapper.AMDSMI_VALUE_TYPE_INT64
-        amdsmi_value.data.int64_value = int_value
+    if isinstance(value, float) and not value.is_integer():
+        # Also catches NaN/inf (is_integer() is False for both), which
+        # int() would otherwise raise a raw ValueError/OverflowError on
+        # instead of the documented AmdSmiParameterException.
+        raise AmdSmiParameterException(value, int, msg=f"value {value!r} is not a whole number")
+    int_value = int(value)
+    if not -(2**63) <= int_value < 2**63:
+        raise AmdSmiParameterException(
+            value, ctypes.c_int64, msg=f"value {value!r} does not fit in a signed 64-bit integer"
+        )
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_power_stabilization_param(
-            processor_handle, param_id, ctypes.byref(amdsmi_value)
-        )
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, int_value)
     )

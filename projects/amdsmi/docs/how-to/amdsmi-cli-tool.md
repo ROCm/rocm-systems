@@ -790,10 +790,9 @@ Set Arguments:
                                                 single @<path> argument pointing to a JSON file matching the
                                                 `static --power-stabilization --json` output.
                                                 enable/ramp_enable accept on/off/true/false/1/0; insertion_priority accepts a
-                                                name (OPPORTUNISTIC, GUARANTEED, DYNAMIC) or its integer value;
-                                                ramp_max_ramp_up_rate/ramp_max_ramp_down_rate accept a decimal number; the
-                                                rest are integers.
-                                                Example: enable=on power_floor=70 insertion_priority=GUARANTEED ramp_max_ramp_up_rate=5.0
+                                                name (OPPORTUNISTIC, GUARANTEED, DYNAMIC) or its integer value; the rest,
+                                                including ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers.
+                                                Example: enable=on power_floor=70 insertion_priority=GUARANTEED ramp_max_ramp_up_rate=5
                                                 Each key is applied in order; processing stops at the first failure.
 
 CPU Arguments:
@@ -2002,8 +2001,8 @@ GPU: 0
         DELAY: 50 ms
         INSERTION_PRIORITY: GUARANTEED
         RAMP_ENABLED: True
-        RAMP_MAX_RAMP_UP_RATE: 10.0 %PL/sec
-        RAMP_MAX_RAMP_DOWN_RATE: 15.0 %PL/sec
+        RAMP_MAX_RAMP_UP_RATE: 10 %PL/sec
+        RAMP_MAX_RAMP_DOWN_RATE: 15 %PL/sec
         RAMP_MIN_TIME_AT_POWER_FLOOR: 5 sec
         RAMP_STOP_DELAY: 2 sec
 ```
@@ -2030,8 +2029,8 @@ KEY | Accepted values
 `delay` | Integer, milliseconds
 `insertion_priority` | `OPPORTUNISTIC`, `GUARANTEED`, `DYNAMIC` (by name), or the integer value
 `ramp_enable` | `0`/`1`, `on`/`off`, `true`/`false`
-`ramp_max_ramp_up_rate` | Float, %PL/sec (100 disables ramp-up management)
-`ramp_max_ramp_down_rate` | Float, %PL/sec (100 disables ramp-down management)
+`ramp_max_ramp_up_rate` | Integer, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Integer, %PL/sec (100 disables ramp-down management)
 `ramp_min_time_at_power_floor` | Integer, seconds
 `ramp_stop_delay` | Integer, seconds
 

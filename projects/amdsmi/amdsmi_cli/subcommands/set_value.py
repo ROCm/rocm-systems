@@ -1067,7 +1067,7 @@ class SetValueCommands:
                 elif error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
                     out = (
                         f"[AMDSMI_STATUS_INVAL] Unable to set {field_name} to {value}: "
-                        "invalid value or type mismatch"
+                        "invalid value"
                     )
                 else:
                     out = (

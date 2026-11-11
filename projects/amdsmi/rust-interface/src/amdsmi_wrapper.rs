@@ -5889,40 +5889,6 @@ extern "C" {
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub enum AmdsmiValueTypeT {
-    AmdsmiValueTypeInt64 = 0,
-    AmdsmiValueTypeDouble = 1,
-}
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union AmdsmiValueDataT {
-    pub int64_value: i64,
-    pub double_value: f64,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiValueDataT"][::std::mem::size_of::<AmdsmiValueDataT>() - 8usize];
-    ["Alignment of AmdsmiValueDataT"][::std::mem::align_of::<AmdsmiValueDataT>() - 8usize];
-    ["Offset of field: AmdsmiValueDataT::int64_value"]
-        [::std::mem::offset_of!(AmdsmiValueDataT, int64_value) - 0usize];
-    ["Offset of field: AmdsmiValueDataT::double_value"]
-        [::std::mem::offset_of!(AmdsmiValueDataT, double_value) - 0usize];
-};
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct AmdsmiValueT {
-    pub type_: AmdsmiValueTypeT,
-    pub data: AmdsmiValueDataT,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AmdsmiValueT"][::std::mem::size_of::<AmdsmiValueT>() - 16usize];
-    ["Alignment of AmdsmiValueT"][::std::mem::align_of::<AmdsmiValueT>() - 8usize];
-    ["Offset of field: AmdsmiValueT::type_"][::std::mem::offset_of!(AmdsmiValueT, type_) - 0usize];
-    ["Offset of field: AmdsmiValueT::data"][::std::mem::offset_of!(AmdsmiValueT, data) - 8usize];
-};
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiHawkInsertionPriorityT {
     AmdsmiHawkInsertionPriorityOpportunistic = 0,
     AmdsmiHawkInsertionPriorityGuaranteed = 1,
@@ -5954,11 +5920,11 @@ pub struct AmdsmiPowerStabilizationInfoT {
     pub delay: u32,
     pub insertion_priority: AmdsmiHawkInsertionPriorityT,
     pub ramp_enabled: bool,
-    pub ramp_max_ramp_up_rate: f64,
-    pub ramp_max_ramp_down_rate: f64,
+    pub ramp_max_ramp_up_rate: u32,
+    pub ramp_max_ramp_down_rate: u32,
     pub ramp_min_time_at_power_floor: u32,
     pub ramp_stop_delay: u32,
-    pub reserved: [u64; 10usize],
+    pub reserved: [u64; 11usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -5979,17 +5945,17 @@ const _: () = {
     ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_enabled"]
         [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_enabled) - 16usize];
     ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_up_rate"]
-        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_up_rate) - 24usize];
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_up_rate) - 20usize];
     ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_max_ramp_down_rate"]
-        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_down_rate) - 32usize];
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_max_ramp_down_rate) - 24usize];
     ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_min_time_at_power_floor"][::std::mem::offset_of!(
         AmdsmiPowerStabilizationInfoT,
         ramp_min_time_at_power_floor
-    ) - 40usize];
+    ) - 28usize];
     ["Offset of field: AmdsmiPowerStabilizationInfoT::ramp_stop_delay"]
-        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_stop_delay) - 44usize];
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, ramp_stop_delay) - 32usize];
     ["Offset of field: AmdsmiPowerStabilizationInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, reserved) - 48usize];
+        [::std::mem::offset_of!(AmdsmiPowerStabilizationInfoT, reserved) - 40usize];
 };
 extern "C" {
     pub fn amdsmi_get_power_stabilization_info(
@@ -6001,6 +5967,6 @@ extern "C" {
     pub fn amdsmi_set_power_stabilization_param(
         processor_handle: AmdsmiProcessorHandle,
         param_id: AmdsmiPowerStabilizationParamIdT,
-        value: *const AmdsmiValueT,
+        value: i64,
     ) -> AmdsmiStatusT;
 }

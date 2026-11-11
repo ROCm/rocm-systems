@@ -8,7 +8,7 @@
 ``int(value)`` silently truncates a non-whole float (``int(3.9) == 3``) and
 raises a raw ``ValueError``/``OverflowError`` -- not the documented
 ``AmdSmiParameterException`` -- for NaN/inf. These tests pin the fix: a float
-value for an int64 param_id must be a whole, finite number, and non-whole
+value for any param_id must be a whole, finite number, and non-whole
 floats (including NaN/inf) raise ``AmdSmiParameterException`` instead of
 truncating or leaking a raw Python exception.
 """
@@ -51,6 +51,44 @@ def _load_source_amdsmi_interface():
 
 ai = _load_source_amdsmi_interface()
 
+_INFO_STRUCT_SIZE = 128
+_RAMP_MAX_RAMP_UP_RATE_OFFSET = 20
+_RAMP_MAX_RAMP_DOWN_RATE_OFFSET = 24
+_RAMP_MIN_TIME_AT_POWER_FLOOR_OFFSET = 28
+_RAMP_STOP_DELAY_OFFSET = 32
+_RESERVED_OFFSET = 40
+_RESERVED_COUNT = 11
+
+
+@unittest.skipIf(
+    not hasattr(ai.amdsmi_wrapper, "struct_amdsmi_power_stabilization_info_t"),
+    "amdsmi_wrapper does not expose struct_amdsmi_power_stabilization_info_t",
+)
+class TestPowerStabilizationInfoLayout(unittest.TestCase):
+    """Pins the all-integer ramp fields' offsets and reserved[11] tail
+    (see test_asic_info_layout.py for the same pattern on a sibling struct)."""
+
+    def test_struct_size_unchanged(self):
+        struct_type = ai.amdsmi_wrapper.struct_amdsmi_power_stabilization_info_t
+        self.assertEqual(ctypes.sizeof(struct_type), _INFO_STRUCT_SIZE)
+
+    def test_ramp_field_offsets(self):
+        struct_type = ai.amdsmi_wrapper.struct_amdsmi_power_stabilization_info_t
+        self.assertEqual(struct_type.ramp_max_ramp_up_rate.offset, _RAMP_MAX_RAMP_UP_RATE_OFFSET)
+        self.assertEqual(
+            struct_type.ramp_max_ramp_down_rate.offset, _RAMP_MAX_RAMP_DOWN_RATE_OFFSET
+        )
+        self.assertEqual(
+            struct_type.ramp_min_time_at_power_floor.offset, _RAMP_MIN_TIME_AT_POWER_FLOOR_OFFSET
+        )
+        self.assertEqual(struct_type.ramp_stop_delay.offset, _RAMP_STOP_DELAY_OFFSET)
+
+    def test_reserved_tail_size_and_offset(self):
+        reserved = ai.amdsmi_wrapper.struct_amdsmi_power_stabilization_info_t.reserved
+        self.assertEqual(reserved.offset, _RESERVED_OFFSET)
+        self.assertEqual(reserved.size, _RESERVED_COUNT * ctypes.sizeof(ctypes.c_uint64))
+        self.assertEqual(reserved.offset + reserved.size, _INFO_STRUCT_SIZE)
+
 
 @unittest.skipIf(
     not hasattr(ai, "amdsmi_set_power_stabilization_param"),
@@ -61,7 +99,6 @@ class TestPowerStabilizationParamIntValidation(unittest.TestCase):
     def setUpClass(cls):
         cls.handle = ai.amdsmi_wrapper.amdsmi_processor_handle()
         cls.int_param = ai.AmdSmiPowerStabilizationParamId.POWER_FLOOR
-        cls.double_param = ai.AmdSmiPowerStabilizationParamId.RAMP_MAX_RAMP_UP_RATE
 
     def setUp(self):
         # Overwrite directly rather than saving/restoring the previous
@@ -71,13 +108,8 @@ class TestPowerStabilizationParamIntValidation(unittest.TestCase):
         # library predates this function.
         self.calls = []
 
-        def _fake_call(handle, param_id, value_ptr):
-            # value_ptr is a ctypes.byref() CArgObject; cast() dereferences it
-            # directly without needing a real ctypes pointer instance.
-            value = ctypes.cast(
-                value_ptr, ctypes.POINTER(ai.amdsmi_wrapper.amdsmi_value_t)
-            ).contents
-            self.calls.append((handle, param_id, value.data.int64_value))
+        def _fake_call(handle, param_id, value):
+            self.calls.append((handle, param_id, value))
             return ai.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         ai.amdsmi_wrapper.amdsmi_set_power_stabilization_param = _fake_call
@@ -112,8 +144,3 @@ class TestPowerStabilizationParamIntValidation(unittest.TestCase):
         with self.assertRaises(ai.AmdSmiParameterException):
             ai.amdsmi_set_power_stabilization_param(self.handle, self.int_param, -math.inf)
         self.assertEqual(self.calls, [])
-
-    def test_double_param_still_accepts_non_whole_float(self):
-        # RAMP_MAX_RAMP_UP_RATE takes AMDSMI_VALUE_TYPE_DOUBLE -- the new
-        # whole-number check must only apply to the int64 branch.
-        ai.amdsmi_set_power_stabilization_param(self.handle, self.double_param, 3.9)

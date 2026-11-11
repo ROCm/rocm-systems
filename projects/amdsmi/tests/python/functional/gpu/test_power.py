@@ -183,13 +183,9 @@ class TestGpuPower(unittest.TestCase):
         the write having changed anything; a nearby distinct value is
         returned instead. Mirrors the special-cased derivation already used
         for insertion_priority, generalized to every other field."""
-        baseline_value = (
-            float(baseline_value) if isinstance(fixed_value, float) else int(baseline_value)
-        )
+        baseline_value = int(baseline_value)
         if baseline_value != fixed_value:
             return fixed_value
-        if isinstance(fixed_value, float):
-            return fixed_value + 1.0
         return fixed_value + 1 if fixed_value == 0 else fixed_value - 1
 
     def test_set_power_stabilization_param(self):
@@ -210,8 +206,8 @@ class TestGpuPower(unittest.TestCase):
             (param_id.DELAY, "delay", 20),
             (param_id.INSERTION_PRIORITY, "insertion_priority", None),
             (param_id.RAMP_ENABLE, "ramp_enabled", 0),
-            (param_id.RAMP_MAX_RAMP_UP_RATE, "ramp_max_ramp_up_rate", 30.0),
-            (param_id.RAMP_MAX_RAMP_DOWN_RATE, "ramp_max_ramp_down_rate", 30.0),
+            (param_id.RAMP_MAX_RAMP_UP_RATE, "ramp_max_ramp_up_rate", 30),
+            (param_id.RAMP_MAX_RAMP_DOWN_RATE, "ramp_max_ramp_down_rate", 30),
             (param_id.RAMP_MIN_TIME_AT_POWER_FLOOR, "ramp_min_time_at_power_floor", 8),
             (param_id.RAMP_STOP_DELAY, "ramp_stop_delay", 4),
             (param_id.ENABLE, "enabled", 0),
@@ -295,14 +291,7 @@ class TestGpuPower(unittest.TestCase):
                                 f"\t### restore amdsmi_set_power_stabilization_param(gpu={i}, "
                                 f"param_id={pid.name}):"
                             )
-                            # Restore with the baseline's own Python type: the
-                            # two ramp-rate params require a float
-                            # (AMDSMI_VALUE_TYPE_DOUBLE), so coercing every
-                            # field to int() makes the API reject them with
-                            # INVAL and leaves them un-restored.
-                            restore_value = original[field]
-                            if not isinstance(restore_value, float):
-                                restore_value = int(restore_value)
+                            restore_value = int(original[field])
                             with self.common.expect_status(
                                 restore_msg, amdsmi.AmdSmiStatus.SUCCESS
                             ):

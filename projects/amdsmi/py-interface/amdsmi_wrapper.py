@@ -462,38 +462,6 @@ AMDSMI_STATUS_MAP_ERROR = 4294967294
 AMDSMI_STATUS_UNKNOWN_ERROR = 4294967295
 amdsmi_status_t = ctypes.c_uint32 # enum
 
-# values for enumeration 'amdsmi_value_type_t'
-amdsmi_value_type_t__enumvalues = {
-    0: 'AMDSMI_VALUE_TYPE_INT64',
-    1: 'AMDSMI_VALUE_TYPE_DOUBLE',
-}
-AMDSMI_VALUE_TYPE_INT64 = 0
-AMDSMI_VALUE_TYPE_DOUBLE = 1
-amdsmi_value_type_t = ctypes.c_uint32 # enum
-class union_amdsmi_value_data_t(Union):
-    pass
-
-union_amdsmi_value_data_t._pack_ = 1 # source:False
-union_amdsmi_value_data_t._layout_ = 'ms'
-union_amdsmi_value_data_t._fields_ = [
-    ('int64_value', ctypes.c_int64),
-    ('double_value', ctypes.c_double),
-]
-
-amdsmi_value_data_t = union_amdsmi_value_data_t
-class struct_amdsmi_value_t(Structure):
-    pass
-
-struct_amdsmi_value_t._pack_ = 1 # source:False
-struct_amdsmi_value_t._layout_ = 'ms'
-struct_amdsmi_value_t._fields_ = [
-    ('type', amdsmi_value_type_t),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('data', amdsmi_value_data_t),
-]
-
-amdsmi_value_t = struct_amdsmi_value_t
-
 # values for enumeration 'amdsmi_clk_type_t'
 amdsmi_clk_type_t__enumvalues = {
     0: 'AMDSMI_CLK_TYPE_SYS',
@@ -5447,12 +5415,13 @@ struct_amdsmi_power_stabilization_info_t._fields_ = [
     ('delay', ctypes.c_uint32),
     ('insertion_priority', amdsmi_hawk_insertion_priority_t),
     ('ramp_enabled', ctypes.c_bool),
-    ('PADDING_1', ctypes.c_ubyte * 7),
-    ('ramp_max_ramp_up_rate', ctypes.c_double),
-    ('ramp_max_ramp_down_rate', ctypes.c_double),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+    ('ramp_max_ramp_up_rate', ctypes.c_uint32),
+    ('ramp_max_ramp_down_rate', ctypes.c_uint32),
     ('ramp_min_time_at_power_floor', ctypes.c_uint32),
     ('ramp_stop_delay', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint64 * 10),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 11),
 ]
 
 amdsmi_power_stabilization_info_t = struct_amdsmi_power_stabilization_info_t
@@ -5462,10 +5431,11 @@ try:
     amdsmi_get_power_stabilization_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_power_stabilization_info_t)]
 except AttributeError:
     pass
+int64_t = ctypes.c_int64
 try:
     amdsmi_set_power_stabilization_param = _libraries['libamd_smi.so'].amdsmi_set_power_stabilization_param
     amdsmi_set_power_stabilization_param.restype = amdsmi_status_t
-    amdsmi_set_power_stabilization_param.argtypes = [amdsmi_processor_handle, amdsmi_power_stabilization_param_id_t, ctypes.POINTER(struct_amdsmi_value_t)]
+    amdsmi_set_power_stabilization_param.argtypes = [amdsmi_processor_handle, amdsmi_power_stabilization_param_id_t, int64_t]
 except AttributeError:
     pass
 __all__ = \
@@ -5839,8 +5809,8 @@ __all__ = \
     'AMDSMI_TEMP_MAX', 'AMDSMI_TEMP_MAX_HYST', 'AMDSMI_TEMP_MIN',
     'AMDSMI_TEMP_MIN_HYST', 'AMDSMI_TEMP_OFFSET',
     'AMDSMI_TEMP_SHUTDOWN', 'AMDSMI_UTILIZATION_COUNTER_FIRST',
-    'AMDSMI_UTILIZATION_COUNTER_LAST', 'AMDSMI_VALUE_TYPE_DOUBLE',
-    'AMDSMI_VALUE_TYPE_INT64', 'AMDSMI_VIRTUALIZATION_MODE_BAREMETAL',
+    'AMDSMI_UTILIZATION_COUNTER_LAST',
+    'AMDSMI_VIRTUALIZATION_MODE_BAREMETAL',
     'AMDSMI_VIRTUALIZATION_MODE_GUEST',
     'AMDSMI_VIRTUALIZATION_MODE_HOST',
     'AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH',
@@ -6130,14 +6100,13 @@ __all__ = \
     'amdsmi_tray_info_t', 'amdsmi_ttm_info_t',
     'amdsmi_uma_carveout_info_t', 'amdsmi_uma_carveout_option_t',
     'amdsmi_utilization_counter_t',
-    'amdsmi_utilization_counter_type_t', 'amdsmi_value_data_t',
-    'amdsmi_value_t', 'amdsmi_value_type_t', 'amdsmi_vbios_info_t',
+    'amdsmi_utilization_counter_type_t', 'amdsmi_vbios_info_t',
     'amdsmi_version_t', 'amdsmi_violation_status_t',
     'amdsmi_virtualization_mode_t', 'amdsmi_voltage_metric_t',
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
     'amdsmi_vram_type_t', 'amdsmi_vram_usage_t', 'amdsmi_xgmi_info_t',
     'amdsmi_xgmi_link_status_t', 'amdsmi_xgmi_link_status_type_t',
-    'amdsmi_xgmi_status_t', 'processor_type_t',
+    'amdsmi_xgmi_status_t', 'int64_t', 'processor_type_t',
     'processor_type_t__enumvalues', 'size_t', 'struct__links',
     'struct_amd_metrics_table_header_t',
     'struct_amdsmi_accelerator_partition_profile_config_t',
@@ -6207,7 +6176,7 @@ __all__ = \
     'struct_amdsmi_topology_nearest_t', 'struct_amdsmi_tray_info_t',
     'struct_amdsmi_ttm_info_t', 'struct_amdsmi_uma_carveout_info_t',
     'struct_amdsmi_uma_carveout_option_t',
-    'struct_amdsmi_utilization_counter_t', 'struct_amdsmi_value_t',
+    'struct_amdsmi_utilization_counter_t',
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',
     'struct_amdsmi_violation_status_t', 'struct_amdsmi_vram_info_t',
     'struct_amdsmi_vram_usage_t', 'struct_amdsmi_xgmi_info_t',
@@ -6217,5 +6186,5 @@ __all__ = \
     'struct_pcie_metric_', 'struct_pcie_static_', 'struct_ras_info_',
     'struct_timespec', 'struct_valid_bits_', 'uint32_t', 'uint64_t',
     'uint8_t', 'union_amdsmi_bdf_t', 'union_amdsmi_cper_valid_bits_t',
-    'union_amdsmi_nps_caps_t', 'union_amdsmi_value_data_t',
-    'union_fabric_info_', 'union_policy_data_']
+    'union_amdsmi_nps_caps_t', 'union_fabric_info_',
+    'union_policy_data_']

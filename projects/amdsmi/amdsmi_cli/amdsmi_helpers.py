@@ -656,7 +656,7 @@ class AMDSMIHelpers:
     @classmethod
     def _fits_int64(cls, value: int) -> bool:
         """Range check for anything that lands in an int64 ctypes field
-        (amdsmi_value_t.data.int64_value / AMPP field values)."""
+        (Power Stabilization's int64_t value / AMPP field values)."""
         return cls._INT64_MIN <= value < cls._INT64_MAX_EXCLUSIVE
 
     @staticmethod
@@ -689,7 +689,7 @@ class AMDSMIHelpers:
     @staticmethod
     def parse_power_stabilization_token(
         token: str, ignore_read_only: bool
-    ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", Union[int, float]]]:
+    ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", int]]:
         """Parse a single 'KEY=VALUE' Power Stabilization token into
         (AmdSmiPowerStabilizationParamId, value).
 
@@ -744,15 +744,6 @@ class AMDSMIHelpers:
                     f"Invalid value '{safe_value}' for {key}. Valid values are: "
                     "on, off, true, false, 1, 0"
                 )
-        elif param_id in (param_ids.RAMP_MAX_RAMP_UP_RATE, param_ids.RAMP_MAX_RAMP_DOWN_RATE):
-            try:
-                value = float(raw_value)
-            except ValueError:
-                raise ValueError(
-                    f"Invalid value '{safe_value}' for {key}: must be a number"
-                ) from None
-            if not math.isfinite(value):
-                raise ValueError(f"Invalid value '{safe_value}' for {key}: must be a finite number")
         else:
             try:
                 value = int(raw_value)
@@ -761,9 +752,9 @@ class AMDSMIHelpers:
                     f"Invalid value '{safe_value}' for {key}: must be an integer"
                 ) from None
             # ctypes silently truncates an out-of-int64-range value when it's
-            # assigned into amdsmi_value_t.data.int64_value; reject it here
-            # instead of letting the CLI report "success" for a value that
-            # was never actually written.
+            # passed as the int64_t parameter; reject it here instead of
+            # letting the CLI report "success" for a value that was never
+            # actually written.
             if not AMDSMIHelpers._fits_int64(value):
                 raise ValueError(
                     f"Invalid value '{safe_value}' for {key}: must fit in a signed 64-bit integer"

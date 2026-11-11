@@ -6865,13 +6865,13 @@ finally:
   return `AMDSMI_STATUS_NOT_SUPPORTED`.
 - Writing requires root (or equivalent sysfs write permission).
 
-Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation beyond checking the value's type.
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation.
 
 Input parameters:
 
 * `processor_handle` the device handle
 * `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
-* `value` new value; type is derived from `param_id`, not from the Python value's type: `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` require a `float` (sets `AMDSMI_VALUE_TYPE_DOUBLE`), every other `param_id` accepts an `int` or `bool` (sets `AMDSMI_VALUE_TYPE_INT64`)
+* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` or whole-number `bool`/`float` (this parameter's sysfs node cannot accept floating-point values)
 
 Output: None
 
@@ -6884,7 +6884,7 @@ Exceptions that can be thrown by `amdsmi_set_power_stabilization_param` function
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, the device is multi-VF, or the driver rejects the write due to an unmet dependency
 - `AMDSMI_STATUS_NO_PERM` - amd-smi lacks permission to write sysfs
-- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, `value`'s type does not match the documented type for `param_id`, or the driver rejects the value
+- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, or the driver rejects the value
 - `AMDSMI_STATUS_FILE_ERROR` - The sysfs write could not complete
 
 Example:
