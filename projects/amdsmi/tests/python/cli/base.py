@@ -147,6 +147,28 @@ class TestCliBase(unittest.TestCase):
         "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
     }
 
+    # The only flags ``metric --nic`` accepts. The parser rejects any GPU or CPU
+    # metric flag given with --nic, so a command carrying one expects a failure.
+    NIC_METRIC_FLAGS = frozenset(
+        {
+            "--nic",
+            "--port",
+            "--extended",
+            "--rdma",
+            "--sensors",
+            "--show-unsupported",
+            "--json",
+            "--csv",
+            "--file",
+            "--append",
+            "--overwrite",
+            "--loglevel",
+            "--watch",
+            "--watch_time",
+            "--iterations",
+        }
+    )
+
     # Order for the amd-smi reset commands, putting --clocks last since
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
@@ -820,6 +842,10 @@ class TestCliBase(unittest.TestCase):
             words = cmd.split()
             if "--nic" in words and ("--watch" in words):
                 cond = [AmdSmiExitCode.INVALID_PARAMETER]
+            if (words[1:2] == ["metric"]) and ("--nic" in words):
+                given_flags = {word for word in words if word.startswith("--")}
+                if given_flags - self.NIC_METRIC_FLAGS:
+                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands
