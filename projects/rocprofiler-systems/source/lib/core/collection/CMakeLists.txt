@@ -27,3 +27,7 @@ target_sources(
     rocprofiler-systems-core-library
     PRIVATE ${collection_sources} ${collection_headers}
 )
+
+if(ROCPROFSYS_BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
