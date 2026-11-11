@@ -201,9 +201,9 @@ public:
 
 /// @brief A qualified gfx1250 wave32 workgroup barrier with implicit identity -1.
 /// @details The original drain precedes signal; signal/wait share a block without
-/// intervening memory, dominate all exits, and execute once per wave independently
-/// of EXEC. Completion is observed after
-/// the unchanged wait; access positions refer to original guest instructions.
+/// intervening memory operations or barriers, dominate all exits, and execute once
+/// per wave independently of EXEC. Completion is observed after the unchanged wait;
+/// access positions refer to original guest instructions.
 class BarrierFacts {
 public:
   uint64_t original_drain = 0;

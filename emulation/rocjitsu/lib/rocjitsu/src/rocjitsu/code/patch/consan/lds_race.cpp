@@ -129,19 +129,19 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       const uint32_t drain =
           build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSWaitDscntSopp, 0).value();
       size_t wait_index = index + 1;
-      bool intervening_memory = false;
+      bool intervening_memory_or_barrier = false;
       while (wait_index < instructions.size() &&
              instructions[wait_index]->mnemonic() != "s_barrier_wait") {
         const Instruction &instruction = *instructions[wait_index];
         if (instruction.is_memory_op() || instruction.is_barrier())
-          intervening_memory = true;
+          intervening_memory_or_barrier = true;
         ++wait_index;
       }
       // Require the original guest drain: DBI envelopes add their own waits,
       // which must not make a store/signal/wait group without s_wait_dscnt 0
       // qualify as guest synchronization.
       if (program.target->id != 1250 || program.wave_size != 32 || index == 0 ||
-          wait_index == instructions.size() || intervening_memory ||
+          wait_index == instructions.size() || intervening_memory_or_barrier ||
           instructions[index - 1]->size() != 4 || instructions[index]->size() != 4 ||
           instructions[wait_index]->size() != 4 ||
           instructions[index - 1]->raw_encoding()[0] != drain ||
@@ -149,7 +149,8 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
           instructions[wait_index]->raw_encoding()[0] != wait)
         return reject_instruction(
             error, InputErrorCode::UnsupportedSynchronization,
-            "requires original LDS drain/signal -1/wait -1 groups without intervening memory",
+            "requires original LDS drain/signal -1/wait -1 groups without intervening memory "
+            "operations or barriers",
             instructions[index]->src_loc());
       barrier_blocks.push_back(block);
       program.barriers.push_back(
