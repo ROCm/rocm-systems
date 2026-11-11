@@ -118,6 +118,7 @@ test_categories:
       - "CpuAffinity.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
+      - "Diagnostics.*"
     exclude_windows:
       - "*"
     labels:

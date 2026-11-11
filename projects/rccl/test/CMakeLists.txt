@@ -287,6 +287,7 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
