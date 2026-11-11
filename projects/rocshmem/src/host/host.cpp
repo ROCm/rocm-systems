@@ -279,25 +279,31 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
  */
 __host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info,
                                                  void* dst, uint64_t value,
-                                                 int pe, uint64_t* out) {
+                                                 int pe, uint64_t* fetch_val) {
+#if defined(GDA_MLX5) || defined(GDA_IONIC)
+  LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
+#endif
   auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
   if (!wiv) {
     return false;
   }
-  *out = wiv->amo_fadd(dst, value, pe);
+  *fetch_val = wiv->amo_fadd(dst, value, pe);
   return true;
 }
 
 __host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
                                                  void* dst, uint64_t swap,
                                                  uint64_t compare, int pe,
-                                                 uint64_t* out) {
+                                                 uint64_t* fetch_val) {
+#if defined(GDA_MLX5) || defined(GDA_IONIC)
+  LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
+#endif
   auto* wiv = dynamic_cast<WindowInfoVerbs*>(window_info);
   if (!wiv) {
     return false;
   }
   /* WindowInfoVerbs::amo_cas(dst, compare, swap, pe). */
-  *out = wiv->amo_cas(dst, compare, swap, pe);
+  *fetch_val = wiv->amo_cas(dst, compare, swap, pe);
   return true;
 }
 #endif  // USE_HOST_VERBS
