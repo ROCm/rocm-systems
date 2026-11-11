@@ -4,6 +4,7 @@
 /// @file vector16_inline_constant_test.cpp
 /// @brief Decoded 16-bit source carriers, delegated reads and destination windows.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
@@ -98,9 +99,9 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("vector16_inline", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "vector16_inline", config, &memory_, &cache_));
     decoder_ = Decoder::create(config.arch);
-    ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);
     wave_ = cu_->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave_, nullptr);

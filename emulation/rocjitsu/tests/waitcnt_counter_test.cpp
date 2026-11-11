@@ -200,7 +200,10 @@ TEST(WaitCounterPolicy, UnmappedDomainsHaveNoMemoryPipelineWait) {
                         WaitCounterKind::Count}) {
       SCOPED_TRACE(static_cast<unsigned>(model));
       SCOPED_TRACE(static_cast<unsigned>(domain));
-      EXPECT_FALSE(memory_wait_counter_type(domain, model));
+      if (domain == WaitCounterKind::Sample && model == WaitcntModel::SplitGfx12)
+        EXPECT_EQ(memory_wait_counter_type(domain, model), WaitCounterType::SAMPLECNT);
+      else
+        EXPECT_FALSE(memory_wait_counter_type(domain, model));
     }
   }
 }

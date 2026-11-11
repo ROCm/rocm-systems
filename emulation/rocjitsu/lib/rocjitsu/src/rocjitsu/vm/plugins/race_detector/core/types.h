@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -20,13 +21,6 @@ struct WaveId {
   bool operator==(WaveId o) const { return value == o.value; }
   bool operator!=(WaveId o) const { return value != o.value; }
   bool operator<(WaveId o) const { return value < o.value; }
-};
-
-/// Number of lanes per wave (32 for RDNA, 64 for CDNA).
-/// Implicitly convertible to int for use in arithmetic and loop bounds.
-struct WaveSize {
-  int value;
-  operator int() const { return value; }
 };
 
 /// Identifies a memory event within a workgroup. Each memory instruction
@@ -44,6 +38,13 @@ struct EventId {
   bool operator==(EventId o) const { return value == o.value; }
   bool operator!=(EventId o) const { return value != o.value; }
   bool operator<(EventId o) const { return value < o.value; }
+};
+
+/// A contiguous run of LDS bytes, for events described by byte ranges rather
+/// than per-lane addresses.
+struct LdsByteRange {
+  uint32_t address = 0; ///< Absolute CU LDS byte address.
+  uint32_t bytes = 0;
 };
 
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
@@ -68,7 +69,7 @@ struct RaceViolation {
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for scalar.
+  int lane;     ///< Lane within the wave, or -1 for no lane (scalar or tensor DMA).
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.

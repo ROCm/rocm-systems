@@ -8,6 +8,7 @@
 #define RJ_ARITH_INTERNAL_H_
 
 #include "common/bits.h"
+#include "common/exec_mask.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
@@ -38,11 +39,6 @@ inline constexpr uint32_t kWmmaInstructionFlags = RJ_ARITH_WMMA_NEG_LO_A | RJ_AR
                                                   RJ_ARITH_WMMA_NEG_C | RJ_ARITH_WMMA_NEG_HI_A |
                                                   RJ_ARITH_WMMA_NEG_HI_B | RJ_ARITH_WMMA_ABS_C;
 
-// EXEC has one bit per lane in the instruction wave.
-template <int Lanes>
-  requires(Lanes == 32 || Lanes == 64)
-using ExecMask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
-
 // Reinterpret FP32 bits as float without conversion or aliasing violations.
 inline float as_float(uint32_t v) { return rocjitsu::arith::bit_cast<float>(v); }
 
@@ -55,8 +51,8 @@ inline double as_double(uint64_t bits) { return rocjitsu::arith::bit_cast<double
 // Return the FP64 representation without numeric conversion.
 inline uint64_t double_bits(double value) { return rocjitsu::arith::bit_cast<uint64_t>(value); }
 
-// Resolve the legacy rocjitsu policy selected by this entry point's wrapper.
-// Explicit semantics are never reinterpreted.
+// Resolve only the semantics field for validation; explicit modes are unchanged.
+// Callers preserve any additional Compatibility policy before calling this helper.
 inline uint64_t resolve_compatibility(uint64_t flags, uint64_t semantics) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY
              ? (flags & ~RJ_ARITH_SEMANTICS_MASK) | semantics
@@ -78,6 +74,13 @@ inline bool is_exact(uint64_t flags) {
 // Return whether resolved semantics require guest FP status reporting.
 inline bool reports_fp_status(uint64_t flags) {
   return (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+}
+
+// A composed instruction may calculate its own status around a numeric sub-operation.
+inline uint64_t without_fp_status(uint64_t flags) {
+  return reports_fp_status(flags) ? (flags & ~RJ_ARITH_SEMANTICS_MASK) |
+                                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                                  : flags;
 }
 
 // Accept ordinary semantics modes 0..3; reject reserved or unresolved compatibility modes.

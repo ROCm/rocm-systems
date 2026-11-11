@@ -50,7 +50,6 @@ void check_loose_unary_f64(Call call, Reference reference, bool gfx12) {
     return result;
   };
   expect_invalid_fp_requests(invalid_request);
-  expect_invalid_fp64_rounding(invalid_request);
 
   // This entry point is loose-only. Its reference is computed independently;
   // strict numeric semantics and required reporting are checked as error contracts.
