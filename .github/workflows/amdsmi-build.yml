@@ -49,7 +49,7 @@ jobs:
     name: Build (Manylinux Gate)
     runs-on: ubuntu-24.04
     container:
-      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82 # latest
+      image: quay.io/pypa/manylinux_2_28_x86_64@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82 # latest, 2026-10-09
     env:
       BUILD_DIR: /tmp/amdsmi-build
 
