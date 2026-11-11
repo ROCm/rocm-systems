@@ -366,29 +366,26 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   only ever return success against a fresh comm, and `ncclDevrInitOnce`'s real
   error path is already covered directly by `dev-runtime-test.cc`'s own suite,
   so a fake tests this binary's own error-propagation logic just as well
-  without pulling in that file's dependency floor. See
-  `test_categories_micro_scheduler.yaml`.
+  without pulling in that file's dependency floor.
 - **`rccl-UnitTestsMicroEnqueue-warpspeed`** — the `enqueue.cc` host
   microtests compiled binary-wide with `ENABLE_WARP_SPEED`. It exercises the
   emitted plan count, packing mode, and launch mode that the macro-off enqueue
-  binary cannot represent. See `test_categories_micro_enqueue.yaml`.
+  binary cannot represent.
 
 - **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
   `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
   `ncclMemTrack` and `ncclMemTrackImportFromPeer`, and `collective_stubs.cc` defines
   `ncclCommMemSuspend`; `mem_manager.cc` defines all three. Its other externals are in
-  `fakes/mem_manager_micro_fakes.cc`. See `test_categories_micro_mem_manager.yaml`.
+  `fakes/mem_manager_micro_fakes.cc`.
 - **`rccl-UnitTestsMicroAllocator`** — `allocator.cc` (via `ALLOCATOR_CC_PATH`, from
   `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
-  needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead. See
-  `test_categories_micro_allocator.yaml`.
+  needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead.
 - **`rccl-UnitTestsMicroMnnvl`** — `mnnvl.cc` (via `MNNVL_CC_PATH`, from `mnnvl-test.cc`);
   suite `Mnnvl*`. Its own binary: `nccl_stubs.cc`, which most targets link, defines
-  `ncclMnnvlCheck`, and `mnnvl.cc` defines it too. See `test_categories_micro_mnnvl.yaml`.
+  `ncclMnnvlCheck`, and `mnnvl.cc` defines it too.
 - **`rccl-UnitTestsMicroAlloc`** — header-only `include/alloc.h` (from `alloc-test.cc`); suite
   `Alloc*`. Its own binary: `alloc.h`'s inline side-stream map and shutdown and skip-free state
-  would be shared with every other unit in `rccl-UnitTestsMicro`. See
-  `test_categories_micro_alloc.yaml`.
+  would be shared with every other unit in `rccl-UnitTestsMicro`.
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
   `src/enqueue/task_prep/task_classify.cc` (via `TASK_CLASSIFY_CC_PATH`, suite
@@ -697,13 +694,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   (via `NET_IB_CAST_CONNECT_CC_PATH`, the hipified `connect_tmp.cc`; suites
   `NetIbCastConnect*Microtest.*`) with the real `qp_sharing.cc`. Fake verbs and an
   in-memory socket pair run listen, connect and accept end to end. Its own binary: no
-  shared binary links the socket and net_ib_cast fakes it needs. See
-  `test_categories_micro_net_ib_cast_connect.yaml`.
+  shared binary links the socket and net_ib_cast fakes it needs.
 
 - **`rccl-UnitTestsMicroNetIbCastQpSharing`**: `src/transport/net_ib_cast/qp_sharing.cc`
   (via `NET_IB_CAST_QP_SHARING_CC_PATH`; suites `NetIbCastQpSharing*Microtest.*`): the
   shared-QP pool, the commId table and completion routing. Its own binary for the same
-  reason. See `test_categories_micro_net_ib_cast_qp_sharing.yaml`.
+  reason.
 
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
