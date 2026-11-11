@@ -5869,9 +5869,12 @@ std::vector<std::string> rocm_core_candidates() {
     }
   }
 
-  const char* rocm_home = std::getenv("ROCM_HOME");
+  // secure_getenv(), not getenv(): these vars pick a dlopen() path, so a
+  // setuid/setgid process must not trust them from its (possibly attacker-
+  // controlled) environment.
+  const char* rocm_home = secure_getenv("ROCM_HOME");
   if (rocm_home == nullptr) {
-    rocm_home = std::getenv("ROCM_PATH");
+    rocm_home = secure_getenv("ROCM_PATH");
   }
   if (rocm_home != nullptr) {
     dirs.push_back(std::string(rocm_home) + "/lib");
