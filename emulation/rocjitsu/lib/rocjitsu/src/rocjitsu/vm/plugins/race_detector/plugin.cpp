@@ -198,6 +198,8 @@ void register_counter_slot(WaveRaceState &race, const InstructionSnapshot &instr
 ///   memory (CDNA5 ISA 11.2.3), and LDS operations count on DScnt and are kept
 ///   in order (CDNA5 ISA 5.7.1.4). With EXEC zero one is skipped only when
 ///   DScnt is zero (CDNA5 ISA 3.2.2.1), so its admission is sound either way.
+/// - DS_NOP holds an ordered DScnt slot too, as the core memory-wait checker
+///   models it; the ISA describes it only as "Do nothing".
 struct CounterOnlySlot {
   amdgpu::MemoryCounterObligation obligation;
   bool is_load;
@@ -211,7 +213,7 @@ std::optional<CounterOnlySlot> counter_only_slot(std::string_view mnemonic) {
   if (mnemonic == "global_wb" || mnemonic == "global_wbinv")
     return CounterOnlySlot{{WaitCounterType::STORECNT, MemoryCompletionClass::VMEM}, false};
   if (mnemonic == "ds_permute_b32" || mnemonic == "ds_bpermute_b32" ||
-      mnemonic == "ds_bpermute_fi_b32" || mnemonic == "ds_swizzle_b32")
+      mnemonic == "ds_bpermute_fi_b32" || mnemonic == "ds_swizzle_b32" || mnemonic == "ds_nop")
     return CounterOnlySlot{{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}, true};
   return std::nullopt;
 }
