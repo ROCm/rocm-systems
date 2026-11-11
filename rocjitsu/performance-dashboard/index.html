@@ -1634,7 +1634,7 @@
 <p>These results measure Rocjitsu's simulation runs. They are not benchmarks of physical AMD GPUs and should not be used to compare AMD hardware performance. Target names such as <code>gfx950</code> identify the architecture being simulated.</p>
 </div>
 <p><a aria-label="Open Rocjitsu Simulation Performance Dashboard (external site)" class="dashboard-launch" href="https://rocm.github.io/rocm-systems/rocjitsu-dashboard/"><strong>Rocjitsu / Simulation Performance Dashboard</strong> <span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2z"/></svg></span></a></p>
-<p>To benchmark a pull request, add the <a href="https://github.com/ROCm/rocm-systems/labels/rocjitsu-presubmit-benchmarks"><code>rocjitsu-presubmit-benchmarks</code></a> label; the results are published to this dashboard.</p>
+<p>To benchmark a same-repository pull request targeting <code>develop</code>, add the <a href="https://github.com/ROCm/rocm-systems/labels/rocjitsu-presubmit-benchmarks"><code>rocjitsu-presubmit-benchmarks</code></a> label. The PR must match the workflow's <a href="https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-benchmarks.yml">path filters</a>; fork PRs are excluded. Results from eligible runs are published to this dashboard.</p>
 <h2 id="what-you-can-explore">What you can explore<a class="headerlink" href="#what-you-can-explore" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Benchmark run history and test durations.</li>
