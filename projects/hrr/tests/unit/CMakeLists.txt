@@ -81,6 +81,7 @@ else()
 endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
+set_tests_properties(hrr-unit-tests PROPERTIES LABELS "cpu-only")
 
 # Handler-level tests: playback handlers and helpers in hip_playback.cpp (and
 # the generated handlers), linked in and called with crafted records or stand-ins
@@ -135,4 +136,5 @@ if(TARGET hrr-playback AND NOT WIN32)
     target_link_options(hrr-handler-tests PRIVATE -fsanitize=address)
   endif()
   add_test(NAME hrr-handler-tests COMMAND hrr-handler-tests)
+  set_tests_properties(hrr-handler-tests PROPERTIES LABELS "cpu-only")
 endif()

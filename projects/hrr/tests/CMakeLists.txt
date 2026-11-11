@@ -12,6 +12,12 @@
 #   scripts/     CI helpers that run a suite and report on it, and the unittest
 #                suites for those helpers and for ../tools (not built).
 #
+# ctest labels select where a test can run:
+#   cpu-only    needs no GPU and no simulator; TheRock CI runs only these.
+#   simulator   runs under the rocJitsu GPU emulator.
+#   gpu         needs a physical AMD GPU.
+# Run one group with `ctest -L cpu-only` from the build directory.
+#
 # tests/config/<suite>.yaml lists every case the binary must contain and where
 # it runs; scripts/hrr_test_config.py enforces the list.
 #
@@ -52,6 +58,15 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME hrr-generator-rules
     COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+  set_tests_properties(hrr-generator-rules PROPERTIES LABELS "cpu-only")
+endif()
+
+# Install the CPU-only suites as a relocatable ctest tree (share/hrr/test) for
+# packaged SDK test runs, such as TheRock's. Run it with
+#   ctest --test-dir <prefix>/share/hrr/test -L cpu-only
+option(HRR_INSTALL_TESTS "Install the CPU-only HRR tests as a relocatable ctest tree" OFF)
+if(HRR_INSTALL_TESTS)
+  include(cmake/HrrInstallTests.cmake)
 endif()
 
 if(HRR_BUILD_INTEGRATION_TESTS)

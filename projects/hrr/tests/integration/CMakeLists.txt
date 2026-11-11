@@ -240,3 +240,5 @@ if(NOT WIN32)
 endif()
 
 add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
+# Needs an AMD GPU or the rocJitsu simulator, and a capture-enabled amdhip64.
+set_tests_properties(hrr-integration-tests PROPERTIES LABELS "simulator;gpu")
