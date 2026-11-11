@@ -4,7 +4,13 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <limits>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
@@ -21,22 +27,6 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
 WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   assert(waveIndex >= 0 && waveIndex < static_cast<int>(waveRaceStates.size()));
   return waveRaceStates[waveIndex];
-}
-
-EventId
-RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
-                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                              IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
-                              MemoryOrderClass memoryOrder,
-                              std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
-  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
-      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
-  size_t count = 1;
-  if (additionalWaitCounterType)
-    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
-  return allocateEventId(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                         std::move(ldsIntervals), std::span(obligations.data(), count),
-                         memoryOrder);
 }
 
 EventId

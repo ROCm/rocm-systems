@@ -21,6 +21,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllReduce, rcclSelectAllReduce);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllGather, rcclSelectAllGather);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectReduceScatter, rcclSelectReduceScatter);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAlltoAll, rcclSelectAlltoAll);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectBroadcast, rcclSelectBroadcast);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEnabled, rcclDdaEnabled);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
@@ -236,6 +237,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                decision);
 }
 
+static ncclResult_t DefaultSelectBroadcast(struct ncclComm*, size_t, ncclDataType_t, int, bool,
+                                           struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectBroadcast");
+}
+std::function<ncclResult_t(struct ncclComm*, size_t, ncclDataType_t, int, bool, struct rcclCollDecision*)>
+    g_rcclSelectBroadcast = DefaultSelectBroadcast;
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision) {
+  return g_rcclSelectBroadcast(comm, count, datatype, root, query, decision);
+}
+
 static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
                                                ncclRedOp_t, bool, struct rcclCollDecision*, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectReduceScatter");
@@ -396,6 +408,7 @@ void ResetRcclWrapFakes() {
   g_rcclSelectAllGather = DefaultSelectAllGather;
   g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
   g_rcclSelectAlltoAll = DefaultSelectAlltoAll;
+  g_rcclSelectBroadcast = DefaultSelectBroadcast;
   g_rcclDdaEnabled = DefaultDdaEnabled;
   g_rcclDdaEntryThreshold = DefaultDdaEntryThreshold;
   g_rcclGetAlgoName = DefaultGetAlgoName;

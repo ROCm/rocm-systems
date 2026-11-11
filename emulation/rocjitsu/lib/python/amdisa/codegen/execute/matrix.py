@@ -456,11 +456,93 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'
             )
             if supports_gpr_idx:
-                L.append('  if (const_acc == amdgpu::ACC_FROM_VGPR)')
+                L.append(f'  if ({s2}.decoded_vgpr())')
                 L.append(
                     '    s2 = amdgpu::apply_gpr_idx_to_mma_base('
                     'wf, vb, s2, amdgpu::VgprMsbRole::Src2);'
                 )
+
+    # Carry the existing MFMA register/accumulator resolution into the library bridge.
+    # CDNA1/2 and other instruction families retain their original executors.
+    if (
+        arch in ('cdna3', 'cdna4')
+        and name.startswith('V_MFMA_F32_')
+        and input_type in ('F16', 'BF16')
+        and M == N
+        and (M, K, B)
+        in {
+            (32, 4, 2),
+            (16, 4, 4),
+            (4, 4, 16),
+            (32, 8, 1),
+            (16, 16, 1),
+            (16, 32, 1),
+            (32, 16, 1),
+        }
+    ):
+        api = 'rj_arith_' + name.lower() + '_w64'
+        L.append(
+            '  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << RJ_ARITH_MFMA_ABID_SHIFT)'
+        )
+        L.append('      | (uint64_t(inst_.blgp) << RJ_ARITH_MFMA_BLGP_SHIFT);')
+        L.append(
+            '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+        )
+        L.append('    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });')
+        L.append(
+            '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+        )
+        L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+        L.append(
+            f'  amdgpu::arith::exec_dense_fp_matrix<{M * K * B // 128}, {M * N * B // 64}, 64>('
+        )
+        L.append(f'      wf, {api}, cu.arithmetic_flags(), controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append(
+            f'      !{s2}.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);'
+        )
+        return '\n'.join(L)
+
+    if (
+        uses_fixed_wave32_split_k_dense_layout
+        and (M, N, K) == (16, 16, 32)
+        and (result_type, input_type)
+        in {
+            ('F32', 'F16'),
+            ('F32', 'BF16'),
+            ('F16', 'F16'),
+            ('BF16', 'BF16'),
+            ('BF16F32', 'BF16'),
+        }
+    ):
+        api = 'rj_arith_' + name.lower() + '_w32'
+        L.append('  uint64_t controls = (inst_.neg & 4) ? RJ_ARITH_WMMA_NEG_C : 0;')
+        L.append('  if (inst_.neg_hi & 4) controls |= RJ_ARITH_WMMA_ABS_C;')
+        if result_type in ('F16', 'BF16'):
+            bf16 = 'true' if result_type == 'BF16' else 'false'
+            L.append('  if (!src2_off &&')
+            L.append(
+                '      (cu.arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_COMPATIBILITY) {'
+            )
+            L.append(
+                f'    const_acc = amdgpu::dot_packed16::inline_word<{bf16}>(const_acc, inst_.src2);'
+            )
+            L.append('  }')
+            bridge_shape = '8, 4, 32, 4, true'
+        elif result_type == 'BF16F32':
+            bridge_shape = '8, 4, 32, 8'
+        else:
+            bridge_shape = '8, 8, 32'
+        L.append('  uint64_t flags = cu.arithmetic_flags();')
+        if result_type in ('F16', 'BF16', 'BF16F32'):
+            L.append('  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;')
+        L.append(f'  amdgpu::arith::exec_dense_fp_matrix<{bridge_shape}>(')
+        L.append(f'      wf, {api}, flags, controls,')
+        L.append(f'      dst, {src0_base_expr}, {src1_base_expr}, s2,')
+        L.append(
+            '      !src2_off ? std::optional<uint32_t>(const_acc) : std::nullopt);'
+        )
+        return '\n'.join(L)
 
     if is_gfx1251_f64_wmma:
         L.append(f'  amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,')

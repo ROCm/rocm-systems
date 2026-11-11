@@ -27,9 +27,15 @@
 
 #include "race_test_builder.h"
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <span>
+#include <utility>
+#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -47,31 +53,42 @@ constexpr std::array kMixedOrderGenericFlatLoadObligations{
 } // namespace
 
 TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_VGPR),
-            amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_GLOBAL),
-            amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_LDS), amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_VGPR), amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_LDS), amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_SGPR),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_TTMP),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::SCALAR_TO_GLOBAL),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_GLOBAL),
-            amdgpu::WaitCounterType::TENSORCNT);
-
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_GLOBAL), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_LDS), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_VGPR), MemoryOrderClass::LDS);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS), MemoryOrderClass::LDS);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_SGPR), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_GLOBAL), MemoryOrderClass::TENSOR);
+  struct TestCase {
+    MemoryEventType type;
+    amdgpu::WaitCounterType counter;
+    MemoryOrderClass order;
+  };
+  constexpr TestCase cases[] = {
+      {MemoryEventType::GLOBAL_TO_VGPR, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::VGPR_TO_GLOBAL, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::GLOBAL_TO_LDS, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::LDS_TO_VGPR, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS},
+      {MemoryEventType::VGPR_TO_LDS, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS},
+      {MemoryEventType::GLOBAL_TO_SGPR, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::GLOBAL_TO_TTMP, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::SCALAR_TO_GLOBAL, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::LDS_TO_GLOBAL, amdgpu::WaitCounterType::TENSORCNT,
+       MemoryOrderClass::TENSOR},
+  };
+  RaceDetector detector(
+      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+      /*ldsSizeBytes=*/1024);
+  for (const TestCase &test : cases) {
+    SCOPED_TRACE(static_cast<int>(test.type));
+    const EventId event = detector.allocateEventId(WaveId{0}, testInstruction(0), test.type,
+                                                   /*registers=*/{}, /*execMask=*/1);
+    const auto &events = detector.events();
+    EXPECT_TRUE(events.hasPendingWaitCounter(event, test.counter));
+    EXPECT_EQ(events.pendingCompletionClass(event, test.counter), test.order);
+    EXPECT_EQ(events.pendingCounterIncrement(event, test.counter), 1);
+    EXPECT_EQ(events.memoryOrder(event), test.order);
+    EXPECT_FALSE(events.allWaitCountersSatisfied(event));
+    EXPECT_TRUE(detector.satisfyEventWaitCounter(event, test.counter));
+    EXPECT_FALSE(events.hasPendingWaitCounter(event, test.counter));
+  }
 }
 
 // ---- VGPR races (vmcnt) ----
@@ -120,17 +137,42 @@ TEST(RaceDetector, FlatGlobalLoadRequiresBothCounterWaits) {
 }
 
 TEST(RaceDetector, FlatLdsLoadRequiresBothCounterWaits) {
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
+  for (bool vmcnt_first : {false, true}) {
+    SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
+    RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+    b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
-  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_TRUE(b.hasVgprRace(1));
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
+    b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+    EXPECT_TRUE(b.hasVgprRace(1));
 
-  b.clearViolations();
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
-  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_FALSE(b.hasRace());
+    b.clearViolations();
+    b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_TRUE(b.hasLdsRace(0));
+
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? -1 : 0, /*lgkmcnt=*/vmcnt_first ? 0 : -1);
+    b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+    b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_FALSE(b.hasRace());
+  }
+}
+
+TEST(RaceDetector, FlatLdsStoreRequiresBothCounterWaits) {
+  for (bool vmcnt_first : {false, true}) {
+    SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
+    RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+    b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
+    b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_TRUE(b.hasLdsRace(0));
+
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? -1 : 0, /*lgkmcnt=*/vmcnt_first ? 0 : -1);
+    b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_FALSE(b.hasRace());
+  }
 }
 
 TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
@@ -193,8 +235,10 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
-    detector.allocateEventId(WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-                             amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    detector.allocateEventId(
+        WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
   }
   struct Range {
     int address;
@@ -327,7 +371,8 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     intervals.append(64, 68);
     const auto event = detector.allocateEventId(
         WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-        amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);
