@@ -1132,6 +1132,7 @@ if(BUILD_TESTS)
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
