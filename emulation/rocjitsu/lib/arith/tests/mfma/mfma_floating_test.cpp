@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Dense half-input MFMA contracts, layout, source controls and whole-wave aliasing.
+// Dense floating MFMA contracts, layout, source controls and whole-wave aliasing.
 #include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/half_reference.h"
@@ -19,15 +19,15 @@ using Entry = decltype(&rj_arith_v_mfma_f32_16x16x16_f16_w64);
 
 // Compare a full instruction against the established approximate reduction,
 // including batched layouts and sources that overlap the destination.
-template <int M, int K, int Batch, bool Bf16> void arithmetic(Entry entry) {
-  constexpr int InputRegs = M * K * Batch / 128;
+template <int M, int K, int Batch, bool Bf16, bool FullF32 = false> void arithmetic(Entry entry) {
+  constexpr int InputRegs = M * K * Batch / (FullF32 ? 64 : 128);
   constexpr int OutputRegs = M * M * Batch / 64;
   constexpr int Count = 2 * InputRegs + 2 * OutputRegs;
   std::array<std::array<uint32_t, 64>, Count> input;
   std::minstd_rand random;
   for (int r = 0; r < Count; ++r) {
     for (auto &word : input[r]) {
-      if (r < 2 * InputRegs) {
+      if (r < 2 * InputRegs && !FullF32) {
         auto half = [&] { return Bf16 ? random_bf16_bits(random) : random_f16_bits(random); };
         word = uint32_t(half()) | uint32_t(half()) << 16;
       } else {
@@ -37,8 +37,10 @@ template <int M, int K, int Batch, bool Bf16> void arithmetic(Entry entry) {
   }
   // One NaN and infinity in each factor also exercise SIMD exceptional lanes.
   for (int r : {0, InputRegs}) {
-    input[r][0] = Bf16 ? kBF16QuietNaNBits : kF16QuietNaNBits;
-    input[r][1] = Bf16 ? kBF16PositiveInfinityBits : kF16PositiveInfinityBits;
+    input[r][0] = FullF32 ? kF32QuietNaNBits : Bf16 ? kBF16QuietNaNBits : kF16QuietNaNBits;
+    input[r][1] = FullF32 ? kF32PositiveInfinityBits
+                  : Bf16  ? kBF16PositiveInfinityBits
+                          : kF16PositiveInfinityBits;
   }
   const auto levels = supported_cpu_levels();
   for (uint64_t controls :
@@ -70,9 +72,13 @@ template <int M, int K, int Batch, bool Bf16> void arithmetic(Entry entry) {
                 source_lane = source_lane % 16 + (blgp - 4) * 16;
               }
             }
-            uint16_t value = uint16_t(input[operand * InputRegs + k % per_lane / 2][source_lane] >>
-                                      (16 * (k % 2)));
-            return Bf16 ? std::bit_cast<float>(uint32_t(value) << 16) : float(half_value(value));
+            if constexpr (FullF32) {
+              return std::bit_cast<float>(input[operand * InputRegs + k % per_lane][source_lane]);
+            } else {
+              uint16_t value = uint16_t(
+                  input[operand * InputRegs + k % per_lane / 2][source_lane] >> (16 * (k % 2)));
+              return Bf16 ? std::bit_cast<float>(uint32_t(value) << 16) : float(half_value(value));
+            }
           };
           for (int k = 0; k < K; ++k) {
             sum = std::fma(read(0, row, k), read(1, col, k), sum);
@@ -103,9 +109,13 @@ template <int M, int K, int Batch, bool Bf16> void arithmetic(Entry entry) {
             continue;
           }
           ASSERT_EQ(status, RJ_ARITH_SUCCESS);
+          // Full FP32 inputs reach magnitude 128. Cancellation exposes up to
+          // 0.001 absolute error between the unfused baseline and fused reference.
+          // Half-input products are exact in FP32 and retain the tighter bound.
           for (int r = 0; r < OutputRegs; ++r) {
             for (int lane = 0; lane < 64; ++lane) {
-              expect_f32(d[r][lane], expected[r][lane], RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5f,
+              expect_f32(d[r][lane], expected[r][lane], RJ_ARITH_SEMANTICS_LOOSE,
+                         /*atol=*/FullF32 ? 0.002 : 1e-5f,
                          /*rtol=*/1e-5f);
             }
           }
@@ -160,4 +170,25 @@ TEST(MfmaHalf, mfma_f32_32x32x16_bf16) {
   arithmetic<32, 16, 1, true>(rj_arith_v_mfma_f32_32x32x16_bf16_w64);
 }
 
+TEST(MfmaFullF32, mfma_f32_16x16x8_xf32) {
+  arithmetic<16, 8, 1, false, true>(rj_arith_v_mfma_f32_16x16x8_xf32_w64);
+}
+TEST(MfmaFullF32, mfma_f32_32x32x4_xf32) {
+  arithmetic<32, 4, 1, false, true>(rj_arith_v_mfma_f32_32x32x4_xf32_w64);
+}
+TEST(MfmaF32, mfma_f32_32x32x1_2b_f32_w64) {
+  arithmetic<32, 1, 2, false, true>(rj_arith_v_mfma_f32_32x32x1_2b_f32_w64);
+}
+TEST(MfmaF32, mfma_f32_16x16x1_4b_f32_w64) {
+  arithmetic<16, 1, 4, false, true>(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64);
+}
+TEST(MfmaF32, mfma_f32_4x4x1_16b_f32_w64) {
+  arithmetic<4, 1, 16, false, true>(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64);
+}
+TEST(MfmaF32, mfma_f32_32x32x2_f32_w64) {
+  arithmetic<32, 2, 1, false, true>(rj_arith_v_mfma_f32_32x32x2_f32_w64);
+}
+TEST(MfmaF32, mfma_f32_16x16x4_f32_w64) {
+  arithmetic<16, 4, 1, false, true>(rj_arith_v_mfma_f32_16x16x4_f32_w64);
+}
 } // namespace

@@ -55,6 +55,28 @@ int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint3
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c);
 
+// FP32 factors use M*K*batch/64 VGPRs each; outputs use M*M*batch/64.
+// Controls, semantics and overlap follow the dense MFMA contract below.
+int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x1_4b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_4x4x1_16b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x2_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x4_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
 // Compute D = A*B+C with FP32 accumulation on all 64 lanes, ignoring EXEC.
 // Shapes with a batch suffix compute that many independent matrices. A and B use
 // M*K*batch/128 VGPRs each, C and D use M*M*batch/64; each pointer addresses 64 words.
@@ -119,6 +141,80 @@ int rj_arith_v_mfma_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t instruction_f
 int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_flags,
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx942 XF32 approximation: A/B two FP32 VGPRs, C/D four for 16x16 or sixteen
+// for 32x32. Like the legacy emulator, this uses full FP32 input precision rather
+// than claiming the GPU's XF32 rounding model. Loose/allow-Loose/Compatibility only.
+// Source controls, whole-wave participation, aliasing and error rules above apply.
+int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t instruction_flags,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x4_xf32_w64(uint64_t flags, uint64_t instruction_flags,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b, const uint32_t *const *c);
+
+// FP8/BF8 MFMA: A/B two packed VGPRs, C/D four for 16x16 or sixteen for 32x32.
+// Unsuffixed forms use gfx942 FNUZ (bias 8/16, sole NaN 0x80); gfx950 forms use
+// OCP E4M3FN/E5M2 (bias 7/15). The suffix distinguishes different arithmetic
+// behind the same ISA mnemonic. Only Loose/allow-Loose/Compatibility are supported.
+// Source controls, whole-wave participation, aliasing and error rules above apply.
+int rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_fp8_bf8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_fp8_bf8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_bf8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_bf8_fp8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_fp8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_fp8_fp8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_fp8_bf8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_fp8_bf8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_bf8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_bf8_fp8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                    uint32_t *const *d, const uint32_t *const *a,
+                                                    const uint32_t *const *b,
+                                                    const uint32_t *const *c);
 
 #ifdef __cplusplus
 } // extern "C"

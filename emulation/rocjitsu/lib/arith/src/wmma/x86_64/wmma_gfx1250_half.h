@@ -3,9 +3,9 @@
 
 // gfx1250 Wave32 half-input WMMA using AVX2 or AVX-512 row FMAs.
 #pragma once
-#include "common/compiler.h"
 #include "common/internal.h"
 #include "wmma/gfx1250_half.h"
+#include "wmma/x86_64/gfx1250_reduction.h"
 #include <immintrin.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -42,34 +42,7 @@ void wmma_gfx1250_half_kernel(uint64_t flags, uint64_t controls, uint32_t *const
       result[i][col] = gfx1250_read_c<Form>(c, i, col, controls);
     }
   }
-  // Constant K offsets avoid dependence on compiler-specific unrolling heuristics.
-  for (int row = 0; row < 16; ++row) {
-#if defined(__AVX512F__)
-    auto initial = _mm512_load_ps(result[row]);
-    auto acc = DotFirst ? _mm512_setzero_ps() : initial;
-    RJ_ARITH_UNROLL(32)
-    for (int k = 0; k < 32; ++k) {
-      acc = _mm512_fmadd_ps(_mm512_set1_ps(rows[row][k]), _mm512_load_ps(columns[k]), acc);
-    }
-    if constexpr (DotFirst) {
-      acc = _mm512_add_ps(acc, initial);
-    }
-    _mm512_store_ps(result[row], acc);
-#else
-    for (int col = 0; col < 16; col += 8) {
-      auto initial = _mm256_load_ps(&result[row][col]);
-      auto acc = DotFirst ? _mm256_setzero_ps() : initial;
-      RJ_ARITH_UNROLL(32)
-      for (int k = 0; k < 32; ++k) {
-        acc = _mm256_fmadd_ps(_mm256_set1_ps(rows[row][k]), _mm256_load_ps(&columns[k][col]), acc);
-      }
-      if constexpr (DotFirst) {
-        acc = _mm256_add_ps(acc, initial);
-      }
-      _mm256_store_ps(&result[row][col], acc);
-    }
-#endif
-  }
+  gfx1250_reduce_rows<32, DotFirst>(rows, columns, result);
   if constexpr (Form == Wmma1250Form::Bf16F32) {
     for (int row = 0; row < 16; ++row) {
       for (int col = 0; col < 16; ++col) {
