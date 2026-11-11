@@ -11,6 +11,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 #include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
@@ -1140,7 +1141,8 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
-  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction[0],
+                           test::kUnimplementedInstruction[1], S_ENDPGM};
   f.run_kernel(code, std::size(code));
   ASSERT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cu()->is_idle());
@@ -1539,7 +1541,7 @@ public:
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
-    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_32x16x128_f4");
     hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
@@ -1570,7 +1572,7 @@ std::vector<uint32_t> independent_wmma_kernel() {
   // Zero operands are sufficient: this test checks real offload and callback
   // lifetimes; the matrix suites separately compare nonzero numerical results.
   for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
-    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                           {.vdst = dst,
                                            .src0 = 256,
                                            .src1 = 288,
@@ -2421,6 +2423,11 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   EXPECT_EQ(log.count(HookEvent::BARRIER_RESOLVED), 1u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), 2u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_HALTED), 2u);
+  for (const HookEvent &e : p->events) {
+    if (e.kind == HookEvent::BARRIER_RESOLVED) {
+      EXPECT_EQ(e.barrier_kind, BarrierKind::Workgroup);
+    }
+  }
 
   ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
@@ -2773,7 +2780,8 @@ TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
 }
 
 TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
-  test::ScopedTempDirectory sink_directory("rocjitsu-plugin-sink-lifetime-");
+  test::ScopedTempDirectory sink_directory;
+  ASSERT_TRUE(sink_directory.initialize("rocjitsu-plugin-sink-lifetime-"));
   const std::string log_path = sink_directory.path() + "/destructor_writer.log";
   std::vector<std::string> events;
   {

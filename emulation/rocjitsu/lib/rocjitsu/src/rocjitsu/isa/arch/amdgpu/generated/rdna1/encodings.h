@@ -704,6 +704,7 @@ public:
 class Vop3 : public IsaInstruction<Isa> {
 public:
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
   bool has_encoded_literal32() const;
@@ -711,7 +712,7 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
-                                         vop3_encoded_source_count(), false);
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
@@ -862,11 +863,14 @@ public:
     }
     Instruction::append_src_operand(out, operand_index);
   }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {

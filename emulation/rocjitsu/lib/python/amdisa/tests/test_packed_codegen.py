@@ -816,7 +816,7 @@ def test_dot_dispatch_covers_every_semantic_class():
     """The DOT semantic classes and their DISPATCH handlers must agree exactly.
 
     The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
-    no entry would generate a body that throws ``UnimplementedInst``. Checking
+    no entry would generate an unimplemented-instruction reporting stub. Checking
     the other direction too rejects handlers for classes no ISA defines,
     including bare ``dot2``/``dot4``/``dot8`` routes.
     """

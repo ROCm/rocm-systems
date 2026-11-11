@@ -4,6 +4,7 @@
 /// @file simd_coverage_test.cpp
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
@@ -55,7 +56,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("simd_coverage_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "simd_coverage_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 256, 32);
     wf->set_mode_raw(3u << 6);
     wf->set_exec(0xffffffffu);
@@ -380,7 +382,9 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("packed_fmac_zero", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(target, "packed_fmac_zero", config, &memory, &l2));
     auto *wave = target->dispatch_wf(0, 0, 106, 256, 32);
     ASSERT_NE(wave, nullptr);
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
@@ -508,7 +512,9 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 256;
         config.lds_size_kb = 64;
-        auto target = ComputeUnitCore::create("simd_decoded_target", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> target;
+        ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+            target, "simd_decoded_target", config, &memory, &l2));
         const uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
         auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
         ASSERT_NE(wave, nullptr);
@@ -625,7 +631,9 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("simd_benchmark_target", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(target, "simd_benchmark_target",
+                                                                    config, &memory, &l2));
     uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
     auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
     ASSERT_NE(wave, nullptr);

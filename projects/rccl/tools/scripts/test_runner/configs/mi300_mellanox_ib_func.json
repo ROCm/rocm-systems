@@ -1862,6 +1862,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -3566,7 +3571,7 @@
       "num_gpus": 1,
       "timeout": 600,
       "env_variables": {
-        "ARCH": "gfx1250"
+        "ARCH": "gfx942"
       },
       "tests": [
         {
@@ -3623,6 +3628,19 @@
           "name": "GIN_GetFlush_ConcurrentBlocks",
           "description": "8 CTAs get + flush concurrently on one GIN context",
           "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter",
+          "description": "256-put burst through the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter_PollBatch1",
+          "description": "256-put burst through the GIN proxy, one GFD per peer per progress iteration",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter",
+          "env_variables": {
+            "NCCL_GIN_PROXY_POLL_BATCH": "1"
+          }
         }
       ]
     },
@@ -4250,7 +4268,7 @@
     },
     {
       "name": "GIN Device MPI - Get/Flush Visibility",
-      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility over IB across two nodes",
+      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility and a put burst over IB across two nodes",
       "config": "gin_device_get_flush",
       "enabled": true
     },

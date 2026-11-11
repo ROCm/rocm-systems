@@ -591,7 +591,9 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
   hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
-  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs
+  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs. When set,
+                                             ///< the device also reports native write ordering
+                                             ///< or at least one flush option
   hipDeviceAttributeGPUDirectRDMAFlushWritesOptions,  ///< Bitmask of
                                                       ///< hipFlushGPUDirectRDMAWritesOptions
                                                       ///< describing the flush paths the device
@@ -6865,10 +6867,12 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
  *
  * @param [in] ctx Context to destroy
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext
  *
  * @see hipCtxCreate, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,hipCtxSetCurrent,
  * hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
+ * @warning Returns #hipErrorInvalidContext when the context was not created by a prior
+ * hipCtxCreate.
  *
  * @warning  This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on the
  * NVIDIA platform.

@@ -111,6 +111,9 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       palDeviceIter->gfxipMajor_, palDeviceIter->gfxipMinor_, palDeviceIter->gfxipStepping_,
       sramecc ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled,
       xnack ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled);
+  if (isa == nullptr) {
+    return std::make_tuple(nullptr, nullptr);
+  }
   return std::make_tuple(
       isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
@@ -1255,13 +1258,24 @@ typedef std::unordered_map<int, bool> requestedDevices_t;
 static void parseRequestedDeviceList(const char* requestedDeviceList,
                                      requestedDevices_t& requestedDevices, uint32_t numDevices,
                                      Pal::IDevice* deviceList[Pal::MaxDevices]) {
-  char* pch = strtok(const_cast<char*>(requestedDeviceList), ",");
-  while (pch != nullptr) {
+  const char* cursor = requestedDeviceList;
+  while (*cursor != '\0') {
+    while (*cursor == ',') {
+      ++cursor;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    const char* token_end = cursor;
+    while (*token_end != '\0' && *token_end != ',') {
+      ++token_end;
+    }
+    std::string token(cursor, token_end);
+    cursor = token_end;
+
     bool deviceIdValid = true;
-    // UUID needs to be specified in the format GPU-<body>, <body> encodes UUID as a 16 chars
-    char* deviceUuid = strstr(pch, "GPU-");
-    // If Uuid is specified, then convert it to index
-    if (deviceUuid != nullptr) {
+    // UUID form is GPU-<body>, <body> is 16 chars. Match the body at byte 4.
+    if (token.find("GPU-") != std::string::npos) {
       for (uint32_t i = 0; i < numDevices; i++) {
         Pal::DeviceProperties properties;
         // Retrieve device properties
@@ -1274,18 +1288,17 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
         char uuid[17] = {0};
         setUUID(&properties, &uuid[0]);
 
-        // Convert it to index
-        if (strcmp(pch + 4, uuid) == 0) {
-          snprintf(pch, strlen(pch), "%d", i);
+        if (strcmp(token.c_str() + 4, uuid) == 0) {
+          token = std::to_string(i);
           break;
         }
       }
     }
 
-    int currentDeviceIndex = atoi(pch);
+    int currentDeviceIndex = atoi(token.c_str());
     // Validate device index.
-    for (size_t i = 0; i < strlen(pch); i++) {
-      if (!isdigit(reinterpret_cast<unsigned char*>(pch)[i])) {
+    for (size_t i = 0; i < token.size(); i++) {
+      if (!isdigit(static_cast<unsigned char>(token[i]))) {
         deviceIdValid = false;
         break;
       }
@@ -1293,8 +1306,6 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
     if (currentDeviceIndex < 0 || static_cast<uint32_t>(currentDeviceIndex) >= numDevices) {
       deviceIdValid = false;
     }
-    // Get next token.
-    pch = strtok(nullptr, ",");
 
     if (!deviceIdValid) {
       // Exit the loop as anything to the right of invalid deviceId
@@ -1330,6 +1341,7 @@ bool Device::init() {
   info.maxSvmSize = static_cast<Pal::gpusize>(OCL_SET_SVM_SIZE * Mi);
   info.clientApiId = (amd::IS_HIP) ? Pal::ClientApi::Hip : Pal::ClientApi::OpenCl;
   info.instrApiVer = RgpSqttInstrumentationApiVersion;
+  info.flags.optInForOmniCache = amd::IS_HIP && OMNICACHE_ENABLE;
 
   if (IS_LINUX) {
     //! @note: Linux may have a deadlock if runtime will attempt to reserve
@@ -2335,7 +2347,7 @@ void Device::destroyScratchBuffers() {
 
 void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
                            const uint* addressMode, uint32_t mipFilter, float minLod,
-                           float maxLod) const {
+                           float maxLod, uint32_t maxAnisotropy) const {
   Pal::SamplerInfo samplerInfo = {};
   assert(addressMode != nullptr);
   samplerInfo.borderColorType = Pal::BorderColorType::TransparentBlack;
@@ -2344,15 +2356,24 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 
   samplerInfo.flags.unnormalizedCoords = !(state & amd::Sampler::StateNormalizedCoordsMask);
   samplerInfo.maxLod = 4096.0f;
+  samplerInfo.maxAnisotropy = maxAnisotropy;
 
   state &= ~amd::Sampler::StateNormalizedCoordsMask;
 
+  const bool aniso = (maxAnisotropy >= 2);
+
   // Program texture filter mode
   if (state == amd::Sampler::StateFilterLinear) {
-    samplerInfo.filter.magnification = Pal::XyFilterLinear;
-    samplerInfo.filter.minification = Pal::XyFilterLinear;
+    samplerInfo.filter.magnification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
+    samplerInfo.filter.minification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
     samplerInfo.filter.zFilter = Pal::ZFilterLinear;
+  } else if (aniso) {
+    samplerInfo.filter.magnification = Pal::XyFilterAnisotropicPoint;
+    samplerInfo.filter.minification = Pal::XyFilterAnisotropicPoint;
   }
+
 
   if (mipFilter == CL_FILTER_NEAREST) {
     samplerInfo.filter.mipFilter = Pal::MipFilterPoint;
@@ -2414,6 +2435,37 @@ bool Device::deviceAllowAccess(void* ptr) const {
   std::lock_guard<std::mutex> lock(lockAllowAccess_);
   // Empty function for now.
   return true;
+}
+
+// ================================================================================================
+void Device::CheckExecutionState() const {
+  // The error is sticky, so once one is latched there is nothing left to ask.
+  if (amd::Device::IsGPUInError()) {
+    return;
+  }
+
+  Pal::PageFaultStatus pageFault = {};
+  const Pal::Result result = iDev()->CheckExecutionState(&pageFault);
+
+  // ErrorUnavailable means the query isn't supported for this client and
+  // ErrorInvalidValue that PAL couldn't read the reset state, neither of which
+  // says the device is bad.
+  if (!Util::IsErrorResult(result) || (result == Pal::Result::ErrorUnavailable) ||
+      (result == Pal::Result::ErrorInvalidValue)) {
+    return;
+  }
+
+  if (result == Pal::Result::ErrorGpuPageFaultDetected) {
+    LogPrintfError("GPU page fault detected! %s at address 0x%llx",
+                   pageFault.flags.readFault ? "read" : "write",
+                   static_cast<unsigned long long>(pageFault.faultAddress));
+  } else {
+    LogPrintfError("PAL reports the device unusable! result:%d", result);
+  }
+  // A trap faults instead of being caught when the KMD trap handler is missing, so
+  // it can't be told apart from a bad access here. Both keep reporting the error
+  // the failed submit in VirtualGPU::Queue::isDone() already reported.
+  gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
 }
 
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
@@ -2796,7 +2848,7 @@ bool Sampler::create(const amd::Sampler& owner) {
     return false;
   }
   dev_.fillHwSampler(owner.state(), hwState_, HsaSamplerObjectSize, owner.addessMode(),
-                     owner.mipFilter(), owner.minLod(), owner.maxLod());
+                     owner.mipFilter(), owner.minLod(), owner.maxLod(), owner.maxAnisotropy());
   return true;
 }
 

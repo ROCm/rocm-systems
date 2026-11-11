@@ -169,6 +169,12 @@ pip3 install -r sphinx/requirements.txt
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
 
+## Changelog
+
+Do not edit [CHANGELOG.md](CHANGELOG.md) by hand. If your pull request needs a changelog entry,
+add one file to [changelog.d/](changelog.d/README.md), named `<name>.<section>.md`. That README
+gives the sections and the format. A nightly workflow folds the files into `CHANGELOG.md`.
+
 ## Copyright
 
 All source code and accompanying documentation is copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
