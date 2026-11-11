@@ -127,7 +127,8 @@ const char* power_stabilization_param_relpath(rsmi_power_stabilization_param_id_
 // nothing in between to clobber it. ScopedFD's open() failure is the
 // exception: its constructor's own LOG_ERROR call can clobber errno before
 // the caller gets to read it, so that path must use ScopedFD::open_errno()
-// (saved at construction time) instead.
+// (saved at construction time) instead. Mirrors convert_ampp_errno()
+// (rocm_smi_ampp.cc) for the errno values both nodes can produce.
 rsmi_status_t classify_power_stabilization_errno(int err) {
   if (err == EACCES || err == EPERM) {
     return RSMI_STATUS_PERMISSION;
@@ -138,7 +139,13 @@ rsmi_status_t classify_power_stabilization_errno(int err) {
   if (err == EINVAL) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  if (err == ENOTSUP || err == EOPNOTSUPP || err == EBUSY || err == ENODEV) {
+  if (err == ERANGE) {
+    return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  if (err == EBUSY) {
+    return RSMI_STATUS_BUSY;
+  }
+  if (err == ENOTSUP || err == EOPNOTSUPP || err == ENODEV) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   return RSMI_STATUS_FILE_ERROR;
@@ -340,8 +347,18 @@ rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
   bool is_ramp_rate = param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE ||
                       param_id == RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE;
 
+  // amd_smi.cc validates value->type against param_id before reaching here,
+  // but rsmi_dev_power_stabilization_param_set is itself a public rocm_smi
+  // entry point, so a mismatched type is rejected at this layer too rather
+  // than reading the wrong union member.
   if (is_ramp_rate) {
+    if (value->type != RSMI_VALUE_TYPE_DOUBLE) {
+      return RSMI_STATUS_INVALID_ARGS;
+    }
     return write_sysfs_value(base + relpath, value->data.double_value);
+  }
+  if (value->type != RSMI_VALUE_TYPE_INT64) {
+    return RSMI_STATUS_INVALID_ARGS;
   }
   return write_sysfs_value(base + relpath, value->data.int64_value);
   CATCH

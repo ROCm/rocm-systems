@@ -1957,7 +1957,8 @@ KEY=VALUE ...`, restoring every writable profile with staged fields found in
 a JSON file for the current GPU in one call. The file must be shaped like
 `amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
 per-GPU objects, each identified by an integer `"gpu"` index and containing
-an `"ampp"."profiles"` list.
+an `"ampp"."profiles"` list. The path must be a regular file (not a symlink,
+so not `/dev/stdin`) no larger than 1 MiB.
 
 ```shell-session
 ~$ sudo amd-smi static --ampp --json --file profiles.json
@@ -2014,7 +2015,8 @@ GPU: 0
 `--power-stabilization-configure` also accepts `@<path>` in place of `KEY=VALUE
 ...`, restoring every settable field from an `amd-smi static
 --power-stabilization --json`-shaped file's entry for the current GPU in one
-call:
+call. As with `--ampp-configure @<path>`, the file must be a regular file (not
+a symlink, so not `/dev/stdin`) no larger than 1 MiB:
 
 ```shell-session
 ~$ sudo amd-smi static --gpu 0 --power-stabilization --json --file ps.json

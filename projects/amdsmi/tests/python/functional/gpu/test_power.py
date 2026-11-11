@@ -176,6 +176,22 @@ class TestGpuPower(unittest.TestCase):
                 )
         return
 
+    @staticmethod
+    def _non_tautological_target(baseline_value, fixed_value):
+        """Returns fixed_value unless it already equals the baseline, in
+        which case the set+read-back assertion would trivially pass without
+        the write having changed anything; a nearby distinct value is
+        returned instead. Mirrors the special-cased derivation already used
+        for insertion_priority, generalized to every other field."""
+        baseline_value = (
+            float(baseline_value) if isinstance(fixed_value, float) else int(baseline_value)
+        )
+        if baseline_value != fixed_value:
+            return fixed_value
+        if isinstance(fixed_value, float):
+            return fixed_value + 1.0
+        return fixed_value + 1 if fixed_value == 0 else fixed_value - 1
+
     def test_set_power_stabilization_param(self):
         """Set each Power Stabilization param and confirm the read-back changed, then restore.
 
@@ -229,7 +245,15 @@ class TestGpuPower(unittest.TestCase):
                 params = tuple(
                     (pid, field, insertion_priority_target)
                     if pid == param_id.INSERTION_PRIORITY
-                    else (pid, field, value)
+                    else (
+                        pid,
+                        field,
+                        (
+                            self._non_tautological_target(original[field], value)
+                            if supported
+                            else value
+                        ),
+                    )
                     for pid, field, value in param_specs
                 )
 
@@ -257,7 +281,16 @@ class TestGpuPower(unittest.TestCase):
                             )
                 finally:
                     if supported:
-                        for pid, field, _ in params:
+                        # Restore ENABLE first (reversing the apply order),
+                        # so the remaining restores happen with Power
+                        # Stabilization already back at its baseline
+                        # enabled/disabled state -- not still left disabled
+                        # from the last value applied above -- matching the
+                        # same driver-dependency concern as the apply order.
+                        restore_order = sorted(
+                            params, key=lambda item: 0 if item[0] == param_id.ENABLE else 1
+                        )
+                        for pid, field, _ in restore_order:
                             restore_msg = (
                                 f"\t### restore amdsmi_set_power_stabilization_param(gpu={i}, "
                                 f"param_id={pid.name}):"

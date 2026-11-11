@@ -8339,11 +8339,13 @@ def amdsmi_set_power_stabilization_param(
         value: New value. RAMP_MAX_RAMP_UP_RATE and RAMP_MAX_RAMP_DOWN_RATE
         require a float (sets an AMDSMI_VALUE_TYPE_DOUBLE amdsmi_value_t);
         every other param_id accepts an int or bool (sets
-        AMDSMI_VALUE_TYPE_INT64)
+        AMDSMI_VALUE_TYPE_INT64). A float passed for one of those int64
+        params must be a whole number (e.g. 3.0, not 3.9, NaN, or inf).
 
     Raises:
         AmdSmiParameterException: If processor_handle, param_id, or value is
-        invalid, including an int64 value out of signed 64-bit range
+        invalid, including an int64 value out of signed 64-bit range or a
+        non-whole-number float for an int64 param
         AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
         AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
     """
@@ -8361,6 +8363,11 @@ def amdsmi_set_power_stabilization_param(
         amdsmi_value.type = amdsmi_wrapper.AMDSMI_VALUE_TYPE_DOUBLE
         amdsmi_value.data.double_value = float(value)
     else:
+        if isinstance(value, float) and not value.is_integer():
+            # Also catches NaN/inf (is_integer() is False for both), which
+            # int() would otherwise raise a raw ValueError/OverflowError on
+            # instead of the documented AmdSmiParameterException.
+            raise AmdSmiParameterException(value, int, msg=f"value {value!r} is not a whole number")
         int_value = int(value)
         if not -(2**63) <= int_value < 2**63:
             raise AmdSmiParameterException(

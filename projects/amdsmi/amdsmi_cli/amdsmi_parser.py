@@ -5,6 +5,7 @@
 import argparse
 import errno
 import os
+import re
 import sys
 import time
 import collections
@@ -74,10 +75,10 @@ class AMDSMISubParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 command, value, outputformat, hint=hint
             )
-        elif message.endswith(": expected one argument") or message.endswith(
-            ": expected at least one argument"
-        ):
-            # e.g. "argument --gpu: expected one argument"
+        elif re.search(r": expected (one|at least one|\d+) arguments?$", message):
+            # e.g. "argument --gpu: expected one argument", or
+            # "argument --node-balancing-mode: expected 2 arguments" for a
+            # fixed-nargs action.
             arg = (
                 message[len("argument ") :].split(":")[0]
                 if message.startswith("argument ")

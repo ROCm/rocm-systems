@@ -1089,14 +1089,12 @@ class SetValueCommands:
         self.logger.clear_multiple_devices_output()
         return results
 
-    def _configure_power_stabilization_from_file(self, args, file_path, gpu_bdf, gpu_id):
-        # Restores Power Stabilization settings for this GPU's entry from a
-        # `amd-smi static --power-stabilization --json`-shaped file
-        # (--power-stabilization-configure @<path>). That file's top level is
-        # `{"gpu_data": [{"gpu": <int>, "power_stabilization": {...}}, ...]}`
-        # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
-        # the integer "gpu" index, not by BDF.
-
+    def _parse_power_stabilization_file_tokens(self, file_path, gpu_bdf, gpu_id):
+        # Resolves this GPU's entry from a `--power-stabilization-configure
+        # @<path>` file into (param_id, value) tokens, without applying them.
+        # Shared by the real apply path and by the `--gpu all` pre-validation
+        # pass, so a malformed file or a GPU missing from it is discovered
+        # identically by both -- see _prevalidate_power_stabilization_file().
         ps_entry = self._load_gpu_section_from_json_file(
             file_path, gpu_id, gpu_bdf, "power_stabilization", "Power Stabilization"
         )
@@ -1129,6 +1127,33 @@ class SetValueCommands:
                 ) from e
             if result is not None:
                 parsed.append(result)
+        return parsed
+
+    def _prevalidate_power_stabilization_file(self, args, file_path):
+        # `--gpu all --power-stabilization-configure @<path>` applies one GPU
+        # at a time (see handle_gpus()), so a file missing a later GPU's
+        # entry would otherwise only surface after earlier GPUs were already
+        # written. Resolve every target GPU's tokens up front -- without
+        # applying them -- so a bad file aborts before any GPU is touched.
+        for device_handle in args.gpu:
+            try:
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+            except amdsmi_exception.AmdSmiLibraryException:
+                gpu_bdf = f"BDF Unavailable for {device_handle}"
+            try:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+            except IndexError:
+                gpu_id = f"ID Unavailable for {device_handle}"
+            self._parse_power_stabilization_file_tokens(file_path, gpu_bdf, gpu_id)
+
+    def _configure_power_stabilization_from_file(self, args, file_path, gpu_bdf, gpu_id):
+        # Restores Power Stabilization settings for this GPU's entry from a
+        # `amd-smi static --power-stabilization --json`-shaped file
+        # (--power-stabilization-configure @<path>). That file's top level is
+        # `{"gpu_data": [{"gpu": <int>, "power_stabilization": {...}}, ...]}`
+        # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
+        # the integer "gpu" index, not by BDF.
+        parsed = self._parse_power_stabilization_file_tokens(file_path, gpu_bdf, gpu_id)
 
         if not parsed:
             self.logger.store_output(
@@ -1247,6 +1272,16 @@ class SetValueCommands:
         if not self.group_check_printed:
             self.helpers.check_required_groups()
             self.group_check_printed = True
+
+        if (
+            isinstance(args.gpu, list)
+            and len(args.gpu) > 1
+            and getattr(args, "power_stabilization_configure", None) is not None
+            and args.power_stabilization_configure.file_path is not None
+        ):
+            self._prevalidate_power_stabilization_file(
+                args, args.power_stabilization_configure.file_path
+            )
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(

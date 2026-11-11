@@ -9939,6 +9939,16 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
   static_assert(offsetof(amdsmi_power_stabilization_info_t, insertion_priority) ==
                     offsetof(rsmi_power_stabilization_info_t, insertion_priority),
                 "AMDSMI and RSMI Power Stabilization info insertion_priority offsets must match");
+  // The reinterpret_cast below carries insertion_priority across as-is, so
+  // the two enums must also agree on their underlying values.
+  static_assert(static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC) &&
+                    static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_GUARANTEED) &&
+                    static_cast<int>(AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC) ==
+                        static_cast<int>(RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC),
+                "amdsmi_hawk_insertion_priority_t and rsmi_hawk_insertion_priority_t "
+                "enumerators must match");
   static_assert(offsetof(amdsmi_power_stabilization_info_t, ramp_enabled) ==
                     offsetof(rsmi_power_stabilization_info_t, ramp_enabled),
                 "AMDSMI and RSMI Power Stabilization info ramp_enabled offsets must match");
@@ -9996,8 +10006,17 @@ amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle pro
 
   // AMDSMI_DRY_RUN is an amdsmi-level operational mode (not part of the
   // sysfs mechanics), so it is honored here rather than in rsmi_dev_
-  // power_stabilization_param_set.
+  // power_stabilization_param_set. Probe the handle and sysfs support first
+  // (matching amdsmi_set_gpu_uma_carveout()'s pattern) so a dry run against
+  // an invalid handle or an unsupported device still reports failure
+  // instead of SUCCESS.
   if (is_dry_run()) {
+    amdsmi_power_stabilization_info_t info_probe;
+    amdsmi_status_t probe_ret = amdsmi_get_power_stabilization_info(processor_handle, &info_probe);
+    if (probe_ret != AMDSMI_STATUS_SUCCESS) {
+      return probe_ret;
+    }
+
     std::ostringstream ss;
     ss << "[DRY_RUN] Would write "
        << (is_ramp_rate ? std::to_string(value->data.double_value)
@@ -10013,6 +10032,12 @@ amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle pro
                 "amdsmi_value_t and rsmi_value_t type offsets must match");
   static_assert(offsetof(amdsmi_value_t, data) == offsetof(rsmi_value_t, data),
                 "amdsmi_value_t and rsmi_value_t data offsets must match");
+  // The reinterpret_cast below carries value->type across as-is, so the two
+  // enums must also agree on their underlying values, not just their layout.
+  static_assert(
+      static_cast<int>(AMDSMI_VALUE_TYPE_INT64) == static_cast<int>(RSMI_VALUE_TYPE_INT64) &&
+          static_cast<int>(AMDSMI_VALUE_TYPE_DOUBLE) == static_cast<int>(RSMI_VALUE_TYPE_DOUBLE),
+      "amdsmi_value_type_t and rsmi_value_type_t enumerators must match");
 
   return rsmi_wrapper(rsmi_dev_power_stabilization_param_set, processor_handle, 0,
                       static_cast<rsmi_power_stabilization_param_id_t>(param_id),

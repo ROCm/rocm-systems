@@ -176,6 +176,7 @@ class _FakeLogger:
     def __init__(self, output_format="human"):
         self.output = {}
         self._format = output_format
+        self.format = output_format  # AmdSmiInvalidFilePathException reads this directly
 
     def store_output(self, _gpu, key, value):
         self.output[key] = value
@@ -486,6 +487,114 @@ class TestConfigurePowerStabilizationFromFileNpmNote(unittest.TestCase):
         self.assertIn("[WARNING]", results[0])
         self.assertIn(f"--power-stabilization-configure @{path}", results[0])
         self.assertTrue(any("9/9" in r for r in results), results)
+
+
+class TestPrevalidatePowerStabilizationFile(unittest.TestCase):
+    """Drives ``_prevalidate_power_stabilization_file()`` and its wiring into
+    ``set_gpu()``: a ``--gpu all --power-stabilization-configure @<path>``
+    replay must resolve every target GPU's file entry before any GPU is
+    written, so a file missing a later GPU's entry aborts before the first
+    write instead of after it."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = dict.fromkeys(_CLI_MODULES)
+        modules.update(_build_fake_amdsmi_for_helpers())
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+        cls.interface.amdsmi_get_gpu_device_bdf = lambda h: f"0000:00:0{h.value}.0"
+
+        cls._path_added = _CLI_DIR not in sys.path
+        if cls._path_added:
+            sys.path.insert(0, _CLI_DIR)
+
+        import amdsmi_helpers  # noqa: F401
+
+        cls.module = load_cli_module(
+            "set_value_under_test_power_stabilization_prevalidate",
+            SET_VALUE_PATH,
+            sys_path_dir=_CLI_DIR,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "_path_added", False) and _CLI_DIR in sys.path:
+            sys.path.remove(_CLI_DIR)
+
+    def _make_command(self):
+        cmd = self.module.SetValueCommands()
+        cmd.logger = _FakeLogger()
+        cmd.node_handle = object()
+        cmd.primary_gpu_handle = None
+        cmd.helpers = _StubHelpers(npm_enabled=False)
+        cmd.group_check_printed = True
+        return cmd
+
+    def _write_ps_json(self, gpu_ids):
+        entry = {"power_floor": 80}
+        data = {
+            "gpu_data": [{"gpu": gpu_id, "power_stabilization": dict(entry)} for gpu_id in gpu_ids]
+        }
+        fd, path = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        self.addCleanup(os.remove, path)
+        return path
+
+    def test_all_gpus_present_does_not_raise(self):
+        cmd = self._make_command()
+        path = self._write_ps_json(gpu_ids=[0, 1])
+        args = types.SimpleNamespace(gpu=[_FakeDeviceHandle(0), _FakeDeviceHandle(1)])
+
+        cmd._prevalidate_power_stabilization_file(args, path)
+
+    def test_missing_entry_for_later_gpu_raises(self):
+        cmd = self._make_command()
+        path = self._write_ps_json(gpu_ids=[0])  # GPU 1 has no entry
+        args = types.SimpleNamespace(gpu=[_FakeDeviceHandle(0), _FakeDeviceHandle(1)])
+
+        with self.assertRaises(self.module.AmdSmiInvalidFilePathException):
+            cmd._prevalidate_power_stabilization_file(args, path)
+
+    def test_set_gpu_aborts_before_dispatch_on_bad_file(self):
+        # A missing GPU-1 entry must be caught before handle_gpus() ever
+        # dispatches per-GPU work, so GPU 0 is never written.
+        cmd = self._make_command()
+        path = self._write_ps_json(gpu_ids=[0])
+        handle_gpus_calls = []
+        cmd.helpers.handle_gpus = lambda args, logger, subcommand: handle_gpus_calls.append(1)
+        args = types.SimpleNamespace(
+            gpu=[_FakeDeviceHandle(0), _FakeDeviceHandle(1)],
+            power_stabilization_configure=types.SimpleNamespace(tokens=None, file_path=path),
+        )
+
+        with self.assertRaises(self.module.AmdSmiInvalidFilePathException):
+            cmd.set_gpu(args)
+
+        self.assertEqual(handle_gpus_calls, [], "handle_gpus must not run once prevalidation fails")
+
+    def test_set_gpu_proceeds_to_dispatch_on_good_file(self):
+        cmd = self._make_command()
+        path = self._write_ps_json(gpu_ids=[0, 1])
+        handle_gpus_calls = []
+
+        def _fake_handle_gpus(args, logger, subcommand):
+            handle_gpus_calls.append(1)
+            return True, args.gpu  # Short-circuit: pretend dispatch is done.
+
+        cmd.helpers.handle_gpus = _fake_handle_gpus
+        args = types.SimpleNamespace(
+            gpu=[_FakeDeviceHandle(0), _FakeDeviceHandle(1)],
+            power_stabilization_configure=types.SimpleNamespace(tokens=None, file_path=path),
+        )
+
+        cmd.set_gpu(args)
+
+        self.assertEqual(handle_gpus_calls, [1], "handle_gpus must run once prevalidation passes")
 
 
 class TestParsePowerStabilizationTokenReadOnlyKeys(unittest.TestCase):
