@@ -116,6 +116,43 @@ TEST(AllGatherPolicyThreshold, LargeValueDoesNotWrap) {
             (size_t)big);
 }
 
+// ---- archSdmaThreshold: per-architecture compiled default ----------------------
+
+constexpr ArchSdmaThreshold kArchTable[] = {{"gfx942", 1u << 25}, {"gfx1250", 1u << 17}};
+constexpr size_t kArchTableSize = sizeof(kArchTable) / sizeof(kArchTable[0]);
+constexpr size_t kArchFallback = 1u << 20;
+
+TEST(AllGatherPolicyArchThreshold, ExactNameMatches) {
+  EXPECT_EQ(archSdmaThreshold("gfx942", kArchTable, kArchTableSize, kArchFallback), 1u << 25);
+  EXPECT_EQ(archSdmaThreshold("gfx1250", kArchTable, kArchTableSize, kArchFallback), 1u << 17);
+}
+
+TEST(AllGatherPolicyArchThreshold, FeatureAndVariantSuffixesMatch) {
+  EXPECT_EQ(archSdmaThreshold("gfx942:sramecc+:xnack-", kArchTable, kArchTableSize, kArchFallback),
+            1u << 25);
+  EXPECT_EQ(archSdmaThreshold("gfx1250-strict", kArchTable, kArchTableSize, kArchFallback), 1u << 17);
+}
+
+TEST(AllGatherPolicyArchThreshold, PrefixOfALongerNameDoesNotMatch) {
+  EXPECT_EQ(archSdmaThreshold("gfx9420", kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+  EXPECT_EQ(archSdmaThreshold("gfx94", kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+  EXPECT_EQ(archSdmaThreshold("gfx12", kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+}
+
+TEST(AllGatherPolicyArchThreshold, UnknownOrMissingNameFallsBack) {
+  EXPECT_EQ(archSdmaThreshold("gfx950", kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+  EXPECT_EQ(archSdmaThreshold("", kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+  EXPECT_EQ(archSdmaThreshold(nullptr, kArchTable, kArchTableSize, kArchFallback), kArchFallback);
+  EXPECT_EQ(archSdmaThreshold("gfx942", nullptr, 0, kArchFallback), kArchFallback);
+}
+
+TEST(AllGatherPolicyArchThreshold, EnvOverridesStillWinOverArchDefault) {
+  const size_t arch = archSdmaThreshold("gfx1250-strict", kArchTable, kArchTableSize, kArchFallback);
+  EXPECT_EQ(pickSdmaThreshold(true, 0, false, 0, arch), 0u);
+  EXPECT_EQ(pickSdmaThreshold(false, 0, true, 4096, arch), 4096u);
+  EXPECT_EQ(pickSdmaThreshold(false, 0, false, 0, arch), 1u << 17);
+}
+
 // ---- allGatherCtas: size-adaptive ladder, clamped to the launched pool --------
 // The launched grid must never exceed the barrier/lsaBarrier/signal pool the kernel
 // indexes by blockIdx.x. allGatherPoolCtas() == that pool (max(-V, ladder peak));

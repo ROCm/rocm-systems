@@ -85,6 +85,29 @@ GIN_SDMA_AG_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long lo
   return compiledDefault;
 }
 
+// Measured LSA<->SDMA crossover for one GPU architecture, keyed by the base name
+// of hipDeviceProp_t::gcnArchName (e.g. "gfx942").
+struct ArchSdmaThreshold {
+  const char* arch;
+  size_t threshold;
+};
+
+// The compiled default for the device's architecture: the first table entry whose
+// arch matches gcnArchName up to its end or a feature/variant suffix (':' or '-'),
+// so "gfx1250" matches "gfx1250-strict" and "gfx942" matches "gfx942:sramecc+:xnack-",
+// but "gfx94" matches neither. Falls back when the name is null or not in the table.
+inline size_t archSdmaThreshold(const char* gcnArchName, const ArchSdmaThreshold* table,
+                                size_t tableSize, size_t fallback) {
+  if (!gcnArchName || !table) return fallback;
+  for (size_t i = 0; i < tableSize; i++) {
+    const char* a = table[i].arch;
+    const char* g = gcnArchName;
+    while (*a && *a == *g) { a++; g++; }
+    if (*a == '\0' && (*g == '\0' || *g == ':' || *g == '-')) return table[i].threshold;
+  }
+  return fallback;
+}
+
 // Sentinel meaning "CTA-count env var unset/empty/unparseable"; allGatherCtas()
 // falls back to the size-adaptive ladder when the env value is this sentinel.
 static constexpr size_t kAllGatherCtasUnset = (size_t)-1;

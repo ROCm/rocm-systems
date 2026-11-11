@@ -114,20 +114,39 @@ bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Gather LSA<->SDMA crossover. GATHER overrides the global
-// NCCL_GIN_ANVIL_SDMA_THRESHOLD, which overrides kGatherSdmaThresholdDefault.
-// The default is higher than AllGather's 32 KiB because only root receives: on
-// 1p8g MI300X the SDMA tier's ~20 us floor loses to LSA stores up to 1 MiB/rank.
+// Gather LSA<->SDMA crossover in bytes per rank. GATHER overrides the global
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD, which overrides the default for the device's
+// architecture. Only root receives, so the crossover sits well above AllGather's
+// and differs by architecture: on one node (out-of-place float and int8, best of
+// 2 x 50 iterations) LSA stores match or beat the SDMA put through 128 MiB/rank on
+// 8x MI300X but only up to 512 KiB/rank on 4x MI455X, whose SDMA floor is ~44 us.
+// Architectures not in kGatherSdmaThresholdByArch.
 static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+static constexpr gin_sdma_allgather::ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
+  {"gfx942", 128u << 20},
+  {"gfx1250", 512u << 10},
+};
+
+static size_t gatherArchSdmaThreshold() {
+  int dev = 0;
+  hipDeviceProp_t prop;
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess)
+    return kGatherSdmaThresholdDefault;
+  return gin_sdma_allgather::archSdmaThreshold(
+      prop.gcnArchName, kGatherSdmaThresholdByArch,
+      sizeof(kGatherSdmaThresholdByArch) / sizeof(kGatherSdmaThresholdByArch[0]),
+      kGatherSdmaThresholdDefault);
+}
+
 static size_t gatherSdmaThresholdOnce() {
   unsigned long long perColl = 0;
   unsigned long long global = 0;
   const bool perCollSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER", &perColl);
   const bool globalSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &global);
   return gin_sdma_allgather::pickSdmaThreshold(perCollSet, perColl, globalSet, global,
-                                               kGatherSdmaThresholdDefault);
+                                               gatherArchSdmaThreshold());
 }
 
 static size_t gatherCtasEnvOnce() {
