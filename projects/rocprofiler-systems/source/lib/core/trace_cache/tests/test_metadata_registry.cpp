@@ -1,13 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "core/agent.hpp"
+#include "core/collection/schema.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <optional>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <thread>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -94,4 +101,93 @@ TEST(metadata_registry_test, add_pmc_code_object_kernel_symbol_ignore_duplicates
     EXPECT_EQ(registry.get_kernel_symbol_list().size(), 1U);
 }
 
+namespace
+{
+constexpr int k_registering_threads = 8;
+
+[[nodiscard]] collection::column_spec
+busy_column()
+{
+    collection::column_spec column;
+    column.symbol   = "busy";
+    column.unit     = "%";
+    column.pmc_name = "busy";
+    return column;
+}
+
+[[nodiscard]] collection::schema
+make_counter_schema(std::uint32_t device)
+{
+    return { .agent          = agent_type::gpu,
+             .device         = device,
+             .target_arch    = "GPU",
+             .event_category = "amd_smi",
+             .columns        = { busy_column() } };
+}
+/** Adds `description` from k_registering_threads threads at once. @return their ids */
+[[nodiscard]] std::array<std::uint32_t, k_registering_threads>
+add_from_threads(metadata_registry& registry, const collection::schema& description)
+{
+    std::array<std::uint32_t, k_registering_threads> ids{};
+    ids.fill(std::numeric_limits<std::uint32_t>::max());
+    std::vector<std::jthread> threads;
+    threads.reserve(ids.size());
+    for(auto& schema_id : ids)
+    {
+        threads.emplace_back([&registry, &description, &schema_id] {
+            schema_id = registry.add_counter_schema(description);
+        });
+    }
+    threads.clear();
+    return ids;
+}
+}  // namespace
+
+TEST(metadata_registry_test, add_counter_schema_gives_an_equal_schema_its_existing_id)
+{
+    metadata_registry registry;
+
+    const auto first  = registry.add_counter_schema(make_counter_schema(0));
+    const auto second = registry.add_counter_schema(make_counter_schema(1));
+    const auto again  = registry.add_counter_schema(make_counter_schema(0));
+
+    EXPECT_EQ(first, 0U);
+    EXPECT_EQ(second, 1U);
+    EXPECT_EQ(again, first);
+    EXPECT_EQ(registry.get_counter_schemas().size(), 2U);
+}
+
+TEST(metadata_registry_test, add_counter_schema_treats_any_column_difference_as_new)
+{
+    metadata_registry registry;
+    auto              changed = make_counter_schema(0);
+    changed.columns[0].unit   = "percent";
+
+    const auto first  = registry.add_counter_schema(make_counter_schema(0));
+    const auto second = registry.add_counter_schema(changed);
+
+    EXPECT_NE(first, second);
+}
+
+TEST(metadata_registry_test, counter_schema_id_is_its_index)
+{
+    metadata_registry registry;
+    static_cast<void>(registry.add_counter_schema(make_counter_schema(0)));
+    const auto schema_id = registry.add_counter_schema(make_counter_schema(1));
+
+    const auto schemas = registry.get_counter_schemas();
+
+    ASSERT_LT(schema_id, schemas.size());
+    EXPECT_EQ(schemas[schema_id], make_counter_schema(1));
+}
+
+TEST(metadata_registry_test, concurrent_adds_of_one_schema_share_one_id)
+{
+    metadata_registry registry;
+
+    const auto ids = add_from_threads(registry, make_counter_schema(0));
+
+    EXPECT_EQ(registry.get_counter_schemas().size(), 1U);
+    EXPECT_EQ(std::ranges::count(ids, 0U), k_registering_threads);
+}
 }  // namespace rocprofsys::trace_cache

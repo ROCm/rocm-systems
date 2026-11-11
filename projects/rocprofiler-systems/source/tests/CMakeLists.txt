@@ -79,6 +79,7 @@ target_link_libraries(
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         $<$<TARGET_EXISTS:rocprofiler-systems-rocsys-core>:rocprofiler-systems::rocprofiler-systems-rocsys-core>
         rocprofiler-systems::rocprofiler-systems-interface-library
+        trace-cache-tests-sqlite
 )
 
 target_include_directories(
