@@ -162,11 +162,11 @@ _reduce_gin_skip = pytest.mark.skipif(
            "a single-node GIN-SDMA-capable machine to enable.")
 
 
-def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, impl=3, ctas=REDUCE_CTAS):
+def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, impl=3, ctas=REDUCE_CTAS, xenv=()):
     if REDUCE_NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA Reduce")
     size = str(int(total_bytes))
-    gin_kv = ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"] + REDUCE_XENV
+    gin_kv = ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"] + REDUCE_XENV + list(xenv)
     # The later -D overrides the helper's -D 3; -D 4 is out-of-place only.
     impl_args = ["-D", "4", "-O", "1"] if impl == 4 else []
     args = (
@@ -198,8 +198,34 @@ def test_ReduceGinSdma(request, size, dtype, op, root_pos):
     root = 0 if root_pos == "first" else REDUCE_NP - 1
     # 5 packs of 16 B past 1 MiB per rank.
     total_bytes = {"1MiB": MiB, "64MiB": 64 * MiB, "partial-tile": REDUCE_NP * (MiB + 5 * 16)}[size]
-    rc, _ = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root)
+    # LL off, so every size runs the tiled kernel.
+    rc, _ = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root,
+                                 xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=0"])
     assert rc == 0, "Reduce -D 3 data check failed at {} bytes, dtype={}, op={}, root={}".format(
+        total_bytes, dtype, op, root)
+
+
+# LL tier of deviceImpl 3 (GinReduceLLKernel): messages up to
+# NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES go to the root as LL packets with no
+# barrier. "tiny" is the smallest aligned message (one CTA, a few units),
+# "uneven" splits unevenly across several CTAs, and "max" forces the 1 MiB
+# ceiling (256 CTAs). The perf binary runs in-place and out-of-place, and its
+# warmup and timed iterations run back to back, which exercises the root's ack.
+@_reduce_gin_skip
+@pytest.mark.parametrize("size", ["tiny", "uneven", "max"])
+@pytest.mark.parametrize("dtype, op", [
+    ("float", "sum"),
+    ("bfloat16", "avg"),
+    ("int8", "max"),
+    ("double", "prod"),
+])
+@pytest.mark.parametrize("root_pos", ["first", "last"])
+def test_ReduceGinSdmaLL(request, size, dtype, op, root_pos):
+    root = 0 if root_pos == "first" else REDUCE_NP - 1
+    total_bytes = {"tiny": REDUCE_NP * 16, "uneven": REDUCE_NP * 16 * 1001, "max": MiB}[size]
+    rc, _ = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root,
+                                 xenv=["NCCL_GIN_ANVIL_REDUCE_LL_MAX_BYTES=1048576"])
+    assert rc == 0, "Reduce -D 3 LL data check failed at {} bytes, dtype={}, op={}, root={}".format(
         total_bytes, dtype, op, root)
 
 
