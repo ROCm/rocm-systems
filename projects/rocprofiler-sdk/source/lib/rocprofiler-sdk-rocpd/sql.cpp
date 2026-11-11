@@ -64,20 +64,22 @@ namespace
 namespace common = ::rocprofiler::common;
 namespace fs     = ::rocprofiler::common::filesystem;
 
+// Has internal linkage, so no other library can interpose it and dladdr on its address
+// names the library this code is part of. An exported symbol is the wrong thing to ask
+// about: both dlsym(RTLD_DEFAULT, "rocpd_sql_load_schema") and &rocpd_sql_load_schema
+// resolve to the first librocprofiler-sdk-rocpd.so in the global scope, which is a
+// different installation whenever an older one is loaded first, for example from a
+// system ROCm earlier on LD_LIBRARY_PATH. This library would then read that
+// installation's versions.yml and reject the schema versions it writes itself.
+void
+schema_path_anchor()
+{}
+
 std::string
 get_install_path()
 {
-    auto* _rocpd_sql_load_schema_sym = dlsym(RTLD_DEFAULT, "rocpd_sql_load_schema");
-
-    ROCP_CI_LOG_IF(WARNING, !_rocpd_sql_load_schema_sym)
-        << "[rocprofiler-sdk-rocpd] dlsym(RTLD_DEFAULT, 'rocpd_sql_load_schema') failed "
-           "(unexpectedly) from within the rocprofiler-sdk-rocpd library";
-
-    if(!_rocpd_sql_load_schema_sym)
-        _rocpd_sql_load_schema_sym = reinterpret_cast<void*>(&rocpd_sql_load_schema);
-
-    if(Dl_info dl_info = {};
-       dladdr(_rocpd_sql_load_schema_sym, &dl_info) != 0 && dl_info.dli_fname != nullptr)
+    if(Dl_info dl_info = {}; dladdr(reinterpret_cast<void*>(&schema_path_anchor), &dl_info) != 0 &&
+                             dl_info.dli_fname != nullptr)
     {
         auto _share_path =
             fs::path{dl_info.dli_fname}.lexically_normal().parent_path().parent_path() /
@@ -90,8 +92,8 @@ get_install_path()
     }
 
     ROCP_CI_LOG(WARNING)
-        << "Failed to locate the installation path of rocprofiler-sdk-rocpd via dladdr of the "
-           "'rocpd_sql_load_schema' symbol (which should be in librocprofiler-sdk-rocpd.so)";
+        << "Failed to locate the installation path of rocprofiler-sdk-rocpd via dladdr of a "
+           "symbol internal to librocprofiler-sdk-rocpd.so";
 
     return std::string{};
 }

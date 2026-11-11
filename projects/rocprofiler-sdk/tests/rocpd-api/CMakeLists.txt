@@ -33,6 +33,38 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocpd-api-env}")
 
 ################################################################################
+# Regression test: the library has to find the schema directory that ships with it,
+# not the one belonging to whichever librocprofiler-sdk-rocpd.so happens to be first
+# in the global symbol scope. Interpose the exported entry point from a prefix that
+# has no share/rocprofiler-sdk-rocpd and give the test no ROCPD_SCHEMA_PATH to fall
+# back on, so the only way the schema loads is if the library located itself.
+################################################################################
+find_package(rocprofiler-sdk-rocpd REQUIRED)
+
+add_library(rocpd-api-stale-rocpd-decoy SHARED)
+target_sources(rocpd-api-stale-rocpd-decoy PRIVATE stale-rocpd-decoy.cpp)
+target_compile_options(rocpd-api-stale-rocpd-decoy PRIVATE -W -Wall -Wextra)
+target_link_libraries(
+    rocpd-api-stale-rocpd-decoy
+    PRIVATE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd-shared-library ${CMAKE_DL_LIBS})
+set_target_properties(
+    rocpd-api-stale-rocpd-decoy
+    PROPERTIES CXX_STANDARD 17
+               CXX_EXTENSIONS OFF
+               CXX_STANDARD_REQUIRED ON
+               LIBRARY_OUTPUT_DIRECTORY
+               "${CMAKE_CURRENT_BINARY_DIR}/stale-rocpd-prefix/lib")
+
+rocprofiler_add_integration_execute_test(
+    rocpd-api-stale-install-schema-path-test
+    COMMAND $<TARGET_FILE:rocpd-api-test> --all
+    DEPENDS rocpd-api-test rocpd-api-stale-rocpd-decoy
+    TIMEOUT 45
+    LABELS "integration-tests;rocpd"
+    PRELOAD "$<TARGET_FILE:rocpd-api-stale-rocpd-decoy>"
+    ENVIRONMENT "ROCPD_SCHEMA_PATH=")
+
+################################################################################
 # Optional: pytest-based schema validation (same API via Python rocpd module)
 ################################################################################
 
