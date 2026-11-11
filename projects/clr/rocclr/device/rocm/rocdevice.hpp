@@ -81,6 +81,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  const void* owner_ = nullptr;    //!< Queue tracker whose slots rearm the signal
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
   //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
