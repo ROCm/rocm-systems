@@ -46,6 +46,7 @@
 #include <utility>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using namespace rocjitsu::test::cdna5;
@@ -4260,7 +4261,9 @@ TEST(MemoryWaitFootprintTest, NarrowDsAndBufferStoresCheckOnlyConsumedBytes) {
     const auto words = rdna3::build_mubuf(opcode, {.vaddr = 0, .vdata = 4, .srsrc = 0, .offen = 1});
     cases.emplace_back(words.begin(), words.end());
   }
-  check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases);
+  // Bind s[0:3] with a valid format so the buffer stores read their data.
+  check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA3, 32, 16, cases, 0, 0,
+                          [](Wavefront &wave) { wave.debug_write_sgpr(3, kRdnaFormat32); });
 }
 
 TEST(MemoryWaitFootprintTest, WriteLaneChecksOnlyTheSelectedDestinationLane) {

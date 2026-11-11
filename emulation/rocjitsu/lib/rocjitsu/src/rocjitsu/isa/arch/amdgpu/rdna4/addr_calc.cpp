@@ -204,6 +204,10 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   const uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
   const uint32_t records = amdgpu::read_scalar_selector(wf, sb_sel + 2);
   const uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  if (amdgpu::addr_calc::rdna_buffer_resource_format(wf.cu().arch(), srd3) == 0) {
+    amdgpu::reject_vector_memory_access(d);
+    return;
+  }
   const uint64_t base_addr =
       (uint64_t{srd1 & 0xffff} << 32) | amdgpu::read_scalar_selector(wf, sb_sel);
   constexpr uint32_t scales[] = {1, 4, 8, 32};
