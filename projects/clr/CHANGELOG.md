@@ -14,6 +14,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* The saturating half-precision intrinsics `__hadd_sat`, `__hsub_sat`, `__hmul_sat`, `__hfma_sat` and their `__half2`
+counterparts `__hadd2_sat`, `__hsub2_sat`, `__hmul2_sat` and `__hfma2_sat` now flush a NaN result to `+0.0` instead of
+propagating it, matching the expected output and improving the performance. 
 
 ## HIP 7.17.0 for ROCm 10.2.0
 
