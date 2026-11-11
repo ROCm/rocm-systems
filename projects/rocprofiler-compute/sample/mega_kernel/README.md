@@ -2,7 +2,7 @@
 
 ## Supported GPU Architectures
 
-### CDNA (Compute/Datacenter)
+### CDNA-CDNA4
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
@@ -10,14 +10,14 @@
 | **MI300/MI300X/MI325X** | CDNA3 | gfx942 | All MI250 + FP8/BF8 (FNUZ-style cvt), TF32, Sparse MFMA |
 | **MI350X/MI355X** | CDNA4 | gfx950 | All MI300 + FP6/FP4, OCP FP8/BF8 where applicable, Async LDS, Enhanced WMMA |
 
-### RDNA4 (Consumer)
+### RDNA4
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
 | **RX 9070 XT/9070** | RDNA4 | gfx1201 | FP8/BF8 OCP, Async LDS, Wave32, WMMA (gfx12 path) |
 | **RX 9060 series** | RDNA4 | gfx1200 | Same as gfx1201 with different CU count |
 
-### RDNA 3.5+ APU iGPU (gfx115x-class)
+### RDNA 3.5(gfx115x-class APU)
 
 | GPU Series | Architecture | GFXIP | Key Features |
 |------------|--------------|-------|--------------|
