@@ -86,6 +86,14 @@ following table:
       - ``hipHostMallocNonCoherent``
       -
       - Coarse-grained
+    * - ``hipHostRegister``
+      - ``hipHostRegisterDefault``
+      -
+      - Fine-grained
+    * - ``hipHostRegister``
+      - ``hipExtHostRegisterCoarseGrained`` :sup:`2`
+      -
+      - Coarse-grained
     * - ``hipExtMallocWithFlags``
       - ``hipDeviceMallocDefault``
       -
@@ -117,6 +125,12 @@ affected by the ``HIP_HOST_COHERENT`` environment variable, if the
 ``hipHostMallocMapped`` are unset. If neither these flags nor the
 ``HIP_HOST_COHERENT`` environment variable is set, or set as 0, the host memory
 allocation is coarse-grained.
+
+:sup:`2` Registering host memory as coarse-grained is supported on Linux and on
+supported Windows configurations. ``hipExtHostRegisterCoarseGrained`` has the
+same value as ``hipHostRegisterReadOnly``, so passing
+``hipHostRegisterReadOnly`` to :cpp:func:`hipHostRegister` also registers the
+memory as coarse-grained.
 
 .. note::
 

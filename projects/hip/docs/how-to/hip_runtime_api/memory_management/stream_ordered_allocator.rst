@@ -56,6 +56,24 @@ Memory pools
 
 Memory pools provide a way to manage memory with stream-ordered behavior while ensuring proper synchronization and avoiding memory access errors. Division of a single memory system into separate pools facilitates querying the access path properties for each partition. Memory pools are used for host memory, device memory, and unified memory.
 
+Default pools
+-------------
+
+Each device has a default memory pool. ``hipMallocAsync()`` allocates from the
+current memory pool of the stream's device, which is the default pool unless
+you set another pool with ``hipDeviceSetMemPool()``.
+
+Use :cpp:func:`hipMemGetDefaultMemPool` to get the default pool for a memory
+location and allocation type. Set ``location.type`` to
+``hipMemLocationTypeDevice`` and ``location.id`` to the device ID. The
+allocation type selects the pool:
+
+* ``hipMemAllocationTypePinned``: the default device memory pool, the same pool
+  that ``hipDeviceGetDefaultMemPool()`` returns.
+* ``hipMemAllocationTypeManaged``: the default managed memory pool.
+
+Other location types and allocation types return ``hipErrorInvalidValue``.
+
 Set pools
 ---------
 
