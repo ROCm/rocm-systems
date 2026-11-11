@@ -859,8 +859,25 @@ in the following table.
         | ``3``: GDAKI
         | ``4``: GPI
         | ``5``: EFA GDA
-        | ``6``: rocSHMEM GDA (required for that backend to initialize)
+        | ``6``: rocSHMEM GDA (this value, or ``6`` in ``RCCL_GIN_TYPE_LIST``, is
+          required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
+        | An empty value counts as unset.
+
+    * - | ``RCCL_GIN_TYPE_LIST``
+        | Lists the GIN backend types that may be active together, so DevComms
+          on one communicator can use different backends. RCCL-specific.
+          Ignored when ``NCCL_GIN_TYPE`` is set to a non-empty value.
+      - | Comma-separated list of ``NCCL_GIN_TYPE`` values from ``2`` to ``7``,
+          for example ``6,7`` (rocSHMEM GDA and Anvil SDMA) or ``6,2``
+          (rocSHMEM GDA and the proxy). Types not in the list are not
+          registered. Other entries are dropped with a warning.
+        | When Anvil SDMA and rocSHMEM GDA are both active, Anvil SDMA is the
+          default backend. A DevComm uses rocSHMEM GDA by requesting
+          ``NCCL_GIN_TYPE_ROCSHMEM_GDA`` in ``ncclDevCommRequirements::ginType``.
+        | All listed backends connect together, so if one fails to connect,
+          GIN fails on that communicator for every backend in the list.
+        | Default: unset (every backend except rocSHMEM GDA may be active)
 
     * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
         | Opt in to GinScatter AllReduce on gfx1250.
@@ -1397,6 +1414,15 @@ threshold table introduced for gfx1250.
           ``RCCL_DDA_A2A_PUSH=0``.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
+
+    * - | ``RCCL_DDA_LL128_A2A_THREADS``
+        | Threads per block for the gfx1250 DDA fabric LL128 ``ncclAlltoAll`` kernel.
+          When ``0`` (default), resolved from ``ddaA2aLL128Threads`` in the arch
+          table; no current table sets it, so the kernel uses 256 threads.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``256``.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

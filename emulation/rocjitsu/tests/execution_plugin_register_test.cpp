@@ -522,6 +522,73 @@ TEST(ExecutionPluginTest, True16InstructionsReportSelectedSourceAndDestinationHa
   }
 }
 
+TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnExtraRead) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride force_simd(false);
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto *plugin = f.attach_ordering_plugin();
+  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint64_t exec = 0x5;
+  wf->set_exec(exec);
+  const uint32_t base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  for (auto opcode : {rdna2::kVFmaF16Vop3, rdna2::kVDivFixupF16Vop3}) {
+    for (uint8_t dst : {0, 3}) {
+      for (bool high : {false, true}) {
+        SCOPED_TRACE(std::format("opcode={} dst={} high={}", opcode, dst, high));
+        for (unsigned lane = 0; lane < 3; ++lane) {
+          f.cu->write_vgpr(base, lane, 0xabcd4000); // 2
+          f.cu->write_vgpr(base + 1, lane, 0x4200); // 3
+          f.cu->write_vgpr(base + 2, lane, 0x4600); // 6
+          f.cu->write_vgpr(base + 3, lane, 0xcece5555);
+        }
+        const auto words = rdna2::build_vop3(opcode, {.vdst = dst,
+                                                      .op_sel = static_cast<uint8_t>(high ? 8 : 0),
+                                                      .src0 = 256,
+                                                      .src1 = 257,
+                                                      .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        plugin->events.clear();
+        amdgpu::ScopedSimdFastPathTracker tracker;
+        ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
+        const bool fma = opcode == rdna2::kVFmaF16Vop3;
+        EXPECT_TRUE(tracker.only_tracked_path_executed(
+            fma ? amdgpu::SimdFastPath::VOP3_FMA_FP16 : amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+
+        std::array<uint64_t, 3> read_lanes{};
+        for (const auto &read : vgpr_read_events(*plugin)) {
+          ASSERT_GE(read.physical_reg, base);
+          const uint32_t source = read.physical_reg - base;
+          ASSERT_LT(source, read_lanes.size());
+          EXPECT_EQ(read_lanes[source] & read.lane_mask, 0u);
+          read_lanes[source] |= read.lane_mask;
+        }
+        EXPECT_EQ(read_lanes, (std::array{exec, exec, exec}));
+        const auto writes = vgpr_write_events(*plugin);
+        ASSERT_EQ(writes.size(), 1u);
+        EXPECT_EQ(writes[0].physical_reg, base + dst);
+        EXPECT_EQ(writes[0].lane_mask, exec);
+        EXPECT_EQ(writes[0].byte_mask,
+                  high ? ExecutionPlugin::kHighHalfByteMask : ExecutionPlugin::kLowHalfByteMask);
+
+        const uint32_t old = dst == 0 ? 0xabcd4000u : 0xcece5555u;
+        const uint32_t result = fma ? 0x4a00u : 0x4000u;
+        const uint32_t expected =
+            high ? (result << 16) | (old & 0xffffu) : (old & 0xffff0000u) | result;
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 0), expected);
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 1), old);
+        EXPECT_EQ(f.cu->read_vgpr_storage(base + dst, 2), expected);
+      }
+    }
+  }
+}
+
 TEST(ExecutionPluginTest, Gfx1250Simd64BitWriteReportsBothDestinationRegisters) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -2040,9 +2107,8 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 }
 
 #if RJ_HOST_ARCH_X86
-// VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
-// detect a scope opened before operand acquisition. A sticky underflow flag is
-// cleared inside the scope and must remain visible to reads from both slots.
+// Both VOPD slots expose unchanged default host controls to register observers.
+// Migrated RDNA arithmetic may add sticky flags; legacy CDNA retains isolation.
 TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
   struct Case {
     rj_code_arch_t arch;
@@ -2069,6 +2135,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
+    const bool uses_arith =
+        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
           std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
@@ -2111,8 +2180,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
               fixture.cu->execute_instruction(instruction.get(), *wave).succeeded();
           const uint32_t restored_mxcsr = _mm_getcsr();
           ASSERT_TRUE(succeeded);
-          EXPECT_EQ(restored_mxcsr, host_mxcsr);
-          if (force_scalar || !util::has_stdx_simd)
+          EXPECT_EQ(restored_mxcsr & observed_bits, host_mxcsr & observed_bits);
+          EXPECT_NE(restored_mxcsr & _MM_EXCEPT_UNDERFLOW, 0u);
+          if (uses_arith || force_scalar || !util::has_stdx_simd)
             EXPECT_TRUE(tracker.no_tracked_path_executed());
           else
             EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
@@ -2122,8 +2192,10 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
           EXPECT_EQ(
               std::set<uint32_t>(observer->read_registers.begin(), observer->read_registers.end()),
               expected_reads);
-          for (uint32_t seen : observer->read_mxcsrs)
-            EXPECT_EQ(seen, host_mxcsr);
+          for (uint32_t seen : observer->read_mxcsrs) {
+            EXPECT_EQ(seen & observed_bits, host_mxcsr & observed_bits);
+            EXPECT_NE(seen & _MM_EXCEPT_UNDERFLOW, 0u);
+          }
           for (int seen : observer->read_roundings)
             EXPECT_EQ(seen, FE_TONEAREST);
         }
@@ -2201,7 +2273,7 @@ TEST(ExecutionPluginTest, Vop3CompareObservesOnlyArchitecturalDestinationReads) 
   EXPECT_TRUE(destination_reads().empty());
 }
 
-TEST(ExecutionPluginTest, Vop3DppSecondaryMaskObservesOnlyRequiredOldDestinationRead) {
+TEST(ExecutionPluginTest, Vop3DppCarryWritesScalarDestinationWithoutReadingIt) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
@@ -2250,23 +2322,14 @@ TEST(ExecutionPluginTest, Vop3DppSecondaryMaskObservesOnlyRequiredOldDestination
     SCOPED_TRACE(force_scalar ? "scalar" : "SIMD");
     ForceScalarOverride force_scalar_scope(force_scalar);
 
-    // BOUND_CTRL=0 preserves the invalid lane's old carry bit, so exactly one
-    // architectural read of the old scalar destination is required.
-    raw.bound_ctrl = 0;
-    f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
-    cdna5::VAddCoCiU32Vop3SdstEnc preserve(reinterpret_cast<const cdna5::MachineInst *>(&raw));
-    plugin->events.clear();
-    preserve.execute_impl(*wf);
-    EXPECT_EQ(destination_read_count(), 1);
-
-    // BOUND_CTRL=1 supplies zero for the invalid source. No old-destination
-    // merge or read is needed; the raw result is committed directly.
-    raw.bound_ctrl = 1;
-    f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
-    cdna5::VAddCoCiU32Vop3SdstEnc zero_fill(reinterpret_cast<const cdna5::MachineInst *>(&raw));
-    plugin->events.clear();
-    zero_fill.execute_impl(*wf);
-    EXPECT_EQ(destination_read_count(), 0);
+    for (uint32_t bound_ctrl : {0u, 1u}) {
+      raw.bound_ctrl = bound_ctrl;
+      f.cu->write_sgpr(sbase + kScalarDst, 0xFFFFFFFFu);
+      cdna5::VAddCoCiU32Vop3SdstEnc add(reinterpret_cast<const cdna5::MachineInst *>(&raw));
+      plugin->events.clear();
+      add.execute_impl(*wf);
+      EXPECT_EQ(destination_read_count(), 0);
+    }
   }
 }
 
