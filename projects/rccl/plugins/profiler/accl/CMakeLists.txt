@@ -52,5 +52,6 @@ install(TARGETS rccl-profiler-accl
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
 )
 install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/accl_report.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_tel_report.py
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl/accl COMPONENT runtime
 )

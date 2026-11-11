@@ -38,6 +38,7 @@ struct acclNetSwSnap {
 // and queued records.
 struct acclNetSnapshot {
   int      refCount;
+  uint64_t seq;
   uint64_t tsStartUs;
   uint64_t tsEndUs;
   int      nSw;          // -1: SW counters unavailable
@@ -51,16 +52,25 @@ struct acclNetCommStats;
 struct acclNetCollState {
   struct acclNetCommStats* owner;
   int    tracked;
+  int    posted;       // Coll stop seen: its proxy ops are posted
   int    overlapped;
   int    unavailable;
+  uint64_t startUs;
+  uint64_t launchWaitUs; // time the launch waited for this window's "before" read
   struct acclNetSnapshot* before;
 };
 
 // Per-communicator totals for the summary line. Written under the net mutex.
 struct acclNetCommStats {
   int      enabled;      // set at init, constant after
+  int      nNodes;
   int      closed;       // set at finalize
   int      queued;       // records waiting for their "after" snapshot
+  int      launchSeen;   // KernelLaunch fired since the last Coll start
+  uint64_t launchWaitUs;
+  uint64_t lastReadSeq;
+  uint64_t reads;        // distinct "after" reads behind this comm's records
+  uint64_t lateProxyOps; // proxy ops that started after their coll completed
   uint64_t records;
   uint64_t overlapped;
   uint64_t unavailable;
@@ -98,11 +108,17 @@ ACCL_HIDDEN char* acclNetFinalize(struct acclNetCommStats* st, int* lost);
 // Event hooks.
 ACCL_HIDDEN void acclNetKernelLaunch(struct acclNetCommStats* st);
 ACCL_HIDDEN void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs);
+ACCL_HIDDEN void acclNetCollPosted(struct acclNetCollState* cs);
 ACCL_HIDDEN void acclNetUntrackedStart(void);
+// A proxy op whose collective had already completed: its traffic is in a later window.
+ACCL_HIDDEN void acclNetLateProxyOp(struct acclNetCommStats* st);
 // Queues rec for the worker, which writes it once the "after" snapshot is read.
 // Returns 0 if queued; otherwise the caller writes rec itself.
+// nProxyOps: proxy ops that started; 0 on a multi-node comm delays the read
+// briefly, since a send-only rank's ops can start after its kernel finished.
 ACCL_HIDDEN int  acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st,
-                                     struct acclNetCollState* cs, struct acclCompletedRecord* rec);
+                                     struct acclNetCollState* cs, struct acclCompletedRecord* rec,
+                                     int nProxyOps);
 ACCL_HIDDEN void acclNetCollDrop(struct acclNetCollState* cs);
 
 // Parsers, exposed for unit tests.

@@ -1,7 +1,7 @@
 /*
  * ACCL Profiler Plugin — Combined GPU kernel + proxy/network decomposition.
  *
- * Subscribes to: Coll, KernelCh, ProxyOp, ProxyStep (+ KernelLaunch, P2p with
+ * Subscribes to: Coll, KernelCh, ProxyOp, ProxyStep (+ KernelLaunch with
  * ACCL_NET_COUNTERS=1)
  * Output: JSONL with per-collective timing decomposition.
  *
@@ -541,7 +541,8 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 
   // With net counters on, the worker writes the record once the "after"
   // snapshot is read.
-  if (!ctx->net.enabled || acclNetCollComplete(ctx, &ctx->net, &coll->net, &rec) != 0) {
+  if (!ctx->net.enabled ||
+      acclNetCollComplete(ctx, &ctx->net, &coll->net, &rec, coll->nProxyOpsStarted) != 0) {
     acclWriteRecord(ctx, &rec, NULL);
   }
 }
@@ -655,9 +656,10 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   *context = ctx;
   *eActivationMask = ncclProfileColl | ncclProfileKernelCh
                    | ncclProfileProxyOp | ncclProfileProxyStep;
-  // KernelLaunch is where the next window opens; P2p marks traffic no record owns.
+  // KernelLaunch is where the next window opens. P2p starts arrive without
+  // their bit (src/plugin/profiler.cc), so they need no subscription.
   if (acclNetInit(&ctx->net, rank, nRanks, nNodes)) {
-    *eActivationMask |= ncclProfileKernelLaunch | ncclProfileP2p;
+    *eActivationMask |= ncclProfileKernelLaunch;
   }
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
@@ -887,8 +889,13 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
     // Proxy ops are posted after this returns, so no NIC traffic of this
-    // collective precedes its "before" snapshot.
-    if (ctx->net.enabled) acclNetCollStart(&ctx->net, &coll->net);
+    // collective precedes its "before" snapshot. A reported 0 channels is
+    // either a symmetric plan's non-head task, which never gets KernelCh
+    // events, or 256 channels: neither can be tracked to completion.
+    if (ctx->net.enabled) {
+      if (coll->nChannelsRaw) acclNetCollStart(&ctx->net, &coll->net);
+      else acclNetUntrackedStart();
+    }
 
     *eHandle = coll;
     return ncclSuccess;
@@ -944,10 +951,16 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
     op->commCtx = ctx;
+    int late = 0;
     if (parentColl) {
       pthread_mutex_lock(&parentColl->mutex);
       parentColl->nProxyOpsStarted++;
+      late = parentColl->finalized;
       pthread_mutex_unlock(&parentColl->mutex);
+    }
+    if (ctx->net.enabled) {
+      if (late) acclNetLateProxyOp(&ctx->net);
+      else if (!parentColl) acclNetUntrackedStart();
     }
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
@@ -1000,6 +1013,8 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
     coll->tsCollStopUs = acclGetTimeUs();
+    // Fired right after ncclProxyStart: this plan's proxy ops are posted.
+    if (ctx->net.enabled && coll->net.tracked) acclNetCollPosted(&coll->net);
 
     pthread_mutex_lock(&coll->mutex);
     if (coll->finalized) {

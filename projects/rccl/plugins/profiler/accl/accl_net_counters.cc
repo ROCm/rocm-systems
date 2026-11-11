@@ -38,6 +38,8 @@ extern ncclDebugLogger_t gLogFn;
 #define ACCL_NL_BUF_SIZE    32768
 #define ACCL_ETH_HEADROOM   256   // old kernels ignore n_stats/len and copy the current count
 #define ACCL_NET_MAX_QUEUED 256   // force a read if overlapping collectives never drain
+#define ACCL_NET_SETTLE_US  200   // lets a late-waking proxy thread start its ops
+#define ACCL_NET_STUCK_US   10000000  // in flight this long: never going to complete
 
 static const char* const kAcclVolumeCounters[] = {
   "tx_rdma_ucast_bytes", "tx_rdma_ucast_pkts", "rx_rdma_ucast_bytes", "rx_rdma_ucast_pkts",
@@ -68,6 +70,8 @@ struct acclNetJob {
   struct acclNetSnapshot*  before;
   int                      overlapped;
   int                      unavailable;
+  int                      settle;
+  uint64_t                 launchWaitUs;
   struct acclCompletedRecord rec;
 };
 
@@ -86,6 +90,8 @@ static struct {
   int             nDevs;
   struct acclNetDev devs[ACCL_NET_MAX_DEVS];
   int           (*swCapture)(RcclTelemetrySwSnapshot*, int);
+  uint64_t        snapSeq;
+  char            selectedDev[ACCL_NET_NAME_LEN];
   struct acclNetSnapshot* cur;      // chain head: the next collective's "before"
   int             readPending;      // requested or in progress
   uint64_t        readSeq;          // bumped per requested read
@@ -541,6 +547,7 @@ static struct acclNetSnapshot* acclNetReadAll(char* rx) {
   struct acclNetSnapshot* s = (struct acclNetSnapshot*)calloc(1, sizeof(*s));
   if (!s) return NULL;
   s->refCount = 1;
+  s->seq = ++g.snapSeq;
   s->tsStartUs = acclNetNowUs();
   if (gAcclNetHooks.snapshotFn) {
     if (gAcclNetHooks.snapshotFn(s) != 0) {
@@ -564,12 +571,14 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
   struct acclNetSnapshot* b = job->before;
   struct acclNetCommStats* st = job->st;
   int unavailable = job->unavailable || !b || !a || g.nDevs == 0;
+  // A late "before" read already holds the previous collective's tail.
+  int trusted = !job->unavailable && b && a;
   int readError = !a;
   int usable[ACCL_NET_MAX_DEVS] = {0};
   for (int i = 0; i < g.nDevs && a; i++) {
     if (!a->dev[i].rdmaOk) readError = 1;
     if (g.devs[i].ethBuf && !a->dev[i].ethOk) readError = 1;
-    usable[i] = b && b->dev[i].rdmaOk && a->dev[i].rdmaOk;
+    usable[i] = trusted && b->dev[i].rdmaOk && a->dev[i].rdmaOk;
     if (!usable[i]) unavailable = 1;
   }
 
@@ -580,6 +589,7 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
                   (unsigned long)b->tsStartUs, (unsigned long)a->tsStartUs,
                   (unsigned long)(a->tsEndUs - a->tsStartUs));
   }
+  acclStrAppend(js, ",\"launch_wait_us\":%lu", (unsigned long)job->launchWaitUs);
   acclStrAppend(js, ",\"devices\":[");
   for (int i = 0; i < g.nDevs; i++) {
     struct acclNetDev* d = &g.devs[i];
@@ -591,7 +601,7 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
         // Narrow firmware counters wrap; a counter that went backwards is omitted.
         if (a->dev[i].rdma[k] < b->dev[i].rdma[k]) continue;
         uint64_t delta = a->dev[i].rdma[k] - b->dev[i].rdma[k];
-        st->totals[i][k] += delta;
+        if (!job->overlapped) st->totals[i][k] += delta;
         if (delta == 0 && !acclNetIsVolume(d->rdmaNames[k])) continue;
         acclStrAppend(js, "%s\"%s\":%lu", first ? "" : ",", d->rdmaNames[k], (unsigned long)delta);
         first = 0;
@@ -635,8 +645,11 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
   if (job->overlapped) st->overlapped++;
   if (unavailable) st->unavailable++;
   if (readError) st->readErrors++;
-  if (a) {
+  // Overlapping records share one "after" read: count each read once.
+  if (a && a->seq != st->lastReadSeq) {
     uint64_t us = a->tsEndUs - a->tsStartUs;
+    st->lastReadSeq = a->seq;
+    st->reads++;
     st->readUsSum += us;
     if (us > st->readUsMax) st->readUsMax = us;
   }
@@ -652,7 +665,10 @@ static void* acclNetWorker(void* arg) {
     g.reading = g.head;
     g.head = g.tail = NULL;
     g.nJobs = 0;
+    int settle = 0;
+    for (struct acclNetJob* j = g.reading; j; j = j->next) settle |= j->settle;
     pthread_mutex_unlock(&gNetMu);
+    if (settle) usleep(ACCL_NET_SETTLE_US);
 
     struct acclNetSnapshot* snap = acclNetReadAll(rx);
 
@@ -713,10 +729,36 @@ static void acclNetFlagPendingJobs(void) {
   for (struct acclNetJob* j = g.head; j; j = j->next) j->overlapped = 1;
 }
 
+// This comm's collectives whose proxy ops are posted, i.e. from an earlier plan.
 static int acclNetInflightOf(struct acclNetCommStats* st) {
   int n = 0;
-  for (int i = 0; i < g.nInflight; i++) n += g.inflight[i]->owner == st;
+  for (int i = 0; i < g.nInflight; i++) n += g.inflight[i]->owner == st && g.inflight[i]->posted;
   return n;
+}
+
+// A collective the plugin never sees complete (e.g. no KernelCh events) would
+// otherwise mark every later record overlapped.
+static void acclNetEvictStuckLocked(void) {
+  uint64_t now = acclNetNowUs();
+  for (int i = 0; i < g.nInflight;) {
+    struct acclNetCollState* cs = g.inflight[i];
+    if (now - cs->startUs < ACCL_NET_STUCK_US) { i++; continue; }
+    cs->overlapped = 1;
+    g.dirty = 1;
+    g.inflight[i] = g.inflight[--g.nInflight];
+  }
+}
+
+// Grace for the previous collective's proxy tail. Once it times out the app is
+// pipelining, so stop waiting until a launch finds nothing of its own in flight.
+static void acclNetGraceLocked(struct acclNetCommStats* st) {
+  if (acclNetInflightOf(st) == 0) {
+    g.graceOff = 0;
+  } else if (!g.graceOff) {
+    uint64_t deadline = acclNetNowUs() + g.graceUs;
+    while (acclNetInflightOf(st) > 0 && acclNetWaitUntil(deadline)) {}
+    if (acclNetInflightOf(st) > 0) g.graceOff = 1;
+  }
 }
 
 // Wait for the read that opens the next collective's window. Never waits while
@@ -725,6 +767,7 @@ static int acclNetInflightOf(struct acclNetCommStats* st) {
 // read that already timed out once is not waited for again.
 // Returns 0 if the read is still pending.
 static int acclNetWaitReadLocked(void) {
+  acclNetEvictStuckLocked();
   if (g.nInflight > 0) return 1;
   acclNetKickLocked();
   if (!g.cur && !g.readPending) acclNetRequestReadLocked();
@@ -737,26 +780,25 @@ static int acclNetWaitReadLocked(void) {
 
 void acclNetKernelLaunch(struct acclNetCommStats* st) {
   pthread_mutex_lock(&gNetMu);
-  // Proxy ops can finish just after the kernel; give this comm's previous
-  // collective a moment so a serialized app is not reported as overlapped.
-  // Once that times out the app is pipelining, so stop waiting until a launch
-  // finds nothing of its own in flight.
-  if (acclNetInflightOf(st) == 0) {
-    g.graceOff = 0;
-  } else if (!g.graceOff) {
-    uint64_t deadline = acclNetNowUs() + g.graceUs;
-    while (acclNetInflightOf(st) > 0 && acclNetWaitUntil(deadline)) {}
-    if (acclNetInflightOf(st) > 0) g.graceOff = 1;
-  }
+  uint64_t t0 = acclNetNowUs();
+  acclNetGraceLocked(st);
   acclNetWaitReadLocked();
+  st->launchWaitUs = acclNetNowUs() - t0;
+  st->launchSeen = 1;
   pthread_mutex_unlock(&gNetMu);
 }
 
 void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs) {
   pthread_mutex_lock(&gNetMu);
+  uint64_t t0 = acclNetNowUs();
+  // Host-callback (graph) launches reach here without a KernelLaunch first.
+  if (!st->launchSeen) acclNetGraceLocked(st);
   int readDone = acclNetWaitReadLocked();
+  cs->launchWaitUs = (st->launchSeen ? st->launchWaitUs : 0) + (acclNetNowUs() - t0);
+  st->launchSeen = 0;
   cs->tracked = 1;
   cs->owner = st;
+  cs->startUs = acclNetNowUs();
   cs->before = acclSnapRef(g.cur);
   cs->unavailable = !readDone || !cs->before;
   // The late read will land inside this collective.
@@ -774,6 +816,19 @@ void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs) 
     g.dirty = 1;
   }
   pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetCollPosted(struct acclNetCollState* cs) {
+  pthread_mutex_lock(&gNetMu);
+  cs->posted = 1;
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetLateProxyOp(struct acclNetCommStats* st) {
+  pthread_mutex_lock(&gNetMu);
+  st->lateProxyOps++;
+  pthread_mutex_unlock(&gNetMu);
+  acclNetUntrackedStart();
 }
 
 void acclNetUntrackedStart(void) {
@@ -795,7 +850,8 @@ static void acclNetRemoveInflightLocked(struct acclNetCollState* cs) {
 }
 
 int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st,
-                        struct acclNetCollState* cs, struct acclCompletedRecord* rec) {
+                        struct acclNetCollState* cs, struct acclCompletedRecord* rec,
+                        int nProxyOps) {
   if (!cs->tracked) return -1;
   struct acclNetJob* job = (struct acclNetJob*)malloc(sizeof(*job));
   pthread_mutex_lock(&gNetMu);
@@ -815,6 +871,8 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   job->before = cs->before;
   job->overlapped = cs->overlapped;
   job->unavailable = cs->unavailable;
+  job->settle = nProxyOps == 0 && st->nNodes > 1;
+  job->launchWaitUs = cs->launchWaitUs;
   cs->before = NULL;
   acclCtxRetain(ctx);
   if (g.tail) g.tail->next = job; else g.head = job;
@@ -852,6 +910,21 @@ static uint64_t acclNetEnvU64(const char* name, uint64_t def, uint64_t max) {
     return def;
   }
   return x;
+}
+
+// rcclTelemetrySwCapture from the librccl that loaded us: logfn lives there, and
+// RTLD_DEFAULT misses a librccl that was itself dlopen'd RTLD_LOCAL.
+static void* acclNetFindSwCapture(void) {
+  Dl_info info;
+  if (gLogFn && dladdr((void*)gLogFn, &info) && info.dli_fname) {
+    void* h = dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
+    if (h) {
+      void* fn = dlsym(h, "rcclTelemetrySwCapture");
+      dlclose(h);
+      if (fn) return fn;
+    }
+  }
+  return dlsym(RTLD_DEFAULT, "rcclTelemetrySwCapture");
 }
 
 // Parses ACCL_NET_DEVICES and applies ACCL_NET_DEVICE_SELECT. Returns device count.
@@ -930,15 +1003,23 @@ int acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, int nNodes) {
   }
   // The last comm's finalize is still tearing down the previous worker.
   while (g.stopping) pthread_cond_wait(&g.doneCv, &gNetMu);
+  st->nNodes = nNodes;
   if (g.users > 0) {
     g.users++;
     st->enabled = 1;
+    const char* sel = getenv("ACCL_NET_DEVICE_SELECT");
+    const char* devs = getenv("ACCL_NET_DEVICES");
+    if (sel && strcmp(sel, "local_rank") == 0 && devs && nNodes > 0 && nRanks % nNodes == 0) {
+      ACCL_NET_INFO("ACCL Profiler: comm rank %d shares the net counter chain on %s chosen by the "
+                    "first communicator", rank, g.selectedDev);
+    }
     pthread_mutex_unlock(&gNetMu);
     return 1;
   }
   g.waitUs = acclNetEnvU64("ACCL_NET_WAIT_MS", 1000, 600000) * 1000;
   g.graceUs = acclNetEnvU64("ACCL_NET_GRACE_US", 1000, 1000000);
   g.nDevs = acclNetParseDevices(rank, nRanks, nNodes);
+  snprintf(g.selectedDev, sizeof(g.selectedDev), "%s", g.nDevs ? g.devs[0].name : "");
   if (g.nDevs == 0 && !gAcclNetHooks.snapshotFn) {
     ACCL_NET_WARN("ACCL Profiler: ACCL_NET_COUNTERS=1 but ACCL_NET_DEVICES lists no usable device; "
                   "net counters are off");
@@ -962,7 +1043,7 @@ int acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, int nNodes) {
     }
     acclEthOpen(d);
   }
-  g.swCapture = (int (*)(RcclTelemetrySwSnapshot*, int))dlsym(RTLD_DEFAULT, "rcclTelemetrySwCapture");
+  g.swCapture = (int (*)(RcclTelemetrySwSnapshot*, int))acclNetFindSwCapture();
   g.stop = 0;
   g.dirty = 0;
   g.graceOff = 0;
@@ -992,10 +1073,12 @@ static char* acclNetSummaryJsonLocked(struct acclNetCommStats* st) {
   struct acclStr js = {NULL, 0, 0, 0};
   acclStrAppend(&js, ",\"net_counters\":{\"records\":%lu,\"overlapped\":%lu,\"unavailable\":%lu,"
                 "\"records_with_read_error\":%lu,\"queued_at_finalize\":%d,"
+                "\"late_proxy_ops\":%lu,\"reads\":%lu,"
                 "\"read_us_mean\":%.1f,\"read_us_max\":%lu,\"totals\":{",
                 (unsigned long)st->records, (unsigned long)st->overlapped,
                 (unsigned long)st->unavailable, (unsigned long)st->readErrors, st->queued,
-                st->records ? (double)st->readUsSum / (double)st->records : 0.0,
+                (unsigned long)st->lateProxyOps, (unsigned long)st->reads,
+                st->reads ? (double)st->readUsSum / (double)st->reads : 0.0,
                 (unsigned long)st->readUsMax);
   for (int i = 0; i < g.nDevs; i++) {
     acclStrAppend(&js, "%s\"%s\":{", i ? "," : "", g.devs[i].name);

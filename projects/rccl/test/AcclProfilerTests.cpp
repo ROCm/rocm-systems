@@ -3282,7 +3282,6 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xB1, &mask, "net", 1, 1, 0, nullptr), 0);
             EXPECT_TRUE(mask & ncclProfileKernelLaunch);
-            EXPECT_TRUE(mask & ncclProfileP2p);
             for (int i = 0; i < 3; i++) {
                 void* coll = NetLaunchColl(ctx, i);
                 ASSERT_NE(coll, nullptr);
@@ -3308,6 +3307,7 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
                 EXPECT_TRUE(Has(recs[i], "\"name\":\"rdma0\""));
                 EXPECT_TRUE(Has(recs[i], "\"ethtool\":null"));
                 EXPECT_EQ(JsonNumber(recs[i], "tx_bytes"), 100.0 * (i + 1));
+                EXPECT_GE(JsonNumber(recs[i], "launch_wait_us"), 0.0);
                 EXPECT_EQ(recs[i].back(), '}');
             }
             // The "after" of N is the "before" of N+1.
@@ -3318,6 +3318,8 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
             const std::string& summary = lines.back();
             EXPECT_TRUE(Has(summary, "\"summary\""));
             EXPECT_EQ(JsonNumber(summary, "records"), 3.0);
+            EXPECT_EQ(JsonNumber(summary, "reads"), 3.0);
+            EXPECT_EQ(JsonNumber(summary, "late_proxy_ops"), 0.0);
             EXPECT_EQ(JsonNumber(summary, "overlapped"), 0.0);
             EXPECT_EQ(JsonNumber(summary, "unavailable"), 0.0);
             EXPECT_EQ(JsonNumber(summary, "tx_rdma_ucast_bytes"), 6000.0);
@@ -3628,6 +3630,136 @@ TEST(AcclNetCounters, RecordNotWrittenByFinalizeClearsComplete) {
         },
         {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
          {"ACCL_NET_DEVICES", "rdma0"}, {"ACCL_NET_WAIT_MS", "50"}}
+    );
+}
+
+// Overlapping windows are not added to the totals: they would be counted twice.
+TEST(AcclNetCounters, OverlappedWindowsStayOutOfTotals) {
+    ScopedProfilerDir dir("net_totals");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclNetCounters.OverlappedWindowsStayOutOfTotals",
+        [&dir]() {
+            FakeNic nic;
+            InstallFakeNic(&nic);
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC1, &mask, "net", 1, 1, 0, nullptr), 0);
+            void* a = NetLaunchColl(ctx, 0);
+            void* b = NetLaunchColl(ctx, 1);
+            nic.Add("tx_rdma_ucast_bytes", 1000);
+            NetCompleteColl(ctx, a);
+            NetCompleteColl(ctx, b);
+            void* c = NetLaunchColl(ctx, 2);
+            nic.Add("tx_rdma_ucast_bytes", 7);
+            NetCompleteColl(ctx, c);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+            ClearNetHooks();
+            auto lines = ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xc1"));
+            EXPECT_EQ(JsonNumber(lines.back(), "tx_rdma_ucast_bytes"), 7.0);
+            // a and b share one "after" read.
+            EXPECT_EQ(JsonNumber(lines.back(), "reads"), 2.0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+         {"ACCL_NET_DEVICES", "rdma0"}, {"ACCL_NET_GRACE_US", "0"}}
+    );
+}
+
+// A proxy op that starts after its collective completed sent in a later window.
+TEST(AcclNetCounters, LateProxyOpIsCountedAndFlagsTheNextRecord) {
+    ScopedProfilerDir dir("net_late");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclNetCounters.LateProxyOpIsCountedAndFlagsTheNextRecord",
+        [&dir]() {
+            FakeNic nic;
+            InstallFakeNic(&nic);
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC2, &mask, "net", 2, 2, 0, nullptr), 0);
+            void* a = NetLaunchColl(ctx, 0);
+            NetCompleteColl(ctx, a);  // finalized with no proxy op started
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, a, 0, 1, 1, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_EQ(acclPluginStopEvent(op), 0);
+            NetCompleteColl(ctx, NetLaunchColl(ctx, 1));
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+            ClearNetHooks();
+            auto lines = ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xc2"));
+            auto recs = CollRecords(lines);
+            ASSERT_EQ(recs.size(), 2u);
+            EXPECT_TRUE(Has(recs[1], "\"overlapped\":true"));
+            EXPECT_EQ(JsonNumber(lines.back(), "late_proxy_ops"), 1.0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+         {"ACCL_NET_DEVICES", "rdma0"}}
+    );
+}
+
+// nChannels=0 (a symmetric plan's non-head task) never completes: treat it as untracked.
+TEST(AcclNetCounters, ZeroChannelCollIsNotTracked) {
+    ScopedProfilerDir dir("net_zeroch");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclNetCounters.ZeroChannelCollIsNotTracked",
+        [&dir]() {
+            FakeNic nic;
+            InstallFakeNic(&nic);
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC3, &mask, "net", 1, 1, 0, nullptr), 0);
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/0, 0, 1024);
+            void* sym = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &sym, &cd), 0);
+            ASSERT_NE(sym, nullptr);
+            ASSERT_EQ(acclPluginStopEvent(sym), 0);
+            NetCompleteColl(ctx, NetLaunchColl(ctx, 1));
+            NetCompleteColl(ctx, NetLaunchColl(ctx, 2));
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+            ClearNetHooks();
+            auto recs = CollRecords(ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xc3")));
+            ASSERT_EQ(recs.size(), 2u);
+            EXPECT_TRUE(Has(recs[0], "\"overlapped\":true"));
+            EXPECT_TRUE(Has(recs[1], "\"overlapped\":false")) << "must not stay in flight";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+         {"ACCL_NET_DEVICES", "rdma0"}}
+    );
+}
+
+// Host-callback launches have no KernelLaunch: Coll start gives the previous
+// collective the grace itself, and the wait is recorded.
+TEST(AcclNetCounters, CollStartWithoutKernelLaunchWaitsForGrace) {
+    ScopedProfilerDir dir("net_hostcb");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclNetCounters.CollStartWithoutKernelLaunchWaitsForGrace",
+        [&dir]() {
+            FakeNic nic;
+            InstallFakeNic(&nic);
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC4, &mask, "net", 1, 1, 0, nullptr), 0);
+            void* a = NetLaunchColl(ctx, 0);
+            std::thread finisher([ctx, a]() {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                NetCompleteColl(ctx, a);
+            });
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 1, 1024);
+            void* b = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &b, &cd), 0);
+            ASSERT_EQ(acclPluginStopEvent(b), 0);
+            finisher.join();
+            NetCompleteColl(ctx, b);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+            ClearNetHooks();
+            auto recs = CollRecords(ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xc4")));
+            ASSERT_EQ(recs.size(), 2u);
+            EXPECT_TRUE(Has(recs[1], "\"overlapped\":false")) << recs[1];
+            EXPECT_GE(JsonNumber(recs[1], "launch_wait_us"), 30000.0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+         {"ACCL_NET_DEVICES", "rdma0"}, {"ACCL_NET_GRACE_US", "500000"}}
     );
 }
 

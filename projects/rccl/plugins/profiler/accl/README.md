@@ -190,6 +190,7 @@ stats, marked `"stale": true` because ionic refreshes them about every 5 s; and
 ```json
 "net_counters": {"overlapped": false, "unavailable": false,
   "before_ts_us": 1700, "after_ts_us": 3900, "after_read_us": 1480,
+  "launch_wait_us": 1210,
   "devices": [{"name": "rdma0",
     "rdma": {"tx_rdma_ucast_bytes": 4194304, "tx_rdma_ucast_pkts": 1024,
              "rx_rdma_ucast_bytes": 4194304, "rx_rdma_ucast_pkts": 1024,
@@ -204,22 +205,37 @@ stats, marked `"stale": true` because ionic refreshes them about every 5 s; and
   `ACCL_PROFILER_MIN_SIZE_BYTES`) may have run in the window.
 - `unavailable`: a read failed or timed out, or no device is configured. The
   collective is never affected.
+- `launch_wait_us`: how long the launch waited for this window's "before" read.
 - The summary adds `net_counters` (records, overlapped, unavailable,
-  `records_with_read_error`, `queued_at_finalize`, read times, per-device
-  totals). A record not written by finalize clears `complete`.
+  `records_with_read_error`, `queued_at_finalize`, `late_proxy_ops`, reads and
+  read times, per-device totals of clean windows). A record not written by
+  finalize clears `complete`.
 
-`accl_report.py` prints a NETWORK COUNTERS table per message size:
-`NETWORK_SUSPECT` (loss/retransmit counters, or ECN/CNP), `CLEAN`, or
-`INCONCLUSIVE` (fewer than 3 clean windows, most windows overlapped/unavailable,
-or non-ionic counter names), with the counters, side and ranks behind it. Loss
-is often visible only on the receiving NIC, so all ranks are pooled.
+`net_tel_report.py` analyzes these records (`accl_report.py` ignores them):
+
+```bash
+python3 net_tel_report.py /path/to/output/ [--warmup 5] [--trace net_trace.json]
+```
+
+It prints, per message size, `NETWORK_SUSPECT` (loss/retransmit counters, or
+ECN/CNP), `CLEAN`, or `INCONCLUSIVE` (fewer than 3 clean windows, most windows
+overlapped/unavailable, no NIC traffic, or non-ionic counter names) with the
+counters, side and ranks behind it; loss is often visible only on the
+receiving NIC, so all ranks are pooled. It also prints exec time with the read
+skew removed: ranks read at different speeds after the app's barrier, and a
+rank's kernel waits for the slowest peer, so
+`corrected = exec - (max launch_wait_us over the comm's ranks - own)`.
+`--trace` writes Chrome trace JSON (chrome://tracing, ui.perfetto.dev): one
+process per host, one thread per rank, a slice per window and per read
+(per-host `CLOCK_MONOTONIC`, not aligned across hosts).
 
 Caveats:
 - Per-collective numbers need a serialized app, e.g. rccl-tests `-z 1`, and
   `ACCL_PROFILER_MIN_SIZE_BYTES=0`.
 - Counters are per NIC: ranks sharing a NIC share windows.
 - The read wait (about 1-2 ms per collective) shows up in wall-clock benchmark
-  time, not in `coll_exec_time_us`.
+  time; `coll_exec_time_us` includes the gap to the slowest peer's read (see
+  the corrected time above).
 - With AINIC CTS offload, a remote rank leaving the barrier early can start
   sending before this rank's read finishes.
 - CUDA graphs are not supported.
