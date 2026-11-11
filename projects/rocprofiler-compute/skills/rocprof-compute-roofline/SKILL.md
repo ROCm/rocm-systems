@@ -18,7 +18,7 @@ carries the same numbers in readable form.
 On Navi48 (gfx1201), read the
 [Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
 section of the `rocprof-compute-speed-of-light` skill before collecting. It
-explains the `DRAM` and `MALL` roofs and the estimated VALU rows.
+explains the `GDDR6` and `MALL` roofs and the estimated VALU rows.
 
 Collect only the roofline block:
 

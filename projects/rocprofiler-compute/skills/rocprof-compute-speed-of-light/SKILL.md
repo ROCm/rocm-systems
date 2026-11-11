@@ -77,12 +77,12 @@ and have no GDDR6 peak. `Infinity Cache Hit Rate` and GDDR6 bandwidth are
 `N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
 is provisional.
 
-On the roofline, the device-memory roof is `DRAM` and the `MALL` roof is the
-64 MB Infinity Cache. The `AI DRAM` point counts GL2C requests destined for
+On the roofline, the device-memory roof is `GDDR6` and the `MALL` roof is the
+64 MB Infinity Cache. The `AI GDDR6` point counts GL2C requests destined for
 memory, which the Infinity Cache can also serve, so the plot marks it once, at
-`DRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
-text never name `MALL`. A point above `DRAM` and below `MALL` means the
-Infinity Cache is absorbing the traffic; never call that kernel DRAM-limited.
+`GDDR6`. Compare it with both roofs yourself, because "Limited by" and the hover
+text never name `MALL`. A point above `GDDR6` and below `MALL` means the
+Infinity Cache is absorbing the traffic; never call that kernel GDDR6-limited.
 Under `STABLE_STD` the measured roofs sit well below the interface peak. The
 VALU roofline rows subtract WMMA issues from all VALU issues and multiply by
 the wave size, validated only for one wave32 FP16 16x16x16 case. They are
