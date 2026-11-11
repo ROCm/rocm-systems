@@ -347,6 +347,9 @@ instruction snapshot, and its counter obligations. Operations without an LDS
 effect still occupy queue positions. Otherwise a partial wait could incorrectly
 identify which LDS operations completed.
 
+Tensor DMA supplies LDS byte ranges through a borrowed span. Registering the
+event builds owned intervals; the detector retains no borrowed execution storage.
+
 Counter completion order and LDS access order answer different questions.
 For example, tensor DMA completes in issue order on `tensorcnt`, so a partial
 wait can complete a prefix. That does not prove that an overlapping tensor load

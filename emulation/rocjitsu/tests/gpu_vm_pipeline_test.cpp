@@ -3575,7 +3575,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
       completion_pcs.push_back(access.pc);
     }
     int issues = 0;
-    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<amdgpu::LdsByteRange> lds_ranges;
     std::vector<uint64_t> completion_pcs;
     std::function<void()> on_issue;
   };
@@ -3623,7 +3623,7 @@ TEST(GpuVmPipeline, DeferredTensorLoadIssuesOnceAndCompletesAtItsInstructionPc) 
   EXPECT_EQ(observer->issues, 1);
   EXPECT_TRUE(lds_untouched_at_issue);
   EXPECT_EQ(observer->lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = lds_address, .bytes = 4}}));
+            (std::vector<amdgpu::LdsByteRange>{{.address = lds_address, .bytes = 4}}));
   EXPECT_EQ(context.wf->lds().read32(lds_address), kSentinel);
   EXPECT_TRUE(observer->completion_pcs.empty());
 

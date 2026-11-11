@@ -814,8 +814,8 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
 /// @details Loads write every element; out-of-tensor elements are zero-filled.
 /// Stores read only in-bounds elements. Bytes outside the wave's LDS allocation
 /// are omitted.
-inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
-  std::vector<TensorDmaLdsRange> ranges;
+inline std::vector<LdsByteRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
+  std::vector<LdsByteRange> ranges;
   ranges.reserve(state.elements.size());
   for (const TensorDmaTransferElement &element : state.elements) {
     const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
@@ -838,7 +838,7 @@ inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState
 inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {
   if (!wf.cu().observes_tensor_dma_issue())
     return;
-  const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
+  const std::vector<LdsByteRange> lds_ranges = tensor_dma_lds_ranges(state);
   wf.cu().report_tensor_dma_issue({
       .is_load = !state.store_from_lds,
       .lds_ranges = lds_ranges,

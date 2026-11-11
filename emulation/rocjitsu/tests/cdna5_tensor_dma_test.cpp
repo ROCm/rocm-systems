@@ -114,7 +114,7 @@ public:
 
   struct Captured {
     bool is_load = true;
-    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<amdgpu::LdsByteRange> lds_ranges;
   };
 
   std::function<void(const amdgpu::TensorDmaIssueObservation &, const amdgpu::Wavefront &)> inspect;
@@ -458,9 +458,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, LoadDropsWritesOutsideTheWavesLds) {
   ASSERT_EQ(observer->accesses.size(), 1u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
   EXPECT_EQ(observer->accesses[0].addresses.size(), 4u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
@@ -478,9 +478,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 8), 0u);
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 12), 0u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, LoadI64StraddlingTheEndWritesOnlyItsFourInRangeBytes) {
@@ -495,9 +495,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, LoadI64StraddlingTheEndWritesOnlyItsFourInRan
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x55667788u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreI64StraddlingTheEndReadsZeroForItsFourOutOfRangeBytes) {
@@ -512,9 +512,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreI64StraddlingTheEndReadsZeroForItsFourOu
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0xaabbccddu);
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + 4), 0u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
 // One i32 element at offset 2046 has two bytes inside the wave's LDS. Keeping a
@@ -532,9 +532,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, LoadI32StraddlingTheEndWritesOnlyItsTwoInRang
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x7788a1a0u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, StoreI32StraddlingTheEndReadsZeroForItsTwoOutOfRangeBytes) {
@@ -549,9 +549,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreI32StraddlingTheEndReadsZeroForItsTwoOut
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0x0000ddccu);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsBytes - 2, .bytes = 2}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, PaddingPushesTheLastElementPastTheEnd) {
@@ -569,10 +569,10 @@ TEST_F(TensorDmaLdsOutOfRangeTest, PaddingPushesTheLastElementPastTheEnd) {
   EXPECT_EQ(cu->lds().read32(wf->lds_base() + kLdsBytes - 4), 0x4b000002u);
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsBytes - 16, .bytes = 8},
-                {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsBytes - 16, .bytes = 8},
+                                         {.address = wf->lds_base() + kLdsBytes - 4, .bytes = 4}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, IterationPastTheEndIsDropped) {
@@ -599,7 +599,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, IterationPastTheEndIsDropped) {
   ASSERT_EQ(issue_observer->issues.size(), 1u);
   EXPECT_EQ(observer->accesses[0].addresses.size(), 4u);
   EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
+            (std::vector<amdgpu::LdsByteRange>{
                 {.address = wf->lds_base() + kLdsBytes - 16, .bytes = 8}}));
 }
 
@@ -624,9 +624,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, GatherRowPastTheEndIsDropped) {
   EXPECT_EQ(cu->lds().read32(neighbour), kSentinel);
   EXPECT_EQ(cu->lds().read32(neighbour + 4), kSentinel);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, ZeroFillPastTheEndIsDropped) {
@@ -642,9 +642,9 @@ TEST_F(TensorDmaLdsOutOfRangeTest, ZeroFillPastTheEndIsDropped) {
   ASSERT_EQ(observer->accesses.size(), 1u);
   ASSERT_EQ(issue_observer->issues.size(), 1u);
   EXPECT_EQ(observer->accesses[0].addresses.size(), 2u);
-  EXPECT_EQ(issue_observer->issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{
-                {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
+  EXPECT_EQ(
+      issue_observer->issues[0].lds_ranges,
+      (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
 TEST_F(TensorDmaLdsOutOfRangeTest, TileWhollyOutsideTheWavesLdsStillCompletes) {
@@ -1342,14 +1342,14 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueReportsEveryIssuedInstruction) {
   auto store = decode_gfx1250(store_words, "tensor_store_from_lds");
   ASSERT_NE(load, nullptr);
   ASSERT_NE(store, nullptr);
-  const amdgpu::TensorDmaLdsRange first_element{.address = wf->lds_base(), .bytes = 4};
+  const amdgpu::LdsByteRange first_element{.address = wf->lds_base(), .bytes = 4};
 
   struct Case {
     const char *name;
     uint32_t count;
     uint32_t tensor_dim0;
     bool store;
-    std::vector<amdgpu::TensorDmaLdsRange> lds_ranges;
+    std::vector<amdgpu::LdsByteRange> lds_ranges;
     uint32_t tile_dim0 = 1;
     uint32_t tile_dim1 = 0;
   };
@@ -1420,10 +1420,10 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueCoversTheWholeLoadTileButOnlyInBoundsSt
   }
   ASSERT_EQ(observer.issues.size(), 2u);
   EXPECT_EQ(observer.issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 24}}));
+            (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base(), .bytes = 24}}));
   EXPECT_EQ(observer.issues[1].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
-                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
+            (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base(), .bytes = 8},
+                                               {.address = wf->lds_base() + 12, .bytes = 8}}));
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaIssueRangesSkipPadding) {
@@ -1448,8 +1448,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueRangesSkipPadding) {
   EXPECT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
   ASSERT_EQ(observer.issues.size(), 1u);
   EXPECT_EQ(observer.issues[0].lds_ranges,
-            (std::vector<amdgpu::TensorDmaLdsRange>{{.address = wf->lds_base(), .bytes = 8},
-                                                    {.address = wf->lds_base() + 12, .bytes = 8}}));
+            (std::vector<amdgpu::LdsByteRange>{{.address = wf->lds_base(), .bytes = 8},
+                                               {.address = wf->lds_base() + 12, .bytes = 8}}));
 }
 
 // The issue hook fires before a load writes LDS. A transfer that waits for
@@ -2345,7 +2345,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
       0x11000000u, 0x22000000u, 0x33000000u, 0x44000000u, 0x55000000u, 0x66000000u};
   struct Result {
     std::vector<uint32_t> lds;
-    std::vector<amdgpu::TensorDmaLdsRange> ranges;
+    std::vector<amdgpu::LdsByteRange> ranges;
   };
   // Runs `loads` (LDS offset, global offset in elements, iterations) and returns
   // the wave's LDS from kStart to the end, relative to its base, and the issued
@@ -2399,10 +2399,10 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratedPaddingRestartsWithEachTile) {
   const Result iterated = run({{kStart, 0, 2}});
   const Result independent =
       run({{kStart, 0, 1}, {kStart + 4 * kIncrementElements, kTileElements, 1}});
-  const std::vector<amdgpu::TensorDmaLdsRange> expected_ranges = {{.address = 2012, .bytes = 8},
-                                                                  {.address = 2024, .bytes = 4},
-                                                                  {.address = 2032, .bytes = 8},
-                                                                  {.address = 2044, .bytes = 4}};
+  const std::vector<amdgpu::LdsByteRange> expected_ranges = {{.address = 2012, .bytes = 8},
+                                                             {.address = 2024, .bytes = 4},
+                                                             {.address = 2032, .bytes = 8},
+                                                             {.address = 2044, .bytes = 4}};
   // Bytes 2012..2047, one entry per dword; the padding gaps keep the sentinel.
   const std::vector<uint32_t> expected_lds = {kValues[0], kValues[1], kSentinel,
                                               kValues[2], kSentinel,  kValues[3],

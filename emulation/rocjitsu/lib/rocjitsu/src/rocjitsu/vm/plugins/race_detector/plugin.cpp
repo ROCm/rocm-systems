@@ -472,14 +472,12 @@ void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
     // Model s_endpgm's implicit wait, retaining LDS history until a subsequent
     // workgroup barrier supplies ordering with the surviving waves.
     const amdgpu::WaitcntModel model = amdgpu::waitcnt_model(wf.cu().arch()).value();
-    PendingWaitCount wait;
     for (size_t index = 0; index < amdgpu::kWaitCounterCount; ++index) {
       const auto kind = static_cast<amdgpu::WaitCounterKind>(index);
       if (const std::optional<amdgpu::WaitCounterType> counter =
               amdgpu::memory_wait_counter_type(kind, model))
-        wait.add(*counter, 0);
+        state->race_state->applyWaitCounter(*counter, 0);
     }
-    state->race_state->dispatch(wait);
   }
   release_wave_state(wf);
 }
@@ -752,12 +750,8 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // rounding them to whole elements would drop those bytes.
   constexpr int kByteGranularity = 1;
 
-  // A transfer has no lanes; its violations report lane -1. The core takes
-  // its own range type, independent of the observation protocol.
-  std::vector<LdsByteRange> ranges;
-  ranges.reserve(issue.lds_ranges.size());
+  // A transfer has no lanes; its violations report lane -1.
   for (const auto &range : issue.lds_ranges) {
-    ranges.push_back({.address = range.address, .bytes = range.bytes});
     const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
     if (bytes == 0)
       continue;
@@ -775,8 +769,8 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // that it counts on TENSORCNT.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(instruction, issue.is_load ? LdsAccess::Write : LdsAccess::Read, ranges,
-                            obligations, memoryOrder);
+  rs->registerLdsRangeEvent(instruction, issue.is_load ? LdsAccess::Write : LdsAccess::Read,
+                            issue.lds_ranges, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
@@ -838,11 +832,9 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   // Cross-wave LDS intervals still need a barrier.
   if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && inst.mnemonic() == "s_trap" &&
       wf.in_trap_handler()) {
-    PendingWaitCount wait;
     for (auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
                          amdgpu::WaitCounterType::LGKMCNT})
-      wait.add(counter, 0);
-    get_state(wf)->race_state->dispatch(wait);
+      s->race_state->applyWaitCounter(counter, 0);
     return;
   }
 
@@ -862,17 +854,14 @@ void RaceDetectorPlugin::onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
   auto *s = get_state(wf);
   assert(s && s->race_state);
   const auto model = amdgpu::waitcnt_model(wf.cu().arch()).value();
-  PendingWaitCount wait;
   for (size_t i = 0; i < fields.size(); ++i) {
     const auto threshold = fields[i];
     if (!threshold)
       continue;
     if (const auto counter =
             amdgpu::memory_wait_counter_type(static_cast<amdgpu::WaitCounterKind>(i), model))
-      wait.add(*counter, static_cast<int>(*threshold));
+      s->race_state->applyWaitCounter(*counter, static_cast<int>(*threshold));
   }
-  if (!wait.empty())
-    s->race_state->dispatch(wait);
 }
 
 void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
@@ -881,11 +870,9 @@ void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   if (!s || !s->race_state)
     return;
-  PendingWaitCount drain;
   for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
                              amdgpu::WaitCounterType::LGKMCNT})
-    drain.add(counter, 0);
-  s->race_state->dispatch(drain);
+    s->race_state->applyWaitCounter(counter, 0);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,

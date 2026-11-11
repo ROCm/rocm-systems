@@ -45,13 +45,6 @@ struct EventId {
   bool operator<(EventId o) const { return value < o.value; }
 };
 
-/// A contiguous run of LDS bytes, for events described by byte ranges rather
-/// than per-lane addresses.
-struct LdsByteRange {
-  uint32_t address = 0; ///< Absolute CU LDS byte address.
-  uint32_t bytes = 0;
-};
-
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
   auto it = std::ranges::find(list, eventId);
   if (it != list.end()) {
@@ -75,24 +68,6 @@ struct RaceViolation {
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact retained event that caused the violation.
-};
-
-struct WaitCounterUpdate {
-  amdgpu::WaitCounterType type;
-  int threshold;
-};
-
-/// Counter thresholds changed by one wait instruction. A wait can update one
-/// or more counters; counters absent from this list retain their prior state.
-struct PendingWaitCount {
-  void add(amdgpu::WaitCounterType type, int threshold) {
-    if (threshold >= 0)
-      updates.push_back({type, threshold});
-  }
-
-  [[nodiscard]] bool empty() const { return updates.empty(); }
-
-  std::vector<WaitCounterUpdate> updates;
 };
 
 } // namespace rocjitsu::plugins::race_detector

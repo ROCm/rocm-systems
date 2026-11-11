@@ -20,6 +20,7 @@
 #include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
+using rocjitsu::amdgpu::LdsByteRange;
 namespace amdgpu = rocjitsu::amdgpu;
 
 namespace {
@@ -86,19 +87,15 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndOnlyLdsIntervals) {
       EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
       EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
     }
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
-    wait.add(amdgpu::WaitCounterType::DSCNT, 1);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 1);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 1);
     // A single-wave workgroup retires a completed event with LDS bytes at once;
     // one without LDS bytes stays wave-complete until the registry trims it.
     EXPECT_EQ(events.status(EventId{0}),
               lds_mask != 0 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
-    wait.updates.clear();
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
-    wait.add(amdgpu::WaitCounterType::DSCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 0);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 0);
     EXPECT_NE(events.status(EventId{1}), EventStatus::ACTIVE);
     EXPECT_TRUE(violations.empty());
   }
@@ -162,13 +159,9 @@ TEST(RaceDetector, InvalidLdsAddressesKeepCounterParticipation) {
     detector.validateWrite(64, WaveId{0}, 3, 4);
     ASSERT_EQ(violations.size(), 1u);
     EXPECT_EQ(violations.front().address, 64);
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 0);
     EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
-    wait.updates.clear();
-    wait.add(amdgpu::WaitCounterType::DSCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 0);
     // The event has LDS bytes, so the single-wave workgroup retires it at once.
     EXPECT_EQ(events.status(event), EventStatus::RETIRED);
     violations.clear();
@@ -199,13 +192,9 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
     EXPECT_TRUE(violations.empty());
     detector.validateWrite(capacity - 4, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 0);
     EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
-    wait.updates.clear();
-    wait.add(amdgpu::WaitCounterType::DSCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 0);
     EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
   }
 }
@@ -785,9 +774,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
       wave.registerLdsRangeEvent(testInstruction(address), LdsAccess::Write, ranges, obligations,
                                  c.eventOrder);
     }
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::TENSORCNT, 1);
     const auto &events = detector.events();
     EXPECT_EQ(events.status(EventId{0}), c.olderAfterWait);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
@@ -809,9 +796,7 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
   for (int i = 0; i < kTransfers; ++i) {
     wave.registerLdsRangeEvent(testInstruction(i), LdsAccess::Read, {}, obligations,
                                MemoryOrderClass::TENSOR);
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(amdgpu::WaitCounterType::TENSORCNT, 0);
   }
   EXPECT_EQ(detector.events().totalAllocated(), kTransfers);
   EXPECT_TRUE(wave.getBarrierPendingEvents().empty());

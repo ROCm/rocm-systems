@@ -44,11 +44,6 @@ WaveRaceState::WaveRaceState(WaveId waveId, RaceDetector *detector,
                              CounterCapacities counterCapacities)
     : counterCapacities(counterCapacities), waveId(waveId), detector(detector) {}
 
-void WaveRaceState::dispatch(const PendingWaitCount &wait_count) {
-  for (const auto &update : wait_count.updates)
-    applyWaitCounter(update.type, update.threshold);
-}
-
 void WaveRaceState::registerCounterEvent(
     InstructionSnapshot instruction,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations) {
@@ -155,7 +150,7 @@ void WaveRaceState::registerLdsEvent(
 }
 
 void WaveRaceState::registerLdsRangeEvent(
-    InstructionSnapshot instruction, LdsAccess access, std::span<const LdsByteRange> ranges,
+    InstructionSnapshot instruction, LdsAccess access, std::span<const amdgpu::LdsByteRange> ranges,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
     MemoryOrderClass memoryOrder) {
   IntervalSet intervals;

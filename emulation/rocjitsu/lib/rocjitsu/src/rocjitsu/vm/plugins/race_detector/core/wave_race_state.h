@@ -4,6 +4,7 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction_snapshot.h"
+#include "rocjitsu/vm/amdgpu/lds_byte_range.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "util/result.h"
 #include <cstdint>
@@ -93,7 +94,7 @@ public:
   ///   accesses; passing TENSOR would skip conflicts with the wave's own
   ///   pending transfers.
   void registerLdsRangeEvent(InstructionSnapshot instruction, LdsAccess access,
-                             std::span<const LdsByteRange> ranges,
+                             std::span<const amdgpu::LdsByteRange> ranges,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
@@ -107,8 +108,9 @@ public:
                                   std::span<const amdgpu::MemoryCounterObligation>,
                                   MemoryOrderClass memoryOrder, uint8_t alignedAtomicBytes = 0);
 
-  /// Dispatch the counter thresholds changed by one wait instruction.
-  void dispatch(const PendingWaitCount &);
+  /// Apply one architectural wait threshold. Negative values and the counter's
+  /// all-ones encoding leave its progress unchanged.
+  void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
 
   /// Check a synchronous VALU source against older writers and remember the
   /// completed read until a barrier publishes it to peer waves.
@@ -132,7 +134,6 @@ private:
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
   void applyCounterConstraint(amdgpu::WaitCounterType type, int maximumRemaining,
                               bool includeUnordered);
-  void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
   int doNotWaitValue(amdgpu::WaitCounterType type) const;
 
   std::vector<EventId> waveMemoryEvents;

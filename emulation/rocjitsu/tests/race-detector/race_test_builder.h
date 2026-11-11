@@ -69,13 +69,13 @@ public:
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
   /// writes every range; it is validated against outstanding LDS reads.
-  void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges) {
+  void tensorLoadToLds(int wave, std::vector<amdgpu::LdsByteRange> ranges) {
     tensorTransfer(wave, LdsAccess::Write, ranges);
   }
 
   /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
   /// reads every range; it is validated against outstanding LDS writes.
-  void tensorStoreFromLds(int wave, std::vector<LdsByteRange> ranges) {
+  void tensorStoreFromLds(int wave, std::vector<amdgpu::LdsByteRange> ranges) {
     tensorTransfer(wave, LdsAccess::Read, ranges);
   }
 
@@ -141,16 +141,12 @@ public:
 
   /// Dispatch s_waitcnt. -1 means "don't change this counter".
   void waitcnt(int wave, int vmcnt = -1, int lgkmcnt = -1) {
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::VMCNT, vmcnt);
-    wait.add(amdgpu::WaitCounterType::LGKMCNT, lgkmcnt);
-    waves_[wave]->dispatch(wait);
+    waves_[wave]->applyWaitCounter(amdgpu::WaitCounterType::VMCNT, vmcnt);
+    waves_[wave]->applyWaitCounter(amdgpu::WaitCounterType::LGKMCNT, lgkmcnt);
   }
 
   void waitTensorcnt(int wave, int tensorcnt) {
-    PendingWaitCount wait;
-    wait.add(amdgpu::WaitCounterType::TENSORCNT, tensorcnt);
-    waves_[wave]->dispatch(wait);
+    waves_[wave]->applyWaitCounter(amdgpu::WaitCounterType::TENSORCNT, tensorcnt);
   }
 
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
@@ -195,7 +191,7 @@ public:
 private:
   /// A transfer has no lanes; its violations report lane -1. Validates and
   /// registers the same bytes as the plugin's tensor DMA hook.
-  void tensorTransfer(int wave, LdsAccess access, std::span<const LdsByteRange> ranges) {
+  void tensorTransfer(int wave, LdsAccess access, std::span<const amdgpu::LdsByteRange> ranges) {
     // Completion is in issue order (TENSOR); LDS accesses are checked as
     // unordered, a conservative rule, as in the plugin.
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
