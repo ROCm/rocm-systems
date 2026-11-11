@@ -3,9 +3,12 @@
 
 # Multi-Arch CI ASAN for rocm-systems
 #
-# Presubmit and on-demand ASAN builds. TheRock's configure_multi_arch_ci.py
-# automatically selects host-asan for pull_request events (faster, host-only)
-# and full asan for workflow_dispatch (comprehensive device-side instrumentation).
+# Presubmit and on-demand ASAN builds. This workflow requests host-asan and
+# pins TheRock at the #9887 branch (users/endurthiabhilash/setup-multi-arch-pr-label-inputs).
+# pull_request_tests lets a pull request keep its test runners. gfx94X and
+# gfx950 use their sandbox runners. gfx125X has no sandbox runner, so it uses
+# its normal runner. The opt-in label is left unset, so a pull request is not
+# skipped for a missing label.
 #
 # The presubmit is scoped to a runtime-only build (compiler-runtime and
 # runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
@@ -61,9 +64,11 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
     with:
       build_variant: "host-asan"
+      # Required by TheRock#9887. Without it a pull request clears the test runner.
+      pull_request_tests: true
       build_stages: "compiler-runtime,runtime-tests"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
@@ -76,7 +81,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -96,7 +101,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -106,7 +111,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
     permissions:
       contents: read
       id-token: write
@@ -124,7 +129,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+          ref: 2ec58f0bff50bdf24dda63fab6edae1d16052be7 # TheRock#9887
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
