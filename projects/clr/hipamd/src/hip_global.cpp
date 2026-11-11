@@ -47,9 +47,6 @@ void __hipGetPCH(const char** pch, unsigned int* size) {
 }
 namespace hip {
 
-// forward declaration of methods required for managed variables
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
-
 // ================================================================================================
 Function::Function(const std::string& name, FatBinaryInfo** modules)
     : name_(name), modules_(modules) {
@@ -274,7 +271,8 @@ hipError_t Var::EnsureManagedVarIsMapped() {
     // reserved and initialized as a fine-grain SVM buffer, leaving migration to HMM.
     // Passing false would allocate fresh storage and drop the initial value.
     const bool use_host_ptr = true;
-    const hipError_t status = ihipMallocManaged(pointer, size_, align_, use_host_ptr);
+    const hipError_t status = ihipMallocManaged(pointer, size_, align_, use_host_ptr,
+                                               ManagedMemOwner::kModuleVariable);
     if (status != hipSuccess) {
       LogPrintfError("Failed to map managed var %s, error: %d", name_.c_str(), status);
       return status;
