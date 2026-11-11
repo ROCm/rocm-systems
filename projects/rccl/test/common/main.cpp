@@ -45,8 +45,7 @@ int main(int argc, char **argv)
         child.memAllocType  = memAllocType;
 
         // Enter worker execution loop
-        child.StartExecutionLoop();
-        return 0; // Exit cleanly when CHILD_STOP is received
+        return child.StartExecutionLoop();
     }
 
   ::testing::InitGoogleTest(&argc, argv);
