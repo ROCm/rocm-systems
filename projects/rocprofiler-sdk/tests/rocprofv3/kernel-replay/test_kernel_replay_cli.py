@@ -359,6 +359,84 @@ def test_att_alone_does_not_drag_in_other_services():
     assert service_conflicts(advanced_thread_trace=True, spm=None) == ["--att"]
 
 
+def _capture_launch_env(argv, environ):
+    """Run rocprofv3 up to the application exec and return the environment it would pass."""
+    module = rocprofv3()
+    previous = {key: os.environ.get(key) for key in environ}
+    captured = {}
+
+    def fake_exec(path, argv, env):
+        captured["env"] = dict(env)
+        captured["argv"] = list(argv)
+
+    for key, value in environ.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    original_exec = module.os.execvpe
+    module.os.execvpe = fake_exec
+    try:
+        cmd_args, app_args = module.parse_arguments(argv)
+        args = module.get_args(cmd_args, module.dotdict({}))
+        try:
+            module.run(app_args, args)
+        except SystemExit as exc:
+            raise AssertionError(
+                "rocprofv3 exited before launching the application"
+            ) from exc
+    finally:
+        module.os.execvpe = original_exec
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    if "env" not in captured:
+        raise AssertionError("rocprofv3 returned without launching the application")
+    return captured["env"]
+
+
+def test_rocpd_schema_path_follows_the_tool_prefix():
+    """rocprofv3 points ROCPD_SCHEMA_PATH at the schema installed beside the tool.
+
+    An older librocprofiler-sdk-rocpd earlier on LD_LIBRARY_PATH reads versions.yml
+    from that variable before the schema beside the loaded library. The tool prefix
+    is the directory that contains the schema this rocprofv3 writes.
+    """
+    script = os.path.realpath(os.environ.get("ROCPROFV3_SCRIPT", default_script_path()))
+    prefix = os.path.dirname(os.path.dirname(script))
+    tool_library = os.path.join(
+        prefix, "lib", "rocprofiler-sdk", "librocprofiler-sdk-tool.so"
+    )
+    if not os.path.exists(tool_library):
+        # The source-tree script has no libraries beside it. CTest passes the built script.
+        print(
+            "skip schema-path launch: tool library is not installed beside "
+            f"{script}"
+        )
+        return
+
+    schema = os.path.join(prefix, "share", "rocprofiler-sdk-rocpd")
+    versions = os.path.join(schema, "versions.yml")
+    assert os.path.isfile(versions), versions
+
+    env = _capture_launch_env(
+        ["--output-format", "rocpd", "--", "/bin/true"],
+        {"LD_LIBRARY_PATH": "/opt/rocm/lib", "ROCPD_SCHEMA_PATH": None},
+    )
+    assert env["ROCPD_SCHEMA_PATH"] == schema
+    # The tool lib directory stays at the end of LD_LIBRARY_PATH.
+    assert env["LD_LIBRARY_PATH"].endswith(os.path.join(prefix, "lib"))
+    assert env["LD_LIBRARY_PATH"].startswith("/opt/rocm/lib")
+
+    preserved = _capture_launch_env(
+        ["--output-format", "rocpd", "--", "/bin/true"],
+        {"ROCPD_SCHEMA_PATH": "/tmp/caller-schema"},
+    )
+    assert preserved["ROCPD_SCHEMA_PATH"] == "/tmp/caller-schema"
+
+
 def test_counter_collection_is_never_itself_a_conflict():
     """Counter collection is the one pass-aware service, so no shape of it may be rejected --
     including the list-of-lists form that replay itself builds."""

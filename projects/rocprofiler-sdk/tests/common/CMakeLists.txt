@@ -24,7 +24,6 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.30)
 endif()
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(rocprofiler-sdk-rocpd REQUIRED)
 
 # rocprofiler-sdk provides a Findlibdw.cmake
 find_package(libdw REQUIRED)
@@ -289,18 +288,6 @@ function(rocprofiler_add_integration_execute_test NAME)
             APPEND
             arg_ENVIRONMENT
             "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
-            )
-    endif()
-
-    # An older librocprofiler-sdk-rocpd already on LD_LIBRARY_PATH rejects schema versions
-    # this build writes. Point the test at the schema installed beside this build's rocpd
-    # library, so the path stays the SDK prefix inside the ROCm superbuild. A test that
-    # sets ROCPD_SCHEMA_PATH keeps it.
-    if(NOT "${arg_ENVIRONMENT}" MATCHES "ROCPD_SCHEMA_PATH=")
-        list(
-            APPEND
-            arg_ENVIRONMENT
-            "ROCPD_SCHEMA_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd-shared-library>/../share/rocprofiler-sdk-rocpd"
             )
     endif()
 
