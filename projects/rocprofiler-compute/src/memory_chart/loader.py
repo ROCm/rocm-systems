@@ -39,11 +39,11 @@ class Keys:
 
 
 # Version of the layout format; README.md says when to bump it
-LAYOUT_VERSION = "1.0.0"
+LAYOUT_VERSION = "2.0.0"
 
 # Each Keys lists every key in file order, then the keys a file may leave out
 LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
-SCOPE_KEYS = Keys(("labels", "split"))
+SCOPE_KEYS = Keys(("label", "columns"))
 BLOCK_KEYS = Keys(
     (
         "id",
@@ -115,14 +115,22 @@ class LayoutArrow:
 
 
 @dataclass(frozen=True)
+class LayoutScope:
+    """A label of the bar above the grid and the columns it spans."""
+
+    label: str
+    first_column: int
+    last_column: int  # included
+
+
+@dataclass(frozen=True)
 class Layout:
     """A checked layout file."""
 
     path: Path
     archs: tuple[str, ...]
     description: str
-    scope_labels: tuple[str, str]
-    scope_split: str
+    scopes: Tuple[LayoutScope, ...]  # left to right, covering every column
     columns: Tuple[Tuple[LayoutBlock, ...], ...]  # top-level blocks of row 0
     above: Optional[LayoutBlock]  # the block in row -1
     below: Optional[LayoutBlock]  # the block in row 1
@@ -211,21 +219,16 @@ def load_layout(path: Path) -> Layout:
 def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
     """Check a parsed layout file and index its blocks; *path* names it in errors."""
     _check_keys(path, data, LAYOUT_KEYS, "the layout")
-    _check_keys(path, data["scope"], SCOPE_KEYS, "scope")
-    if len(data["scope"]["labels"]) != 2:
-        _fail(path, "scope needs two labels")
     raw_blocks = _raw_blocks(path, data["blocks"])
     groups, column_count = _stacks(path, raw_blocks)
     columns = tuple(
         _stacked(path, groups, (None, column)) for column in range(column_count)
     )
-    left, right = data["scope"]["labels"]
     layout = Layout(
         path=path,
         archs=tuple(data["archs"]),
         description=data["description"],
-        scope_labels=(left, right),
-        scope_split=data["scope"]["split"],
+        scopes=_scopes(path, data["scope"], column_count),
         columns=columns,
         above=_outside_grid(path, raw_blocks, column_count, -1),
         below=_outside_grid(path, raw_blocks, column_count, 1),
@@ -463,6 +466,42 @@ def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
 # ---------------------------------------------------------------------------
 
 
+def _scopes(path: Path, entries: object, column_count: int) -> Tuple[LayoutScope, ...]:
+    """The scopes, checked to cover columns 0 to the last in order, without gaps
+    or overlaps."""
+    if not isinstance(entries, list) or not entries:
+        _fail(path, "scope must be a list of at least one label and its columns")
+    scopes = tuple(_scope(path, raw) for raw in entries)
+    starts = [scope.first_column for scope in scopes]
+    next_starts = [scope.last_column + 1 for scope in scopes]
+    if starts != [0, *next_starts[:-1]] or next_starts[-1] != column_count:
+        spans = [[scope.first_column, scope.last_column] for scope in scopes]
+        _fail(
+            path,
+            f"scope columns {spans} must cover columns 0 to {column_count - 1} "
+            "in order, without gaps or overlaps",
+        )
+    return scopes
+
+
+def _scope(path: Path, raw: object) -> LayoutScope:
+    if not isinstance(raw, dict):
+        _fail(path, f"a scope must be an object, not {raw!r}")
+    where = f"scope {raw.get('label')!r}"
+    _check_keys(path, raw, SCOPE_KEYS, where)
+    if not isinstance(raw["label"], str) or not raw["label"]:
+        _fail(path, f"label of {where} must be a non-empty string")
+    columns = raw["columns"]
+    if not isinstance(columns, list) or len(columns) != 2:
+        _fail(path, f"columns of {where} must be [first, last], not {columns!r}")
+    first, last = columns
+    _check_index(path, first, f"first column of {where}")
+    _check_index(path, last, f"last column of {where}")
+    if last < first:
+        _fail(path, f"columns of {where} must not end before they start")
+    return LayoutScope(raw["label"], first, last)
+
+
 def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> None:
     by_id = {block.id: block for block in layout.blocks()}
     # A block left out was in a parent cycle, so no column reaches it
@@ -471,13 +510,6 @@ def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> 
         _fail(layout.path, f"blocks {unplaced} nest inside each other")
     for arrow in layout.arrows:
         _check_arrow(layout, arrow, by_id)
-    after_first = {b.id for b in layout.top_level_blocks() if b.column > 0}
-    if layout.scope_split not in after_first:
-        _fail(
-            layout.path,
-            f"scope split {layout.scope_split!r} must be a top-level block "
-            "after the first column",
-        )
 
 
 def _check_arrow(

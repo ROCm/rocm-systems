@@ -95,7 +95,8 @@ def format_layout(data: dict[str, Any]) -> str:
         elif key == "arrows":
             lines += _arrows(data["arrows"])
         elif key == "scope":
-            lines.append(f'  "scope": {{{_inline(data["scope"], SCOPE_KEYS)}}},')
+            scopes = ", ".join(f"{{{_inline(s, SCOPE_KEYS)}}}" for s in data["scope"])
+            lines.append(f'  "scope": [{scopes}],')
         else:
             lines.append(f"  {json.dumps(key)}: {json.dumps(data[key])},")
     lines.append("}")

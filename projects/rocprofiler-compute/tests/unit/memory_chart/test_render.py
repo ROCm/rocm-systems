@@ -169,10 +169,27 @@ def test_typical_values_stay_on_their_label_line(gpu_arch):
 def test_a_long_scope_label_widens_every_panel(tmp_path):
     # gfx115x's right region is a single column with little room to spare
     data = common.memory_chart_layout_data("gfx115x")
-    data["scope"]["labels"][1] = "A much longer memory label"
+    data["scope"][1]["label"] = "A much longer memory label"
     chart = chart_from_layout(tmp_path, "gfx115x", data)
     assert len(panel_widths(chart)) == 1
     assert "A much longer memory label" in strip_ansi(chart.render(DEFAULT_TITLE))
+
+
+def test_each_scope_label_spans_its_columns(tmp_path):
+    data = common.memory_chart_layout_data("gfx950")
+    data["scope"] = [
+        {"label": "GPU (XCD)", "columns": [0, 2]},
+        {"label": "Fabric", "columns": [3, 4]},
+        {"label": "Memory", "columns": [5, 6]},
+    ]
+    chart = chart_from_layout(tmp_path, "gfx950", data)
+    lines = strip_ansi(chart.render(DEFAULT_TITLE)).splitlines()
+    bar = next(line for line in lines if line.startswith("|-"))
+    bars = [x for x, char in enumerate(bar) if char == "|"]
+    grid_top = lines[box_rows(lines, "HBM")[0]].rstrip()
+    edges = [box_rows(lines, title)[2] for title in ("Data Fabric", "UMC")]
+    assert bars == [0, *edges, len(grid_top) - 1]
+    assert re.findall(r" (\w[\w ()]*) ", bar) == ["GPU (XCD)", "Fabric", "Memory"]
 
 
 def test_legend_lists_only_what_the_chart_uses():
