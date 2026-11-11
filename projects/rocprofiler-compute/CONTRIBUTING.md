@@ -94,14 +94,13 @@ analyze_group.add_argument(
     action=ExperimentalAction,
     experimental_enabled=experimental_enabled,
     feature_label="Your feature description",
-    base_action="store_const",  # Required — see supported actions below
-    nargs=0,
-    const=True,
+    base_action="store_true",  # Required — see supported actions below
     help="\t\tDescription of your feature",
 )
 ```
 
-The `base_action` parameter is required and must be one of:
+The `base_action` parameter is required. The option takes the same arguments as
+`add_argument` with that action, and must be one of:
 
 | Value | Behavior |
 |---|---|
@@ -134,6 +133,41 @@ When a feature is ready for general availability:
 2. Replace `action=ExperimentalAction` with a standard argparse action (e.g. `action="store"`).
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
 4. Update documentation and tests accordingly.
+
+## Adding Debug Options
+
+Debug options help troubleshoot rocprof-compute itself. Like experimental options,
+they are hidden from help output unless `--debug` is passed. Unlike experimental
+options, they work without `--debug`. The
+[analyze CLI documentation](docs/how-to/analyze/cli.rst#debug-options) describes
+them for users.
+
+### Adding a New Debug Option
+
+**Step 1 — Add the argument using `DebugAction`**
+
+In `src/argparser.py`, name the option `--debug-<name>` and add it to the
+Debug Options group of its mode, such as `analyze_debug_group` for analyze.
+
+```python
+analyze_debug_group.add_argument(
+    "--debug-your-option",
+    action=DebugAction,
+    debug_enabled=debug_enabled,
+    base_action="store_true",  # Required — same values as ExperimentalAction
+    help="Description of your option.",
+)
+```
+
+**Step 2 — Verify behavior**
+
+```bash
+# Should not appear
+rocprof-compute analyze --help
+
+# Should appear
+rocprof-compute analyze --debug --help
+```
 
 ## Using Pre-Commit Hooks
 
