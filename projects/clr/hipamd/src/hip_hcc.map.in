@@ -709,6 +709,7 @@ global:
     hipDeviceFlushGPUDirectRDMAWrites;
     hipKernelSetCacheConfig;
     hipExtMemcpyBatchAsync;
+    hipDeviceGetExecAffinitySupport;
 local:
     *;
 } hip_7.17;

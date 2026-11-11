@@ -5071,6 +5071,15 @@ static hipError_t hipExtMemcpyBatchAsyncLayer(void** dsts, void** srcs, size_t* 
   return _r;
 }
 
+// api_id = 515
+static hipError_t hipDeviceGetExecAffinitySupportLayer(int* pi, hipExecAffinityType type,
+                                                       hipDevice_t dev) {
+  auto* _rec = HipGetActiveRecordExt(515u);
+  auto _r = g_next.hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
+  _rec->end_ns = NowNs();
+  return _r;
+}
+
 // API name table — indexed by api_id (same order as UpdateDispatchTable).
 const char* const kHipApiNamesExt[] = {
   "hipApiName",
@@ -5588,8 +5597,9 @@ const char* const kHipApiNamesExt[] = {
   "hipLibraryGetGlobal",
   "hipLibraryGetManaged",
   "hipExtMemcpyBatchAsync",
+  "hipDeviceGetExecAffinitySupport",
 };
-const size_t kHipApiNamesCountExt = 515;
+const size_t kHipApiNamesCountExt = 516;
 
 #include <cstring>
 
@@ -6111,6 +6121,7 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   g_wrapper_tbl.hipLibraryGetGlobal_fn = hipLibraryGetGlobalLayer;
   g_wrapper_tbl.hipLibraryGetManaged_fn = hipLibraryGetManagedLayer;
   g_wrapper_tbl.hipExtMemcpyBatchAsync_fn = hipExtMemcpyBatchAsyncLayer;
+  g_wrapper_tbl.hipDeviceGetExecAffinitySupport_fn = hipDeviceGetExecAffinitySupportLayer;
   // g_wrapper_tbl is fully written before any Install call copies it in.
 }
 

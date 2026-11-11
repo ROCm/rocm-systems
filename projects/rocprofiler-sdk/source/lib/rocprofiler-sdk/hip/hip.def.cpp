@@ -741,6 +741,9 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync_fn, dsts, srcs, sizes, sizesDst, waits, signals, count, attrs, attrsIdxs, numAttrs, stream);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetExecAffinitySupport, hipDeviceGetExecAffinitySupport, hipDeviceGetExecAffinitySupport_fn, pi, type, dev);
+#endif
 // clang-format on
 
 #else
