@@ -2500,12 +2500,15 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
 }
 
 void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment,
-                        bool mapAllAgents) const {
+                        bool mapAllAgents, bool readOnly) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
   if (memSegment == kIoMemory) {
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
+  }
+  if (readOnly) {
+    memFlags |= HSA_AMD_MEMORY_POOL_LOCK_READ_ONLY_FLAG;
   }
 
   // gpu_agents_ is every GPU visible to this process.
