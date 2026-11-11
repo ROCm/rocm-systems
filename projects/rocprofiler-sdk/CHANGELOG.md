@@ -21,7 +21,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Removed
 
-## ROCprofiler-SDK 1.4.1 for ROCm release 10.0.1
+## ROCprofiler-SDK 1.4.1
 
 ### Added
 
