@@ -872,6 +872,15 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_default
+  Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals_Child:
+    <<: *level_default
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "AIRUNTIME-3153 - child process; spawned by name from Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts_DeviceSignals, never run standalone."
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_default
     tags: [transfer]
