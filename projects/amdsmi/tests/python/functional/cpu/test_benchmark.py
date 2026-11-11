@@ -102,8 +102,9 @@ class TestCpuBenchmark(unittest.TestCase):
 
     def _log_test_start(self, api_name, device_type, device_id, **kwargs):
         """Helper method to log the start of a test."""
-        extra_info = " ".join([f"{k}={v}" for k, v in kwargs.items()])
-        self.common.print(f"Testing {api_name} on {device_type} {device_id} {extra_info}".strip())
+        extra_info = ", ".join([f"{k}={v}" for k, v in kwargs.items()])
+        args = f"{device_type}={device_id}" + (f", {extra_info}" if extra_info else "")
+        self.common.print(f"### {api_name}({args})")
 
     def _log_test_end(self, api_name, device_type, device_id, stats, **kwargs):
         """Helper method to log the end of a test."""
@@ -152,7 +153,7 @@ class TestCpuBenchmark(unittest.TestCase):
             return
 
         func_name = api_func.__name__
-        msg = f"### test {func_name}({label_prefix}={processor_id})"
+        msg = f"### {func_name}({label_prefix}={processor_id})"
 
         try:
             result = api_func(*args, **kwargs)

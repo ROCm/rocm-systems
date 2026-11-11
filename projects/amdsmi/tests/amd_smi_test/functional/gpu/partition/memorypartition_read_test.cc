@@ -48,8 +48,12 @@ void TestMemoryPartitionRead::Run(void) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
     char full[k255Len] = {};
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition",
+                       "gpu=" + std::to_string(dv_ind) + ", len=" + std::to_string(k255Len),
+                       VERB(STANDARD));
     amdsmi_status_t err =
         amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], full, k255Len);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Memory partition is not supported on this device" << std::endl;
@@ -72,8 +76,13 @@ void TestMemoryPartitionRead::Run(void) {
     const auto name_len = static_cast<uint32_t>(name.size());
     for (uint32_t len : {1u, 2u, name_len, name_len + 1}) {
       std::vector<char> buf(len + 1, kGuard);
-      err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], buf.data(), len);
       const bool fits = len > name_len;
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_partition",
+                         "gpu=" + std::to_string(dv_ind) + ", len=" + std::to_string(len),
+                         VERB(STANDARD));
+      err = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind], buf.data(), len);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err,
+                            fits ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_INSUFFICIENT_SIZE);
       EXPECT_EQ(err, fits ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_INSUFFICIENT_SIZE)
           << "len=" << len;
       EXPECT_EQ(buf[len], kGuard) << "wrote past the end of a " << len << "-byte buffer";

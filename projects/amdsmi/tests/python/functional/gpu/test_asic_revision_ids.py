@@ -90,7 +90,7 @@ class TestGpuAsicRevisionIds(unittest.TestCase):
 
         checked = 0
         unreachable = []
-        for processor in self.common.processors:
+        for i, processor in enumerate(self.common.processors):
             # drm_render maps a processor handle to its own node; a BDF lookup
             # cannot, because partitions of one GPU share a single BDF.
             try:
@@ -103,7 +103,10 @@ class TestGpuAsicRevisionIds(unittest.TestCase):
                 unreachable.append(f"{processor}: {exc}")
                 continue
 
-            asic_info = amdsmi.amdsmi_get_gpu_asic_info(processor)
+            msg = f"\t### amdsmi_get_gpu_asic_info(gpu={i}):"
+            asic_info = None
+            with self.common.expect_status(msg, amdsmi.AmdSmiStatus.SUCCESS):
+                asic_info = amdsmi.amdsmi_get_gpu_asic_info(processor)
             expected = {
                 "chip_rev_id": words[_CHIP_REV_INDEX],
                 "external_rev_id": words[_EXTERNAL_REV_INDEX],

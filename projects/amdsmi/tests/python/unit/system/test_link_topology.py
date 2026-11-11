@@ -10,7 +10,9 @@ import unittest
 from enum import IntEnum
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import Common, amdsmi
+
+_common = Common.for_unit_tests()
 
 
 class TestLinkTopology(unittest.TestCase):
@@ -73,7 +75,11 @@ class TestLinkTopology(unittest.TestCase):
                     return wrapper.AMDSMI_STATUS_SUCCESS
 
                 with mock.patch.object(wrapper, "amdsmi_get_link_topology", side_effect=_fill):
-                    result = amdsmi.amdsmi_get_link_topology(src, dst)
+                    with _common.expect_status(
+                        "\t### amdsmi_get_link_topology(src, dst) [mocked C call]:",
+                        amdsmi.AmdSmiStatus.SUCCESS,
+                    ):
+                        result = amdsmi.amdsmi_get_link_topology(src, dst)
 
                 self.assertIs(type(result["link_status"]), int)
                 self.assertEqual(result["link_status"], status)
@@ -81,12 +87,18 @@ class TestLinkTopology(unittest.TestCase):
                 self.assertEqual(json.loads(json.dumps(result))["link_status"], status.value)
 
     def test_rejects_non_handle_arguments(self):
-        with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
+        with _common.expect_status(
+            '\t### amdsmi_get_link_topology("not-a-handle", "also-bad"):',
+            raises=amdsmi.amdsmi_interface.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology("not-a-handle", "also-bad")
 
     def test_rejects_bad_destination_handle(self):
         src = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-        with self.assertRaises(amdsmi.amdsmi_interface.AmdSmiParameterException):
+        with _common.expect_status(
+            '\t### amdsmi_get_link_topology(src, "also-bad"):',
+            raises=amdsmi.amdsmi_interface.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, "also-bad")
 
     def test_success_path_returns_mapped_dict(self):
@@ -106,7 +118,11 @@ class TestLinkTopology(unittest.TestCase):
         with mock.patch.object(
             amdsmi.amdsmi_wrapper, "amdsmi_get_link_topology", side_effect=_fill
         ):
-            result = amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, dst)
+            with _common.expect_status(
+                "\t### amdsmi_get_link_topology(src, dst) [mocked C call]:",
+                amdsmi.AmdSmiStatus.SUCCESS,
+            ):
+                result = amdsmi.amdsmi_interface.amdsmi_get_link_topology(src, dst)
 
         self.assertEqual(
             set(result), {"weight", "link_status", "link_type", "num_hops", "fb_sharing"}
@@ -135,7 +151,11 @@ class TestLinkTopology(unittest.TestCase):
             return wrapper.AMDSMI_STATUS_SUCCESS
 
         with mock.patch.object(wrapper, "amdsmi_get_link_topology", side_effect=_fill) as query:
-            result = amdsmi.amdsmi_get_link_topology(handle, handle)
+            with _common.expect_status(
+                "\t### amdsmi_get_link_topology(handle, handle) [mocked C call]:",
+                amdsmi.AmdSmiStatus.SUCCESS,
+            ):
+                result = amdsmi.amdsmi_get_link_topology(handle, handle)
 
         query.assert_called_once()
         self.assertEqual(

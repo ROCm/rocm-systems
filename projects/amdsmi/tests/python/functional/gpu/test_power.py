@@ -115,6 +115,7 @@ class TestGpuPower(unittest.TestCase):
         )
         return
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_power_profile(self):
         self.common.print_func_name("")
         # Valid rejections (although driver may include others)

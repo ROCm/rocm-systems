@@ -1004,6 +1004,25 @@ class TestCliBase(unittest.TestCase):
                 per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
         return min(per_gpu) if per_gpu else 0
 
+    def PerfLevelRestoreCmds(self):
+        """``set --perf-level`` commands putting every GPU back on its baseline level.
+
+        For tests that run ``amd-smi set``/``reset``, which can leave the driver on a
+        level of their own (``reset --clocks`` forces AUTO, ``--clk-limit`` and
+        ``--perf-determinism`` leave MANUAL/DETERMINISM). Run these last, after the
+        other clock writes. The baseline is the one setUpClass recorded.
+        """
+        cmds = []
+        prefix = "AMDSMI_DEV_PERF_LEVEL_"
+        for index, _ in enumerate(self.common.processors):
+            perf_level = self.metric_data["gpu_data"][index]["perf_level"]
+            if perf_level in ("N/A", prefix + "UNKNOWN"):
+                continue
+            if perf_level.startswith(prefix):
+                perf_level = perf_level[len(prefix) :]
+            cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
+        return cmds
+
     @staticmethod
     def _clk_limit_value(clocks, clk_type, bound):
         """The clock's currently reported *bound*, or None when it is not readable.

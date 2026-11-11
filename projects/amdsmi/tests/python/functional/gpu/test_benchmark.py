@@ -76,8 +76,9 @@ class TestGpuBenchmark(unittest.TestCase):
 
     def _log_test_start(self, api_name, device_type, device_id, **kwargs):
         """Helper method to log the start of a test."""
-        extra_info = " ".join([f"{k}={v}" for k, v in kwargs.items()])
-        self.common.print(f"Testing {api_name} on {device_type} {device_id} {extra_info}".strip())
+        extra_info = ", ".join([f"{k}={v}" for k, v in kwargs.items()])
+        args = f"{device_type}={device_id}" + (f", {extra_info}" if extra_info else "")
+        self.common.print(f"### {api_name}({args})")
 
     def _log_test_end(self, api_name, device_type, device_id, stats, **kwargs):
         """Helper method to log the end of a test."""
@@ -126,7 +127,7 @@ class TestGpuBenchmark(unittest.TestCase):
             return
 
         func_name = api_func.__name__
-        msg = f"### test {func_name}({label_prefix}={processor_id})"
+        msg = f"### {func_name}({label_prefix}={processor_id})"
 
         try:
             result = api_func(*args, **kwargs)
@@ -2140,10 +2141,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # No processor needed for library version
         try:
             ret = amdsmi.amdsmi_get_lib_version()
-            self.common.print("### test amdsmi_get_lib_version()")
+            self.common.print("### amdsmi_get_lib_version()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print("### test amdsmi_get_lib_version()")
+            self.common.print("### amdsmi_get_lib_version()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(amdsmi.amdsmi_get_lib_version, "get_lib_version")
@@ -2318,10 +2319,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # Print result for all processors
         try:
             ret = amdsmi.amdsmi_get_processor_count_from_handles(self.processors)
-            self.common.print("### test amdsmi_get_processor_count_from_handles()")
+            self.common.print("### amdsmi_get_processor_count_from_handles()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print("### test amdsmi_get_processor_count_from_handles()")
+            self.common.print("### amdsmi_get_processor_count_from_handles()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(
@@ -2619,10 +2620,10 @@ class TestGpuBenchmark(unittest.TestCase):
         # No processor needed for threads per core
         try:
             ret = amdsmi.amdsmi_get_threads_per_core()
-            self.common.print("### test amdsmi_get_threads_per_core()")
+            self.common.print("### amdsmi_get_threads_per_core()")
             self._print("", ret)
         except amdsmi.AmdSmiLibraryException as e:
-            self.common.print("### test amdsmi_get_threads_per_core()")
+            self.common.print("### amdsmi_get_threads_per_core()")
             self.common.print(f"  Error: {e}")
 
         stats = self._measure_api_performance(
@@ -3183,6 +3184,7 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("amdsmi_reset_gpu_xgmi_error", "GPUs", "reset_gpu_xgmi_error")
 
+    @common.restores_gpu_perf_level
     def test_performance_set_clk_freq(self):
         self.common.print_func_name("")
 
@@ -3300,6 +3302,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "set_gpu_accelerator_partition_profile",
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_clk_limit(self):
         self.common.print_func_name("")
 
@@ -3589,6 +3592,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_memory_partition_mode", "Processors", "set_gpu_memory_partition_mode"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_od_clk_info(self):
         self.common.print_func_name("")
 
@@ -3638,6 +3642,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_od_clk_info", "Processors", "set_gpu_od_clk_info"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_od_volt_info(self):
         self.common.print_func_name("")
 
@@ -3683,6 +3688,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_od_volt_info", "Processors", "set_gpu_od_volt_info"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_overdrive_level(self):
         self.common.print_func_name("")
 
@@ -3740,6 +3746,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "gpu_overdrive_level_workflow", "Processors", "set_gpu_overdrive_level"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_pci_bandwidth(self):
         self.common.print_func_name("")
 
@@ -3804,6 +3811,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "gpu_pci_bandwidth_workflow", "Processors", "set_gpu_pci_bandwidth"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_perf_determinism_mode(self):
         self.common.print_func_name("")
 
@@ -3842,6 +3850,7 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_set_gpu_perf_determinism_mode", "Processors", "set_gpu_perf_determinism_mode"
         )
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_perf_level(self):
         self.common.print_func_name("")
 
@@ -3916,6 +3925,7 @@ class TestGpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("gpu_perf_level_workflow", "Processors", "set_gpu_perf_level")
 
+    @common.restores_gpu_perf_level
     def test_performance_set_gpu_power_profile(self):
         self.common.print_func_name("")
 
@@ -4192,10 +4202,10 @@ class TestGpuBenchmark(unittest.TestCase):
             # Print result for this error code
             try:
                 ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(error_int))
-                self.common.print(f"### test amdsmi_status_code_to_string(error={error_num})")
+                self.common.print(f"### amdsmi_status_code_to_string(error={error_num})")
                 self._print("", ret)
             except amdsmi.AmdSmiLibraryException as e:
-                self.common.print(f"### test amdsmi_status_code_to_string(error={error_num})")
+                self.common.print(f"### amdsmi_status_code_to_string(error={error_num})")
                 self.common.print(f"  Error: {e}")
 
             stats = self._measure_api_performance(

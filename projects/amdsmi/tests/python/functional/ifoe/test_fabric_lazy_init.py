@@ -59,7 +59,10 @@ class TestFabricLazyInit(unittest.TestCase):
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
             # asic info is a plain sysfs/DRM read, unrelated to fabric.
-            asic = amdsmi.amdsmi_get_gpu_asic_info(gpu)
+            msg = f"\t### amdsmi_get_gpu_asic_info(gpu={i}):"
+            asic = None
+            with self.common.expect_status(msg, amdsmi.AmdSmiStatus.SUCCESS):
+                asic = amdsmi.amdsmi_get_gpu_asic_info(gpu)
             self.assertIsInstance(asic, dict)
         elapsed = time.monotonic() - start
         self.assertLess(elapsed, MAX_SECONDS, f"Non-fabric queries took {elapsed:.2f}s")
@@ -73,11 +76,13 @@ class TestFabricLazyInit(unittest.TestCase):
         start = time.monotonic()
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
+            msg = f"\t### amdsmi_get_gpu_fabric_info(gpu={i}):"
             try:
                 info = amdsmi.amdsmi_get_gpu_fabric_info(gpu)
+                self.common.print(msg, info)
                 self.assertIsInstance(info, dict)
-            except amdsmi.AmdSmiLibraryException:
+            except amdsmi.AmdSmiLibraryException as e:
                 # Unsupported / not-a-UALink device: a clean status, not a hang.
-                pass
+                self.common.print(msg, e)
         elapsed = time.monotonic() - start
         self.assertLess(elapsed, MAX_SECONDS, f"Fabric queries took {elapsed:.2f}s")

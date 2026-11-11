@@ -109,6 +109,7 @@ class TestGpuXgmi(unittest.TestCase):
 
     def test_topo_get_p2p_status_rejects_non_handle(self):
         self.common.print_func_name("")
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        msg = "\t### amdsmi_topo_get_p2p_status(gpu=not_a_handle, gpu=not_a_handle):"
+        with self.common.expect_status(msg, raises=amdsmi.AmdSmiParameterException):
             amdsmi.amdsmi_topo_get_p2p_status("not_a_handle", "not_a_handle")
         return

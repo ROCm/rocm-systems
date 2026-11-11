@@ -32,11 +32,35 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 namespace {
+
+bool IsVerbose() { return GetTestVerbosity() >= TestBase::VERBOSE_STANDARD; }
+
+// Prints the call's API name, arguments and status as the KPI report reads them, and returns the
+// status. The expected status only selects the TEST SUCCESS/FAILURE label; asserts stay at the
+// call site.
+amdsmi_status_t LoggedCall(std::string_view api, std::string_view desc, amdsmi_status_t status,
+                           amdsmi_status_t expected, const char* file = __builtin_FILE(),
+                           uint32_t line = __builtin_LINE()) {
+  DISPLAY_AMDSMI_API(api, desc, IsVerbose());
+  DISPLAY_AMDSMI_STATUS(IsVerbose(), file, line, status, expected);
+  return status;
+}
+
+// As above, for a call that may return either of two statuses.
+amdsmi_status_t LoggedCall(std::string_view api, std::string_view desc, amdsmi_status_t status,
+                           amdsmi_status_t expected, amdsmi_status_t or_expected,
+                           const char* file = __builtin_FILE(), uint32_t line = __builtin_LINE()) {
+  DISPLAY_AMDSMI_API(api, desc, IsVerbose());
+  DISPLAY_AMDSMI_STATUS(IsVerbose(), file, line, status, expected, or_expected);
+  return status;
+}
 
 bool HasCapSysAdmin() {
   __user_cap_header_struct header{_LINUX_CAPABILITY_VERSION_3, 0};
@@ -254,9 +278,15 @@ TEST(GpuUnit, CuidNullArgumentsRejected) {
   const AmdSmiSession session;
   ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_get_gpu_cuid_info(nullptr, nullptr), AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(LoggedCall("amdsmi_get_gpu_cuid_info",
+                       "CuidNullArgumentsRejected, null handle and info, args=(nullptr, nullptr)",
+                       amdsmi_get_gpu_cuid_info(nullptr, nullptr), AMDSMI_STATUS_INVAL),
+            AMDSMI_STATUS_INVAL);
   amdsmi_cuid_component_t component = {};
-  EXPECT_EQ(amdsmi_get_cuid_components(nullptr, &component), AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(LoggedCall("amdsmi_get_cuid_components",
+                       "CuidNullArgumentsRejected, null count, args=(nullptr, &component)",
+                       amdsmi_get_cuid_components(nullptr, &component), AMDSMI_STATUS_INVAL),
+            AMDSMI_STATUS_INVAL);
 }
 
 // Built without libamdcuid, every CUID entry point reports not-supported, with
@@ -271,7 +301,11 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
   ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
 
   uint32_t count = 7;
-  EXPECT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(
+      LoggedCall("amdsmi_get_cuid_components",
+                 "CuidEntryPointsNotSupportedWithoutTheLibrary, components, args=(&count, nullptr)",
+                 amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_NOT_SUPPORTED),
+      AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_EQ(count, 0u);
 
   // A real handle where there is one. Without the library neither device entry
@@ -283,11 +317,19 @@ TEST(GpuUnit, CuidEntryPointsNotSupportedWithoutTheLibrary) {
 
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    EXPECT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(LoggedCall("amdsmi_get_gpu_cuid_info",
+                         "CuidEntryPointsNotSupportedWithoutTheLibrary, info, args=(handle, &info)",
+                         amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_NOT_SUPPORTED),
+              AMDSMI_STATUS_NOT_SUPPORTED);
 
     char cuid[AMDSMI_GPU_CUID_SIZE] = {};
     unsigned int length = sizeof(cuid);
-    EXPECT_EQ(amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(
+        LoggedCall("amdsmi_get_gpu_device_cuid",
+                   "CuidEntryPointsNotSupportedWithoutTheLibrary, device cuid, args=(handle, "
+                   "&length, cuid)",
+                   amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_NOT_SUPPORTED),
+        AMDSMI_STATUS_NOT_SUPPORTED);
   }
 }
 
@@ -336,7 +378,9 @@ TEST(GpuUnit, CuidSnapshotIsSelfConsistent) {
   size_t checked = 0;
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    const amdsmi_status_t status = LoggedCall(
+        "amdsmi_get_gpu_cuid_info", "CuidSnapshotIsSelfConsistent, args=(handle, &info)",
+        amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM);
     // A handle without a CUID, such as a host without a machine-id, or one
     // this caller may not read in full, leaves nothing to check.
     if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
@@ -405,7 +449,9 @@ TEST(GpuUnit, CuidSourceNamesTheStageThatAnswered) {
     const std::string bdf_str = BdfString(bdf);
 
     amdsmi_cuid_info_t info = {};
-    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    const amdsmi_status_t status = LoggedCall(
+        "amdsmi_get_gpu_cuid_info", "CuidSourceNamesTheStageThatAnswered, args=(handle, &info)",
+        amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM);
     if (status == AMDSMI_STATUS_NOT_SUPPORTED || status == AMDSMI_STATUS_NO_PERM) continue;
     ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS) << bdf_str;
     ++answered;
@@ -426,10 +472,16 @@ bool WholeGpuCuid(amdsmi_processor_handle handle, amdsmi_cuid_info_t* info) {
   amdsmi_bdf_t bdf = {};
   uint32_t count = 0;
   if (amdsmi_get_gpu_device_bdf(handle, &bdf) != AMDSMI_STATUS_SUCCESS ||
-      amdsmi_get_cuid_components(&count, nullptr) != AMDSMI_STATUS_SUCCESS)
+      LoggedCall("amdsmi_get_cuid_components", "WholeGpuCuid, count, args=(&count, nullptr)",
+                 amdsmi_get_cuid_components(&count, nullptr),
+                 AMDSMI_STATUS_SUCCESS) != AMDSMI_STATUS_SUCCESS)
     return false;
   std::vector<amdsmi_cuid_component_t> components(count);
-  if (amdsmi_get_cuid_components(&count, components.data()) != AMDSMI_STATUS_SUCCESS) return false;
+  if (LoggedCall("amdsmi_get_cuid_components",
+                 "WholeGpuCuid, list, args=(&count, components.data())",
+                 amdsmi_get_cuid_components(&count, components.data()),
+                 AMDSMI_STATUS_SUCCESS) != AMDSMI_STATUS_SUCCESS)
+    return false;
   const std::string wanted = BdfString(bdf);
   for (const auto& c : components) {
     const std::string path = c.device_path;
@@ -497,7 +549,10 @@ TEST(GpuUnit, CuidPartitionNodeNamesThePartition) {
   const FabricatedPartition partition(handle, "DPX", "2");
   ASSERT_TRUE(partition.valid());
   amdsmi_cuid_info_t info = {};
-  EXPECT_NE(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_NE(LoggedCall("amdsmi_get_gpu_cuid_info",
+                       "CuidPartitionNodeNamesThePartition, args=(handle, &info)",
+                       amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_SUCCESS);
   ExpectNoCuidReported(info);
 }
 
@@ -522,7 +577,11 @@ TEST(GpuUnit, CuidWithoutAPartitionNodeTheLibraryNamesTheRenderNode) {
     const FabricatedPartition fabricated(handle, mode, nullptr);
     ASSERT_TRUE(fabricated.valid());
     amdsmi_cuid_info_t info = {};
-    ASSERT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(
+        LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidWithoutAPartitionNodeTheLibraryNamesTheRenderNode, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS),
+        AMDSMI_STATUS_SUCCESS);
     EXPECT_STREQ(info.derived, whole.derived);
     EXPECT_STREQ(info.primary, whole.primary);
     EXPECT_EQ(info.source, whole.source);
@@ -540,11 +599,19 @@ TEST(GpuUnit, CuidSingleStringCallMatchesSnapshot) {
 
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    if (amdsmi_get_gpu_cuid_info(handle, &info) != AMDSMI_STATUS_SUCCESS) continue;
+    if (LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidSingleStringCallMatchesSnapshot, info, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS,
+                   AMDSMI_STATUS_NO_PERM) != AMDSMI_STATUS_SUCCESS)
+      continue;
 
     char cuid[AMDSMI_GPU_CUID_SIZE] = {};
     unsigned int length = sizeof(cuid);
-    ASSERT_EQ(amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(
+        LoggedCall("amdsmi_get_gpu_device_cuid",
+                   "CuidSingleStringCallMatchesSnapshot, device cuid, args=(handle, &length, cuid)",
+                   amdsmi_get_gpu_device_cuid(handle, &length, cuid), AMDSMI_STATUS_SUCCESS),
+        AMDSMI_STATUS_SUCCESS);
     EXPECT_STREQ(cuid, info.derived);
   }
 }
@@ -572,11 +639,16 @@ TEST(GpuUnit, CuidForAPartitionIsItsOwn) {
     if (partition == kNoPartition) continue;
 
     amdsmi_cuid_info_t info = {};
-    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    const amdsmi_status_t status = LoggedCall(
+        "amdsmi_get_gpu_cuid_info", "CuidForAPartitionIsItsOwn, info, args=(handle, &info)",
+        amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM);
 
     char cuid[AMDSMI_GPU_CUID_SIZE] = {};
     unsigned int length = sizeof(cuid);
-    const amdsmi_status_t string_status = amdsmi_get_gpu_device_cuid(handle, &length, cuid);
+    const amdsmi_status_t string_status =
+        LoggedCall("amdsmi_get_gpu_device_cuid",
+                   "CuidForAPartitionIsItsOwn, device cuid, args=(handle, &length, cuid)",
+                   amdsmi_get_gpu_device_cuid(handle, &length, cuid), status);
 
     if (status == AMDSMI_STATUS_SUCCESS) {
       EXPECT_EQ(string_status, AMDSMI_STATUS_SUCCESS) << "partition " << partition;
@@ -624,7 +696,11 @@ TEST(GpuUnit, CuidDerivedValuesDoNotCollideAcrossProcessors) {
   std::vector<uint32_t> partitions;
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    if (amdsmi_get_gpu_cuid_info(handle, &info) != AMDSMI_STATUS_SUCCESS) continue;
+    if (LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidDerivedValuesDoNotCollideAcrossProcessors, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS,
+                   AMDSMI_STATUS_NO_PERM) != AMDSMI_STATUS_SUCCESS)
+      continue;
     derived.emplace_back(info.derived);
     partitions.push_back(PartitionId(handle));
   }
@@ -657,7 +733,9 @@ TEST(GpuUnit, CuidFailedSnapshotReportsNothing) {
   size_t checked = 0;
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+    const amdsmi_status_t status = LoggedCall(
+        "amdsmi_get_gpu_cuid_info", "CuidFailedSnapshotReportsNothing, args=(handle, &info)",
+        amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM);
     if (status == AMDSMI_STATUS_SUCCESS) continue;
 
     ExpectNoCuidReported(info);
@@ -679,11 +757,19 @@ TEST(GpuUnit, CuidLegacyUuidIsStillItsOwnValue) {
 
   for (auto handle : handles) {
     amdsmi_cuid_info_t info = {};
-    if (amdsmi_get_gpu_cuid_info(handle, &info) != AMDSMI_STATUS_SUCCESS) continue;
+    if (LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidLegacyUuidIsStillItsOwnValue, info, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS,
+                   AMDSMI_STATUS_NO_PERM) != AMDSMI_STATUS_SUCCESS)
+      continue;
 
     char uuid[AMDSMI_GPU_UUID_SIZE] = {};
     unsigned int length = sizeof(uuid);
-    if (amdsmi_get_gpu_device_uuid(handle, &length, uuid) != AMDSMI_STATUS_SUCCESS) continue;
+    if (LoggedCall("amdsmi_get_gpu_device_uuid",
+                   "CuidLegacyUuidIsStillItsOwnValue, uuid, args=(handle, &length, uuid)",
+                   amdsmi_get_gpu_device_uuid(handle, &length, uuid),
+                   AMDSMI_STATUS_SUCCESS) != AMDSMI_STATUS_SUCCESS)
+      continue;
 
     EXPECT_TRUE(LooksLikeUuid(uuid)) << "uuid: " << uuid;
     EXPECT_STRNE(uuid, info.derived);
@@ -694,10 +780,14 @@ namespace {
 
 std::vector<amdsmi_cuid_component_t> CuidComponents(amdsmi_status_t* status) {
   uint32_t count = 0;
-  *status = amdsmi_get_cuid_components(&count, nullptr);
+  *status =
+      LoggedCall("amdsmi_get_cuid_components", "CuidComponents, count, args=(&count, nullptr)",
+                 amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS);
   if (*status != AMDSMI_STATUS_SUCCESS) return {};
   std::vector<amdsmi_cuid_component_t> components(count);
-  *status = amdsmi_get_cuid_components(&count, components.data());
+  *status = LoggedCall(
+      "amdsmi_get_cuid_components", "CuidComponents, list, args=(&count, components.data())",
+      amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS);
   components.resize(count);
   return components;
 }
@@ -748,7 +838,11 @@ TEST(GpuUnit, CuidComponentListIsConsistent) {
 
   for (auto handle : GpuHandles()) {
     amdsmi_cuid_info_t info = {};
-    if (amdsmi_get_gpu_cuid_info(handle, &info) != AMDSMI_STATUS_SUCCESS) continue;
+    if (LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidComponentListIsConsistent, info, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS,
+                   AMDSMI_STATUS_NO_PERM) != AMDSMI_STATUS_SUCCESS)
+      continue;
     EXPECT_EQ(card_by_derived.count(info.derived), 1u)
         << info.derived << " is missing from the list";
   }
@@ -763,12 +857,20 @@ TEST(GpuUnit, CuidComponentListReportsAShortBuffer) {
   ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
 
   uint32_t total = 0;
-  ASSERT_EQ(amdsmi_get_cuid_components(&total, nullptr), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(LoggedCall("amdsmi_get_cuid_components",
+                       "CuidComponentListReportsAShortBuffer, count, args=(&total, nullptr)",
+                       amdsmi_get_cuid_components(&total, nullptr), AMDSMI_STATUS_SUCCESS),
+            AMDSMI_STATUS_SUCCESS);
   if (total < 2) GTEST_SKIP() << "fewer than two components";
 
   std::vector<amdsmi_cuid_component_t> components(total - 1);
   uint32_t count = total - 1;
-  EXPECT_EQ(amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_INSUFFICIENT_SIZE);
+  EXPECT_EQ(
+      LoggedCall(
+          "amdsmi_get_cuid_components",
+          "CuidComponentListReportsAShortBuffer, short list, args=(&count, components.data())",
+          amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_INSUFFICIENT_SIZE),
+      AMDSMI_STATUS_INSUFFICIENT_SIZE);
   EXPECT_EQ(count, total);
   EXPECT_TRUE(LooksLikeUuid(components.back().info.derived));
 }
@@ -868,10 +970,17 @@ TEST(GpuUnit, CuidWithoutAMachineIdThereIsNoTemporaryCuid) {
     ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
     for (auto handle : GpuHandles()) {
       amdsmi_cuid_info_t info = {};
-      const amdsmi_status_t status = amdsmi_get_gpu_cuid_info(handle, &info);
+      const amdsmi_status_t status =
+          LoggedCall("amdsmi_get_gpu_cuid_info",
+                     "CuidWithoutAMachineIdThereIsNoTemporaryCuid, info, args=(handle, &info)",
+                     amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_NOT_SUPPORTED,
+                     AMDSMI_STATUS_SUCCESS);
       char cuid[AMDSMI_GPU_CUID_SIZE] = {};
       unsigned int length = sizeof(cuid);
-      const amdsmi_status_t string_status = amdsmi_get_gpu_device_cuid(handle, &length, cuid);
+      const amdsmi_status_t string_status = LoggedCall(
+          "amdsmi_get_gpu_device_cuid",
+          "CuidWithoutAMachineIdThereIsNoTemporaryCuid, device cuid, args=(handle, &length, cuid)",
+          amdsmi_get_gpu_device_cuid(handle, &length, cuid), status);
       if (status == AMDSMI_STATUS_SUCCESS) {
         EXPECT_EQ(info.auxiliary, 0) << info.derived;
         continue;
@@ -882,11 +991,19 @@ TEST(GpuUnit, CuidWithoutAMachineIdThereIsNoTemporaryCuid) {
       EXPECT_EQ(string_status, status);
     }
     uint32_t count = 0;
-    const amdsmi_status_t list_status = amdsmi_get_cuid_components(&count, nullptr);
+    const amdsmi_status_t list_status = LoggedCall(
+        "amdsmi_get_cuid_components",
+        "CuidWithoutAMachineIdThereIsNoTemporaryCuid, count, args=(&count, nullptr)",
+        amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_PERM);
     if (list_status == AMDSMI_STATUS_NO_PERM && geteuid() != 0) return;
     ASSERT_EQ(list_status, AMDSMI_STATUS_SUCCESS);
     std::vector<amdsmi_cuid_component_t> components(count);
-    ASSERT_EQ(amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(
+        LoggedCall(
+            "amdsmi_get_cuid_components",
+            "CuidWithoutAMachineIdThereIsNoTemporaryCuid, list, args=(&count, components.data())",
+            amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS),
+        AMDSMI_STATUS_SUCCESS);
     for (const auto& c : components) {
       EXPECT_EQ(c.info.auxiliary, 0) << c.bdf << " " << c.device_path << ": " << c.info.derived;
     }
@@ -921,13 +1038,20 @@ TEST(GpuUnit, CuidUnreadablePrimaryFailsTheSnapshot) {
         continue;
       }
       amdsmi_cuid_info_t info = {};
-      EXPECT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_UNEXPECTED_DATA);
+      EXPECT_EQ(LoggedCall("amdsmi_get_gpu_cuid_info",
+                           "CuidUnreadablePrimaryFailsTheSnapshot, info, args=(handle, &info)",
+                           amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_UNEXPECTED_DATA),
+                AMDSMI_STATUS_UNEXPECTED_DATA);
       ExpectNoCuidReported(info);
       ++checked;
     }
     EXPECT_EQ(checked, 1u);
     uint32_t count = 0;
-    EXPECT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_UNEXPECTED_DATA);
+    EXPECT_EQ(
+        LoggedCall("amdsmi_get_cuid_components",
+                   "CuidUnreadablePrimaryFailsTheSnapshot, count, args=(&count, nullptr)",
+                   amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_UNEXPECTED_DATA),
+        AMDSMI_STATUS_UNEXPECTED_DATA);
     return;
   }
 
@@ -938,7 +1062,10 @@ TEST(GpuUnit, CuidUnreadablePrimaryFailsTheSnapshot) {
     amdsmi_bdf_t bdf = {};
     amdsmi_cuid_info_t info = {};
     if (amdsmi_get_gpu_device_bdf(handle, &bdf) == AMDSMI_STATUS_SUCCESS &&
-        amdsmi_get_gpu_cuid_info(handle, &info) == AMDSMI_STATUS_SUCCESS &&
+        LoggedCall("amdsmi_get_gpu_cuid_info",
+                   "CuidUnreadablePrimaryFailsTheSnapshot, probe, args=(handle, &info)",
+                   amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS,
+                   AMDSMI_STATUS_NO_PERM) == AMDSMI_STATUS_SUCCESS &&
         info.source == AMDSMI_CUID_SOURCE_DRIVER && info.auxiliary == 0 &&
         info.primary[0] != '\0') {
       primary = "/sys/bus/pci/devices/" + BdfString(bdf) + "/cuid_primary";
@@ -966,9 +1093,18 @@ TEST(GpuUnit, CuidTemporaryComponentWithoutAPrimaryIsListed) {
     const AmdSmiSession session;
     ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
     uint32_t count = 0;
-    ASSERT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(
+        LoggedCall("amdsmi_get_cuid_components",
+                   "CuidTemporaryComponentWithoutAPrimaryIsListed, count, args=(&count, nullptr)",
+                   amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS),
+        AMDSMI_STATUS_SUCCESS);
     std::vector<amdsmi_cuid_component_t> components(count);
-    ASSERT_EQ(amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(
+        LoggedCall(
+            "amdsmi_get_cuid_components",
+            "CuidTemporaryComponentWithoutAPrimaryIsListed, list, args=(&count, components.data())",
+            amdsmi_get_cuid_components(&count, components.data()), AMDSMI_STATUS_SUCCESS),
+        AMDSMI_STATUS_SUCCESS);
     size_t cpus = 0;
     for (const auto& c : components) {
       if (c.info.component_type != AMDSMI_CUID_COMPONENT_CPU) continue;
@@ -996,7 +1132,10 @@ TEST(GpuUnit, CuidComponentListOfAnEmptyNodeIsEmpty) {
     const AmdSmiSession session(AMDSMI_INIT_AMD_NICS);
     ASSERT_EQ(session.status(), AMDSMI_STATUS_SUCCESS);
     uint32_t count = 7;
-    EXPECT_EQ(amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(LoggedCall("amdsmi_get_cuid_components",
+                         "CuidComponentListOfAnEmptyNodeIsEmpty, args=(&count, nullptr)",
+                         amdsmi_get_cuid_components(&count, nullptr), AMDSMI_STATUS_SUCCESS),
+              AMDSMI_STATUS_SUCCESS);
     EXPECT_EQ(count, 0u);
     return;
   }
