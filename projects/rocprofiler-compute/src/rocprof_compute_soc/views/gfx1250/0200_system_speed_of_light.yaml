@@ -1,7 +1,25 @@
 view: System Speed-of-Light
 alias: sol
 tables:
-- title: System Speed-of-Light
+- title: GPU Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: gl0.bw
+  - metric: l2.bw
+  - metric: ea.dram_rd_bw
+  - metric: ea.dram_wr_bw
+  - metric: grbm.gpu_active_cycles
+    pct_of_peak: false
+  - metric: wgp.util
+    pct_of_peak: false
+- title: Compute Throughput
   header:
     metric: Metric
     value: Avg
@@ -12,45 +30,54 @@ tables:
   - metric: compute.valu_flops_fp16
   - metric: compute.valu_flops_fp32
   - metric: compute.valu_flops_fp64
-  - metric: compute.valu_iops
-  - metric: compute.valu_trans_flops_fp16
-  - metric: compute.valu_trans_flops_fp32
-  - metric: compute.valu_trans_flops_fp64
-  - metric: compute.wmma_flops_fp64
-  - metric: compute.wmma_flops_fp32
-  - metric: compute.wmma_flops_fp16
-  - metric: compute.wmma_flops_bf16
   - metric: compute.wmma_flops_fp8
   - metric: compute.wmma_flops_mxfp8
+  - metric: compute.wmma_flops_bf16
+  - metric: compute.wmma_flops_fp16
+  - metric: compute.wmma_flops_fp32
+  - metric: compute.wmma_flops_fp64
   - metric: compute.wmma_flops_fp6
   - metric: compute.wmma_flops_fp4
+  - metric: compute.wmma_flops_f6f4
+    pct_of_peak: false
   - metric: compute.wmma_iops_int8
   - metric: compute.wmma_iops_int4
-  - metric: wgp.active_wgps
-  - metric: compute.ipc
-  - metric: wave.occupancy
-  - metric: txa.lds_bw_load
-  - metric: txa.lds_bw_store
-  - metric: lds.bank_conflicts_access
-  - metric: gl0.hit_rate
+  - metric: compute.pipeline_util_xdl
     pct_of_peak: false
+  - metric: compute.ipc
+- title: Memory Throughput
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
   - metric: gl0.bw
-  - metric: gl1.gl1a_util
+  - metric: gl0.util
+    pct_of_peak: false
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: lds.util
     pct_of_peak: false
   - metric: gl2.hit_rate
     pct_of_peak: false
   - metric: l2.bw
+  - metric: gl2.util
+    pct_of_peak: false
   - metric: ea.dram_rd_bw
   - metric: ea.dram_wr_bw
-  - metric: ea.gl2_to_dram_rd_lat
-    pct_of_peak: false
-  - metric: ea.gl2_to_dram_wr_lat
-    pct_of_peak: false
+  - metric: sl1d.bw
   - metric: sl1d.hit_rate_excl_dup
     pct_of_peak: false
-  - metric: sl1d.bw
   - metric: l1i.hit_rate_excl_dup
     pct_of_peak: false
   - metric: l1i.bw
-  - metric: compute.inst_cache_fetch_lat
+  - metric: txa.util
+    pct_of_peak: false
+  - metric: txd.util
+    pct_of_peak: false
+  - metric: l1i.gl1_rd_bw
+    pct_of_peak: false
+  - metric: sl1d.gl1_rd_bw
     pct_of_peak: false

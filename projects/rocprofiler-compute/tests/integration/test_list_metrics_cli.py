@@ -111,11 +111,9 @@ def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, ca
     assert return_code == 0
 
     output = capsys.readouterr().out
-    assert (
-        "\n2. System Speed-of-Light (alias: sol)\n2.1 System Speed-of-Light\n" in output
-    )
+    assert "\n2. System Speed-of-Light (alias: sol)\n2.1 GPU Speed-of-Light\n" in output
     assert re.search(
-        r"\| 2\.1\.0 +\| VALU FLOPs +\| GFLOP/s +\| The total floating", output
+        r"\| 2\.2\.0 +\| VALU FLOPs +\| GFLOP/s +\| The total floating", output
     )
     assert "\n18.1 Aggregate Stats (All channels)\n" in output
     assert "\n18.2 " not in output
@@ -138,7 +136,7 @@ def test_list_metrics_selects_a_metric_id_in_every_table(
     ])
     assert return_code == 0
 
-    assert first_column_ids(capsys.readouterr().out) == ["2.1.9", "11.2.2"]
+    assert first_column_ids(capsys.readouterr().out) == ["2.2.8", "11.2.2"]
 
 
 def test_list_metrics_defaults_to_current_gpu(

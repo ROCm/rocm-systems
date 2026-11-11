@@ -28,12 +28,6 @@ lds.bank_conflict_stall_rate_wr:
   formula: 100 * SUM(TX_VMW_LDS_BANKCONF_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   description: Percentage of VMW-busy cycles stalled due to an LDS write bank conflict.
-lds.bank_conflicts_access:
-  name: LDS Bank Conflicts per Access
-  formula: SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)
-  unit: Conflicts per Access
-  description: Number of LDS bank conflicts per LDS access.
-  peak: 64
 lds.segment_conflict_stall_rate_lds:
   name: LDS Segment Conflict Stall Rate
   formula: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)

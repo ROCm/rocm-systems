@@ -230,11 +230,11 @@ def test_view_metric_errors():
     broken = copy.deepcopy(views)
     rows = dict(iter_view_rows(broken))
     rows["11.2.0"]["metric"] = "compute.made_up"
-    rows["2.1.11"]["peak"] = "empirical"
+    rows["2.2.11"]["peak"] = "empirical"
     del rows["4.1.0"]["peak"]
     rows["16.2.0"]["metric"] = "compute.ipc_issued"
     assert view_metric_errors(broken, library.metrics) == [
-        "2.1.11 compute.branch_util has no 'peak_empirical'",
+        "2.2.11 compute.branch_util has no 'peak_empirical'",
         "11.2.0 compute.made_up: not a metric of the arch's library",
         "vl1d.stalled_on_l2_data: no view shows it",
         "compute.valu_flops_f16: no row shows its 'peak_empirical'",

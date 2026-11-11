@@ -104,10 +104,6 @@ ch.total_req_wr:
   formula: SUM(CHC_REQ_WRITE_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   counters: [CHC_REQ_WRITE_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
-compute.inst_cache_fetch_lat:
-  formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
-  unit: Cycles
-  counters: [GRBM_GUI_ACTIVE_sum, SQ_IFETCH_LEVEL_ACCUM, SQ_IFETCH_REQS_sum, SQ_WAVES]
 compute.insts_async_load:
   formula: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
   unit: (Count + $normUnit)
@@ -509,14 +505,6 @@ ea.dram_wr_bw:
   unit: GB/s
   peak: $hbmBandwidth
   counters: [GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
-ea.gl2_to_dram_rd_lat:
-  formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_DRAM_RD_CMD_POP_sum)
-  unit: Cycles
-  counters: [GC_EA_SE_DRAM_RD_CMD_POP_sum, GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
-ea.gl2_to_dram_wr_lat:
-  formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_DRAM_WR_CMD_POP_sum)
-  unit: Cycles
-  counters: [GC_EA_SE_DRAM_WR_CMD_POP_sum, GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum, GRBM_GUI_ACTIVE_sum, SQ_WAVES]
 ea.gmi_bw_rd:
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
@@ -1419,11 +1407,6 @@ lds.bank_conflict_stall_rate_wr:
   formula: 100 * SUM(TX_VMW_LDS_BANKCONF_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_LDS_BANKCONF_STORE_CNT_sum, TX_VMW_VMW_BUSY_sum]
-lds.bank_conflicts_access:
-  formula: SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_LDS_INPUT_ACTIVE_sum - TX_VMW_LDS_BANK_CONFLICT_sum)
-  unit: Conflicts per Access
-  peak: 64
-  counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_LDS_BANK_CONFLICT_sum, TX_VMW_LDS_INPUT_ACTIVE_sum]
 lds.segment_conflict_stall_rate_lds:
   formula: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
   unit: Percent
@@ -1865,11 +1848,6 @@ wave.life:
   formula: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
   unit: Cycles
   counters: [GRBM_GUI_ACTIVE_sum, SQG_WAVES_sum, SQG_WAVE_CYCLES_sum, SQ_WAVES]
-wave.occupancy:
-  formula: SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-  unit: Wavefronts
-  peak: $max_waves_per_cu * $cu_per_gpu
-  counters: [GRBM_GUI_ACTIVE_sum, SQG_WAVE_CYCLES_sum, SQ_WAVES]
 wave.occupancy_pct:
   formula: 100 * SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu * $max_waves_per_cu)
   unit: Percent

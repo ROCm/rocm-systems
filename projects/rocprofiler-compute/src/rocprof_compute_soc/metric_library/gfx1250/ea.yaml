@@ -10,16 +10,6 @@ ea.dram_wr_bw:
   unit: GB/s
   description: The number of bytes per second written to HBM (DRAM) through the EA.
   peak: $hbmBandwidth
-ea.gl2_to_dram_rd_lat:
-  name: GL2 to DRAM Read Latency
-  formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_RD_sum) / SUM(GC_EA_SE_DRAM_RD_CMD_POP_sum)
-  unit: Cycles
-  description: Average latency to read data from HBM to GL2.
-ea.gl2_to_dram_wr_lat:
-  name: GL2 to DRAM Write Latency
-  formula: SUM(GC_EA_SE_SARB_OUTSTANDING_DRAM_WR_sum) / SUM(GC_EA_SE_DRAM_WR_CMD_POP_sum)
-  unit: Cycles
-  description: Average latency to write data from GL2 to HBM.
 ea.gmi_bw_rd:
   name: GMI Read Bandwidth
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
