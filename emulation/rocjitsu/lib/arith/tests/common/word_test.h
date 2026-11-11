@@ -8,6 +8,7 @@
 
 #include "common/contracts.h"
 #include "common/cpu.h"
+#include "common/dpp_reference.h"
 #include "common/integer.h"
 #include "common/registers.h"
 #include "common/semantics.h"
@@ -22,9 +23,9 @@
 
 namespace rocjitsu::arith::test {
 
-// Guarded source and destination slots with room for overlapping operands.
+// Two slots per source and four for C/D also serve wide shifts, MAD and SAD.
 // Default-seeded high-bit draws provide arbitrary bits; the first lanes cover
-// zero, signed/unsigned limits and alternating bits.
+// zero, signed/unsigned limits, alternating bits and wrapped shift counts.
 template <int Lanes> Registers<12, Lanes> make_integer_inputs() {
   Registers<12, Lanes> input;
   std::minstd_rand random;
@@ -56,8 +57,8 @@ void expect_integer_registers(const Registers<12, Lanes> &actual,
   }
 }
 
-// Enumerate individual and combined integer modifiers.
-inline std::vector<uint64_t> integer_modes(uint64_t low_modifiers) {
+// Enumerate individual/combined integer modifiers and optional DPP cases.
+inline std::vector<uint64_t> integer_modes(uint64_t low_modifiers, bool supports_dpp) {
   std::vector<uint64_t> modes{0};
   for (int bit = 0; bit < 32; ++bit) {
     if ((low_modifiers >> bit) & 1) {
@@ -67,26 +68,56 @@ inline std::vector<uint64_t> integer_modes(uint64_t low_modifiers) {
   if (low_modifiers) {
     modes.push_back(low_modifiers);
   }
+  if (supports_dpp) {
+    for (uint64_t dpp : dpp_modes) {
+      modes.push_back(dpp | low_modifiers);
+    }
+  }
   return modes;
+}
+
+// DPP acts before arithmetic and half selection. SUBREV routes B, not A.
+template <typename Mask> bool integer_source(uint64_t mode, Mask exec_mask, int lane, int &source) {
+  source = lane;
+  return mode & (RJ_ARITH_DPP8 | RJ_ARITH_DPP16) ? dpp_source(mode, exec_mask, lane, source)
+                                                 : bool((exec_mask >> lane) & 1);
+}
+
+// Same one-word ALU contract for unary, binary and ternary instructions.
+// Only argument count differs; numerical behavior stays in family references.
+template <int Operands, typename Call, typename Mask>
+int call_integer_word(Call call, uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d,
+                      const uint32_t *const *a, const uint32_t *const *b,
+                      const uint32_t *const *c) {
+  if constexpr (Operands == 1) {
+    return call(flags, exec_mask, mode, d, a);
+  } else if constexpr (Operands == 2) {
+    return call(flags, exec_mask, mode, d, a, b);
+  } else {
+    return call(flags, exec_mask, mode, d, a, b, c);
+  }
 }
 
 // Each reference computes one complete destination word, including the old D
 // half when relevant. Sample modes independently from masks, not a full product.
-template <int Lanes, typename Call, typename Reference>
+template <int Lanes, int Operands, bool SupportsDpp = true, typename Call, typename Reference>
 void check_integer_word(Call call, Reference reference, uint64_t low_modifiers,
+                        bool reverse = false,
                         const Registers<12, Lanes> &input = make_integer_inputs<Lanes>()) {
   using Mask = WaveMask<Lanes>;
-  expect_alu_invalid_flags<false>(
+  expect_alu_invalid_flags<SupportsDpp>(
       [&](uint64_t flags, uint64_t mode) {
         auto r = input;
-        int error = call(flags, ~Mask(0), mode, r.v + 8, r.v, r.v + 2, r.v + 4);
+        int error = call_integer_word<Operands>(call, flags, ~Mask(0), mode, r.v + 8, r.v, r.v + 2,
+                                                r.v + 4);
         expect_integer_registers(r, input);
-        EXPECT_EQ(call(flags, ~Mask(0), mode, nullptr, nullptr, nullptr, nullptr),
+        EXPECT_EQ(call_integer_word<Operands>(call, flags, ~Mask(0), mode, nullptr, nullptr,
+                                              nullptr, nullptr),
                   RJ_ARITH_ERROR_INVALID_FLAGS);
         return error;
       },
       low_modifiers);
-  const auto modes = integer_modes(low_modifiers);
+  const auto modes = integer_modes(low_modifiers, SupportsDpp);
   const auto cpu_levels = supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
     for (uint64_t semantics : semantics_modes()) {
@@ -99,18 +130,20 @@ void check_integer_word(Call call, Reference reference, uint64_t low_modifiers,
         for (int aliasing_offset : {8, 0, 2, 4}) {
           auto r = input, expected = input;
           for (int lane = 0; lane < Lanes; ++lane) {
-            if (!((exec_mask >> lane) & 1)) {
+            int source;
+            if (!integer_source(mode, exec_mask, lane, source)) {
               continue;
             }
-            uint32_t a = input.v[0][lane];
-            uint32_t b = input.v[2][lane];
+            uint32_t a = reverse ? input.v[0][lane] : source < 0 ? 0 : input.v[0][source];
+            uint32_t b = !reverse ? input.v[2][lane] : source < 0 ? 0 : input.v[2][source];
             expected.v[aliasing_offset][lane] = reference(
                 a, b, input.v[4][lane], input.v[aliasing_offset][lane], uint32_t(mode), lane);
           }
           uint64_t flags = cpu | semantics | (scenario % 2 ? RJ_ARITH_FP16_OVFL : 0);
-          ASSERT_EQ(call(flags, exec_mask, mode, exec_mask ? r.v + aliasing_offset : nullptr,
-                         exec_mask ? r.v : nullptr, exec_mask ? r.v + 2 : nullptr,
-                         exec_mask ? r.v + 4 : nullptr),
+          ASSERT_EQ(call_integer_word<Operands>(
+                        call, flags, exec_mask, mode, exec_mask ? r.v + aliasing_offset : nullptr,
+                        exec_mask ? r.v : nullptr, exec_mask ? r.v + 2 : nullptr,
+                        exec_mask ? r.v + 4 : nullptr),
                     RJ_ARITH_SUCCESS);
           expect_integer_registers(r, expected);
         }

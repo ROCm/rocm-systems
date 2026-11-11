@@ -71,12 +71,14 @@ set(COMMON_FILES
   git_version.h
   collector.h
   collector.cu
+  alltoall_hier_policy.h
   common.h
   common.cu
   gin_sdma_allgather_policy.h
   gin_sdma_broadcast_policy.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h
+  gin_resource_sharing.h
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
@@ -136,6 +138,11 @@ add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
 target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl nccl_test_os nccl_tests_options verifiable)
+# dlsym(RTLD_DEFAULT) cannot see symbols of a statically linked RCCL.
+get_target_property(RCCL_LIBRARY_TYPE roc::rccl TYPE)
+if(RCCL_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
+  target_compile_definitions(rccl_common PRIVATE RCCL_TESTS_STATIC_RCCL)
+endif()
 if(USE_MPI)
   target_link_libraries(rccl_common MPI::MPI_CXX)
 endif()

@@ -119,15 +119,17 @@ class PrivacyDocTest(unittest.TestCase):
         for key in EPIC_TASKS:
             self.assertIn(f"https://amd-hub.atlassian.net/browse/{key}", text)
 
-    def test_sharing_section_quotes_the_archive_notice(self):
+    def test_sharing_section_links_the_notice_and_does_not_copy_it(self):
         header = NOTICE_H.read_text(encoding="utf-8")
-        # The lines between the marker lines, as a docs literalinclude takes them.
-        lines = header.split("hrr-archive-notice-begin", 1)[1].split("\n", 1)[1]
-        notice = lines.split("hrr-archive-notice-end", 1)[0].rsplit("\n", 1)[0] + "\n"
+        notice = header.split("hrr-archive-notice-begin", 1)[1]
+        notice = notice.split("hrr-archive-notice-end", 1)[0]
         text = PRIVACY.read_text(encoding="utf-8")
         section = text.split("## Sharing an archive", 1)[1].split("\n## ", 1)[0]
-        quote = section.split("```text\n", 1)[1].split("```", 1)[0]
-        self.assertEqual(quote, notice)
+        self.assertIn("](include/hrr/hrr_archive_notice.h)", section)
+        # The header is the notice's only copy: no long line of it in the page.
+        long_lines = [l.strip() for l in notice.splitlines() if len(l.strip()) > 40]
+        self.assertGreater(len(long_lines), 10)
+        self.assertEqual([l for l in long_lines if l in text], [])
 
     def test_readme_and_recording_skill_link_the_page(self):
         readme = (HRR / "README.md").read_text(encoding="utf-8")
