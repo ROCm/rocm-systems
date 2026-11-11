@@ -71,7 +71,14 @@ class ScopedPowerStabilizationRestore {
       : processor_handle_(processor_handle), param_id_(param_id), restore_value_(restore_value) {}
 
   ~ScopedPowerStabilizationRestore() {
-    amdsmi_set_power_stabilization_param(processor_handle_, param_id_, &restore_value_);
+    // EXPECT_ (non-fatal) rather than ASSERT_/CHK_ERR_ASRT: a destructor
+    // must not attempt the early `return` those fatal macros expand to,
+    // especially one already running mid-unwind from an earlier fatal
+    // assertion elsewhere in Run().
+    amdsmi_status_t ret =
+        amdsmi_set_power_stabilization_param(processor_handle_, param_id_, &restore_value_);
+    EXPECT_EQ(AMDSMI_STATUS_SUCCESS, ret)
+        << "Failed to restore power_stabilization param_id " << param_id_;
   }
 
   ScopedPowerStabilizationRestore(const ScopedPowerStabilizationRestore&) = delete;
