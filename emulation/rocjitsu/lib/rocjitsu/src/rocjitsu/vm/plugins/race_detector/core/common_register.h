@@ -4,7 +4,10 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
+#include <array>
 #include <cassert>
+#include <cstddef>
+#include <optional>
 #include <span>
 
 namespace rocjitsu::plugins::race_detector {
@@ -125,5 +128,33 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   assert(false && "invalid memory event type");
   return MemoryOrderClass::UNORDERED;
 }
+
+/// @brief Owns one or two unit counter increments with the same completion order.
+/// @details The converted span borrows this object's storage. Event registration
+/// consumes it before returning, so passing a temporary directly is safe. Keep
+/// the owner alive when storing a span for later use. Use an explicit obligation
+/// array for different completion orders or non-unit counter increments.
+class CounterObligations {
+public:
+  CounterObligations(
+      amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
+      std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
+      : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
+    if (additional_wait_counter_type)
+      obligations_[count_++] = {*additional_wait_counter_type, memory_order};
+  }
+
+  /// @brief The default counter and order for an event type.
+  explicit CounterObligations(MemoryEventType type)
+      : CounterObligations(defaultWaitCounterType(type), defaultMemoryOrder(type)) {}
+
+  operator std::span<const amdgpu::MemoryCounterObligation>() const {
+    return {obligations_.data(), count_};
+  }
+
+private:
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations_;
+  std::size_t count_ = 1;
+};
 
 } // namespace rocjitsu::plugins::race_detector
