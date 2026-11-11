@@ -4,14 +4,14 @@
 // FP16 interpolation with packed source selection and staged rounding.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fp64_impl.h"
 #include "fp/mixed_fma_scalar.h"
 #include "graphics/interp.h"
 #include "graphics/interp16_scalar.h"
 #include "graphics/interp_guest.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <stdint.h>
 

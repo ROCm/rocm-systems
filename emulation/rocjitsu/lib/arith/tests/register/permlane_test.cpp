@@ -4,6 +4,7 @@
 // Tests for lane permutations across rows and half-waves.
 
 #include "register/helpers.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 namespace {
 

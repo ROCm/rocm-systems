@@ -4,9 +4,9 @@
 // ISA-local FP64 register decoding, rounding, and output modifier helpers.
 #pragma once
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/fp64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 

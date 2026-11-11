@@ -6,14 +6,14 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/float_output.h"
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
 #include "fp/minmax_impl.h"
 #include "math/unary_f64_exact.h"
 #include "math/x86_64/trans_f64_exact.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
