@@ -101,13 +101,6 @@ def alltoall_ctx_wg_api(T, TNAME):
         f"    const {T} *source, int nelems);\n\n"
     )
 
-def alltoall_ctx_wg_api(T, TNAME):
-    return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
-        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
-        f"    const {T} *source, int nelems);\n\n"
-    )
-
 def alltoall_wg_api(T, TNAME):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_{TNAME}_alltoall_wg(\n"

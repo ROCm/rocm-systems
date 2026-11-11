@@ -671,9 +671,9 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case SignalOpsOnStreamTestType:
       test_name = "Signal_Ops_On_Stream";
-      testers.push_back(new SignalOpsOnStreamTester(args));
+      PUSH_TESTER(SignalOpsOnStreamTester(args));
       break;
-    case TeamFCollectTestType:
+    case TeamFCollectTestType: {
       test_name = "Fcollect Test";
       #define PUSH_FCOL(T, name) \
         if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
@@ -1292,75 +1292,75 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case TilePutRowMajorStartCoordTestType:
       test_name = "Tile Put Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetRowMajorStartCoordTestType:
       test_name = "Tile Get Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePutWaveRowMajorStartCoordTestType:
       test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWaveRowMajorStartCoordTestType:
       test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePutWGRowMajorStartCoordTestType:
       test_name = "Tile Put WG Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TileGetWGRowMajorStartCoordTestType:
       test_name = "Tile Get WG Row-Major (non-zero start_coord)";
-      testers.push_back(new TileRMATester(args));
+      PUSH_TESTER(TileRMATester(args));
       break;
     case TilePut3DTestType:
       test_name = "Tile Put 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGet3DTestType:
       test_name = "Tile Get 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWG3DTestType:
       test_name = "Tile Put WG 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWG3DTestType:
       test_name = "Tile Get WG 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePut4DTestType:
       test_name = "Tile Put 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGet4DTestType:
       test_name = "Tile Get 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWG4DTestType:
       test_name = "Tile Put WG 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWG4DTestType:
       test_name = "Tile Get WG 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWave3DTestType:
       test_name = "Tile Put Wave 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWave3DTestType:
       test_name = "Tile Get Wave 3D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TilePutWave4DTestType:
       test_name = "Tile Put Wave 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case TileGetWave4DTestType:
       test_name = "Tile Get Wave 4D Contiguous";
-      testers.push_back(new TileNDRMATester(args));
+      PUSH_TESTER(TileNDRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
@@ -1475,7 +1475,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case QpPutNbiPollTestType:
       test_name = "QP-Direct Put NBI Poll";
-      testers.push_back(new QpPutNbiTester(args));
+      PUSH_TESTER(QpPutNbiTester(args));
       break;
 #endif
 #if defined(USE_SDMA)
@@ -1490,7 +1490,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiPollTestType:
       test_name = "SDMA-Direct Put NBI Poll";
-      testers.push_back(new SdmaPutNbiTester(args));
+      PUSH_TESTER(SdmaPutNbiTester(args));
       break;
 #endif
     default:
