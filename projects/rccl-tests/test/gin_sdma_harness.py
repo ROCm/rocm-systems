@@ -108,10 +108,10 @@ def gin_env_xflags(kv_list):
     return flags
 
 
-def gin_perf_argv(exe, size, dtype, ctas, extra=None):
-    """Fixed-size GIN -D 3 perf argv.
+def gin_perf_argv(exe, size, dtype, ctas, extra=None, impl=3):
+    """Fixed-size GIN perf argv for device implementation `impl` (-D, default 3).
 
-    `extra` is inserted after `-D 3` and before `-V`, so the AllToAll vs
+    `extra` is inserted after `-D` and before `-V`, so the AllToAll vs
     AllGather/Broadcast `-A 1` gap is an explicit extra rather than a
     copy-paste drift. AllToAll omits `-A 1`; the others pass extra=["-A", "1"].
     """
@@ -128,7 +128,7 @@ def gin_perf_argv(exe, size, dtype, ctas, extra=None):
         "-R",
         "2",
         "-D",
-        "3",
+        str(impl),
     ]
     args += list(extra or [])
     args += [
