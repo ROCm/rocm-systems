@@ -188,26 +188,38 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, co
 /// config and attaches the resulting plugin group to the VM's SoC. This is the
 /// C-API equivalent of what the LD_PRELOAD interposer and the rocjitsu CLI do
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
-/// enable plugins without linking the simulator's C++ ABI. Call once after
-/// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
+/// enable plugins without linking the simulator's C++ ABI. Call after
+/// rj_vm_create / rj_vm_create_from_string; repeated calls are allowed before
+/// the first rj_vm_step or rj_vm_run. A config with
 /// no `plugins` attaches an empty group (near-zero overhead). Plugin load
 /// failures are best-effort unless the config sets the top-level
 /// `require_all_plugins` boolean to true. This function must complete before the
 /// first rj_vm_step or rj_vm_run call and must not overlap either call; that
 /// ordering keeps plugin initialization and replacement outside the
-/// simulation-callback interval.
+/// simulation-callback interval. Admission failures preserve the installed group
+/// and its active state. Exceptions during shutdown, replacement, or initialization
+/// are translated to errors without a state-preservation guarantee. To reconfigure
+/// a single-instance plugin such as Perfsim, first pass an empty string to remove
+/// the installed group, then load the new config. This removes the old group
+/// before the replacement is validated; a rejected replacement leaves no plugins.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
-/// @param[in] config_json The full config-file JSON (same text used to create
-///            the VM). Never NULL.
+/// @param[in] config_json The full config-file JSON containing the plugin
+///            configuration; it may differ from the text used to create the VM.
+///            Never NULL. An empty string removes all installed plugins; a non-empty
+///            config must be a JSON object.
 /// @param[in] plugin_dir Trusted directory to load plugin shared objects from
 ///            by explicit path — required in daemon mode, where the process is
 ///            not re-exec'd and cannot rely on a launcher-populated
 ///            LD_LIBRARY_PATH. NULL or empty resolves plugins by soname via the
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
-///                               required plugin could not be loaded.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, or plugin
+///            admission rejected the config (invalid JSON/object/options or a
+///            required plugin could not be loaded). The installed group and its
+///            active state are unchanged.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, or an exception occurred during
+///            configuration, replacement, or initialization. The installed group
+///            and active state may have changed.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 
@@ -250,12 +262,14 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
-/// @brief Run the VM to completion or until max_ticks is reached.
+/// @brief Run the VM to completion or until its finite horizon stops it.
 ///
 /// @details Runs the simulation to completion. Terminates when all primary
 /// components signal completion, the tick limit from the configuration is
-/// reached, or quiescence is detected. This call must not overlap
-/// rj_vm_load_plugins or rj_vm_destroy.
+/// reached, or quiescence is detected. A finite run also terminates at the last
+/// processed tick when a primary remains active but no work is queued; an
+/// unlimited run continues waiting for future async work. This call must not
+/// overlap rj_vm_load_plugins or rj_vm_destroy.
 /// @param[in] vm VM handle.
 /// @param[out] ticks_executed Number of ticks actually executed (may be NULL).
 /// @retval ROCJITSU_STATUS_SUCCESS Simulation completed successfully.

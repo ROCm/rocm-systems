@@ -236,9 +236,9 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
       Isa::resolved_vgpr_offset(vdst.opr_type_, vdst.encoding_value_);
   uint64_t rel_dst_index =
       rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;
-  bool rel_dst_valid =
-      amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(), wf.vgpr_alloc().count)
-          .has_value();
+  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), vdst.vgpr_count(),
+                                                   wf.vgpr_alloc().count, wf.cu().arch())
+                           .has_value();
   if (!rel_dst_valid)
     return;
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
@@ -781,7 +781,19 @@ void VLshlrevB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_lshlrev_b16_vop3(*this, wf);
 }
 
-void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_u16_vop3(*this, wf); }
+void VMadU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t result = amdgpu::vop3_integer_mad<uint16_t, 16>(s0, s1, s2, inst_.clamp);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
+  }
+}
 
 void VInterpP1llF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   wf.report_instruction_execution_error(
@@ -807,7 +819,31 @@ void VAddLshlU32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_add_lshl_u32_vop3(*this, wf);
 }
 
-void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_fma_f16_vop3(*this, wf); }
+void VFmaF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  auto &inst = *this;
+  ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16();
+  uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint16_t src0_bits =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));
+    uint16_t src1_bits =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1));
+    uint16_t src2_bits =
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2));
+    uint32_t omod = amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(),
+                                                        wf.ieee_mode(), false, inst_.omod);
+    uint16_t result = amdgpu::fp_mode::fma_f16(
+        src0_bits, src1_bits, src2_bits, inst_.abs & 1u, inst_.abs & 2u, inst_.abs & 4u,
+        inst_.neg & 1u, inst_.neg & 2u, inst_.neg & 4u, wf.fp_round_mode_f16_f64(),
+        wf.fp_denorm_mode_f16_f64(), omod, inst_.clamp, wf.fp16_ovfl(),
+        amdgpu::floating_clamp_nan_to_zero(wf),
+        amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, true);
+  }
+}
 
 void VMin3F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_v_min3_f16_vop3(*this, wf);
@@ -850,10 +886,59 @@ void VInterpP2F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
-void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mad_i16_vop3(*this, wf); }
+void VMadI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    uint32_t s0 = ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0);
+    uint32_t s1 = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);
+    uint32_t s2 = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t result = amdgpu::vop3_integer_mad<int16_t, 16>(s0, s1, s2, inst_.clamp);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result, false);
+  }
+}
 
 void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_div_fixup_f16_vop3(*this, wf);
+  auto &inst = *this;
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16(
+      [&wf](auto p, auto b, auto c) {
+        return ::rocjitsu::amdgpu::div_fixup_f16_promoted_simd(p, b, c, wf.fp_round_mode_f16_f64(),
+                                                               wf.fp_denorm_mode_f16_f64());
+      },
+      amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true);
+  uint64_t exec = wf.exec();
+  uint32_t opsel = amdgpu::vop3_opsel(inst_);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    float p = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+    float b = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
+    float c = util::f16_to_f32(
+        static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
+    p = amdgpu::source_modifier::apply_to_float(p, 0, inst_.abs, inst_.neg);
+    b = amdgpu::source_modifier::apply_to_float(b, 1, inst_.abs, inst_.neg);
+    c = amdgpu::source_modifier::apply_to_float(c, 2, inst_.abs, inst_.neg);
+    float result =
+        amdgpu::div_fixup_f16(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
+    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
+        wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);
+    if (effective_omod == 1)
+      result *= 2.0f;
+    else if (effective_omod == 2)
+      result *= 4.0f;
+    else if (effective_omod == 3)
+      result *= 0.5f;
+    if (inst_.clamp)
+      result = amdgpu::clamp_floating_result(result, wf);
+    result = amdgpu::fp_mode::finalize_omod_f32(result, effective_omod);
+    uint32_t result_bits = amdgpu::narrow_div_fixup_f16(result, wf.fp16_ovfl());
+    result_bits = amdgpu::fp_mode::finalize_omod_f16(result_bits, effective_omod);
+    ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
+  }
 }
 
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {

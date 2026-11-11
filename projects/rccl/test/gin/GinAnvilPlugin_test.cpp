@@ -156,6 +156,51 @@ TEST_F(GinAnvilPluginTest, Init_WrongGinType) {
   EXPECT_EQ(ictx, nullptr);
 }
 
+// AICOMRCCL-3418: with NCCL_GIN_TYPE unset, RCCL_GIN_TYPE_LIST decides.
+TEST_F(GinAnvilPluginTest, Init_ListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  void* ictx = nullptr;
+  ASSERT_EQ(plugin_.init(&ictx, 0, nullptr), ncclSuccess);
+  ASSERT_NE(ictx, nullptr);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+TEST_F(GinAnvilPluginTest, Init_NotListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,2");
+  void* ictx = nullptr;
+  EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx, nullptr);
+}
+
+TEST_F(GinAnvilPluginTest, Init_GinTypeOverridesGinTypes) {
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,2");
+  void* ictx = nullptr;
+  ASSERT_EQ(plugin_.init(&ictx, 0, nullptr), ncclSuccess);
+  ASSERT_NE(ictx, nullptr);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+TEST_F(GinAnvilPluginTest, Init_OnByDefault) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+  void* ictx = nullptr;
+  ASSERT_EQ(plugin_.init(&ictx, 0, nullptr), ncclSuccess);
+  ASSERT_NE(ictx, nullptr);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// An empty NCCL_GIN_TYPE is unset, as ncclParamGinType() reads it, not a type that matches nothing.
+TEST_F(GinAnvilPluginTest, Init_EmptyGinTypeIsUnset) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+  void* ictx = nullptr;
+  ASSERT_EQ(plugin_.init(&ictx, 0, nullptr), ncclSuccess);
+  ASSERT_NE(ictx, nullptr);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
 // G2: probe failure.
 TEST_F(GinAnvilPluginTest, Init_ProbeFails) {
   GinAnvilPluginStubs::SetProbeResult(0);

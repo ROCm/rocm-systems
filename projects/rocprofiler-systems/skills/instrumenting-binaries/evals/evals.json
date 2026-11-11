@@ -17,7 +17,7 @@
                 "warns that combining --module-restrict with --function-restrict ignores the function restriction"
             ],
             "id": "instrumenting-exclude-a-library",
-            "prompt": "How do I stop rocprof-sys-instrument from instrumenting libm, and separately how do I limit it to only the functions in solver.cpp?",
+            "prompt": "How do I stop rocprof-sys-instrument from instrumenting libm, and separately how do I limit it to only the functions in solver.cpp? I was planning to pass --module-restrict for the file and --function-restrict for a couple of its functions.",
             "skill_should_trigger": true
         },
         {
@@ -42,8 +42,7 @@
         {
             "expected_behavior": [
                 "explains the default minimum of 1024 instructions and the matching address-range minimum",
-                "recommends lowering --min-instructions (for example -i 0 or a smaller value) and using --instrument-loops",
-                "notes that more detail means more overhead"
+                "recommends lowering --min-instructions (for example -i 0 or a smaller value) and using --instrument-loops"
             ],
             "id": "instrumenting-min-instructions-granularity",
             "prompt": "Only a handful of my functions are instrumented. How do I instrument smaller functions and loops with rocprof-sys-instrument?",
@@ -52,8 +51,7 @@
         {
             "expected_behavior": [
                 "suggests --print-excluded or --dump-info with --simulate",
-                "points to the heuristics block in excluded.json to see which constraint applied",
-                "mentions that binary rewrite does not instrument shared libraries"
+                "points to the heuristics block in excluded.json to see which constraint applied"
             ],
             "id": "instrumenting-function-missing-from-trace",
             "prompt": "My function is missing from the rocprof-sys trace after a binary rewrite. How do I find out why it was excluded?",

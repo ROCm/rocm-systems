@@ -123,12 +123,6 @@ static ncclIntruAddressMap<ncclDevrWindow, struct ncclWindow_vidmem*, &ncclDevrW
   ncclWindowMap;
 static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream);
 
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers at the bottom:
 
@@ -365,8 +359,16 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
+      // Temporary ROCM-30633 skip (gfx1250 or NCCL_CUMEM_SKIP_FREE=1); see rcclSkipLsaFlatAddressFree in alloc.h.
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+      size_t flatBytes = devr->lsaSize * devr->bigSize;
+      devr->lsaFlatBase = nullptr;
+      if (!rcclSkipLsaFlatAddressFree()) {
+        CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
+      } else {
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
+             "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
+      }
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }

@@ -1,8 +1,9 @@
+import { fontSizes, fontWeights } from '../../theme/typography';
 import { Box, Stack, Typography } from '@mui/material';
 import SectionCard from '../shared/SectionCard';
 import CategoryTag from '../shared/CategoryTag';
-import { monoFont } from '../../theme/tokens';
-import { formatPercent, shortSha } from '../../utils/formatters';
+import { shapeTokens } from '../../theme/tokens';
+import { formatPercent } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
 
 export default function LargestChanges({ projection, catalogs = [] }) {
@@ -29,18 +30,22 @@ export default function LargestChanges({ projection, catalogs = [] }) {
   }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.id.localeCompare(b.id)).slice(0, 6);
   const maximum = Math.max(...changes.map(({ delta }) => Math.abs(delta)), 0);
   const unavailable = [...new Set(projection.rows.map((row) => row.cohortIds.length && (!sharedOnly || row.cohortIds.some((id) => sharedIds.has(id))) ? row.latest?.reason ?? row.reference?.reason ?? 'no valid reference' : 'No shared workloads'))];
-  return <SectionCard title="Largest Changes" subtitle="Duration change (%) · lower is faster" sx={{ height: '100%', minWidth: 0 }} contentSx={{ p: 2 }} data-testid="largest-changes">
-    {!changes.length ? <Typography color="text.secondary" sx={{ py: 4, fontSize: 12 }}>{!projection.rows.length ? 'No configurations selected.' : `No comparable results: ${unavailable.join('; ')}.`}</Typography> : changes.map(({ id, result, delta, row, baseline, candidate }) => {
+  return <SectionCard title="Largest changes" subtitle="Duration change (%) · lower is faster" sx={{ height: '100%', minWidth: 0 }} data-testid="largest-changes">
+    {!changes.length ? <Typography color="text.secondary" sx={{ py: '40px', px: '12px', fontSize: fontSizes.body, textAlign: 'center' }}>{!projection.rows.length ? 'No configurations selected.' : `No comparable results: ${unavailable.join('; ')}.`}</Typography> : changes.map(({ id, result, delta, row }, index) => {
       const state = classifyDurationChange(delta);
       const tone = changeTone(state);
-      return <Box key={`${row.key}/${id}`} data-configuration={row.key} data-workload={id} data-change-state={state} sx={{ py: 1.1 }}>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
-          <Box sx={{ minWidth: 0 }}><Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere', fontSize: 12 }}>{result.name}</Typography>
-            <Stack direction="row" sx={{ mt: 0.4, gap: 0.5, flexWrap: 'wrap' }}><CategoryTag kind="target" label={row.target} /><CategoryTag label={result.suite} /><CategoryTag kind="mode" label={row.mode} /></Stack>
+      return <Box key={`${row.key}/${id}`} data-configuration={row.key} data-workload={id} data-change-state={state} sx={{ py: shapeTokens.rowPadding, ...(index === 0 && { pt: 0, mt: '-2px' }) }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'center', columnGap: '10px', rowGap: '4px' }}>
+          <Box sx={{ minWidth: 0 }}><Typography sx={{ fontWeight: fontWeights.medium, overflowWrap: 'anywhere', fontSize: fontSizes.body }}>{result.name}</Typography>
+            <Stack direction="row" sx={{ mt: '3px', gap: '5px', flexWrap: 'wrap' }}><CategoryTag subdued kind="target" label={row.target} /><CategoryTag subdued label={result.suite} /><CategoryTag subdued kind="mode" label={row.mode} /></Stack>
           </Box>
-          <Typography title={`Latest ${shortSha(candidate.run)} vs reference ${shortSha(baseline.run)}`} sx={{ flexShrink: 0, fontFamily: monoFont, fontSize: 15, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(delta)}</Typography>
-        </Stack>
-        <Box aria-hidden="true" sx={{ mt: 1, height: 3, bgcolor: 'divider', borderRadius: 1 }}><Box data-testid="change-magnitude-bar" sx={{ height: '100%', width: `${maximum ? Math.abs(delta) / maximum * 100 : 0}%`, bgcolor: tone === 'neutral' ? 'text.disabled' : `${tone}.main`, borderRadius: 1 }} /></Box>
+          <Typography variant="numeric" sx={{ flexShrink: 0, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(delta)}</Typography>
+        </Box>
+        {/* The line is a border: the browser snaps borders to a whole number of device pixels, so every
+            bar paints the same thickness at any row position. */}
+        <Box aria-hidden="true" sx={{ '--bar': '2px', position: 'relative', mt: 1, height: 0, borderTop: 'var(--bar) solid', borderColor: 'dashboard.barTrack' }}>
+          <Box data-testid="change-magnitude-bar" sx={{ position: 'absolute', top: 'calc(-1 * var(--bar))', left: 0, height: 0, width: `${maximum ? Math.abs(delta) / maximum * 100 : 0}%`, borderTop: 'var(--bar) solid', borderColor: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }} />
+        </Box>
       </Box>;
     })}
   </SectionCard>;

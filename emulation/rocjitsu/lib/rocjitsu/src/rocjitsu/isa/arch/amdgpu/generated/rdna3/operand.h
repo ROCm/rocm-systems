@@ -20,7 +20,8 @@ class Operand final : public IsaOperand<Isa> {
 public:
   enum class Literal32Widening : uint8_t { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   static constexpr bool kStaticRegisterAccess = true;
-  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source = false,
+  Operand(int size_bits, OperandType opr_type, int encoding_value);
+  Operand(int size_bits, OperandType opr_type, int encoding_value, bool packed_16bit_source,
           bool packed_16bit_dst = false);
   Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,
           bool packed_16bit_source, bool packed_16bit_dst = false);
@@ -38,6 +39,7 @@ public:
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.
   static bool full_execution_backend_complete();
+  bool execution_backend_available() const override;
   bool simd_capable() const override;
 
 private:

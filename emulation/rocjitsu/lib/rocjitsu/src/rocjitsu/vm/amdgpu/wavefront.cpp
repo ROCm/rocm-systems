@@ -152,6 +152,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
   //       first because reset() zeroes them,
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
+  // The halt hook also completes race events before release_wf can resolve a barrier.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;
