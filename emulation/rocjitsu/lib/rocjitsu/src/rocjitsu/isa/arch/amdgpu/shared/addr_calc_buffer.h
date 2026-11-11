@@ -12,6 +12,7 @@
 /// required field names.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -41,6 +42,29 @@ inline bool buffer_resource_range_is_backed(const Wavefront &wf, uint32_t select
     return scalar_selector_range_is_backed(wf, selector, 2) &&
            scalar_selector_range_is_backed(wf, selector + 2, 2);
   return scalar_selector_range_is_backed(wf, selector, 4);
+}
+
+/// @brief CDNA5 V# TYPE, SRD bits 127:126, from SRD word 3. Zero identifies a
+/// buffer.
+constexpr uint8_t cdna5_buffer_resource_type(uint32_t srd3) {
+  return static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+}
+
+/// @brief Whether a gfx1250 VBUFFER instruction is ignored because its
+/// resource is not a buffer: an SRD TYPE other than 0 makes the instruction
+/// ignored (CDNA5 ISA 9.6). The SRD is read without a register-access
+/// observation. False when `modifiers` name no VBUFFER resource or its SRD is
+/// not backed by this wave.
+inline bool cdna5_ignores_buffer_resource(const RegisterModifiers &modifiers, const Wavefront &wf) {
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA5 || !modifiers.buffer_resource ||
+      modifiers.scalar_buffer_words)
+    return false;
+  const uint32_t selector = modifiers.buffer_resource->encoding_value();
+  if (!buffer_resource_range_is_backed(wf, selector))
+    return false;
+  const auto word3 = resolve_scalar_register_range(wf, selector + 3, 1);
+  return word3 &&
+         cdna5_buffer_resource_type(RegisterAccess(wf).read_scalar_unobserved(*word3)) != 0;
 }
 
 /// MUBUF/MTBUF SOFFSET accepts scalar registers and inline integer/float constants.

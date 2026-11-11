@@ -27,6 +27,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -1452,6 +1453,51 @@ protected:
   }
   void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
 
+  static constexpr uint32_t kResourceSgpr = 8;
+
+  /// Issue a one-lane decoded buffer_load_b32 into `vgpr` whose resource
+  /// descriptor has TYPE `type`. A descriptor whose TYPE is not 0 is not a
+  /// buffer, so the instruction is ignored (CDNA5 ISA 9.6) and execution
+  /// clears its lanes.
+  void buffer_load(int wave, uint32_t vgpr, uint32_t type, uint64_t exec = 1) {
+    waves[wave]->pc += 16;
+    const uint32_t resource = waves[wave]->sgpr_alloc().base + kResourceSgpr;
+    for (uint32_t word = 0; word < 3; ++word)
+      fixture.cu()->write_sgpr(resource + word, 0);
+    // TYPE is bits [127:126] of the descriptor, the top two bits of word 3.
+    fixture.cu()->write_sgpr(resource + 3, type << 30);
+    auto words =
+        cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer, {.soffset = cdna5::OPR_SREG_NULL,
+                                                            .vdata = static_cast<uint8_t>(vgpr),
+                                                            .rsrc = kResourceSgpr});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const uint64_t lanes = type == 0 ? exec : 0;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = lanes;
+    state->lane_mask = lanes;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    inst->set_data(std::move(state));
+    issue(wave, *inst, {}, exec);
+  }
+
+  void wait_storecnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc10000u | count);
+  }
+
+  struct WriteBack {
+    const char *name;
+    uint32_t word;
+  };
+  static constexpr std::array<WriteBack, 2> kWriteBacks{
+      {{"global_wb", 0xEE0B0000u}, {"global_wbinv", 0xEE13C000u}}};
+
+  void global_inv(int wave) { issue_words(wave, {0xEE0AC000u, 0x00000000u, 0x00000000u}); }
+
   /// `Mixed` sends lane 0 to global memory and lane 1 to LDS.
   enum class FlatRoute { Global, Lds, Mixed, NoActiveLanes };
 
@@ -1488,8 +1534,7 @@ protected:
 
   /// Deliver a memory instruction to the issue hook, then the routed-memory
   /// hook, with the wave's EXEC set to `exec` for the issue.
-  void issue(int wave, TestMemoryInstruction &inst, const MemoryAccessObservation &access,
-             uint64_t exec) {
+  void issue(int wave, Instruction &inst, const MemoryAccessObservation &access, uint64_t exec) {
     const uint64_t wave_exec = waves[wave]->exec();
     waves[wave]->set_exec(exec);
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
@@ -1973,7 +2018,7 @@ TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvAdvancesLoadcnt) {
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 1; ++index)
     vmem_load(0, /*vgpr=*/1);
-  ASSERT_NO_FATAL_FAILURE(issue_words(0, {0xEE0AC000u, 0x00000000u, 0x00000000u})); // global_inv.
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
   EXPECT_FALSE(vgpr_read(0, 0));
 }
 
@@ -1981,17 +2026,12 @@ TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvBelowCapacityKeepsOldestLoadPend
   vmem_load(0, /*vgpr=*/0);
   for (int index = 0; index < kCapacity - 2; ++index)
     vmem_load(0, /*vgpr=*/1);
-  ASSERT_NO_FATAL_FAILURE(issue_words(0, {0xEE0AC000u, 0x00000000u, 0x00000000u})); // global_inv.
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
   EXPECT_TRUE(vgpr_read(0, 0));
 }
 
 TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksAdvanceStorecnt) {
-  struct WriteBack {
-    const char *name;
-    uint32_t word;
-  };
-  for (const WriteBack write_back :
-       {WriteBack{"global_wb", 0xEE0B0000u}, WriteBack{"global_wbinv", 0xEE13C000u}}) {
+  for (const WriteBack write_back : kWriteBacks) {
     SCOPED_TRACE(write_back.name);
     for (int index = 0; index < kCapacity; ++index)
       vmem_store(0);
@@ -1999,8 +2039,111 @@ TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksAdvanceStorecnt) {
     ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
     EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
-    execute_wait(*fixture.plugin_group_, *waves[0], 0xbfc10000u); // s_wait_storecnt 0.
+    wait_storecnt(0, 0);
   }
+}
+
+// GLOBAL_INV also holds its LOADcnt slot afterwards, in order with loads, as
+// LLVM orders it with VMEM reads. A load, 61 younger loads, GLOBAL_INV at issue
+// 63 and a load at issue 64 fill LOADcnt, so the last issue completes the
+// oldest load and only that one.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalInvHoldsALoadcntSlot) {
+  const int oldest = race_state(0).getDetector()->events().totalAllocated();
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// A load, then GLOBAL_INV: LOADcnt holds two, so waiting for one to remain
+// completes the load.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsGlobalInv) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(global_inv(0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// GLOBAL_WB and GLOBAL_WBINV hold their STOREcnt slot in order with stores.
+TEST_F(Gfx1250CounterCapacityRaceTest, GlobalWriteBacksHoldAStorecntSlot) {
+  for (const WriteBack write_back : kWriteBacks) {
+    SCOPED_TRACE(write_back.name);
+    for (int index = 0; index < kCapacity - 1; ++index)
+      vmem_store(0);
+    const int oldest = race_state(0).getDetector()->events().totalAllocated() - (kCapacity - 1);
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    vmem_store(0);
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_storecnt(0, 0);
+  }
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialStorecntWaitCountsGlobalWriteBacks) {
+  for (const WriteBack write_back : kWriteBacks) {
+    SCOPED_TRACE(write_back.name);
+    vmem_store(0);
+    const int store = race_state(0).getDetector()->events().totalAllocated() - 1;
+    ASSERT_NO_FATAL_FAILURE(issue_words(0, {write_back.word, 0x00000000u, 0x00000000u}));
+    wait_storecnt(0, 1);
+    EXPECT_EQ(event_status(store), EventStatus::WAVE_COMPLETE);
+    wait_storecnt(0, 0);
+  }
+}
+
+// A buffer instruction whose descriptor TYPE is not 0 is ignored (CDNA5 ISA
+// 9.6). The detector gives it no LOADcnt slot, whether EXEC is active or zero,
+// so it proves no older load complete; if hardware still counted it, that only
+// keeps the older load pending longer. A valid buffer load takes a slot in both
+// cases.
+TEST_F(Gfx1250CounterCapacityRaceTest, BufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, IgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroBufferLoadFillsLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroIgnoredBufferLoadDoesNotFillLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/0, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitDoesNotCountIgnoredExecZeroBufferLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  ASSERT_NO_FATAL_FAILURE(buffer_load(0, /*vgpr=*/2, /*type=*/2, /*exec=*/0));
+  wait_loadcnt(0, 1);
+  EXPECT_TRUE(vgpr_read(0, 0));
 }
 
 // Transfers that move no data still take a TENSORcnt slot.

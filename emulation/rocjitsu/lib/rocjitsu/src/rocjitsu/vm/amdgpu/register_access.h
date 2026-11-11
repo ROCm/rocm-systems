@@ -1710,6 +1710,39 @@ public:
     }
   }
 
+  /// @brief Read one dword from validated scalar storage without reporting an
+  /// instruction-visible register read.
+  /// @details Code that plans an instruction's accesses, or observes it, uses
+  /// this path to read encoding-selected control words such as a resource
+  /// descriptor, which are not register reads by the instruction itself.
+  [[nodiscard]] uint32_t read_scalar_unobserved(const ScalarRegisterRange &range,
+                                                uint32_t offset = 0) const {
+    const Wavefront &wf = wavefront();
+    if (offset >= range.width)
+      return 0;
+    const uint32_t index = range.index + offset;
+    switch (range.storage) {
+    case ScalarRegisterStorage::SGPR:
+      // Like write_scalar_unobserved(), reach only this wave's SGPRs.
+      if (!cu_->owns_sgpr_range(wf, wf.sgpr_alloc().base + range.index, range.width))
+        return 0;
+      return cu_->read_sgpr_storage(wf.sgpr_alloc().base + index);
+    case ScalarRegisterStorage::FLAT_SCRATCH:
+      return static_cast<uint32_t>(wf.scratch_base() >> (index == 0 ? 0 : 32));
+    case ScalarRegisterStorage::VCC:
+      return static_cast<uint32_t>(wf.vcc() >> (index == 0 ? 0 : 32));
+    case ScalarRegisterStorage::TTMP:
+      return wf.ttmp(index);
+    case ScalarRegisterStorage::M0:
+      return wf.m0();
+    case ScalarRegisterStorage::EXEC:
+      return static_cast<uint32_t>(wf.exec_raw() >> (index == 0 ? 0 : 32));
+    case ScalarRegisterStorage::DISCARD:
+      return 0;
+    }
+    return 0;
+  }
+
   // Physical SGPR access. These APIs are for helpers that already know the
   // physical scalar register index. Reads may use a CU-bound compatibility path
   // that resolves one owner for the complete range. Writes require an explicit
