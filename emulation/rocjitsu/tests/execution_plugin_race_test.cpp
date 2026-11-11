@@ -1498,6 +1498,25 @@ protected:
 
   void global_inv(int wave) { issue_words(wave, {0xEE0AC000u, 0x00000000u, 0x00000000u}); }
 
+  struct LanePermute {
+    const char *name;
+    uint16_t op;
+  };
+  static constexpr std::array<LanePermute, 4> kLanePermutes{
+      {{"ds_permute_b32", cdna5::kDsPermuteB32Vds},
+       {"ds_bpermute_b32", cdna5::kDsBpermuteB32Vds},
+       {"ds_bpermute_fi_b32", cdna5::kDsBpermuteFiB32Vds},
+       {"ds_swizzle_b32", cdna5::kDsSwizzleB32Vds}}};
+
+  /// Issue a decoded LDS lane permute or swizzle, which reaches only the issue
+  /// hook because it accesses no LDS memory.
+  void lane_permute(int wave, uint16_t op) {
+    const auto words = cdna5::build_vds(op, {.addr = 8, .data0 = 9, .vdst = 10});
+    issue_words(wave, {words[0], words[1], 0x00000000u});
+  }
+
+  int next_event() { return race_state(0).getDetector()->events().totalAllocated(); }
+
   /// `Mixed` sends lane 0 to global memory and lane 1 to LDS.
   enum class FlatRoute { Global, Lds, Mixed, NoActiveLanes };
 
@@ -2092,6 +2111,69 @@ TEST_F(Gfx1250CounterCapacityRaceTest, PartialStorecntWaitCountsGlobalWriteBacks
     wait_storecnt(0, 1);
     EXPECT_EQ(event_status(store), EventStatus::WAVE_COMPLETE);
     wait_storecnt(0, 0);
+  }
+}
+
+// LDS lane permutes and swizzles use the LDS hardware without LDS memory (CDNA5
+// ISA 11.2.3), and LDS operations count on DScnt and are kept in order (CDNA5
+// ISA 5.7.1.4). So each needs a free DScnt slot to issue, and then holds one in
+// order with LDS operations.
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(lane_permute(0, cdna5::kDsBpermuteB32Vds));
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermuteBelowCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(lane_permute(0, cdna5::kDsBpermuteB32Vds));
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, EachLanePermuteAdvancesDscnt) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int oldest = next_event();
+    for (int index = 0; index < kCapacity; ++index)
+      ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_dscnt(0, 0);
+  }
+}
+
+// A DS read, 61 younger reads, a permute at issue 63 and a read at issue 64
+// fill DScnt, so the last issue completes the oldest read and only that one.
+TEST_F(Gfx1250CounterCapacityRaceTest, LanePermutesHoldADscntSlot) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int oldest = next_event();
+    for (int index = 0; index < kCapacity - 1; ++index)
+      ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    ds_read(0, kYoungerAddress);
+    EXPECT_EQ(event_status(oldest), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(event_status(oldest + 1), EventStatus::ACTIVE);
+    wait_dscnt(0, 0);
+  }
+}
+
+// A DS read, then a permute: DScnt holds two, so waiting for one to remain
+// completes the read.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialDscntWaitCountsLanePermutes) {
+  for (const LanePermute permute : kLanePermutes) {
+    SCOPED_TRACE(permute.name);
+    const int read = next_event();
+    ds_read(0, kYoungerAddress);
+    ASSERT_NO_FATAL_FAILURE(lane_permute(0, permute.op));
+    wait_dscnt(0, 1);
+    EXPECT_EQ(event_status(read), EventStatus::WAVE_COMPLETE);
+    wait_dscnt(0, 0);
   }
 }
 

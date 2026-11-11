@@ -176,8 +176,8 @@ bool ignored_memory_issue(const Instruction &inst, const amdgpu::Wavefront &wf) 
 ///   reaches the slot before any later operation. A FLAT instruction's slots
 ///   are recorded by register_unused_flat_domains(), so its routed obligations
 ///   here are empty.
-/// - GLOBAL_INV on LOADcnt, and GLOBAL_WB and GLOBAL_WBINV on STOREcnt, each in
-///   order with the VMEM operations on its counter.
+/// - A wait-counter producer without memory issue metadata, on the counter
+///   counter_only_slot() selects.
 void register_counter_slot(WaveRaceState &race, const InstructionSnapshot &instruction,
                            std::span<const amdgpu::MemoryCounterObligation> obligations,
                            MemoryOrderClass memoryOrder, bool is_load) {
@@ -186,6 +186,34 @@ void register_counter_slot(WaveRaceState &race, const InstructionSnapshot &instr
   race.registerEvent(instruction,
                      is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL,
                      /*registers=*/{}, /*execMask=*/0, /*byteMask=*/0xF, obligations, memoryOrder);
+}
+
+/// The counter slot a gfx1250 wait-counter producer without memory issue
+/// metadata takes when it issues, and whether it returns data:
+/// - GLOBAL_INV counts on LOADcnt, and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
+///   (CDNA5 ISA 5.7.1.2), in order with the VMEM operations on that counter, as
+///   LLVM orders GLOBAL_INV with VMEM reads. None is skipped for EXEC zero
+///   (CDNA5 ISA 3.2.2.1).
+/// - The LDS lane permutes and DS_SWIZZLE_B32 use the LDS hardware without LDS
+///   memory (CDNA5 ISA 11.2.3), and LDS operations count on DScnt and are kept
+///   in order (CDNA5 ISA 5.7.1.4). With EXEC zero one is skipped only when
+///   DScnt is zero (CDNA5 ISA 3.2.2.1), so its admission is sound either way.
+struct CounterOnlySlot {
+  amdgpu::MemoryCounterObligation obligation;
+  bool is_load;
+};
+
+std::optional<CounterOnlySlot> counter_only_slot(std::string_view mnemonic) {
+  using amdgpu::MemoryCompletionClass;
+  using amdgpu::WaitCounterType;
+  if (mnemonic == "global_inv")
+    return CounterOnlySlot{{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM}, true};
+  if (mnemonic == "global_wb" || mnemonic == "global_wbinv")
+    return CounterOnlySlot{{WaitCounterType::STORECNT, MemoryCompletionClass::VMEM}, false};
+  if (mnemonic == "ds_permute_b32" || mnemonic == "ds_bpermute_b32" ||
+      mnemonic == "ds_bpermute_fi_b32" || mnemonic == "ds_swizzle_b32")
+    return CounterOnlySlot{{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}, true};
+  return std::nullopt;
 }
 
 /// On gfx1250 (CDNA5) "Every Flat instruction increments both DScnt and either
@@ -979,25 +1007,20 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
       }
     }
 
-    // GLOBAL_INV counts on LOADcnt and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
-    // (CDNA5 ISA 5.7.1.2), and none of them is skipped for EXEC zero (CDNA5 ISA
-    // 3.2.2.1). They carry no memory issue metadata, so their gfx1250
-    // backpressure is applied here. Each then holds its slot in order with the
-    // VMEM operations on its counter, as LLVM orders GLOBAL_INV with VMEM reads.
+    // Wait-counter producers without memory issue metadata, such as GLOBAL_INV
+    // and the LDS lane permutes, apply their gfx1250 backpressure here and then
+    // hold their slot (see counter_only_slot()).
     if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && inst.is_memory_wait_producer() &&
         !inst.is_memory_op()) {
-      const std::string_view cache_op = inst.mnemonic();
-      const bool invalidate = cache_op == "global_inv";
-      if (invalidate || cache_op == "global_wb" || cache_op == "global_wbinv") {
-        const auto counter =
-            invalidate ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT;
-        if (s->race_state->prepareForCounterIncrement(counter).failed()) {
+      if (const auto slot = counter_only_slot(inst.mnemonic())) {
+        const std::span<const amdgpu::MemoryCounterObligation> obligations{&slot->obligation, 1};
+        if (s->race_state->prepareForCounterIncrement(slot->obligation.wait_counter_type())
+                .failed()) {
           report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
           return;
         }
-        const amdgpu::MemoryCounterObligation slot{counter, amdgpu::MemoryCompletionClass::VMEM};
-        register_counter_slot(*s->race_state, instruction.value(), {&slot, 1},
-                              MemoryOrderClass::VMEM, /*is_load=*/invalidate);
+        register_counter_slot(*s->race_state, instruction.value(), obligations,
+                              memoryOrderForObligations(obligations), slot->is_load);
       }
     }
 
