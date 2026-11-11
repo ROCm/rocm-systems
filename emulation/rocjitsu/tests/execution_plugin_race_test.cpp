@@ -1488,55 +1488,62 @@ TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
   EXPECT_NE(sink.str().find("RACE "), std::string::npos);
 }
 
-TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
-  PluginFixture f;
-  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
-  PluginSinkConfig sink_config;
-  StringSink &sink = sink_config.emplace<StringSink>();
-  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
-  f.soc->set_plugin_group(f.plugin_group_);
-  f.plugin_group_->onInit();
+TEST(RaceDetectorPluginTest, DualOffsetStoreTracksBothOffsetOrders) {
+  constexpr uint8_t kFarOffset = 4;
+  constexpr uint32_t kReadAddress = kFarOffset * sizeof(uint32_t);
+  for (const std::array<uint8_t, 2> offsets :
+       {std::array<uint8_t, 2>{0, kFarOffset}, std::array<uint8_t, 2>{kFarOffset, 0}}) {
+    SCOPED_TRACE(std::format("offsets=({}, {})", offsets[0], offsets[1]));
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna4"));
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
 
-  auto *writer = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
-  auto *reader = f.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
-  ASSERT_NE(writer, nullptr);
-  ASSERT_NE(reader, nullptr);
-  writer->set_exec(1u);
-  reader->set_exec(1u);
-  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
-  f.plugin_group_->onAmdgpuWorkgroupDispatched(
-      /*dispatch_id=*/1, /*wg_id=*/0, /*physical_vgpr_count=*/512,
-      /*physical_sgpr_count=*/208, waves);
+    Wavefront *writer = fixture.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    Wavefront *reader = fixture.cu()->dispatch_wf(0, 0x2000, 104, 256);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_NE(reader, nullptr);
+    // One active lane leaves descending, disjoint offsets out of order until
+    // interval finalization, without neighboring lanes merging the ranges.
+    writer->set_exec(1);
+    reader->set_exec(1);
+    std::array<Wavefront *, 2> waves{writer, reader};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+    fixture.cu()->write_vgpr(writer->vgpr_alloc().base, 0, 0);
+    fixture.cu()->write_vgpr(writer->vgpr_alloc().base + 1, 0, 11);
+    fixture.cu()->write_vgpr(writer->vgpr_alloc().base + 2, 0, 22);
+    fixture.cu()->write_vgpr(reader->vgpr_alloc().base, 0, kReadAddress);
 
-  auto store_state = std::make_unique<VectorMemState>(LOCAL_MEM);
-  store_state->elem_size = sizeof(uint32_t);
-  store_state->num_elems = 1;
-  store_state->is_load = false;
-  store_state->wf_size = writer->wf_size();
-  store_state->exec_mask = 1;
-  store_state->lane_mask = 1;
-  store_state->per_lane_addr[0] = 0;
-  store_state->ds2_active = true;
-  store_state->ds2_per_lane_addr[0] = 16;
-  TestMemoryInstruction store(std::move(store_state));
-  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, store, *writer);
-  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, store, *writer);
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    const std::array<uint32_t, 2> store_words = cdna4::build_ds(
+        cdna4::kDsWrite2B32Ds,
+        {.offset0 = offsets[0], .offset1 = offsets[1], .addr = 0, .data0 = 1, .data1 = 2});
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, store_words.data()));
+    ASSERT_NE(store, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, *store, *writer);
+    ASSERT_TRUE(fixture.cu()->execute_instruction(store.get(), *writer).succeeded());
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *store, *writer);
+    ASSERT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
 
-  auto load_state = std::make_unique<VectorMemState>(LOCAL_MEM);
-  load_state->elem_size = sizeof(uint32_t);
-  load_state->num_elems = 1;
-  load_state->is_load = true;
-  load_state->wf_size = reader->wf_size();
-  load_state->exec_mask = 1;
-  load_state->lane_mask = 1;
-  load_state->dst_reg_base = reader->vgpr_alloc().base;
-  load_state->per_lane_addr[0] = 16;
-  TestMemoryInstruction load(std::move(load_state));
-  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, load, *reader);
-  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *reader);
+    const std::array<uint32_t, 2> load_words =
+        cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words.data()));
+    ASSERT_NE(load, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, *load, *reader);
+    ASSERT_TRUE(fixture.cu()->execute_instruction(load.get(), *reader).succeeded());
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *reader);
 
-  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+    const std::string report = sink.str();
+    EXPECT_NE(report.find(std::format("Race on LDS byte {} [", kReadAddress)), std::string::npos)
+        << report;
+    EXPECT_NE(report.find("ds_write2_b32"), std::string::npos) << report;
+    EXPECT_NE(report.find("ds_read_b32"), std::string::npos) << report;
+  }
 }
 
 TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
