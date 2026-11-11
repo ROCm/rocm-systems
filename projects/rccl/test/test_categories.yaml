@@ -125,7 +125,6 @@ test_categories:
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
       - "HipProbe.*"
-      - "GroupSimulateEstimate.*"
     exclude_windows:
       - "*"
     labels:

@@ -17,36 +17,6 @@
 // defaults leave the selection unchanged.
 // ===========================================================================
 
-namespace {
-// topoGetAlgoInfo needs slightly more comm state than updateCollCostTable: it
-// reads archName for the arch-specific overrides and the maxThreads table when
-// it converts an algorithm choice into a warp count.
-struct AlgoInfoComm {
-  // Holds a CostComm for the comm/topo pair, the rank counts and the XGMI_ALL
-  // stamp; adds only what topoGetAlgoInfo needs beyond updateCollCostTable.
-  //
-  // NOT parameterised, deliberately, even though topoGetAlgoInfo reads nRanks and
-  // nNodes. CostComm hardcodes maxLocalRanks and localRanks to 8 regardless of
-  // nRanks (:1387-1392), so CostComm(64, 8) would describe 64 ranks over 8 nodes
-  // with 8 local ranks and one GPU node -- a comm that cannot exist. Exposing a
-  // pair of parameters that produce an incoherent fixture is worse than the fixed
-  // 8/1 here. Varying either one needs CostComm to derive the local counts first,
-  // and that changes what the existing CostComm tests cover (e.g. :1582).
-  CostComm base{8, 1};
-  AlgoInfoComm() {
-    ncclComm* comm = base.get();
-    comm->WarpSize = 32;
-    SetSingleGpuArch(&base.topo(), "gfx942");
-    for (int a = 0; a < NCCL_NUM_ALGORITHMS; ++a) {
-      for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) {
-        comm->maxThreads[a][p] = 256;
-      }
-    }
-  }
-  ncclComm* get() { return base.get(); }
-};
-}  // namespace
-
 TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce) {
   // Pins that each hook is actually reached. Without these assertions the
   // counters are decorative: production could stop calling rcclSetPipelining
@@ -392,4 +362,88 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
     EXPECT_EQ(c.algo, task.algorithm);
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
   }
+}
+
+// ===========================================================================
+// ncclGroupSimulateEnd estimatedTime (enqueue.cc, getAlgoInfo / ncclPrepareTasks).
+//
+// Two writers used to publish a non-positive estimate. The CSV tuner forces a
+// choice by storing 0 in that cost-table cell, and topoGetAlgoInfo copied the
+// minimum into estimatedTime. Direct AllGather is lowered to per-peer sends, so
+// no collective task is costed and the estimate stayed at the initializer (-1).
+// These tests pin the repair: the 0 is replaced by the cost-model time of the
+// algorithm that was selected, and ncclPrepareTasks still costs a direct
+// AllGather that never enters the collective queue. A positive constant would
+// satisfy `estimatedTime > 0` without being either of those.
+// ===========================================================================
+
+namespace {
+constexpr float kOtherModelUs = 100.0f;
+
+// The CSV tuner writes 0 into the cell it wants. The 0 selects; it is not a time.
+ncclResult_t ZeroTreeLlCell(void*, ncclFunc_t, size_t, int, float** collCostTable, int, int, int, int* nChannels) {
+  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  table[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 0.0f;
+  if (nChannels) *nChannels = 0;
+  return ncclSuccess;
+}
+
+void AttachZeroTuner(ncclComm* comm, ncclTuner_t* tuner) {
+  *tuner = ncclTuner_t{};
+  tuner->getCollInfo = ZeroTreeLlCell;
+  comm->tuner = tuner;
+  // An empty registration cache makes regBuff false once the graph is invalid,
+  // so getAlgoInfo does not consult graph registration.
+  comm->planner.capturingGraph = ncclCudaGraphNone(comm->config.graphUsageMode);
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_ReportsCostModelTimeOfTheChosenAlgo) {
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, /*collNetSupport=*/0, /*nvlsSupport=*/0,
+                                     /*numPipeOps=*/1, &sim));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm) << "the 0 must still win selection";
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+  EXPECT_FLOAT_EQ(kChosenModelUs, sim.estimatedTime)
+      << "estimatedTime must be the cost-model time, not the tuner's 0";
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_KeepsZeroWhenCostModelHasNoPositiveTime) {
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, NCCL_ALGO_PROTO_IGNORE, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+  EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime)
+      << "a non-positive model time must not be reported in place of the sentinel";
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_SingleRankZeroCost_StaysZeroWithoutATuner) {
+  // nRanks == 1 writes RING/SIMPLE = 0 and never asks the cost model. That 0 is
+  // a real cost, and there is no tuner sentinel to replace.
+  AlgoInfoComm cc;
+  cc.get()->nRanks = 1;
+  ScriptCellTime(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+  ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim));
+  EXPECT_EQ(0, g_topoGetAlgoTimeCalls) << "the single-rank short circuit must not query the model";
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+  EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime);
 }
