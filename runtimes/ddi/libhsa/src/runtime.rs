@@ -34,7 +34,8 @@ use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session, SessionRetirement};
 use rocddi::topology::host::{CpuCacheKind, CpuInfo};
 use rocddi::topology::{
-    Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo, TopologySnapshot,
+    CacheAssociations, Endpoint, GpuInfo, MemoryBank, MemoryBankKind, MemoryLinkInfo,
+    TopologyGraphSnapshot,
 };
 
 use crate::callback_arg::CallbackArg;
@@ -207,14 +208,11 @@ pub(crate) struct HsaState {
     /// CPU and GPU cache records exposed through HSA queries.
     pub(crate) caches: Vec<Cache>,
     /// Passive node, cache, and reported-route facts for this HSA generation.
-    pub(crate) topology: TopologySnapshot,
+    pub(crate) topology: TopologyGraphSnapshot,
     /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
     pub(crate) session: Option<Session>,
-    /// Lifetime policy for the KFD context used by this runtime generation.
-    /// Memory-pool choices that require the primary context use this value.
-    pub(crate) lifetime: DriverContextLifetime,
 }
 
 /// Callback work detached while HSA storage remains published for `OnUnload`.
@@ -409,7 +407,7 @@ impl HsaState {
             .session
             .as_ref()
             .ok_or(ERROR)
-            .and_then(|session| session.topology_snapshot().map_err(map_error))
+            .and_then(|session| session.topology_graph_snapshot().map_err(map_error))
         {
             Ok(topology) => topology,
             Err(status) => {
@@ -460,7 +458,7 @@ impl HsaState {
         host_page_size: usize,
         host_memory_bytes: usize,
         host: &CpuInfo,
-        topology: TopologySnapshot,
+        topology: TopologyGraphSnapshot,
         lifetime: DriverContextLifetime,
     ) -> Result<Self, Status> {
         let session = pending.session.as_ref().ok_or(ERROR)?;
@@ -488,7 +486,7 @@ impl HsaState {
             let native_caches = cpu.node.into_iter().flat_map(|node| {
                 topology.caches.iter().filter(move |cache| {
                     cache.node == node
-                        && cache.info.cpu_cache
+                        && cache.info.associations.contains(CacheAssociations::CPU)
                         && matches!(cache.info.kind, CpuCacheKind::Data | CpuCacheKind::Other)
                 })
             });
@@ -594,6 +592,7 @@ impl HsaState {
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
+        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?);
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {
@@ -603,7 +602,7 @@ impl HsaState {
             loader: LoaderState::new(),
             image_state: ImageState::new(),
             memory_state: MemoryState::new(health.clone()),
-            signal_state: SignalState::new(lifetime),
+            signal_state,
             host_page_size,
             system_alloc_max_bytes,
             cpus,
@@ -622,7 +621,6 @@ impl HsaState {
             topology,
             gpus,
             session: Some(session),
-            lifetime,
         })
     }
 

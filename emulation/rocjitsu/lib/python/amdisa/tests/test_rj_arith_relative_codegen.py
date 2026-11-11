@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from amdisa.codegen.execute.rj_arith_scalar import RELATIVE_MOVES, gen_scalar
 
 from amdisa.codegen.execute.vector_special import gen_vector_movrel, gen_vector_swaprel
 
@@ -47,6 +48,13 @@ def test_all_relative_methods_use_rj_arith_after_emulator_address_resolution(arc
         / arch
     )
     cases = {
+        'sop1': [
+            'SMovrelsB32',
+            'SMovrelsB64',
+            'SMovreldB32',
+            'SMovreldB64',
+            'SMovrelsd2B32',
+        ],
         'vop1': [
             'VMovrelsB32',
             'VMovreldB32',

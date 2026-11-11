@@ -20,6 +20,14 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
+rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
+rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
+
 # One explicit source, executable and arithmetic test per instruction.
 foreach(
     instruction
@@ -177,6 +185,12 @@ foreach(
     rj_arith_add_test(${target} math/${family}_test.cpp)
 endforeach()
 
+# VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
+foreach(family IN ITEMS alu fused dot)
+    set(target "rj_arith_dual_${family}_test")
+    rj_arith_add_test(${target} dual/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
@@ -186,6 +200,7 @@ target_compile_definitions(
 add_subdirectory(headers)
 
 # Standalone utilities.
+add_subdirectory(benchmark)
 add_subdirectory(cpuinfo)
 
 if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
@@ -219,4 +234,56 @@ foreach(
 )
     set(target "rj_arith_compare_${family}_test")
     rj_arith_add_test(${target} compare/${family}_test.cpp)
+endforeach()
+
+# Integer families share references and contract checks, with explicit API tests.
+foreach(
+    family
+    IN
+    ITEMS
+        half_binary
+        half_ternary
+        add
+        multiply
+        select
+        combined
+        bitfield
+        bit_count
+        boolean
+        mad
+        packed_binary
+        packed_mad
+        shift
+        sad
+        carry
+        mad64
+)
+    set(target "rj_arith_integer_${family}_test")
+    rj_arith_add_test(${target} integer/${family}_test.cpp)
+endforeach()
+
+# Scalar families keep required SCC/EXEC results distinct from FP status.
+foreach(
+    family
+    IN
+    ITEMS
+        boolean
+        shift
+        move
+        field
+        count
+        pack
+        arithmetic
+        compare_integer
+        compare_float
+        exec
+        fp
+        round
+        conversion
+        state
+        relative
+        pseudo
+)
+    set(target "rj_arith_scalar_${family}_test")
+    rj_arith_add_test(${target} scalar/${family}_test.cpp)
 endforeach()

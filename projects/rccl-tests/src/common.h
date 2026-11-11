@@ -9,6 +9,8 @@
 #define __COMMON_H__
 
 #define NCCL_TESTS_VERSION "2.19.6"
+// Socket encryption pre-shared key; util.cu redacts it from the JSON report by this name.
+#define NCCL_TESTS_TLS_PSK_ENV "NCCL_TESTS_TLS_PSK"
 
 #include "rccl/rccl.h"
 // nccl_device.h provides the device-API public types referenced below
@@ -203,10 +205,17 @@ struct testEngine {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclComm_t comm);
+  /* Optional: fills up to testMaxDevComms reqs (preset to NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER) for
+   * one communicator; *nReqs == 0 skips, testNotImplemented falls back to getDevCommRequirements. */
+  testResult_t (*getMultiDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, int* nReqs, ncclComm_t comm);
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
 };
+
+// DevComm slots per GPU: threadArgs::devComms holds gpu i's DevComms at
+// [i*testMaxDevComms, i*testMaxDevComms + nDevComms).
+constexpr int testMaxDevComms = 2;
 
 extern struct testEngine ncclTestEngine;
 
@@ -238,6 +247,7 @@ struct threadArgs {
   ncclComm_t* comms;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   ncclDevComm* devComms;
+  int nDevComms;  // DevComms created per GPU; 0 when the device implementation skipped
 #endif
   cudaStream_t* streams;
   void** bias;
@@ -271,6 +281,12 @@ struct threadArgs {
   char devtimeAugmentLine[512];
 #endif
 };
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+static inline ncclDevComm* testDevComms(struct threadArgs* args, int gpu) {
+  return args->devComms + gpu * testMaxDevComms;
+}
+#endif
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
 struct testThread {
