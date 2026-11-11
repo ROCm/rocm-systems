@@ -3669,37 +3669,40 @@ pub enum AmdsmiNicHealthStateT {
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicHealthT {
     pub state: u8,
-    pub reserved: [u8; 3usize],
     pub error_count: u32,
     pub reporter: [::std::os::raw::c_char; 64usize],
+    pub reserved: [u64; 4usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicHealthT"][::std::mem::size_of::<AmdsmiNicHealthT>() - 72usize];
-    ["Alignment of AmdsmiNicHealthT"][::std::mem::align_of::<AmdsmiNicHealthT>() - 4usize];
+    ["Size of AmdsmiNicHealthT"][::std::mem::size_of::<AmdsmiNicHealthT>() - 104usize];
+    ["Alignment of AmdsmiNicHealthT"][::std::mem::align_of::<AmdsmiNicHealthT>() - 8usize];
     ["Offset of field: AmdsmiNicHealthT::state"]
         [::std::mem::offset_of!(AmdsmiNicHealthT, state) - 0usize];
-    ["Offset of field: AmdsmiNicHealthT::reserved"]
-        [::std::mem::offset_of!(AmdsmiNicHealthT, reserved) - 1usize];
     ["Offset of field: AmdsmiNicHealthT::error_count"]
         [::std::mem::offset_of!(AmdsmiNicHealthT, error_count) - 4usize];
     ["Offset of field: AmdsmiNicHealthT::reporter"]
         [::std::mem::offset_of!(AmdsmiNicHealthT, reporter) - 8usize];
+    ["Offset of field: AmdsmiNicHealthT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reserved) - 72usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicPortSplitT {
     pub splittable: u8,
     pub split_count: u8,
+    pub reserved: [u64; 1usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicPortSplitT"][::std::mem::size_of::<AmdsmiNicPortSplitT>() - 2usize];
-    ["Alignment of AmdsmiNicPortSplitT"][::std::mem::align_of::<AmdsmiNicPortSplitT>() - 1usize];
+    ["Size of AmdsmiNicPortSplitT"][::std::mem::size_of::<AmdsmiNicPortSplitT>() - 16usize];
+    ["Alignment of AmdsmiNicPortSplitT"][::std::mem::align_of::<AmdsmiNicPortSplitT>() - 8usize];
     ["Offset of field: AmdsmiNicPortSplitT::splittable"]
         [::std::mem::offset_of!(AmdsmiNicPortSplitT, splittable) - 0usize];
     ["Offset of field: AmdsmiNicPortSplitT::split_count"]
         [::std::mem::offset_of!(AmdsmiNicPortSplitT, split_count) - 1usize];
+    ["Offset of field: AmdsmiNicPortSplitT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, reserved) - 8usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3710,14 +3713,14 @@ pub struct AmdsmiNicTelemetryT {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AmdsmiNicTelemetryT"][::std::mem::size_of::<AmdsmiNicTelemetryT>() - 112usize];
+    ["Size of AmdsmiNicTelemetryT"][::std::mem::size_of::<AmdsmiNicTelemetryT>() - 152usize];
     ["Alignment of AmdsmiNicTelemetryT"][::std::mem::align_of::<AmdsmiNicTelemetryT>() - 8usize];
     ["Offset of field: AmdsmiNicTelemetryT::health"]
         [::std::mem::offset_of!(AmdsmiNicTelemetryT, health) - 0usize];
     ["Offset of field: AmdsmiNicTelemetryT::port_split"]
-        [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 72usize];
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 104usize];
     ["Offset of field: AmdsmiNicTelemetryT::reserved"]
-        [::std::mem::offset_of!(AmdsmiNicTelemetryT, reserved) - 80usize];
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, reserved) - 120usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

@@ -82,6 +82,36 @@ TEST_F(NicUnit, NicPublicLayoutFirmwareMatchesThePreviousRelease) {
   EXPECT_EQ(sizeof(amdsmi_nic_fw_info_t), kPreviousFwInfoSizeBytes);
 }
 
+// Each struct new to this release ends in one uint64_t reserve, so a later field can take its place
+// without changing the size.
+TEST_F(NicUnit, NicPublicLayoutNewStructsEndInOneReservedArray) {
+  constexpr auto kHealthSizeBytes = size_t{104};
+  constexpr auto kPortSplitSizeBytes = size_t{16};
+  constexpr auto kTelemetrySizeBytes = size_t{152};
+  constexpr auto kSensorSizeBytes = size_t{320};
+  constexpr auto kWordAlignment = alignof(uint64_t);
+
+  EXPECT_EQ(sizeof(amdsmi_nic_health_t), kHealthSizeBytes);
+  EXPECT_EQ(sizeof(amdsmi_nic_port_split_t), kPortSplitSizeBytes);
+  EXPECT_EQ(sizeof(amdsmi_nic_telemetry_t), kTelemetrySizeBytes);
+  EXPECT_EQ(sizeof(amdsmi_nic_sensor_t), kSensorSizeBytes);
+
+  EXPECT_EQ(alignof(amdsmi_nic_health_t), kWordAlignment);
+  EXPECT_EQ(alignof(amdsmi_nic_port_split_t), kWordAlignment);
+  EXPECT_EQ(alignof(amdsmi_nic_telemetry_t), kWordAlignment);
+  EXPECT_EQ(alignof(amdsmi_nic_sensor_t), kWordAlignment);
+
+  EXPECT_EQ((offsetof(amdsmi_nic_health_t, reserved) + sizeof(amdsmi_nic_health_t::reserved)),
+            sizeof(amdsmi_nic_health_t));
+  EXPECT_EQ(
+      (offsetof(amdsmi_nic_port_split_t, reserved) + sizeof(amdsmi_nic_port_split_t::reserved)),
+      sizeof(amdsmi_nic_port_split_t));
+  EXPECT_EQ((offsetof(amdsmi_nic_telemetry_t, reserved) + sizeof(amdsmi_nic_telemetry_t::reserved)),
+            sizeof(amdsmi_nic_telemetry_t));
+  EXPECT_EQ((offsetof(amdsmi_nic_sensor_t, reserved) + sizeof(amdsmi_nic_sensor_t::reserved)),
+            sizeof(amdsmi_nic_sensor_t));
+}
+
 // The library reports how a NIC connects to a device; the public call speaks amdsmi_link_type_t.
 TEST_F(NicUnit, NicLinkTypeMapsEachLibraryLinkToThePublicOne) {
   using amd::smi::to_amdsmi_link_type;

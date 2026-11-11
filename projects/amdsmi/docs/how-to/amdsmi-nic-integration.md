@@ -550,14 +550,15 @@ typedef enum {
 
 typedef struct {
     uint8_t  state;          // an amdsmi_nic_health_state_t value
-    uint8_t  reserved[3];
     uint32_t error_count;    // UINT32_MAX when unavailable; real counts saturate to UINT32_MAX-1
     char     reporter[64];   // devlink reporter name; "" if none
+    uint64_t reserved[4];
 } amdsmi_nic_health_t;
 
 typedef struct {
-    uint8_t splittable;
-    uint8_t split_count;
+    uint8_t  splittable;
+    uint8_t  split_count;
+    uint64_t reserved[1];
 } amdsmi_nic_port_split_t;
 
 typedef struct {

@@ -3295,9 +3295,10 @@ struct_amdsmi_nic_health_t._pack_ = 1 # source:False
 struct_amdsmi_nic_health_t._layout_ = 'ms'
 struct_amdsmi_nic_health_t._fields_ = [
     ('state', ctypes.c_ubyte),
-    ('reserved', ctypes.c_ubyte * 3),
+    ('PADDING_0', ctypes.c_ubyte * 3),
     ('error_count', ctypes.c_uint32),
     ('reporter', ctypes.c_char * 64),
+    ('reserved', ctypes.c_uint64 * 4),
 ]
 
 amdsmi_nic_health_t = struct_amdsmi_nic_health_t
@@ -3309,6 +3310,8 @@ struct_amdsmi_nic_port_split_t._layout_ = 'ms'
 struct_amdsmi_nic_port_split_t._fields_ = [
     ('splittable', ctypes.c_ubyte),
     ('split_count', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 6),
+    ('reserved', ctypes.c_uint64 * 1),
 ]
 
 amdsmi_nic_port_split_t = struct_amdsmi_nic_port_split_t
@@ -3320,7 +3323,6 @@ struct_amdsmi_nic_telemetry_t._layout_ = 'ms'
 struct_amdsmi_nic_telemetry_t._fields_ = [
     ('health', amdsmi_nic_health_t),
     ('port_split', amdsmi_nic_port_split_t),
-    ('PADDING_0', ctypes.c_ubyte * 6),
     ('reserved', ctypes.c_uint64 * 4),
 ]
 
