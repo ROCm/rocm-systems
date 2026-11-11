@@ -220,6 +220,23 @@ protected:
     }
   }
 
+  // A one-rank failure anywhere in the setup must reach every rank: no rank blocks in an exchange,
+  // none keeps DDA IPC, and nothing stays allocated or mapped.
+  void expectEveryRankWithoutDdaIpc() {
+    EXPECT_EQ(0, bootstrap_.timeouts);
+    EXPECT_EQ(0, bootstrap_.desyncs);
+    for (int rank = 0; rank < kRanks; ++rank) {
+      EXPECT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;  // DDA IPC is optional
+      EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+      EXPECT_EQ(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
+      EXPECT_EQ(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
+      EXPECT_EQ(nullptr, comms_[rank]->ddaPeerPtrsDev) << "rank " << rank;
+      EXPECT_EQ(nullptr, comms_[rank]->ddaPeerPtrsHost) << "rank " << rank;
+    }
+    EXPECT_TRUE(liveAllocations_.empty());
+    EXPECT_EQ(0, openMappingCount());
+  }
+
   int openMappingCount() {
     std::lock_guard<std::mutex> lock(memoryMu_);
     int count = 0;
@@ -370,6 +387,76 @@ TEST_F(DdaIpcLifecycleMicrotest, OneRankScratchFailureLeavesEveryRankWithoutDdaI
   }
   EXPECT_TRUE(liveAllocations_.empty());
   EXPECT_EQ(0, openMappingCount());
+}
+
+// The peer tables are allocated before the vote, so a one-rank failure there is a not-ready vote.
+TEST_F(DdaIpcLifecycleMicrotest, OneRankPeerTableFailureLeavesEveryRankWithoutDdaIpc) {
+  std::atomic<int> peerTableAllocs{0};
+  ScopedHook<hipError_t(void**, size_t)> failOnePeerTable{
+    g_hipMalloc, [this, &peerTableAllocs](void** ptr, size_t size) {
+    if (size == kRanks * sizeof(void*) && peerTableAllocs.fetch_add(1) == 0) {
+      *ptr = nullptr;
+      return hipErrorOutOfMemory;
+    }
+    *ptr = allocate(size);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  EXPECT_EQ(kRanks, peerTableAllocs.load());
+  expectEveryRankWithoutDdaIpc();
+}
+
+// A rank that cannot export its scratch still joins the pointer exchange and publishes no handle.
+TEST_F(DdaIpcLifecycleMicrotest, OneRankScratchExportFailureLeavesEveryRankWithoutDdaIpc) {
+  std::atomic<int> exports{0};
+  ScopedHook<hipError_t(hipIpcMemHandle_t*, void*)> failOneExport{
+    g_hipIpcGetMemHandle, [&exports](hipIpcMemHandle_t* handle, void* ptr) {
+    if (exports.fetch_add(1) == 0) return hipErrorInvalidValue;
+    std::memset(handle, 0, sizeof(*handle));
+    std::memcpy(handle, &ptr, sizeof(ptr));
+    return hipSuccess;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  expectEveryRankWithoutDdaIpc();
+}
+
+// A rank that cannot open a peer's scratch still reaches the barrier exchange and the ready vote.
+TEST_F(DdaIpcLifecycleMicrotest, OneRankScratchOpenFailureLeavesEveryRankWithoutDdaIpc) {
+  std::atomic<int> opens{0};
+  ScopedHook<hipError_t(void**, hipIpcMemHandle_t, unsigned)> failOneOpen{
+    g_hipIpcOpenMemHandle, [this, &opens](void** ptr, hipIpcMemHandle_t handle, unsigned) {
+    if (opens.fetch_add(1) == 0) {
+      *ptr = nullptr;
+      return hipErrorInvalidValue;
+    }
+    std::memcpy(ptr, &handle, sizeof(*ptr));
+    std::lock_guard<std::mutex> lock(memoryMu_);
+    ++openMappings_[*ptr];
+    return hipSuccess;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  expectEveryRankWithoutDdaIpc();
+}
+
+// A rank whose barrier mailbox allocation fails still joins the barrier's pointer exchange.
+TEST_F(DdaIpcLifecycleMicrotest, OneRankBarrierMailboxFailureLeavesEveryRankWithoutDdaIpc) {
+  std::atomic<int> mailboxAllocs{0};
+  ScopedHook<hipError_t(void**, size_t, unsigned)> failOneMailbox{
+    g_hipExtMallocWithFlags, [this, &mailboxAllocs](void** ptr, size_t size, unsigned) {
+    if (size != DDA_IPC_BUFFER_SIZE && mailboxAllocs.fetch_add(1) == 0) {
+      *ptr = nullptr;
+      return hipErrorOutOfMemory;
+    }
+    *ptr = allocate(size);
+    return *ptr == nullptr ? hipErrorOutOfMemory : hipSuccess;
+  }};
+
+  initializeDdaIpcForAllRanks();
+  EXPECT_EQ(kRanks, mailboxAllocs.load());
+  expectEveryRankWithoutDdaIpc();
 }
 
 // RCCL_DDA_IPC_LAZY_INIT=1: comm init allocates nothing, and the first ensure on every rank
@@ -633,6 +720,64 @@ TEST_F(DdaIpcLifecycleMicrotest, PeerCloseFailureIsBestEffortAndSerialCleanupCom
   }
 }
 
+// Mirrors the record ncclIpcMemHandler::exchangeMemPtrs gathers from every rank.
+struct PublishedIpcHandle {
+  hipIpcMemHandle_t handle;
+  int valid;
+};
+
+// Every rank publishes a valid handle to its own 0x1000 + rank * 0x100, except noHandleRank.
+ncclResult_t gatherFakeIpcHandles(void* allData, int size, int nranks, int noHandleRank) {
+  EXPECT_EQ(static_cast<int>(sizeof(PublishedIpcHandle)), size);
+  auto* published = static_cast<PublishedIpcHandle*>(allData);
+  for (int rank = 0; rank < nranks; ++rank) {
+    void* ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000 + rank * 0x100));
+    std::memset(&published[rank], 0, sizeof(published[rank]));
+    if (rank == noHandleRank) continue;
+    std::memcpy(&published[rank].handle, &ptr, sizeof(ptr));
+    published[rank].valid = 1;
+  }
+  return ncclSuccess;
+}
+
+TEST(DdaIpcMemHandlerMicrotest, PeerWithoutHandleFailsTheExchangeWithoutOpening) {
+  constexpr int nranks = 4;
+  int openCalls = 0;
+  ScopedHook allGather(g_bootstrapAllGather, [](void*, void* allData, int size) {
+    return gatherFakeIpcHandles(allData, size, nranks, /*noHandleRank=*/2);
+  });
+  ScopedHook exportHandle(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t* handle, void* ptr) {
+    std::memset(handle, 0, sizeof(*handle));
+    std::memcpy(handle, &ptr, sizeof(ptr));
+    return hipSuccess;
+  });
+  ScopedHook openHandle(g_hipIpcOpenMemHandle, [&openCalls](void**, hipIpcMemHandle_t, unsigned) {
+    ++openCalls;
+    return hipSuccess;
+  });
+
+  ncclIpcMemHandler handler(nullptr, /*rank=*/0, nranks);
+  ASSERT_EQ(ncclSuccess, handler.addSelfDeviceMemPtr(reinterpret_cast<void*>(0x1000)));
+  EXPECT_EQ(ncclRemoteError, handler.exchangeMemPtrs());
+  EXPECT_EQ(0, openCalls);
+}
+
+// Without a local pointer the handler still joins the gather, so its peers do not block.
+TEST(DdaIpcMemHandlerMicrotest, MissingLocalPointerStillJoinsTheExchange) {
+  constexpr int nranks = 4;
+  int gathers = 0;
+  ScopedHook allGather(g_bootstrapAllGather, [&gathers](void*, void* allData, int size) {
+    ++gathers;
+    auto* published = static_cast<PublishedIpcHandle*>(allData);
+    EXPECT_EQ(0, published[0].valid);
+    return gatherFakeIpcHandles(allData, size, nranks, /*noHandleRank=*/0);
+  });
+
+  ncclIpcMemHandler handler(nullptr, /*rank=*/0, nranks);
+  EXPECT_EQ(ncclInvalidUsage, handler.exchangeMemPtrs());
+  EXPECT_EQ(1, gathers);
+}
+
 TEST(DdaIpcMemHandlerMicrotest, PartialOpenFailureClosesMappingsOpenedBeforeTheFailure) {
   constexpr int nranks = 4;
   constexpr int selfRank = 0;
@@ -641,14 +786,7 @@ TEST(DdaIpcMemHandlerMicrotest, PartialOpenFailureClosesMappingsOpenedBeforeTheF
   int closeCalls = 0;
 
   ScopedHook allGather(g_bootstrapAllGather, [](void*, void* allData, int size) {
-    EXPECT_EQ(static_cast<int>(sizeof(hipIpcMemHandle_t)), size);
-    auto* handles = static_cast<hipIpcMemHandle_t*>(allData);
-    for (int rank = 0; rank < nranks; ++rank) {
-      void* ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1000 + rank * 0x100));
-      std::memset(&handles[rank], 0, sizeof(handles[rank]));
-      std::memcpy(&handles[rank], &ptr, sizeof(ptr));
-    }
-    return ncclSuccess;
+    return gatherFakeIpcHandles(allData, size, nranks, /*noHandleRank=*/-1);
   });
   ScopedHook exportHandle(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t* handle, void* ptr) {
     std::memset(handle, 0, sizeof(*handle));

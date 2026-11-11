@@ -19,6 +19,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 using nccl_dda_detail::DdaIpcBarrierState;
@@ -47,7 +48,7 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
 }
 
 // Allocates and zeroes the scratch. Returns null, with the HIP error cleared, on any failure.
-void* ddaIpcAllocScratch(ncclComm* comm, size_t bytes) {
+void* ddaIpcAllocScratch(size_t bytes) {
   void* scratch = nullptr;
 #if defined(HIP_UNCACHED_MEMORY)
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocUncached));
@@ -72,85 +73,79 @@ void* ddaIpcAllocScratch(ncclComm* comm, size_t bytes) {
   return scratch;
 }
 
-// Takes ownership of scratch. Failures are logged and leave the comm without DDA IPC.
-ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
-  auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
-  if (handler == nullptr) {
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
-    return ncclSuccess;
-  }
-
-  ncclResult_t res = handler->addSelfDeviceMemPtr(scratch);
-  if (res != ncclSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: addSelfDeviceMemPtr failed");
-    return ncclSuccess;
-  }
-  res = handler->exchangeMemPtrs();
-  if (res != ncclSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: exchangeMemPtrs failed");
-    return ncclSuccess;
-  }
-
+// What each rank allocates on its own before the ranks vote. All set, or all null.
+struct DdaIpcLocal {
+  void* scratch = nullptr;
+  ncclIpcMemHandler* handler = nullptr;
   void* peerDev = nullptr;
-  cudaError_t ce = cudaMalloc(&peerDev, kDdaNranks * sizeof(void*));
+  void** peerHost = nullptr;
+};
+
+void ddaIpcFreeLocal(DdaIpcLocal* local) {
+  delete local->handler;
+  CUDACHECKIGNORE(cudaFree(local->peerDev));
+  free(local->peerHost);
+  CUDACHECKIGNORE(cudaFree(local->scratch));
+  *local = DdaIpcLocal{};
+}
+
+bool ddaIpcAllocLocal(ncclComm* comm, size_t bytes, DdaIpcLocal* local) {
+  local->scratch = ddaIpcAllocScratch(bytes);
+  if (local->scratch == nullptr) return false;
+  local->handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
+  if (local->handler == nullptr) {
+    WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
+    ddaIpcFreeLocal(local);
+    return false;
+  }
+  cudaError_t ce = cudaMalloc(&local->peerDev, kDdaNranks * sizeof(void*));
   if (ce != cudaSuccess) {
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
     WARN("ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)", cudaGetErrorString(ce));
-    return ncclSuccess;
+    (void)cudaGetLastError();
+    local->peerDev = nullptr;
+    ddaIpcFreeLocal(local);
+    return false;
   }
-
-  void* h_ptrs[kDdaNranks];
-  for (int i = 0; i < kDdaNranks; ++i) {
-    void* p = nullptr;
-    res = handler->getPeerDeviceMemPtr(i, &p);
-    if (res != ncclSuccess) {
-      CUDACHECKIGNORE(cudaFree(peerDev));
-      delete handler;
-      CUDACHECKIGNORE(cudaFree(scratch));
-      WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
-      return ncclSuccess;
-    }
-    h_ptrs[i] = p;
-  }
-
-  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
-  if (ce != cudaSuccess) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
-    return ncclSuccess;
-  }
-
-  if (ncclCalloc(&comm->ddaPeerPtrsHost, kDdaNranks) != ncclSuccess) {
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+  if (ncclCalloc(&local->peerHost, kDdaNranks) != ncclSuccess) {
     WARN("ncclDdaIpcCommInit: OOM allocating host peer table");
-    return ncclSuccess;
+    local->peerHost = nullptr;
+    ddaIpcFreeLocal(local);
+    return false;
   }
+  return true;
+}
 
-  cudaError_t ddaCe = cudaMemcpy(comm->ddaPeerPtrsHost, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToHost);
-  if (ddaCe != cudaSuccess) {
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
-    WARN("ncclDdaIpcCommInit: cudaMemcpy(host peer table) failed (%s)", cudaGetErrorString(ddaCe));
-    return ncclSuccess;
+// Takes ownership of local. Collective: every rank runs both pointer exchanges and the ready
+// allgather whatever fails on it, so one rank's failure leaves every rank without DDA IPC
+// instead of blocking its peers in an exchange or splitting the backend choice.
+ncclResult_t ddaIpcSetup(ncclComm* comm, DdaIpcLocal* local, size_t bytes) {
+  const ncclResult_t addRes = local->handler->addSelfDeviceMemPtr(local->scratch);
+  const ncclResult_t exchangeRes = local->handler->exchangeMemPtrs();
+  bool localOk = addRes == ncclSuccess && exchangeRes == ncclSuccess;
+  if (!localOk) WARN("ncclDdaIpcCommInit: scratch pointer exchange failed");
+
+  void* h_ptrs[kDdaNranks] = {};
+  for (int i = 0; localOk && i < kDdaNranks; ++i) {
+    if (local->handler->getPeerDeviceMemPtr(i, &h_ptrs[i]) != ncclSuccess) {
+      WARN("ncclDdaIpcCommInit: getPeerDeviceMemPtr failed");
+      localOk = false;
+    }
+  }
+  if (localOk) {
+    cudaError_t ce = cudaMemcpy(local->peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
+    if (ce != cudaSuccess) {
+      WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
+      (void)cudaGetLastError();
+      localOk = false;
+    }
+  }
+  if (localOk) {
+    memcpy(local->peerHost, h_ptrs, kDdaNranks * sizeof(void*));
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
   auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap,
                                                                dda::common::DdaKernelParams{comm->abortFlagDev});
-  // From here on every rank reaches the ready allgather below, so a local failure cannot leave peers on DDA.
   DdaIpcBarrierState* barrierState = nullptr;
   if (!barrierPair.first) {
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
@@ -166,15 +161,16 @@ ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
   const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
     kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
   uint32_t* epochDev = nullptr;
-  if (barrierState != nullptr && (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
-                                  cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
+  if (localOk && barrierState != nullptr &&
+      (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
+       cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
     (void)cudaGetLastError(); // clear the sticky error
     CUDACHECKIGNORE(cudaFree(epochDev));
     epochDev = nullptr;
   }
 
   // Rank-uniform outcome, else ranks pick different backends and hang. 0: no DDA IPC, 1: no LL epoch cells, 2: all.
-  int ready = barrierState == nullptr ? 0 : (epochDev == nullptr ? 1 : 2);
+  int ready = !localOk || barrierState == nullptr ? 0 : (epochDev == nullptr ? 1 : 2);
   std::vector<int> allReady(kDdaNranks, 0);
   allReady[comm->rank] = ready;
   if (bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)) != ncclSuccess) {
@@ -189,11 +185,7 @@ ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
   if (ready == 0) {
     delete barrierState;
     barrierPair.first.reset();
-    free(comm->ddaPeerPtrsHost);
-    comm->ddaPeerPtrsHost = nullptr;
-    CUDACHECKIGNORE(cudaFree(peerDev));
-    delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    ddaIpcFreeLocal(local);
     ATTN("DDA IPC setup failed on a rank; skipping the DDA IPC path");
     return ncclSuccess;
   }
@@ -201,32 +193,35 @@ ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
     ATTN("LL epoch cells unavailable on a rank; DDA Broadcast disabled");
   }
 
-  comm->ddaIpcMemHandler = handler;
-  comm->ddaScratch = scratch;
+  comm->ddaIpcMemHandler = local->handler;
+  comm->ddaScratch = local->scratch;
   comm->ddaScratchBytes = bytes;
-  comm->ddaPeerPtrsDev = peerDev;
+  comm->ddaPeerPtrsDev = local->peerDev;
+  comm->ddaPeerPtrsHost = local->peerHost;
   comm->ddaIpcBarrierState = barrierState;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
+  *local = DdaIpcLocal{};
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
   return ncclSuccess;
 }
 
-// Collective: each rank votes on holding its scratch, so one unready rank leaves every rank without DDA IPC.
+// Collective: each rank votes on holding its local resources, so one unready rank leaves every rank without DDA IPC.
 // Capturing ranks may not allocate: the setup's synchronous copies are illegal in capture.
 ncclResult_t ddaIpcVoteAndSetup(ncclComm* comm, size_t bytes, bool mayAllocate, bool* agreed) {
   *agreed = false;
-  void* scratch = mayAllocate ? ddaIpcAllocScratch(comm, bytes) : nullptr;
+  DdaIpcLocal local;
+  const bool allocated = mayAllocate && ddaIpcAllocLocal(comm, bytes, &local);
   std::vector<uint8_t> ready(comm->nRanks);
-  ready[comm->rank] = scratch != nullptr;
+  ready[comm->rank] = allocated;
   ncclResult_t res = bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t));
   if (res != ncclSuccess || std::find(ready.begin(), ready.end(), 0) != ready.end()) {
-    CUDACHECKIGNORE(cudaFree(scratch));
+    ddaIpcFreeLocal(&local);
     return res;
   }
   *agreed = true;
-  return ddaIpcSetup(comm, scratch, bytes);
+  return ddaIpcSetup(comm, &local, bytes);
 }
 
 } // namespace
