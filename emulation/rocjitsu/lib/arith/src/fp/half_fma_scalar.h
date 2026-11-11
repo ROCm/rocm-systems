@@ -8,10 +8,10 @@
 
 #include "common/bits.h"
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/fma_integer.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

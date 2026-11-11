@@ -16,7 +16,7 @@
 #include "graphics/interp16_reference.h"
 #include "graphics/interp32_reference.h"
 #include "graphics/mullit_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <bit>
 #include <cmath>

@@ -4,6 +4,7 @@
 // Tests for whole-word and selected-halfword register moves.
 
 #include "register/helpers.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 // Check register routing and preservation of unselected destination data.
 TEST(RegisterVMovB32W32, Arithmetic) {

@@ -6,10 +6,10 @@
 
 #include "conversion/conversion64.h"
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "conversion/float_conversion.h"
 #include "fp/fp64_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 

@@ -6,7 +6,7 @@
 #include "conversion/helpers.h"
 #include "conversion/integer_conversion_reference.h"
 #include "conversion/pack_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"

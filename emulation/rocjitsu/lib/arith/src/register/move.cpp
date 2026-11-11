@@ -4,10 +4,10 @@
 // Whole-word and selected-halfword moves with EXEC masking.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

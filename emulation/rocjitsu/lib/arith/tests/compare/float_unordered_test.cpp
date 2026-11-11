@@ -4,7 +4,7 @@
 // Tests for unordered floating-point comparisons and negated predicates.
 
 #include "compare/float_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <cmath>
 #include <gtest/gtest.h>

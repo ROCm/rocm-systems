@@ -7,14 +7,14 @@
 // Stage ordering follows rocjitsu shared/pseudo_scalar.h and transcendental.h.
 // GFX1201 captures correct half OMOD underflow: newly created -0 keeps its sign.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/half_fma_scalar.h"
 #include "math/half_unary.h"
 #include "math/half_unary_exact.h"
 #include "math/unary_exact.h"
 #include "math/unary_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

@@ -9,11 +9,11 @@
 // raise INT_DIV0, while CLAMP suppresses a new cause (not an existing flag).
 
 #include "math/rcp_iflag.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "math/unary_exact.h"
 #include "math/x86_64/rcp_exact.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <stdint.h>
 

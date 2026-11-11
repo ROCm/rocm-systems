@@ -7,7 +7,7 @@
 #include "common/x86_64/half_x86_64_v3.h"
 #include "math/trig.h"
 #include "math/x86_64/trig_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 #include <immintrin.h>
 #include <stdint.h>

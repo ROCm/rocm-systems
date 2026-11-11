@@ -9,7 +9,7 @@
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <bit>
 #include <gtest/gtest.h>

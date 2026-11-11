@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>

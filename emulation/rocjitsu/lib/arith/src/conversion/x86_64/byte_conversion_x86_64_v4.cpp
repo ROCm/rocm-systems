@@ -7,7 +7,7 @@
 #include "conversion/byte_conversion.h"
 #include "conversion/float_conversion.h"
 #include "conversion/x86_64/lanes.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <immintrin.h>
 #include <stdint.h>

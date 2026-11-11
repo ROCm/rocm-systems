@@ -7,7 +7,7 @@
 // Adapted from rocjitsu's shared/cube.h bit-level model.
 
 #include "graphics/cube.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 
 #include <immintrin.h>
 #include <stdint.h>

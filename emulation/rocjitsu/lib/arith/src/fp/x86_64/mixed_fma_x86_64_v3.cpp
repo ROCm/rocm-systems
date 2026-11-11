@@ -10,7 +10,7 @@
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

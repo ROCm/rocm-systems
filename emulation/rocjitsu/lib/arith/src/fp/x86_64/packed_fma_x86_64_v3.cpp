@@ -8,7 +8,7 @@
 #include "common/x86_64/half_x86_64_v3.h"
 #include "fp/packed_fma.h"
 #include "fp/x86_64/half_fma_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>

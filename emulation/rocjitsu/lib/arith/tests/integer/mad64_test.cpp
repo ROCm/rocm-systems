@@ -4,7 +4,7 @@
 // Tests for wide integer multiply-add and carry results.
 
 #include "integer/mad64_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 
