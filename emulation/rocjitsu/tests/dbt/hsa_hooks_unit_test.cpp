@@ -1088,6 +1088,26 @@ hsa_status_t HSA_API capture_iterated_symbol_for_test(hsa_executable_t, hsa_agen
   return HSA_STATUS_SUCCESS;
 }
 
+TEST(HsaHooksUnitTest, RejectsUnreadableRuntimeHandoff) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-hsa-unreadable-handoff-"));
+  rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  rocjitsu::test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
+                                                           runtime.path());
+  const std::string handoff = runtime.path() + "/config_path";
+  ASSERT_TRUE(std::filesystem::create_directory(handoff));
+  FakeApiTable api;
+  OnUnload();
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(OnLoad(&api.table, 0, 0, nullptr));
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_NE(diagnostic.find("failed to load runtime config"), std::string::npos);
+  EXPECT_NE(diagnostic.find("Cannot read runtime config handoff: " + handoff), std::string::npos);
+  EXPECT_EQ(api.core.hsa_code_object_reader_create_from_file_fn,
+            fake_code_object_reader_create_from_file);
+  OnUnload();
+}
+
 TEST(HsaHooksUnitTest, IterateAgentsDropsGuestOwnSlotWhenGuestAppearsFirst) {
   reset_pool_blocker(false);
   reset_agent_blocker(false);

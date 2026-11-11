@@ -1137,7 +1137,7 @@ AgentStepping classify_agent(const OriginalApi &api, hsa_agent_t agent) {
   } data{get_isa_info, {}, false};
   const hsa_status_t status = iterate(
       agent,
-      [](hsa_isa_t isa, void *opaque) -> hsa_status_t {
+      [](hsa_isa_t isa, void *opaque) noexcept -> hsa_status_t {
         auto *out = static_cast<IsaData *>(opaque);
         uint32_t length = 0;
         if (out->get_info(isa, HSA_ISA_INFO_NAME_LENGTH, &length) != HSA_STATUS_SUCCESS ||
@@ -1482,15 +1482,6 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
 
   translation.output = copy_bytes(translated_data, translated_size);
   rj_gfx1250_b0_to_a0_free(translated_data);
-  if (translation.output == nullptr) {
-    // Deliberately NOT remembered: running out of memory says nothing about
-    // these bytes, and recording it would turn one bad moment into a permanent
-    // refusal of an object that translates perfectly well.
-    log_translation(translation.info.source_code_object_id, "output_copy_failed",
-                    translation.info.changed_instruction_count, source->size(), translated_size,
-                    translation.status, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
 
   remember(translation);
   const hsa_status_t load_status =
