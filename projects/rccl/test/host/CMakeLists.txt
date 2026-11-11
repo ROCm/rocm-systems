@@ -108,6 +108,44 @@ foreach(_param
 endforeach()
 # The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastSplitDataOnQps, \"IB_SPLIT_DATA_ON_QPS\", 0)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_SPLIT_DATA_ON_QPS\", 0)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastPrepostReceiveWorkRequests, \"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "NCCL_PARAM(IbCastAsyncEvents, \"IB_RETURN_ASYNC_EVENTS\", 1)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"IB_RETURN_ASYNC_EVENTS\", 1)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "RCCL_PARAM(IbCastOptionalRecvCompletion, \"IB_OPTIONAL_RECV_COMPLETION\", 0)<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return g_loadParam(\"RCCL_IB_OPTIONAL_RECV_COMPLETION\", 0)<SEMI> }"
+  "transport/net_ib_cast/common.cc" "int IbCastNMergedDevs = -1<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastNMergedDevs = -1<SEMI>"
+  "transport/net_ib_cast/common.cc" "int IbCastNDevs = -1<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastNDevs = -1<SEMI>"
+  "transport/net_ib_cast/common.cc" "int IbCastRelaxedOrderingEnabled = 0<SEMI>"
+    "net_ib_cast_common_fakes.cc" "int IbCastRelaxedOrderingEnabled = 0<SEMI>"
+  "transport/net_ib_cast/common.cc" "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
+    "net_ib_cast_common_fakes.cc" "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
+  "transport/net_ib_cast/common.cc" "return &sComm->devs[devIndex].base<SEMI>"
+    "net_ib_cast_common_fakes.cc" "if (base->isSend) return &((struct ncclIbSendComm*)base)->devs[devIndex].base<SEMI>"
+  "transport/net_ib_cast/common.cc" "return &rComm->devs[devIndex].base<SEMI>"
+    "net_ib_cast_common_fakes.cc" "return &((struct ncclIbRecvComm*)base)->devs[devIndex].base<SEMI>"
+  "transport/net_ib_cast/init.cc" "RCCL_PARAM(IbCastQpsPerP2p, \"IB_QPS_PER_P2P\", 0)<SEMI>"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"RCCL_IB_QPS_PER_P2P\", 0)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "RCCL_PARAM(IbCastP2pDisableCts, \"IB_P2P_DISABLE_CTS\", 1)<SEMI>"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"RCCL_IB_P2P_DISABLE_CTS\", 1)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "NCCL_PARAM(IbCastOooRq, \"IB_OOO_RQ\", 0)"
+    "net_ib_cast_init_fakes.cc" "return g_loadParam(\"IB_OOO_RQ\", 0)<SEMI> }"
+  "transport/net_ib_cast/init.cc" "bool IbCastAinicRoce = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastAinicRoce = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastMultiplaneEnable = false<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastMultiplaneEnable = false<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastOffloadEnabled = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastOffloadEnabled = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastUseInline = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastUseInline = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "bool IbCastAinicCtsInlineData = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "bool IbCastAinicCtsInlineData = 0<SEMI>"
+  "transport/net_ib_cast/init.cc" "int IbCastGdrFlushDisable = 0<SEMI>"
+    "net_ib_cast_init_fakes.cc" "int IbCastGdrFlushDisable = 0<SEMI>"
   "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
@@ -1158,6 +1196,46 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNetIbCastQpSharing -- src/transport/net_ib_cast/qp_sharing.cc. Own binary: it
+  # needs the net_ib_cast fakes and include directories that no shared binary links.
+  set(TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES
+    net-ib-cast-qp-sharing-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc    # IbCastDevs
+    fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbCastConnect -- src/transport/net_ib_cast/connect.cc with the real
+  # qp_sharing.cc. Own binary: no shared binary links the net_ib_cast or socket fakes it needs.
+  set(TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES
+    net-ib-cast-connect-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/ionicdvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_gdr_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_multiplane_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # src/misc/ IB verbs and direct-verbs loaders
   set(TEST_MICRO_MISC_SOURCE_FILES
     fakes/hip_fakes.cc
@@ -2139,16 +2217,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
 # ---------------------------------------------------------------------------
 set(_enq_common_args
   SOURCES ${TEST_MICRO_ENQUEUE_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_WARP_SPEED
   EXTRA_INCLUDES
     ${RCCL_HOST_HIPIFY_DIR}/src/device               # device/common.h (neutered)
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    RCCL_TEST_ENQUEUE_HOOKS
     # Per-symbol omissions from the shared nccl_stubs.cc; enqueue.cc itself
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # enqueue-test.cc provides these launch-prepare floors directly.
+    RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+    RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
     # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
@@ -2157,6 +2240,8 @@ set(_enq_common_args
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
+rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-warpspeed ${_enq_common_args})
+target_compile_definitions(rccl-UnitTestsMicroEnqueue-warpspeed PRIVATE ENABLE_WARP_SPEED)
 if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
@@ -2598,6 +2683,35 @@ set(_MICRO_TRANSPORT_DEFS
   RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
   RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
   RMA_SOCKET_SETUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_setup.cc")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastQpSharing
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastQpSharing
+  SOURCES ${TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, qp_sharing.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_qp_sharing.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastConnect
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastConnect
+  SOURCES ${TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, connect_cast.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # connect_tmp.cc, not connect.cc: graph/connect.cc is listed first in src/CMakeLists.txt, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_IB_CAST_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/connect_tmp.cc"
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_connect.yaml")
 
 # One src/transport/ test file per binary. SOURCES lists the fakes and the real sibling units the test file
 # reaches; a sibling unit is compiled real or faked, never both. PROCESS_ISOLATED links the forking runner.
