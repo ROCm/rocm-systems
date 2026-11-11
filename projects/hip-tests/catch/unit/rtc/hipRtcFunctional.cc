@@ -8,6 +8,7 @@
  * hipRTC program should be created even if the name passed is empty or null
  * hipRTC program compilation should succeed even if gpu arch is not specified in the options
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
+ * hipRTC program compilation should succeed when the same program is compiled again
  */
 #include <hip_test_common.hh>
 
@@ -68,4 +69,12 @@ HIP_TEST_CASE(Unit_hiprtc_functional) {
 #if HT_NVIDIA
   HIPCHECK(hipCtxDestroy(ctx));
 #endif
+}
+
+HIP_TEST_CASE(Unit_hiprtc_compile_twice) {
+  hiprtcProgram prog;
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
+  HIPRTC_CHECK(hiprtcCompileProgram(prog, 0, 0));
+  HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }

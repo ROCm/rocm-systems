@@ -12,6 +12,9 @@ rtc:
   Unit_hiprtc_functional:
     <<: *level_default
     tags: [compile]
+  Unit_hiprtc_compile_twice:
+    <<: *level_default
+    tags: [compile]
   Unit_hipStreamCaptureRtc:
     <<: *level_default
     tags: [integration]
