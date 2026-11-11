@@ -54,3 +54,12 @@ not enable stronger explicit ISA flags globally: a trailing `-march` does not
 cancel options such as `-mavx2`. The archive audit checks symbol ownership,
 not the instruction set of each function. Debug CI exercises emitted inline
 definitions that optimized builds may remove.
+
+## Performance-sensitive loops
+
+Use `RJ_ARITH_UNROLL(count)` from `common/compiler.h` when a bounded arithmetic
+loop relies on unrolling for constant operand offsets or register-resident
+accumulators. Check GCC and Clang output at the intended ISA levels, and measure
+runtime and code size. Do not annotate staging loops or large loops indiscriminately;
+the hint must not be needed for correctness. Keep floating-point reduction order
+unchanged when unrolling.

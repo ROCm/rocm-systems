@@ -24,9 +24,9 @@ std::vector<std::string> element_types(const std::string &name) {
     auto position = name.find('_', begin);
     int end = position == std::string::npos ? int(name.size()) : int(position);
     std::string token = name.substr(begin, end - begin);
-    if (token == "f16" || token == "bf16" || token == "f32" || token == "f64" || token == "fp8" ||
-        token == "bf8" || token == "i32" || token == "u32" || token == "iu8" || token == "iu4" ||
-        token == "u8" || token == "u4") {
+    if (token == "bf16f32" || token == "f16" || token == "bf16" || token == "f32" ||
+        token == "f64" || token == "fp8" || token == "bf8" || token == "i32" || token == "u32" ||
+        token == "iu8" || token == "iu4" || token == "u8" || token == "u4") {
       types.push_back(token);
     }
     begin = end + 1;
@@ -82,6 +82,11 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     left = right = types.back();
   }
   std::string formats[] = {left, right, output, output};
+  if (output == "bf16f32") {
+    // Packed BF16 results consume an FP32 accumulator.
+    formats[2] = "f32";
+    formats[3] = instruction.find("swmmac") != std::string::npos ? "f32" : "bf16";
+  }
   if (layout == OperandLayout::Float32Inputs) {
     left = right = formats[0] = formats[1] = formats[2] = "f32";
   }
@@ -150,9 +155,9 @@ Operands::Operands(const std::string &instruction, bool one_nan_lane, OperandLay
     // Change one input element, away from SIMD boundaries. Gfx11 WMMA requires
     // replicated A/B inputs: use C there to keep just one physical NaN lane.
     // Other matrix instructions use one A element (which can affect many outputs).
-    bool gfx11 = instruction.find("v_wmma_") == 0 &&
-                 instruction.find("gfx12") == std::string::npos &&
-                 (left == "f16" || left == "bf16");
+    bool gfx11 =
+        instruction.find("v_wmma_") == 0 && instruction.find("gfx12") == std::string::npos &&
+        instruction.find("_16x16x16_") != std::string::npos && (left == "f16" || left == "bf16");
     int operand = gfx11 ? 2 : 0;
     const auto &type = formats[operand];
     auto &value = data[operand][0][5];

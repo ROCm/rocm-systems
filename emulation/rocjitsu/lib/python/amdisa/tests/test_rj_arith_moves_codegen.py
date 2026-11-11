@@ -93,7 +93,9 @@ def test_all_move_and_selection_encodings_route_to_rj_arith(arch):
                 depth += (source[end] == '{') - (source[end] == '}')
                 end += 1
             body = source[match.end() : end - 1]
-            assert re.search(r'\brj_arith(?:_|::)', body), match[1]
+            assert re.search(
+                r'\b(?:rj_arith(?:_|::)|amdgpu::arith::execute_move32\()', body
+            ), match[1]
             assert 'try_execute_' not in body
             assert 'amdgpu::execute_s_' not in body
             assert 'amdgpu::execute_v_' not in body

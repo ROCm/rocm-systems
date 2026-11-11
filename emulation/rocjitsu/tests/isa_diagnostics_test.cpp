@@ -401,12 +401,12 @@ TEST_P(IsaDiagnosticsTest, Cdna5LdsTransposeDoesNotInheritCdna4Restrictions) {
   }
 }
 
-TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
+TEST_P(IsaDiagnosticsTest, MigratedMfmaReportsItsIssuingPc) {
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP();
   ASSERT_NO_FATAL_FAILURE(create(64, 2));
   const uint64_t pc = wf->pc;
-  // Independent, helper-eligible MFMAs followed by a branch that drains work.
+  // Migrated MFMAs stay on the issuer, preserving each diagnostic PC.
   for (unsigned i = 0; i < 2; ++i) {
     const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
                                                {.vdst = static_cast<uint8_t>(64 + i * 16),
@@ -424,7 +424,7 @@ TEST_P(IsaDiagnosticsTest, AsyncMfmaReportsItsIssuingPc) {
     cu->step();
   cu->step(); // Drain at the branch before inspecting the result.
   const std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_GT(async_execution::stats.mma, submitted);
+  EXPECT_EQ(async_execution::stats.mma, submitted);
   EXPECT_EQ(cu->isa_diagnostic_count(), 2u);
   EXPECT_NE(output.find("pc=0x100000:"), std::string::npos) << output;
   EXPECT_NE(output.find("pc=0x100008:"), std::string::npos) << output;

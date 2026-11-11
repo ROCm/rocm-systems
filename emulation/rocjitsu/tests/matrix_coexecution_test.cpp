@@ -177,7 +177,7 @@ TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
   EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
   EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x128_bf8_bf8"));
   EXPECT_TRUE(mc::async_candidate("v_wmma_f32_32x16x128_f4"));
-  EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
+  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
   EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_f8f6f4"));
   EXPECT_FALSE(mc::async_candidate("v_add_f32"));
 }
@@ -899,7 +899,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
                                              .src1 = 288,
                                              .src2 = 320,
                                              .blgp = format}),
-            0x38383838, 0, 8);
+            0x38383838, 0, 2);
   for (unsigned opcode : {45, 46})
     for (bool inline_scale : {false, true})
       add(ROCJITSU_CODE_ARCH_CDNA4,
@@ -921,8 +921,8 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
     const bool expect_async = c.mfma
-                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
-                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32;
+                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (c.mfma_family & 10) != 0
+                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k > 32;
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {
