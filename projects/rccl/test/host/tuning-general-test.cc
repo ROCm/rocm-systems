@@ -374,7 +374,7 @@ TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRin
   ASSERT_EQ(256ULL << 20, ceiling);
 
   float latency = 1.0f, bandwidth = 1.0f;
-  for (int nRanks : {16, 32}) {
+  for (int nRanks : {kFp8RingPenaltyRanks + 1, 16, 32}) {
     comm_->nRanks = nRanks;
     ncclTuningInput_t atCeiling = MakeTimeInput(ceiling, 1, ncclFloat8e4m3);
     atCeiling.func = ncclFuncAllReduce;
@@ -402,7 +402,7 @@ TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRin
 
   comm_->nNodes = 1;
   comm_->nRanks = 12;
-  EXPECT_FLOAT_EQ(otherBase * 1024.0f, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
+  EXPECT_FLOAT_EQ(otherBase, ncclTuningGetTime(&otherArch, NCCL_ALGO_RING, &latency, &bandwidth));
 
   table.ddaLL128Max[ncclFuncAllReduce] = 0;
   ASSERT_EQ(0u, rcclDdaLL128Threshold(comm_.get(), ncclFuncAllReduce));

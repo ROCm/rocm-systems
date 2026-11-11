@@ -1877,7 +1877,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_RingNotPenalised) {
   // At the DDA LL128 ceiling the ring is exempt; one byte below it is penalized.
   constexpr size_t kCeiling = 256ULL << 20;
-  for (int nRanks : {16, 32}) {
+  for (int nRanks : {kFp8RingPenaltyRanks + 1, 16, 32}) {
     for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
       for (size_t nBytes : {kCeiling, kCeiling - 1}) {
         ResetEnqueueTestDeps();
@@ -1899,8 +1899,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AtOrBelowEightRanks_NotPenalised) {
-  // The `nRanks > 8` half of the guard. 8 exactly must NOT be penalised.
-  CostComm eight(/*nRanks=*/8);
+  // The sentinel itself must not be penalised. The penalty starts at the next rank.
+  CostComm eight(/*nRanks=*/kFp8RingPenaltyRanks);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce, ncclFloat8e4m3);
   ScriptAllTimes(2.0f);
@@ -1936,10 +1936,10 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AllReduceOutsideGfx1250LargeRing
   EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE]);
 }
 
-TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250ExemptionDropsWhenNodeOrRankCountFlips) {
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250ExemptionDropsWhenNodeCountFlips) {
   constexpr size_t kCeiling = 256ULL << 20;
   struct RankNodes { int nRanks; int nNodes; };
-  for (RankNodes setup : {RankNodes{16, 2}, RankNodes{12, 1}}) {
+  for (RankNodes setup : {RankNodes{kFp8RingPenaltyRanks + 1, 2}, RankNodes{16, 2}}) {
     ResetEnqueueTestDeps();
     g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return kCeiling; };
     CostComm big(setup.nRanks, setup.nNodes);
