@@ -5,9 +5,9 @@
 //!
 //! The records defined here describe hardware independently of a topology
 //! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
-//! information can be used without a node ID. `model` defines the sources,
-//! nodes, and relationships that bind those facts into one snapshot. Its public
-//! types are re-exported here so callers have one topology interface.
+//! information can be used without a node ID. `graph` binds those facts to
+//! source-qualified nodes and reported relationships in one snapshot. Its
+//! public types are re-exported here so callers have one topology interface.
 //!
 //! An endpoint is a passive discovery record. Optional facts from other
 //! sources may be populated later. Inspecting or cloning one does not activate
@@ -17,15 +17,16 @@
 
 use crate::driver;
 use crate::memory::{DeviceAccess, HostCacheability};
+use std::ops::{BitOr, BitOrAssign};
 
 mod gpu;
+mod graph;
 pub mod host;
-mod model;
 pub mod platform;
 pub use gpu::{
     GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile,
 };
-pub use model::{
+pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
     MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
     TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
@@ -67,6 +68,44 @@ pub enum CacheKind {
     Other,
 }
 
+/// Processor classes positively associated with a cache by its source.
+///
+/// These flags can be combined. An absent flag means the source did not report
+/// that association; it does not prove the processor cannot use the cache.
+/// Source-qualified nodes identify the particular cache and endpoint, while
+/// these flags only classify the reported processor kinds.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CacheAssociations(u32);
+
+impl CacheAssociations {
+    /// No processor association was reported.
+    pub const NONE: Self = Self(0);
+    /// The source associates this cache with CPUs.
+    pub const CPU: Self = Self(1 << 0);
+    /// The source associates this cache with GPU compute units.
+    pub const GPU_COMPUTE_UNIT: Self = Self(1 << 1);
+
+    /// Returns whether every association in `required` was reported.
+    #[must_use]
+    pub const fn contains(self, required: Self) -> bool {
+        self.0 & required.0 == required.0
+    }
+}
+
+impl BitOr for CacheAssociations {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for CacheAssociations {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
 /// Passive cache information shared by host and endpoint topology.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
@@ -78,14 +117,12 @@ pub struct CacheInfo {
     pub line_size_bytes: Option<u32>,
     /// Data and instruction classification of this cache.
     pub kind: CacheKind,
-    /// Whether the source classifies this as a CPU cache.
-    pub cpu_cache: bool,
-    /// Whether the source marks this cache as associated with compute units.
-    pub(crate) compute_unit_cache: bool,
+    /// Processor classes positively associated with this cache by its source.
+    pub associations: CacheAssociations,
 }
 
 impl CacheInfo {
-    /// Creates cache information without a compute-unit association.
+    /// Creates cache information without a reported processor association.
     #[must_use]
     pub const fn new(
         level: u32,
@@ -98,8 +135,7 @@ impl CacheInfo {
             size_bytes,
             line_size_bytes,
             kind,
-            cpu_cache: false,
-            compute_unit_cache: false,
+            associations: CacheAssociations::NONE,
         }
     }
 }

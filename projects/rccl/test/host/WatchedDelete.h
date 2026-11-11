@@ -18,6 +18,8 @@ static const void* g_deleteWatchPtr = nullptr;
 static int g_deleteWatchHits = 0;
 // Leaves the watched block allocated, so a second delete of it is counted rather than a double free.
 static bool g_deleteWatchKeeps = false;
+// 0 = disarmed; otherwise the next nothrow new of exactly this size becomes the watched pointer.
+static std::size_t g_deleteWatchNewSize = 0;
 
 static void MicroOperatorDelete(void* p) noexcept {
   if (p != nullptr && p == g_deleteWatchPtr) {
@@ -33,7 +35,14 @@ void* operator new(std::size_t n) {
   return p;
 }
 void* operator new[](std::size_t n) { return ::operator new(n); }
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+  void* p = std::malloc(n != 0 ? n : 1);
+  if (p != nullptr && g_deleteWatchNewSize != 0 && n == g_deleteWatchNewSize) {
+    g_deleteWatchPtr = p;
+    g_deleteWatchNewSize = 0;
+  }
+  return p;
+}
 void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
 void operator delete(void* p) noexcept { MicroOperatorDelete(p); }
 void operator delete[](void* p) noexcept { MicroOperatorDelete(p); }

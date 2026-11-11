@@ -65,11 +65,6 @@ public:
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask = 0xF);
 
   /// Register an event with its architectural wait-counter obligations.
-  void
-  registerEvent(InstructionSnapshot instruction, MemoryEventType type,
-                std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-                std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   /// A nonzero lastRegisterByteMask overrides byteMask for the last destination.
   void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
@@ -77,10 +72,6 @@ public:
                      MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
   /// Register an in-flight scalar load using its architectural destination.
-  void registerScalarLoad(
-      InstructionSnapshot instruction, RegisterRef destination, uint64_t execMask,
-      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   void registerScalarLoad(InstructionSnapshot instruction, RegisterRef destination,
                           uint64_t execMask,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
@@ -93,12 +84,6 @@ public:
                         std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask = 0xF);
-  void
-  registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
-                   std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                   std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
-                   amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-                   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
   /// ldsLaneMask restricts LDS intervals to a subset of execMask (for mixed
   /// FLAT). Register dependencies still use all execMask lanes, and the whole
   /// instruction occupies one event with one set of counter obligations.
