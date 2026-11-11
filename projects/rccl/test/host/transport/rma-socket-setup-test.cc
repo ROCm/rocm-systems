@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <initializer_list>
@@ -111,7 +112,69 @@ class RmaSocketSetupMicrotest : public ::testing::Test {
     ResetHipFakes();
     ResetNcclFakes();
   }
+
+  template <typename Signature>
+  void CheckConnectFailure(std::function<Signature>& target, int failCall, int expectedCloses) {
+    ncclSocket listen{};
+    std::array<ncclRmaSocketProxyHandle, 2> handleStorage{};
+    std::array<void*, 2> handles{{&handleStorage[0], &handleStorage[1]}};
+    ScopedConnectHandshake handshake({1, 0});
+    const auto original = target;
+    int attempts = 0;
+    ScopedHook failure(target, [&, original](auto... arguments) {
+      if (++attempts == failCall) return ncclRemoteError;
+      return original(arguments...);
+    });
+    std::vector<void*> allocations;
+    ScopedHook allocate(g_hipHostMalloc, [&](void** output, size_t size, unsigned) {
+      *output = std::calloc(1, size);
+      allocations.push_back(*output);
+      return *output ? hipSuccess : hipErrorOutOfMemory;
+    });
+    ScopedHook release(g_hipHostFree, [&](void* pointer) {
+      auto found = std::find(allocations.begin(), allocations.end(), pointer);
+      EXPECT_NE(allocations.end(), found);
+      if (found != allocations.end()) {
+        allocations.erase(found);
+        std::free(pointer);
+      }
+      return hipSuccess;
+    });
+    void* output = &listen;
+
+    EXPECT_EQ(ncclRemoteError, ncclRmaSocketProxyConnect(nullptr, handles.data(), 2, 1, &listen, &output));
+    EXPECT_EQ(nullptr, output);
+    EXPECT_EQ(failCall, failure.calls);
+    EXPECT_EQ(expectedCloses, handshake.close.calls);
+    EXPECT_EQ(4, allocate.calls);
+    EXPECT_EQ(4, release.calls);
+    EXPECT_TRUE(allocations.empty());
+  }
 };
+
+TEST_F(RmaSocketSetupMicrotest, Connect_IncomingInitFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketInit, 3, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondConnectFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketConnect, 2, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondSendFailureReleasesPeerResources) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketSend, 2, 4));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondAcceptFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketAccept, 2, 5));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondReadyFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketReady, 2, 5));
+}
+
+TEST_F(RmaSocketSetupMicrotest, Connect_SecondRecvFailureAlsoClosesTemporarySocket) {
+  ASSERT_NO_FATAL_FAILURE(CheckConnectFailure(g_ncclSocketRecv, 2, 5));
+}
 
 ncclRmaSocketProxyCollComm* AllocateOwnedComm(int nranks) {
   auto* comm = static_cast<ncclRmaSocketProxyCollComm*>(std::calloc(1, sizeof(ncclRmaSocketProxyCollComm)));
@@ -340,6 +403,25 @@ TEST_F(RmaSocketSetupMicrotest, CreateAndDestroyContext_PublishesRequestsAndUpda
 
   EXPECT_EQ(ncclRmaSocketProxyDestroyContext(contexts), ncclSuccess);
   EXPECT_EQ(comm->nContexts, 0);
+  FreeOwnedComm(comm);
+}
+
+TEST_F(RmaSocketSetupMicrotest, CreateContext_QueueCapacityOverflowDoesNotPublishContexts) {
+  auto* comm = AllocateOwnedComm(2);
+  ASSERT_NE(nullptr, comm);
+  const int existingContexts = INT_MAX / (2 * NCCL_RMA_SOCKET_MAX_REQUESTS_PER_PEER);
+  comm->nContexts = existingContexts;
+  ncclRmaConfig_t config{};
+  config.nContexts = 2;
+  config.rankStride = 1;
+  void* output = nullptr;
+
+  EXPECT_EQ(ncclInvalidArgument, ncclRmaSocketProxyCreateContext(comm, &config, &output));
+
+  EXPECT_EQ(nullptr, output);
+  EXPECT_EQ(existingContexts, comm->nContexts);
+  EXPECT_EQ(0, comm->peerSender[0].capacity);
+  EXPECT_EQ(0, comm->peerSender[1].capacity);
   FreeOwnedComm(comm);
 }
 
