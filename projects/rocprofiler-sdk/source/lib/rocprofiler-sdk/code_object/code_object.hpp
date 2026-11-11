@@ -31,6 +31,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace rocprofiler
@@ -54,6 +55,10 @@ get_ids();
 
 uint64_t
 get_kernel_id(uint64_t kernel_object);
+
+/// The symbol name of a loaded kernel, or nullptr. The string lives as long as the process.
+const std::string*
+get_kernel_name(uint64_t kernel_id);
 
 void
 iterate_loaded_code_objects(code_object_iterator_t&& func);
