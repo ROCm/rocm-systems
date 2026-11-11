@@ -561,6 +561,127 @@ TEST_F(KFDMemoryTest, MemoryRegisterSamePtr) {
     TEST_END
 }
 
+/* Covers the legacy userptr path only; set HSA_USE_SVM=0 on SVM-capable GPUs */
+void KFDMemoryTest::MemoryRegisterReadOnly(int gpuNode) {
+    if (!hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: userptr registration is a no-op on APU." << std::endl;
+        return;
+    }
+
+    const HSAuint64 size = PAGE_SIZE;
+    HsaMemFlags roFlags = {0};
+    roFlags.ui32.HostAccess = 1;
+    roFlags.ui32.ReadOnly = 1;
+    HsaMemFlags rwFlags = roFlags;
+    rwFlags.ui32.ReadOnly = 0;
+
+    HSAuint32 *roBuf = reinterpret_cast<HSAuint32 *>(mmap(NULL, size, PROT_READ | PROT_WRITE,
+                                                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+    ASSERT_NE_GPU(MAP_FAILED, reinterpret_cast<void *>(roBuf), gpuNode);
+    for (HSAuint64 i = 0; i < size / sizeof(HSAuint32); i++)
+        roBuf[i] = 0x5A5A5A5A;
+
+    HSAuint64 roVA = 0;
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, roBuf, size,
+                                   roFlags), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, roBuf, size, &roVA),
+                       gpuNode);
+    if (roVA == reinterpret_cast<HSAuint64>(roBuf)) {
+        LOG() << "Skipping test: userptr went through the SVM API, set HSA_USE_SVM=0." << std::endl;
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, roBuf), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, roBuf), gpuNode);
+        munmap(roBuf, size);
+        return;
+    }
+
+    HsaPointerInfo ptrInfo;
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtQueryPointerInfo, m_hsakmt_current_ctx, roBuf, &ptrInfo),
+                       gpuNode);
+    EXPECT_EQ_GPU(ptrInfo.Type, HSA_POINTER_REGISTERED_USER, gpuNode);
+    EXPECT_EQ_GPU(ptrInfo.MemFlags.ui32.ReadOnly, 1, gpuNode);
+
+    SDMAQueue sdmaQueue;
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+    HsaMemoryBuffer sysBuffer(size, gpuNode);
+
+    /* The GPU can read a read-only userptr */
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                    sysBuffer.As<void *>(), reinterpret_cast<void *>(roVA), size));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_EQ_GPU(sysBuffer.As<HSAuint32 *>()[0], 0x5A5A5A5Au, gpuNode);
+
+    /* A read-only userptr cannot be registered writable, with or without flags */
+    EXPECT_EQ_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, roBuf, size,
+                              rwFlags), HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED, gpuNode);
+    EXPECT_EQ_GPU(HSAKMT_CALL(hsaKmtRegisterMemory, m_hsakmt_current_ctx, roBuf, size),
+                  HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED, gpuNode);
+
+    /* A second read-only registration shares the BO and keeps it alive */
+    HSAuint64 roVA2 = 0;
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, roBuf, size,
+                                   roFlags), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, roBuf, size, &roVA2),
+                       gpuNode);
+    EXPECT_EQ_GPU(roVA2, roVA, gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx,
+                                   reinterpret_cast<void *>(roVA2)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                   reinterpret_cast<void *>(roVA2)), gpuNode);
+
+    sysBuffer.Fill(0);
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                    sysBuffer.As<void *>(), reinterpret_cast<void *>(roVA), size));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_EQ_GPU(sysBuffer.As<HSAuint32 *>()[0], 0x5A5A5A5Au, gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx,
+                                   reinterpret_cast<void *>(roVA)), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                   reinterpret_cast<void *>(roVA)), gpuNode);
+
+    /* A writable userptr stays writable after a read-only registration */
+    HSAuint32 *rwBuf = reinterpret_cast<HSAuint32 *>(mmap(NULL, size, PROT_READ | PROT_WRITE,
+                                                         MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+    ASSERT_NE_GPU(MAP_FAILED, reinterpret_cast<void *>(rwBuf), gpuNode);
+
+    HSAuint64 rwVA = 0, rwVA2 = 0;
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, rwBuf, size,
+                                   rwFlags), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, rwBuf, size, &rwVA),
+                       gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, rwBuf, size,
+                                   roFlags), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, rwBuf, size, &rwVA2),
+                       gpuNode);
+    EXPECT_EQ_GPU(rwVA2, rwVA, gpuNode);
+
+    sysBuffer.Fill(0xA5A5A5A5);
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                    reinterpret_cast<void *>(rwVA), sysBuffer.As<void *>(), size));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_TRUE_GPU(WaitOnValue(rwBuf, 0xA5A5A5A5), gpuNode);
+
+    for (int i = 0; i < 2; i++) {
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx,
+                                       reinterpret_cast<void *>(rwVA)), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       reinterpret_cast<void *>(rwVA)), gpuNode);
+    }
+
+    EXPECT_SUCCESS_GPU(sdmaQueue.Destroy(), gpuNode);
+    munmap(rwBuf, size);
+    munmap(roBuf, size);
+}
+
+TEST_F(KFDMemoryTest, MemoryRegisterReadOnly) {
+    TEST_START(TESTPROFILE_RUNALL)
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MemoryRegisterReadOnly(gpuNode);
+    }));
+
+    TEST_END
+}
+
 /* FlatScratchAccess
  * Since HsaMemoryBuffer has to be associated with a specific GPU node, this function in the current form
  * will not work for multiple GPU nodes. For now test only one default GPU node.
