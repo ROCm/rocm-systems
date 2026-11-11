@@ -10475,9 +10475,11 @@ auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, 
   };
 }
 
+// gfx1250 comms get the fabric DDA handler, as after ncclDdaFabricCommInit.
 ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
   ncclComm* comm = MakeCommWithArch(arch);
   comm->nRanks = 8;
+  if (std::strcmp(arch, "gfx1250") == 0) comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);
   return comm;
 }
 
@@ -10621,6 +10623,36 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPl
     EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
     EXPECT_EQ(NCCL_ALGO_RING, d.algo);
     EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// gfx1250 without the fabric handler is treated as IPC: no tier without the opt-in, never LL128.
+TEST(WrapMicrotestIsolated, SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_Gfx1250IpcScratch_NeedsOptInAndNeverChecksLL128", []() {
+    int llCalls = 0, ll128Calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++llCalls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->ddaFabricMemHandler = nullptr;
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, llCalls);
+
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
     DeleteCommWithArch(comm);
   });
 }

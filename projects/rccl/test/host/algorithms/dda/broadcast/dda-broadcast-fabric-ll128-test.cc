@@ -193,11 +193,22 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_Gfx1250Only) {
   EXPECT_TRUE(Eligible(16));
 }
 
+// IPC scratch has no fabric handler.
+TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_RejectsIpcScratch) {
+  SetArch("gfx1250");
+  mock_.setFabricResourcesPresent(true);
+  comm().ddaFabricMemHandler = nullptr;
+  comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+  EXPECT_FALSE(Eligible(16));
+  comm().ddaIpcMemHandler = nullptr;
+}
+
 TEST_F(DdaBroadcastFabricLL128Microtest, Eligible_NeedsScratchPeersAndEpoch) {
   SetArch("gfx1250");
   EXPECT_FALSE(ncclBroadcastDdaFabricLL128Eligible(nullptr, 16, ncclInt8));
-  for (int missing = 0; missing < 4; ++missing) {
+  for (int missing = 0; missing < 5; ++missing) {
     mock_.setFabricResourcesPresent(true);
+    comm().ddaFabricMemHandler = missing == 4 ? nullptr : comm().ddaFabricMemHandler;
     comm().ddaScratch = missing == 0 ? nullptr : comm().ddaScratch;
     comm().ddaPeerPtrsDev = missing == 1 ? nullptr : comm().ddaPeerPtrsDev;
     comm().ddaLLEpochDev = missing == 2 ? nullptr : comm().ddaLLEpochDev;

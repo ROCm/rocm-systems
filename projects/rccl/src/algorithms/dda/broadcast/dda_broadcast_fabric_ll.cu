@@ -76,6 +76,7 @@ size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm) {
 
 bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   if (comm == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) return false;
+  if (comm->ddaFabricMemHandler == nullptr && comm->ddaIpcMemHandler == nullptr) return false;
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) return false;
   if (count == 0) return false;
   const size_t bytes = count * ncclTypeSize(datatype);

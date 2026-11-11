@@ -79,7 +79,8 @@ dim3 ddaLL128BcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
 } // namespace
 
 bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  if (comm == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) return false;
+  if (comm == nullptr || comm->ddaFabricMemHandler == nullptr) return false;
+  if (comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) return false;
   if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) return false;
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) return false;
   // gfx1250 only until a cross-GPU gfx9 data test exists.
