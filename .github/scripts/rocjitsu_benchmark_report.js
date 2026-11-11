@@ -12,6 +12,7 @@ function previousOrder(body) {
 async function reportBenchmark({
   github,
   context,
+  core,
   benchmarkResult,
   publishResult,
   runNumber,
@@ -21,8 +22,30 @@ async function reportBenchmark({
   headSha,
 }) {
   const { owner, repo } = context.repo;
-  const number = context.payload.pull_request.number;
-  const marker = `<!-- rocjitsu-benchmark-report:${number} -->`;
+  let pull = context.payload.pull_request;
+  const postCommit = context.eventName === 'push';
+  if (postCommit) {
+    if (context.ref !== 'refs/heads/develop' || headSha !== context.sha) return;
+    const associated = await github.paginate(
+      github.rest.repos.listPullRequestsAssociatedWithCommit,
+      { owner, repo, commit_sha: headSha, per_page: 100 },
+    );
+    const matches = associated.filter((candidate) =>
+      candidate.base?.ref === 'develop' &&
+      candidate.base?.repo?.full_name === `${owner}/${repo}` &&
+      candidate.merged_at && candidate.merge_commit_sha === headSha,
+    );
+    if (matches.length !== 1) {
+      core?.warning(`Expected one associated develop PR for ${headSha}, found ${matches.length}.`);
+      return;
+    }
+    [pull] = matches;
+  }
+  if (!pull) return;
+  const number = pull.number;
+  const marker = postCommit
+    ? `<!-- rocjitsu-post-commit-benchmark:${headSha} -->`
+    : `<!-- rocjitsu-benchmark-report:${number} -->`;
   const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}/attempts/${runAttempt}`;
   const comments = await github.paginate(github.rest.issues.listComments, {
     owner, repo, issue_number: number, per_page: 100,
@@ -41,7 +64,7 @@ async function reportBenchmark({
   }
   const dashboardUrl = new URL('https://rocm.github.io/rocm-systems/rocjitsu-dashboard/');
   dashboardUrl.searchParams.set('view', 'branch');
-  dashboardUrl.searchParams.set('branch', context.payload.pull_request.head.ref);
+  dashboardUrl.searchParams.set('branch', postCommit ? 'develop' : pull.head.ref);
   dashboardUrl.searchParams.set('detail', '1');
   if (publishResult === 'success') {
     if (!publishedRunId) throw new Error('Successful publication has no published run ID.');
@@ -50,19 +73,21 @@ async function reportBenchmark({
   const body = [
     marker,
     `<!-- rocjitsu-benchmark-report-run:${context.runId}:${runNumber}:${runAttempt} -->`,
-    '## Rocjitsu benchmark dashboard',
+    postCommit ? '## Rocjitsu post-merge benchmark results' : '## Rocjitsu benchmark dashboard',
     '',
     ...(benchmarkResult === 'cancelled' ? [
       '**Benchmark cancelled. This attempt did not complete.**',
       '',
-      "To measure the current code, rerun the workflow for the current PR head, not an older commit's run.",
+      postCommit
+        ? 'Rerun this workflow to measure the merged commit.'
+        : "To measure the current code, rerun the workflow for the current PR head, not an older commit's run.",
       '',
     ] : []),
     publishResult === 'success'
       ? 'Results published to the shared dashboard dataset.'
       : 'Results were not confirmed published for this attempt. Check the workflow run for details; the dashboard may only contain earlier attempts.',
     '',
-    `- ${benchmarkResult === 'cancelled' ? 'Selected commit' : 'Measured head'}: [\`${headSha}\`](${context.serverUrl}/${owner}/${repo}/commit/${headSha})`,
+    `- ${benchmarkResult === 'cancelled' ? 'Selected commit' : postCommit ? 'Measured commit' : 'Measured head'}: [\`${headSha}\`](${context.serverUrl}/${owner}/${repo}/commit/${headSha})`,
     `- Workflow run: [#${runNumber}](${runUrl})`,
     `- Reporting attempt: **${runAttempt}**`,
     `- Benchmark attempt: **${benchmarkAttempt || 'not recorded'}**`,

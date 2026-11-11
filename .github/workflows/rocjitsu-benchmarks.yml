@@ -691,7 +691,8 @@ jobs:
     # Report job-level cancellation too; a blanket !cancelled() would suppress it.
     if: >-
       always() &&
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/develop')) &&
       needs.source-metadata.result == 'success' &&
       needs.benchmark.result != 'skipped'
     runs-on: ubuntu-24.04
@@ -701,7 +702,7 @@ jobs:
       pull-requests: write
     # Serialize comment lookup/create/update so concurrent attempts cannot create duplicates.
     concurrency:
-      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number }}
+      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: false
       queue: max
     steps:
@@ -729,6 +730,7 @@ jobs:
             await reportBenchmark({
               github,
               context,
+              core,
               benchmarkResult: process.env.BENCHMARK_RESULT,
               publishResult: process.env.PUBLICATION_RESULT,
               runNumber: process.env.GITHUB_RUN_NUMBER,

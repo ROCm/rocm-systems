@@ -250,3 +250,113 @@ test('API errors fail reporting rather than claiming delivery', async () => {
   args.github.rest.issues.createComment = async () => { throw new Error('API unavailable'); };
   await assert.rejects(reportBenchmark(args), /API unavailable/);
 });
+
+function postCommitFixture() {
+  const result = fixture();
+  const { args } = result;
+  const associated = [{ number: 42, merged_at: '2026-11-11T00:00:00Z',
+    merge_commit_sha: args.headSha,
+    base: { ref: 'develop', repo: { full_name: 'ROCm/rocm-systems' } } }];
+  const warnings = [];
+  args.core = { warning(message) { warnings.push(message); } };
+  args.context = { ...args.context, payload: {}, eventName: 'push',
+    sha: args.headSha, ref: 'refs/heads/develop' };
+  args.github.rest.repos = { listPullRequestsAssociatedWithCommit: Symbol('associated') };
+  const paginateComments = args.github.paginate;
+  args.github.paginate = async (method, parameters) => {
+    if (method === args.github.rest.repos.listPullRequestsAssociatedWithCommit) {
+      assert.deepEqual(parameters, { owner: 'ROCm', repo: 'rocm-systems',
+        commit_sha: args.headSha, per_page: 100 });
+      return associated;
+    }
+    return paginateComments(method, parameters);
+  };
+  return { ...result, associated, warnings };
+}
+
+test('post-merge report finds the exact merged PR and links its develop result', async () => {
+  const { args, comments, writes } = postCommitFixture();
+  await reportBenchmark(args);
+  assert.equal(writes[0][1].issue_number, 42);
+  const body = comments[0].body;
+  assert.match(body, /<!-- rocjitsu-post-commit-benchmark:a{40} -->/);
+  assert.match(body, /Rocjitsu post-merge benchmark results/);
+  assert.match(body, /Measured commit: \[`a{40}`\]/);
+  const url = new URL(body.match(/\[Open the dashboard\]\(([^)]+)\)/)[1]);
+  assert.equal(url.searchParams.get('branch'), 'develop');
+  assert.equal(url.searchParams.get('run'), args.publishedRunId);
+  assert.equal(url.searchParams.get('detail'), '1');
+});
+
+test('post-merge reruns update their comment without touching the presubmit report', async () => {
+  const { args, comments, writes } = postCommitFixture();
+  comments.push({ id: 8, user: { login: 'github-actions[bot]' },
+    performed_via_github_app: { slug: 'github-actions' },
+    body: '<!-- rocjitsu-benchmark-report:42 -->' });
+  await reportBenchmark(args);
+  await reportBenchmark({ ...args, runAttempt: '2' });
+  assert.deepEqual(writes.map(([kind]) => kind), ['create', 'update']);
+  assert.equal(comments.length, 2);
+  assert.equal(comments[0].body, '<!-- rocjitsu-benchmark-report:42 -->');
+});
+
+test('an older post-merge run cannot replace a newer report', async () => {
+  const { args, writes } = postCommitFixture();
+  await reportBenchmark({ ...args, runAttempt: '2' });
+  await reportBenchmark(args);
+  assert.equal(writes.length, 1);
+});
+
+for (const mismatch of [
+  { merged_at: null },
+  { merge_commit_sha: 'b'.repeat(40) },
+  { base: { ref: 'release', repo: { full_name: 'ROCm/rocm-systems' } } },
+  { base: { ref: 'develop', repo: { full_name: 'other/rocm-systems' } } },
+]) {
+  test(`does not comment on a loosely associated PR: ${JSON.stringify(mismatch)}`, async () => {
+    const { args, associated, writes, warnings } = postCommitFixture();
+    Object.assign(associated[0], mismatch);
+    await reportBenchmark(args);
+    assert.equal(writes.length, 0);
+    assert.equal(warnings.length, 1);
+  });
+}
+
+for (const count of [0, 2]) {
+  test(`skips ambiguous or missing merged PRs (${count} matches)`, async () => {
+    const { args, associated, writes, warnings } = postCommitFixture();
+    if (count === 0) associated.length = 0;
+    else associated.push({ ...associated[0], number: 43 });
+    await reportBenchmark(args);
+    assert.equal(writes.length, 0);
+    assert.equal(warnings.length, 1);
+  });
+}
+
+for (const changes of [{ ref: 'refs/heads/feature' }, { sha: 'b'.repeat(40) }]) {
+  test(`rejects a push outside the measured develop commit: ${JSON.stringify(changes)}`, async () => {
+    const { args, writes } = postCommitFixture();
+    args.context = { ...args.context, ...changes };
+    args.github.paginate = async () => { assert.fail('Should not query unrelated commits'); };
+    await reportBenchmark(args);
+    assert.equal(writes.length, 0);
+  });
+}
+
+test('failed post-merge publication does not link an earlier run as the result', async () => {
+  const { args, comments } = postCommitFixture();
+  await reportBenchmark({ ...args, benchmarkResult: 'failure', publishResult: 'failure', publishedRunId: '' });
+  const body = comments[0].body;
+  assert.match(body, /Results were not confirmed published/);
+  assert.match(body, /Benchmark job: \*\*failure\*\*/);
+  const url = new URL(body.match(/\[Open the dashboard\]\(([^)]+)\)/)[1]);
+  assert.equal(url.searchParams.get('branch'), 'develop');
+  assert.equal(url.searchParams.has('run'), false);
+});
+
+test('cancelled post-merge report offers recovery for the merged commit', async () => {
+  const { args, comments } = postCommitFixture();
+  await reportBenchmark({ ...args, benchmarkResult: 'cancelled', publishResult: 'skipped', publishedRunId: '' });
+  assert.match(comments[0].body, /Rerun this workflow to measure the merged commit/);
+  assert.doesNotMatch(comments[0].body, /current PR head/);
+});
