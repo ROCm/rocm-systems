@@ -1679,11 +1679,12 @@ bool rejects_atomic_operation(const VectorMemState &d, Wavefront &wf, bool local
   return true;
 }
 
-bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
+bool rejects_flat_dds(const Instruction &inst, Wavefront &wf, uint64_t request_lanes) {
   if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
     return false;
   util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
                      " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
+  wf.set_unreported_memory_failure("CDNA5 FLAT DDS backing is not implemented");
   return true;
 }
 
@@ -1806,8 +1807,10 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
 
 VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
                                                          uint64_t request_lanes) {
-  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0)
+  if (d.requires_scratch_backing && (d.scratch_lane_mask & request_lanes) && wf.scratch_base() == 0) {
+    wf.set_unreported_memory_failure("private access without scratch backing");
     return VmAccessOutcome::Faulted;
+  }
 
   if (wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
     const bool has_progress = d.translated.request_index != 0 ||

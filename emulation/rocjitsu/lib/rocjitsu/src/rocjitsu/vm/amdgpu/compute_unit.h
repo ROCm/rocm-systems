@@ -1822,7 +1822,14 @@ protected:
   /// @param issue_pc Original instruction PC, before advancing to the resume PC.
   void handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc);
   /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
-  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+  /// @details A failure that no VM fault reporter covered also aborts the queue:
+  /// the CP cancellation does not wake the dispatch's waiter, and ROCr acts on a
+  /// memory-violation status only after a VM fault event.
+  /// @param issue_pc PC of the failing instruction, for the diagnostic.
+  /// @param unreported Static cause of a failure known to have no VM fault
+  ///        event, or null to decide from the outcome and the wave's binding.
+  void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome, uint64_t issue_pc,
+                                const char *unreported = nullptr);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
 

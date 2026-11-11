@@ -790,6 +790,10 @@ public:
   /// Whether two snapshots descend from one explicit VM root binding.
   /// Invalidation preserves the lineage; root replacement starts a new one.
   [[nodiscard]] bool same_root_lineage(const GpuVmAccess &other) const;
+  /// @brief Whether this binding raises a VM fault event for its failed translations.
+  /// @details Without a reporter, a terminal fault reaches no runtime event, so
+  /// its issuer must notify the queue owner directly.
+  [[nodiscard]] bool reports_faults() const;
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
   }

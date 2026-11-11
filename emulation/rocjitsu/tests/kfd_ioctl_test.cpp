@@ -12,6 +12,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
@@ -28692,6 +28693,98 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
   EXPECT_FALSE(wave->debug_stopped());
   EXPECT_EQ(publications, 0u);
   EXPECT_EQ(status[0], 0u);
+}
+
+// ROCr defers EC_QUEUE_WAVE_MEMORY_VIOLATION to its VM fault handler, which
+// only the VM fault event wakes. A rejected FLAT DDS access and a SCRATCH
+// access without a scratch allocation fail before translation, so no event
+// follows; publishing that status left hipDeviceSynchronize() waiting forever.
+// The runtime must instead receive a wave abort, which ROCr handles directly.
+TEST_F(KfdIoctlCdna5Test, MemoryFailuresWithoutAVmFaultEventAbortTheRuntimeQueue) {
+  constexpr uint64_t kSharedBase = uint64_t{1} << 48;
+  constexpr uint32_t kEvent = 83, kEndpgm = 0xBFB00000u;
+  for (const bool dds : {true, false}) {
+    SCOPED_TRACE(testing::Message() << "dds=" << dds);
+    auto process = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(process, nullptr);
+    const auto access =
+        dds ? rocjitsu::cdna5::build_vflat(rocjitsu::cdna5::kFlatLoadB32Vflat,
+                                           {.saddr = 124, .vdst = 2, .vaddr = 0})
+            : rocjitsu::cdna5::build_vscratch(rocjitsu::cdna5::kScratchLoadB32Vscratch,
+                                              {.saddr = 124, .vdst = 2});
+    // Separate code addresses keep the decoded-instruction cache apart.
+    const uint64_t code_va = dds ? 0x600000000ULL : 0x600100000ULL;
+    std::array<uint32_t, 1024> code{access[0], access[1], access[2], kEndpgm};
+    process->map_pages(code_va, code.data(), sizeof(code));
+    alignas(4096) std::array<uint8_t, 4096> cwsr{};
+    alignas(4096) std::array<uint8_t, 4096> exception_page{};
+    const uint64_t status = reinterpret_cast<uint64_t>(exception_page.data());
+    process->map_pages(status, exception_page.data(), exception_page.size());
+    std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &status, sizeof(status));
+    std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kEvent, sizeof(kEvent));
+    alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
+    alignas(4096) amd_queue_v2_t queue_descriptor{};
+    process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                       sizeof(queue_descriptor));
+    kfd_ioctl_create_queue_args create{};
+    create.gpu_id = kCdna5GpuId;
+    create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    create.queue_percentage = 100;
+    create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    create.ring_size = static_cast<uint32_t>(ring.size());
+    create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+    create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+    create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+    create.ctx_save_restore_size = static_cast<uint32_t>(cwsr.size());
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+    ASSERT_TRUE(process->queue_snapshot_map_.at(create.queue_id).has_runtime_exception_signal);
+    std::vector<uint64_t> published;
+    driver_->set_interrupt_callback_for_testing([&](uint32_t pid, uint32_t event) {
+      if (event != kEvent)
+        return;
+      published.push_back(vm_read64(status, pid));
+      // ROCr consumes and clears the queue error signal to acknowledge it.
+      (void)vm_write64(status, 0, pid);
+    });
+    struct Guard {
+      rocjitsu::SimulatedKfd *driver;
+      uint32_t queue;
+      ~Guard() {
+        driver->set_interrupt_callback_for_testing(nullptr);
+        kfd_ioctl_destroy_queue_args destroy{};
+        destroy.queue_id = queue;
+        driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+      }
+    } guard{driver_, create.queue_id};
+    auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
+    if (dds)
+      cu->set_apertures(kSharedBase, kSharedBase + UINT32_MAX, 0, 0);
+    auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+    ASSERT_NE(wave, nullptr);
+    wave->set_process_id(driver_->local_process_id());
+    wave->set_address_space(process->gpu(0).address_space);
+    wave->set_queue_id(create.queue_id);
+    wave->set_dispatch_id(7);
+    wave->set_exec(1);
+    ASSERT_EQ(wave->scratch_base(), 0u);
+    // Beyond the workgroup's LDS allocation, a shared-aperture lane is DDS.
+    const uint64_t dds_address = kSharedBase + 0xffffffc0;
+    cu->write_vgpr(wave->vgpr_alloc().base, 0, static_cast<uint32_t>(dds_address));
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, static_cast<uint32_t>(dds_address >> 32));
+    testing::internal::CaptureStderr();
+    cu->step();
+    const std::string warnings = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(published, std::vector<uint64_t>{KFD_EC_MASK(EC_QUEUE_WAVE_ABORT)});
+    EXPECT_FALSE(wave->fatal_exception_pending());
+    const std::string failure =
+        std::string("memory access failed: ") + (dds ? "CDNA5 FLAT DDS backing is not implemented"
+                                                     : "private access without scratch backing");
+    const auto reported = warnings.find(failure);
+    ASSERT_NE(reported, std::string::npos) << warnings;
+    // Name the failing instruction, not the advanced resume PC.
+    EXPECT_NE(warnings.find(std::format("pc={:#x}", code_va), reported), std::string::npos)
+        << warnings;
+  }
 }
 
 TEST_P(KfdMemoryFaultPcTest, RuntimeReceivesEveryFaultWithoutRepeatedAcknowledgments) {

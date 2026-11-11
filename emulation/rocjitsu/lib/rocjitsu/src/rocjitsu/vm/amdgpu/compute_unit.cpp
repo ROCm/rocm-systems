@@ -804,25 +804,32 @@ void ComputeUnitCore::enter_trap_handler(Wavefront &wave, const TrapHandlerConfi
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  // Consume the pipeline's marker now so a claimed fault cannot leave it behind.
+  const char *unreported = wf.take_unreported_memory_failure();
   if (wf.instruction_execution_failed()) {
     fail_wave_instruction(
         wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
         wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
     return;
   }
+  if (!unreported && wf.address_space() && !wf.snapshot_vm_access())
+    unreported = "address space retired during the access";
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
   }
-  // Only architectural data faults belong to the runtime exception owner.
+  // Only architectural data faults belong to the runtime exception owner, and
+  // only once a VM fault reporter saw them: KFD publishes them as a memory
+  // violation, which ROCr pairs with that reporter's VM fault event.
   // Fetch faults are offered once at the fetch site, with their real address.
-  if (outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
+  if (outcome == VmAccessOutcome::Faulted && !unreported && memory_violation_handler_ &&
       memory_violation_handler_(wf, 0, false, issue_pc))
     return;
-  handle_terminal_vm_fault(wf, outcome);
+  handle_terminal_vm_fault(wf, outcome, issue_pc, unreported);
 }
 
-void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome) {
+void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome,
+                                               uint64_t issue_pc, const char *unreported) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
@@ -832,13 +839,21 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                                         .process_id = wf.process_id(),
                                         .dispatch_id = wf.dispatch_id(),
                                         .vm_outcome = outcome});
-  if (outcome == VmAccessOutcome::Revoked) {
-    // Fetch revocation is recovered before reaching this terminal path. An
-    // in-flight data access cannot be replayed safely. Notify the live queue
-    // owner after dropping the wave-state lock, rather than invoking a fault
-    // reporter retained by the revoked snapshot. The dispatch still aborts
-    // without publishing a successful completion.
-    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueMemoryViolation,
+  // A revoked snapshot's reporter must not run, and VMID 0 physical memory has
+  // none. Cancelling the dispatch alone, or publishing a memory-violation status
+  // that waits for a VM fault event, would leave the completion waiter hanging.
+  if (!unreported && outcome == VmAccessOutcome::Revoked)
+    unreported = "address space revoked during the access";
+  if (!unreported) {
+    const std::optional<GpuVmAccess> access = wf.snapshot_vm_access();
+    if (!access || !access->reports_faults())
+      unreported = "memory fault without a VM fault reporter";
+  }
+  if (unreported) {
+    util::Logger::warn("memory access failed: ", unreported, ": process=", wf.process_id(),
+                       " queue=", wf.queue_id(), " dispatch=", wf.dispatch_id(), " cu=", name(),
+                       " wave=", wf.wf_id(), " pc=", std::format("{:#x}", issue_pc));
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
                           /*clear_debug_stop_on_success=*/false,
                           /*retain_failure_for_debugger=*/false);
   }
@@ -2456,7 +2471,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       drain_async_window();
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(MissingGpuVm) pc=0x",
                        std::hex, active->pc, std::dec, " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted, active->pc,
+                               "translated wave has no GPU VM");
       return IssueOutcome::NotIssued;
     }
     if (vm_access == nullptr) {
@@ -2485,12 +2501,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                        " HALT(StaleAddressSpace) pc=0x", std::hex, active->pc, std::dec,
                        " vmid=", vmid);
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted, active->pc,
+                               "address space retired before fetch");
       return IssueOutcome::NotIssued;
     }
     if (!using_retained_vm_access && !active->same_execution_root(*vm_access)) {
       drain_async_window();
-      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked);
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked, active->pc,
+                               "address space root replaced before fetch");
       return IssueOutcome::NotIssued;
     }
   }
@@ -2551,7 +2569,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
                      " HALT(InstructionVmAccess) pc=0x", std::hex, active->pc, std::dec,
                      " vmid=", vmid, " outcome=", static_cast<unsigned>(fetch_outcome));
-    handle_terminal_vm_fault(*active, fetch_outcome);
+    handle_terminal_vm_fault(*active, fetch_outcome, active->pc);
     return IssueOutcome::NotIssued;
   }
 
