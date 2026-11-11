@@ -148,12 +148,14 @@ GIN_SDMA_AG_HD inline int allGatherPoolCtas(int deviceCtaCount) {
 // pin is
 // honored but clamped to poolCtas so the grid never exceeds the barrier/signal pool
 // (avoids the OOB the pin used to allow when it exceeded max(-V, 16)).
+// sdmaCtas is the SDMA-tier grid; Gather passes 1 because it issues a single put.
 GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold,
-                                        size_t envCtas, int poolCtas) {
+                                        size_t envCtas, int poolCtas,
+                                        int sdmaCtas = kAllGatherCtasSdma) {
   if (poolCtas < 1) poolCtas = 1;
   if (envCtas != kAllGatherCtasUnset && envCtas > 0)
     return (envCtas > (size_t)poolCtas) ? poolCtas : (int)envCtas;
-  const int adaptive = chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : kAllGatherCtasSdma;
+  const int adaptive = chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : sdmaCtas;
   return (adaptive > poolCtas) ? poolCtas : adaptive;
 }
 
@@ -163,6 +165,19 @@ GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold
 // wrong slice offset is caught in both places rather than only self-consistently.
 GIN_SDMA_AG_HD inline size_t allGatherRecvSliceOffset(int rank, size_t count) {
   return (size_t)rank * count;
+}
+
+// Gather -D 3 SDMA tier, in-place: the root's chunk already sits in its own recv
+// slice, so the root skips its self-put. Offsets are bytes into the windows.
+GIN_SDMA_AG_HD inline bool gatherRootSkipsSelfPut(bool isRoot, bool sameWindow, size_t sendOffset,
+                                                 size_t recvOffset, int root, size_t chunkBytes_) {
+  return isRoot && sameWindow &&
+         sendOffset == recvOffset + allGatherRecvSliceOffset(root, chunkBytes_);
+}
+
+// Signal increments the root waits for: one per rank that puts to it.
+GIN_SDMA_AG_HD inline uint64_t gatherRootExpectedSignals(int nRanks, bool rootSkipsSelfPut) {
+  return (uint64_t)nRanks - (rootSkipsSelfPut ? 1 : 0);
 }
 
 // AllGather algorithm / bus bandwidth (GB/s) given the per-rank element count,
@@ -191,15 +206,21 @@ inline bool parseEnvU64(const char* name, unsigned long long* val) {
   return true;
 }
 
-inline size_t parseAllGatherCtasEnv() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
-  if (!e || !e[0]) e = getenv("NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
+// CTA-count pin from env `name`, falling back to `alias` when `name` is unset or
+// empty. Returns kAllGatherCtasUnset when neither holds a plain decimal count.
+inline size_t parseCtasEnv(const char* name, const char* alias = nullptr) {
+  const char* e = getenv(name);
+  if ((!e || !e[0]) && alias) e = getenv(alias);
   if (!e || !e[0] || *e == '-') return kAllGatherCtasUnset;
   char* end = nullptr;
   unsigned long long v = strtoull(e, &end, 10);
   if (end == e || *end != '\0') return kAllGatherCtasUnset;
   if ((size_t)v == kAllGatherCtasUnset) return kAllGatherCtasUnset;
   return (size_t)v;
+}
+
+inline size_t parseAllGatherCtasEnv() {
+  return parseCtasEnv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "NCCL_GIN_ANVIL_AG_CTAS");  // deprecated alias
 }
 
 inline size_t resolveSdmaThresholdFromEnv() {

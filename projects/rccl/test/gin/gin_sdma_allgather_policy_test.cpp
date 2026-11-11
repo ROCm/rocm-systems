@@ -8,7 +8,8 @@
 // (gin_sdma_allgather_policy.h). No GPU required: GIN_SDMA_HOST_ONLY drops the
 // HIP attributes so the header compiles as plain C++. These validate the exact
 // message sizing, LSA<->SDMA tier crossover, context-threshold fallback and
-// bandwidth math that all_gather.cu (GinHybridAllGatherKernel) relies on.
+// bandwidth math that all_gather.cu (GinHybridAllGatherKernel) relies on, plus
+// the grid and in-place signal accounting gather.cu (GinHybridGatherKernel) reuses.
 
 #include <gtest/gtest.h>
 
@@ -216,6 +217,42 @@ TEST(AllGatherPolicyCtas, GridNeverExceedsPool) {
   }
 }
 
+// ---- Gather -D 3: one SDMA CTA, same LSA grid and pool clamp ------------------
+
+TEST(GatherPolicyCtas, SdmaTierUsesOneCta) {
+  const int pool = allGatherPoolCtas(16);
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, kAllGatherCtasUnset, pool, 1), 1);
+  EXPECT_EQ(allGatherCtas(1024, 32768, kAllGatherCtasUnset, pool, 1), kAllGatherCtasLsa);
+}
+
+TEST(GatherPolicyCtas, EnvPinStillWinsAndIsClamped) {
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, 8, allGatherPoolCtas(64), 1), 8);
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, 1000, allGatherPoolCtas(16), 1), 16);
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, 0, allGatherPoolCtas(16), 1), 1);
+}
+
+// ---- Gather -D 3 in-place: root skips its self-put and waits for one fewer ----
+
+TEST(GatherPolicyInPlace, RootSkipsSelfPutOnlyInPlace) {
+  const size_t chunk = 4096;
+  const int root = 2;
+  // In-place root: same window, send slice == root's recv slice (with a shift).
+  EXPECT_TRUE(gatherRootSkipsSelfPut(true, true, root * chunk, 0, root, chunk));
+  EXPECT_TRUE(gatherRootSkipsSelfPut(true, true, 512 + root * chunk, 512, root, chunk));
+  // Out-of-place root: different windows, or the same window at another offset.
+  EXPECT_FALSE(gatherRootSkipsSelfPut(true, false, root * chunk, 0, root, chunk));
+  EXPECT_FALSE(gatherRootSkipsSelfPut(true, true, 0, 0, root, chunk));
+  // Non-root ranks always put, even with the in-place layout.
+  EXPECT_FALSE(gatherRootSkipsSelfPut(false, true, 1 * chunk, 0, root, chunk));
+}
+
+TEST(GatherPolicyInPlace, RootWaitsForOneSignalPerPut) {
+  EXPECT_EQ(gatherRootExpectedSignals(8, false), 8u);
+  EXPECT_EQ(gatherRootExpectedSignals(8, true), 7u);
+  EXPECT_EQ(gatherRootExpectedSignals(1, false), 1u);
+  EXPECT_EQ(gatherRootExpectedSignals(1, true), 0u);
+}
+
 // ---- bandwidthGBps: algBw counts all ranks, busBw applies (n-1)/n ------------
 
 TEST(AllGatherPolicyBandwidth, AlgAndBusBandwidth) {
@@ -272,6 +309,22 @@ TEST(AllGatherPolicyEnv, ParseAllGatherCtasEnv) {
   setenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS", "8foo", 1);
   EXPECT_EQ(parseAllGatherCtasEnv(), kAllGatherCtasUnset);
   unsetenv("NCCL_GIN_ANVIL_SDMA_ALLGATHER_CTAS");
+}
+
+TEST(GatherPolicyEnv, ParseGatherCtasEnvHasNoAlias) {
+  const char* kName = "NCCL_GIN_ANVIL_SDMA_GATHER_CTAS";
+  unsetenv(kName);
+  setenv("NCCL_GIN_ANVIL_AG_CTAS", "4", 1);
+  EXPECT_EQ(parseCtasEnv(kName), kAllGatherCtasUnset);
+  unsetenv("NCCL_GIN_ANVIL_AG_CTAS");
+
+  setenv(kName, "1", 1);
+  EXPECT_EQ(parseCtasEnv(kName), 1u);
+  setenv(kName, "-2", 1);
+  EXPECT_EQ(parseCtasEnv(kName), kAllGatherCtasUnset);
+  setenv(kName, "2x", 1);
+  EXPECT_EQ(parseCtasEnv(kName), kAllGatherCtasUnset);
+  unsetenv(kName);
 }
 
 }  // namespace

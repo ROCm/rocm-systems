@@ -5,7 +5,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include <cstdlib>
 #include "cuda_runtime.h"
 #include "common.h"
 #include "gin_sdma_allgather_policy.h"
@@ -148,16 +147,6 @@ static size_t gatherSdmaThresholdOnce() {
   return gin_sdma_allgather::pickSdmaThreshold(perCollSet, perColl, globalSet, global,
                                                gatherArchSdmaThreshold());
 }
-
-static size_t gatherCtasEnvOnce() {
-  const char* e = getenv("NCCL_GIN_ANVIL_SDMA_GATHER_CTAS");
-  if (!e || !e[0] || *e == '-') return gin_sdma_allgather::kAllGatherCtasUnset;
-  char* end = nullptr;
-  unsigned long long v = strtoull(e, &end, 10);
-  if (end == e || *end != '\0') return gin_sdma_allgather::kAllGatherCtasUnset;
-  if ((size_t)v == gin_sdma_allgather::kAllGatherCtasUnset) return gin_sdma_allgather::kAllGatherCtasUnset;
-  return (size_t)v;
-}
 #endif
 
 static inline size_t GatherResolveSdmaThreshold() {
@@ -177,20 +166,14 @@ static inline size_t GatherResolveCtasEnv() {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return gin_sdma_allgather::kAllGatherCtasUnset;
 #else
-  static const size_t cached = gatherCtasEnvOnce();
+  static const size_t cached = gin_sdma_allgather::parseCtasEnv("NCCL_GIN_ANVIL_SDMA_GATHER_CTAS");
   return cached;
 #endif
 }
 
 static inline int GatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
-  if (poolCtas < 1) poolCtas = 1;
-  const size_t envCtas = GatherResolveCtasEnv();
-  if (envCtas != gin_sdma_allgather::kAllGatherCtasUnset && envCtas > 0)
-    return (envCtas > (size_t)poolCtas) ? poolCtas : (int)envCtas;
-  const int adaptive = gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)
-                           ? gin_sdma_allgather::kAllGatherCtasLsa
-                           : kGatherCtasSdma;
-  return (adaptive > poolCtas) ? poolCtas : adaptive;
+  return gin_sdma_allgather::allGatherCtas(chunkBytes, sdmaThreshold, GatherResolveCtasEnv(),
+                                           poolCtas, kGatherCtasSdma);
 }
 
 // Each rank stores its chunk into root's recv slice. `root` is a world rank;
@@ -243,8 +226,8 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
   const bool isRoot = devComm.rank == root;
-  const bool rootInPlace = isRoot && sendwin == recvwin &&
-      sendoffset == recvoffset + gin_sdma_allgather::allGatherRecvSliceOffset(root, chunkBytes);
+  const bool rootInPlace = gin_sdma_allgather::gatherRootSkipsSelfPut(
+      isRoot, sendwin == recvwin, sendoffset, recvoffset, root, chunkBytes);
   const int peerStride = gridDim.x;
   for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < devComm.nRanks;
        r += peerStride * (int)blockDim.x) {
@@ -257,7 +240,8 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   __syncthreads();
 
   if (isRoot && blockIdx.x == (root % peerStride))
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks - (rootInPlace ? 1 : 0));
+    gin.waitSignal(ncclCoopCta(), signalIndex,
+                   signalValue + gin_sdma_allgather::gatherRootExpectedSignals(devComm.nRanks, rootInPlace));
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
