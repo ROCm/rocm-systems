@@ -364,17 +364,8 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
   }
 }
 
-// ===========================================================================
-// ncclGroupSimulateEnd estimatedTime (enqueue.cc, getAlgoInfo / ncclPrepareTasks).
-//
-// Two writers used to publish a non-positive estimate. The CSV tuner forces a
-// choice by storing 0 in that cost-table cell, and topoGetAlgoInfo copied the
-// minimum into estimatedTime. Direct AllGather is lowered to per-peer sends, so
-// no collective task is costed and the estimate stayed at the initializer (-1).
-// These tests pin the repair: the 0 is replaced by the cost-model time of the
-// algorithm that was selected, and ncclPrepareTasks still costs a direct
-// AllGather that never enters the collective queue. A positive constant would
-// satisfy `estimatedTime > 0` without being either of those.
+// ncclGroupSimulateEnd estimatedTime: a tuner-forced 0 reports the cost-model
+// time of the chosen algorithm, and a direct AllGather is still costed.
 // ===========================================================================
 
 namespace {
@@ -429,6 +420,31 @@ TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_KeepsZeroWhenCostModelHasNoPositi
   EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
   EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime)
       << "a non-positive model time must not be reported in place of the sentinel";
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_ShortCircuitDoesNotQueryTheCostModel) {
+  // These 0s come from updateCollCostTable, not from a tuner choice. AlltoAllPivot
+  // is past NCCL_NUM_FUNCTIONS, so ncclTopoGetAlgoTime would read off the end of
+  // comm->bandwidths. One rank is the other arm of that same short circuit.
+  struct {
+    int nRanks;
+    ncclFunc_t func;
+  } const cases[] = {{8, ncclFuncAlltoAllPivot}, {1, ncclFuncAllReduce}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nRanks = c.nRanks;
+    ncclTuner_t tuner{};
+    AttachZeroTuner(cc.get(), &tuner);
+    ScriptCellTime(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kChosenModelUs, kOtherModelUs);
+    g_topoGetAlgoTimeCalls = 0;
+    ncclTaskColl task = CostTask(c.func);
+    task.count = 1024;
+    ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
+
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, &sim)) << c.func;
+    EXPECT_EQ(0, g_topoGetAlgoTimeCalls) << c.func;
+    EXPECT_FLOAT_EQ(0.0f, sim.estimatedTime) << c.func;
+  }
 }
 
 TEST_F(EnqueueMicrotest, GetAlgoInfo_SingleRankZeroCost_StaysZeroWithoutATuner) {

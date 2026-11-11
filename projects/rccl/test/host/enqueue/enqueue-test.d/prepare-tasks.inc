@@ -49,8 +49,16 @@ struct DirectAllGatherScene {
 
 TEST_F(EnqueueMicrotest, PrepareTasks_DirectAllGather_ReportsCostModelTime) {
   DirectAllGatherScene scene;
-  scene.enqueue(ncclFuncAllGather, 1024);
-  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kChosenModelUs);
+  constexpr size_t count = 1024;
+  scene.enqueue(ncclFuncAllGather, count);
+  // getAlgoInfo costs count * nRanks for AllGather. A wrong func or count must
+  // not still report this time.
+  const size_t nBytes =
+    ncclTypeSize(ncclFloat32) * ncclFuncMaxSendRecvCount(ncclFuncAllGather, scene.cc.get()->nRanks, count);
+  g_topoGetAlgoTime = [=](struct ncclComm*, int coll, int, int, size_t bytes, int, float* time) {
+    if (time) *time = (coll == ncclFuncAllGather && bytes == nBytes) ? kChosenModelUs : NCCL_ALGO_PROTO_IGNORE;
+    return ncclSuccess;
+  };
   ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
 
   ASSERT_EQ(ncclSuccess, scene.run(&sim));
