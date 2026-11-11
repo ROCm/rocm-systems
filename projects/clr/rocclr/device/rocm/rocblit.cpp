@@ -1165,7 +1165,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 // ================================================================================================
 // Get Staging or Pinned memory buffer
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
-                               DmaBlitManager::BufferState& buffState) const {
+                               DmaBlitManager::BufferState& buffState, bool readOnly) const {
   bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer);
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
@@ -1183,7 +1183,7 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePi
       size_t tmpSize = amd::alignUp(PinXferSize + partial2, PinnedMemoryAlignment);
       xferSize = std::min(tmpSize - partial2, size);
     }
-    amd::Memory* pinnedMem = pinHostMemory(alignedHost, xferSize, partial1);
+    amd::Memory* pinnedMem = pinHostMemory(alignedHost, xferSize, partial1, readOnly);
     if (pinnedMem != nullptr) {
       Memory* pinnedMemory = dev().getRocMemory(pinnedMem);
       address pinBuffer = pinnedMemory->getDeviceMemory();
@@ -1239,7 +1239,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     // Get Pinned Host Memory or Staging buffer based on copy size
     BufferState outBuffer = {0};
     getBuffer(static_cast<const_address>(hostmem + copyOffset), totalSize, enablePin, firstTx,
-              outBuffer);
+              outBuffer, hostToDev);
     size_t copysize = outBuffer.copySize_;
     address stagingBuffer = outBuffer.buffer_;
     if (stagingBuffer == 0) {
@@ -2078,7 +2078,7 @@ bool KernelBlitManager::writeImage(const void* srcHost, device::Memory& dstMemor
     FindPinSize(pinSize, size, rowPitch, slicePitch, gpuMem(dstMemory));
 
     size_t partial;
-    amd::Memory* amdMemory = pinHostMemory(srcHost, pinSize, partial);
+    amd::Memory* amdMemory = pinHostMemory(srcHost, pinSize, partial, true);
 
     if (amdMemory == nullptr) {
       // Force SW copy
@@ -2533,7 +2533,7 @@ bool KernelBlitManager::writeBufferRect(const void* srcHost, device::Memory& dst
             copyMetadata.isAsync_);
     size_t pinSize = hostRect.start_ + hostRect.end_;
     size_t partial;
-    amd::Memory* amdMemory = pinHostMemory(srcHost, pinSize, partial);
+    amd::Memory* amdMemory = pinHostMemory(srcHost, pinSize, partial, true);
 
     if (amdMemory == nullptr) {
       // Force DMA copy with staging
@@ -3140,7 +3140,7 @@ bool KernelBlitManager::WriteBufferBatch(
 
       BufferState buffer_state = {0};
       getBuffer(static_cast<const_address>(src_addr + copy_offset), remaining_size, enable_pin,
-                first_transfer, buffer_state);
+                first_transfer, buffer_state, true);
       const size_t copy_size = buffer_state.copySize_;
       if (buffer_state.buffer_ == 0 || copy_size == 0) {
         LogWarning("KernelBlitManager::WriteBufferBatch: Buffer creation failed!");
@@ -3858,7 +3858,7 @@ bool KernelBlitManager::initHeap(device::Memory* heap_to_initialize, device::Mem
 // ================================================================================================
 
 amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
-                                           size_t& partial) const {
+                                           size_t& partial, bool readOnly) const {
   size_t pinAllocSize;
   const static bool SysMem = true;
   amd::Memory* amdMemory;
@@ -3873,7 +3873,8 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   // Recalculate pin memory size
   pinAllocSize = amd::alignUp(pinSize + partial, PinnedMemoryAlignment);
 
-  amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
+  amdMemory = new (*context_) amd::Buffer(
+      *context_, CL_MEM_USE_HOST_PTR | (readOnly ? ROCCLR_MEM_PIN_READ_ONLY : 0), pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
