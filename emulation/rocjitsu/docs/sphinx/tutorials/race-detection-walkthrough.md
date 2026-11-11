@@ -17,7 +17,7 @@ emulator runs the kernel entirely on the CPU.
 
 ```{note}
 This tutorial uses the built-in race detector, an execution plugin that
-runs inside the rocJITsu emulator (`RJ_RACE=1`).
+runs inside the rocJITsu emulator.
 ```
 
 ## Write the kernel
@@ -68,23 +68,38 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 
 ## Run under the race detector
 
-Set `RJ_RACE=1` to activate the race detection plugin, then launch the
-binary under rocJITsu:
+From `emulation/rocjitsu`, copy `configs/gfx950_mi350x.json` to
+`my_config.json` and add a `plugins` section to activate the race detector:
+
+``` json
+{ "plugins": { "race": {} } }
+```
+
+Launch the binary with that configuration, where `BUILD_DIR` is your
+rocJITsu build directory:
 
 ``` bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 ## Interpret the race report
 
-The race detector prints a report to stderr that looks like this:
+The following report was captured from the gfx950 example above. PCs,
+register assignments, and dispatch IDs can vary between builds and runs.
 
 ``` text
-RACE type=LDS reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
-Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=2 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
+  Current access: read at PC 0x73aee4951728.
+  Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
+  Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
+  Waves 1 and 0 have not synchronized this access.
+       PC              Instruction
+  ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
+       Execution trace below is for wave 0.
+       0x73aee495171c  ds_write_b32 v0, v1
+       0x73aee4951724  v_sub_u32_e32 v1, 0, v0
+  ==>  0x73aee4951728  ds_read_b32 v1, v1 offset:508  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -96,17 +111,19 @@ Each field tells you something specific:
 -   **wave=0, lane=0** --- the wave and lane that performed the
     conflicting read.
 -   **wg=0,0,0** --- the workgroup coordinates.
--   **ds_write_b32** --- the store instruction from wave 1 that wrote to
-    LDS byte 508.
+-   **Marked ds_write_b32** --- the store instruction from wave 1 that
+    wrote to LDS byte 508. The unmarked row is wave 0's own execution of
+    that store, at the beginning of its trace.
 -   **ds_read_b32** --- the load instruction from wave 0 that read the
     same address without an intervening barrier.
 
-The detector tracks three lifecycle states for each in-flight memory
-operation: *active* (in flight --- accessing the destination is a race),
-*wave-complete* (retired by `s_waitcnt` for the owning wave, but still a
-race for other waves), and *retired* (synchronized by `s_barrier` ---
-safe for all waves). Because no barrier separates the write and the
-read, the write event is still active when the read executes.
+The completion line says that wave 1's store still has an unsatisfied
+`lgkmcnt` wait requirement. The synchronization line says that waves 1 and 0
+have not synchronized this access. These are separate conditions: satisfying
+the store's wait requirement in wave 1 would not order wave 0's read after
+the store. A missing barrier alone does not tell us whether the store's
+wait requirements have been satisfied. The kernel needs `__syncthreads()`
+between the write and the cross-wave read either way.
 
 ## Fix the kernel
 
@@ -126,22 +143,21 @@ Recompile and rerun:
 
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 The output should complete with `done` and no `RACE` reports.
 
 ## Save reports to a file
 
-For CI pipelines or scripted workflows, redirect race reports to a file
-using the sink system:
+For CI pipelines or scripted workflows, create the output directory with
+`mkdir -p /tmp/output` and add a `sinks` section to `my_config.json`:
 
-``` bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+``` json
+{ "sinks": { "types": ["file"], "dir": "/tmp/output" } }
 ```
 
-Reports are written to `/tmp/output/race.log`.
+Rerun with the same command. Reports are written to `/tmp/output/race.log`.
 
 ## Next steps
 

@@ -74,8 +74,8 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Enable the race detector by adding it to the `plugins` section of your
-rocjitsu config file (`my_config.json`):
+Copy `configs/gfx950_mi350x.json` to `my_config.json` and enable the race
+detector by adding a `plugins` section to that configuration:
 
 ```json
 { "plugins": { "race": {} } }
@@ -88,35 +88,38 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 A report identifies the conflicting instructions and their owning waves. This
-excerpt illustrates the layout; PCs and register assignments depend on the
-compiled kernel:
+report was captured from the gfx950 example above; PCs, register assignments,
+and dispatch IDs can vary between builds and runs:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=2 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).
-  Current access: read at PC 0x1018.
-  Conflict: transfer from VGPRs into LDS at PC 0x1010, wave 1.
-  Wait requirements satisfied for this operation in wave 1.
+  Current access: read at PC 0x73aee4951728.
+  Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
+  Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
   Waves 1 and 0 have not synchronized this access.
-       PC      Instruction
-  ==>  0x1010  ds_write_b32 v0, v1  ; <-- wave 1
+       PC              Instruction
+  ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
        Execution trace below is for wave 0.
-       0x1014  v_sub_u32_e32 v1, 0, v0
-  ==>  0x1018  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+       0x73aee495171c  ds_write_b32 v0, v1
+       0x73aee4951724  v_sub_u32_e32 v1, 0, v0
+  ==>  0x73aee4951728  ds_read_b32 v1, v1 offset:508  ; <-- wave 0 lane 0
 END_RACE
 ```
 
-This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
+This tells you that dispatch 2 of `transpose_lds` reported a race: wave 1 wrote
 to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)
 without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
 
-The wait-requirements line refers to the conflicting memory operation, not to
-wave 1 finishing execution. Its completion requirements were satisfied within
-wave 1, for example by an `s_waitcnt`. That does not order wave 0's read after
-wave 1's write; the waves still need a barrier.
+The completion line refers to the conflicting memory operation. Here, wave 1
+has not satisfied its `lgkmcnt` wait requirement. Even if that requirement
+were satisfied by an `s_waitcnt`, wave 0's read would still need to be ordered
+after wave 1's write. The synchronization line describes that separate
+requirement. The unmarked `ds_write_b32` is wave 0's own execution of the
+store; the marked write above it belongs to wave 1.
 
 ### Running your own application
 
@@ -130,7 +133,8 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.p
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
-scripted workflows), add a `sinks` section to your config:
+scripted workflows), create the output directory with `mkdir -p /tmp/output`
+and add a `sinks` section to your config:
 
 ```json
 {
@@ -149,8 +153,12 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 The human-readable heading names the affected register or LDS byte and identifies
 read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
 next lines identify the current access and the conflicting memory event by
-where its data moves, such as from global memory into VGPRs. For a pending
-event, the report lists the completion counters that remain unsatisfied, using
+where its data moves, such as from VGPRs into LDS. A conflict on a VGPR is
+described as a load into VGPRs without naming the source memory space: a FLAT
+instruction can load from different spaces in different lanes, and the event
+does not retain each lane's source.
+
+For a pending event, the report lists the completion counters that remain unsatisfied, using
 the architectural wait names for the target. Internal GFX11 subsets are
 displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains. When the
 event belongs to another wave, the report also states that the two waves have
