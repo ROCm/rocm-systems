@@ -111,7 +111,9 @@ __launch_bounds__(512)
 
     if (blockIdx.y == 0 && tid == 0) {
       uint32_t d0, f0, d1, f1;
-      (void)ddaLLWaitLineFlags(&self[peer], flag, params, d0, f0, d1, f1);
+      // Last step on the root; on abort fall through to the common epilogue.
+      const bool tokSeen = ddaLLWaitLineFlags(&self[peer], flag, params, d0, f0, d1, f1);
+      (void)tokSeen;
     }
   } else {
     if (flatBlockId == 0) {
