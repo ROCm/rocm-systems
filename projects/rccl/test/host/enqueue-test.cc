@@ -401,11 +401,12 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
 }
 
-// gfx942 multi-node alltoall cap (enqueue.cc:1361). The fit loop divides
+// gfx942 remote alltoall cap (enqueue.cc). The fit loop divides
 // p2pnChannelsPerPeer by two while fitted * nRanks is strictly greater than
-// p2pnChannels, then returns 2 only when the result is still above 2. Every
-// other collective, arch, node count, and a user-set nChannelsPerNetPeer fall
-// through. gfx110 alltoall still reaches its own table entry.
+// p2pnChannels, then returns 2 only when the result is still above 2. The peer
+// in this table is on the other node. A same-node peer, every other collective,
+// arch, node count, a user-set nChannelsPerNetPeer, and RCCL_SATURATE_P2P_NCHANNELS
+// fall through. gfx110 alltoall still reaches its own table entry.
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFittedChannels) {
   struct Case {
     const char* name;
@@ -459,10 +460,35 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFi
     std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
                   sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", k.gcn);
     if (k.userSet) comm->config.nChannelsPerNetPeer = k.user;
+    int rankNode[2] = {0, 1};
+    comm->node = 0;
+    comm->rankToNode = rankNode;
     ncclTaskP2p task{};
     task.collAPI = k.coll;
+    task.root = 1;
     EXPECT_EQ(k.expect, rcclP2pPolicyChannels(comm.get(), &task)) << k.name;
   }
+
+  // task->root is the peer. Both ends see the other node, so both cap; a peer
+  // on this node does not.
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  comm->node = 0;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 0 to node 1";
+  comm->node = 1;
+  task.root = 0;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 1 to node 0";
+  comm->node = 0;
+  task.root = 0;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer";
 }
 
 TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableReturnsBeforeTheGfx942Cap) {
@@ -476,6 +502,30 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableReturnsBeforeTheGfx942Cap) 
   task.collAPI = ncclFuncAlltoAll;
   EXPECT_EQ(nullptr, comm->topo);
   EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task));
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_SaturateP2pSkipsTheGfx942Cap) {
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->node = 0;
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  task.root = 1;
+
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? int64_t(1) : deft;
+  };
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate set";
+
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? int64_t(0) : deft;
+  };
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate off";
 }
 
 // ===========================================================================

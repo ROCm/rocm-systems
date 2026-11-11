@@ -11,11 +11,16 @@
 #include "enqueue_test_deps.h"
 
 #include "nccl_fakes.h"
+#include "rccl_common.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
 // rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
 // compile rccl_wrap.cc, which this target does not.
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+
+// paths.cc owns RCCL_PARAM(SaturateP2pNChannels). This binary does not compile
+// paths.cc, and rcclP2pPolicyChannels consults the accessor.
+int64_t rcclParamSaturateP2pNChannels() { return g_loadParam("RCCL_SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET); }
 
 void ResetEnqueueTestDeps() {
   ResetHipFakes();
