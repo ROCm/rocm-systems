@@ -203,23 +203,24 @@ def test_accvgpr_dst_is_canonicalized_into_acc_range():
 
 
 def test_accvgpr_src_is_canonicalized_into_acc_range():
-    # v_accvgpr_read / v_accvgpr_mov src: a well-formed raw src (256 + N) is shifted
-    # into the OPR_SRC_ACCVGPR range [768, 1023]; a raw < 256 is left unshifted so it
-    # cannot escape into the out-of-range [512, 767] band.
-    expr = CodeGenerator._operand_encoding_value_expr(
-        _OperandCtx(
-            'src0',
-            'ENC_VOP3P',
-            packed_16bit=False,
-            operand_type='OPR_SRC_ACCVGPR',
+    for operand, operand_type, selector in (
+        ('src0', 'OPR_SRC_ACCVGPR', 'OpSelSrcAccvgpr'),
+        ('src2', 'OPR_SRC_ACCVGPR_OR_CONST', 'OpSelSrcAccvgprOrConst'),
+    ):
+        expr = CodeGenerator._operand_encoding_value_expr(
+            _OperandCtx(
+                operand,
+                'ENC_VOP3P',
+                packed_16bit=False,
+                operand_type=operand_type,
+            )
         )
-    )
-    assert expr == (
-        '(reinterpret_cast<const OpEncoding*>(inst)->src0 >= 256 ? '
-        'reinterpret_cast<const OpEncoding*>(inst)->src0 + '
-        '(OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN - 256) : '
-        'reinterpret_cast<const OpEncoding*>(inst)->src0)'
-    )
+        assert expr == (
+            f'(reinterpret_cast<const OpEncoding*>(inst)->{operand} >= 256 ? '
+            f'reinterpret_cast<const OpEncoding*>(inst)->{operand} + '
+            f'({selector}::{operand_type}_ACC_MIN - 256) : '
+            f'reinterpret_cast<const OpEncoding*>(inst)->{operand})'
+        )
 
 
 def test_sdwa_clamp_preserves_semantic_result_width():
