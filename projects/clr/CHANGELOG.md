@@ -4,6 +4,13 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Added
+* New floating-point emulation control types in `hip/library_types.h`, for API parity with the corresponding CUDA 13 types used by math libraries (for example, FP64/FP32 GEMM emulation in hipBLAS and hipBLASLt). Enumerator values match CUDA.
+    - `hipEmulationStrategy` (`hipEmulationStrategy_t`): `HIP_EMULATION_STRATEGY_DEFAULT`, `HIP_EMULATION_STRATEGY_PERFORMANT`, `HIP_EMULATION_STRATEGY_EAGER`.
+    - `hipEmulationMantissaControl` (`hipEmulationMantissaControl_t`): `HIP_EMULATION_MANTISSA_CONTROL_DYNAMIC`, `HIP_EMULATION_MANTISSA_CONTROL_FIXED`.
+    - `hipEmulationSpecialValuesSupport` (`hipEmulationSpecialValuesSupport_t`): a bitmask where `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_INFINITY` (1) and `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NAN` (2) can be combined, plus `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_NONE` (0) and `HIP_EMULATION_SPECIAL_VALUES_SUPPORT_DEFAULT` (0xFFFF).
+    - On the NVIDIA platform, these map to the corresponding CUDA types: `hipEmulationStrategy` with CUDA 13.0 or later, and `hipEmulationMantissaControl` and `hipEmulationSpecialValuesSupport` with CUDA 13.1 or later.
+
 ### Resolved issues
 
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
