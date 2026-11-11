@@ -2562,32 +2562,25 @@ static void CreateCeAllReduceEligibleComm(
 // A count of float32 divisible by the 8 mock ranks; well within RCCL_CE_AR_2SHOT_MAX_BYTES.
 static constexpr size_t kCeAllReduceCount = 4096;
 
-// Without CE support rcclUseCeAr2Shot refuses every call, so the bias case
-// would pass without the bias check; both cases must skip together.
-static bool CeAllReduceRuntimeSupported()
-{
-    return ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32);
-}
-
-static constexpr const char* kCeAllReduceUnsupportedMsg =
-    "CE not supported on this runtime driver "
-    "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
-
 // rcclUseCeAr2Shot gates the Copy Engine AllReduce path. The CE kernels never
 // read the bias buffer, so an eligible-looking ncclAllReduceWithBias call must
 // still be refused; taking CE there silently drops the bias from the result.
 TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 {
+    // Without CE support rcclUseCeAr2Shot refuses every call, so the bias case
+    // would pass without the bias check. Skip here, not in the children: a child
+    // skip is not reported as a skip of this test.
+    if(!ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32))
+    {
+        GTEST_SKIP() << "CE not supported on this runtime driver "
+                        "(need ROCm >= 7.12 or 7.0.2.x backport [70051831, 70060000))";
+    }
+
     RUN_ISOLATED_TESTS(
         ProcessIsolatedTestRunner::TestConfig(
             "RcclUseCeAllReduce_BiasBufferRejected",
             []()
             {
-                if(!CeAllReduceRuntimeSupported())
-                {
-                    GTEST_SKIP() << kCeAllReduceUnsupportedMsg;
-                }
-
                 ncclComm_t            comm = nullptr;
                 auto                  topo = std::make_unique<ncclTopoSystem>();
                 struct ncclTopoNode   gpu;
@@ -2612,11 +2605,6 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
             "RcclUseCeAllReduce_NoBiasAccepted",
             []()
             {
-                if(!CeAllReduceRuntimeSupported())
-                {
-                    GTEST_SKIP() << kCeAllReduceUnsupportedMsg;
-                }
-
                 ncclComm_t            comm = nullptr;
                 auto                  topo = std::make_unique<ncclTopoSystem>();
                 struct ncclTopoNode   gpu;
