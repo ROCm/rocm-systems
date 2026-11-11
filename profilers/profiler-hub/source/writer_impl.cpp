@@ -4,8 +4,12 @@
 #include "writer_impl.hpp"
 #include "storage_impl.hpp"
 
+#include "profiler-hub/version.hpp"
+
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace profiler_hub
 {
@@ -33,9 +37,20 @@ writer_impl_core<Policy>::writer_impl_core(std::shared_ptr<writer_context> ctx)
       std::make_unique<typename Policy::region_writer_t>(m_ctx, m_stmts, m_common_ops))
 , m_pmc_event_writer(
       std::make_unique<typename Policy::pmc_event_writer_t>(m_ctx, m_stmts, m_common_ops))
+, m_graph_launch_writer(
+      std::make_unique<typename Policy::graph_launch_writer_t>(m_ctx,
+                                                               m_stmts,
+                                                               m_common_ops))
+, m_hip_event_writer(
+      std::make_unique<typename Policy::hip_event_writer_t>(m_ctx, m_stmts, m_common_ops))
 {}
 
-template class writer_impl_core<active_policy_t>;
+template class writer_impl_core<writer_policy_3_0_0>;
+template class writer_impl_core<writer_policy_3_0_1>;
+template class writer_impl_core<writer_policy_3_0_2>;
+template class writer_impl_core<writer_policy_3_0_3>;
+template class writer_impl_core<writer_policy_3_0_4>;
+template class writer_impl_core<writer_policy_3_0_5>;
 
 std::shared_ptr<writer_context>
 writer_t::impl::create_writer_context(const std::unique_ptr<storage_t>& storage)
@@ -62,15 +77,55 @@ writer_t::impl::create_writer_context(const std::unique_ptr<storage_t>& storage)
         throw std::invalid_argument("Empty UUID provided!");
     }
 
-    ctx->validator = std::make_shared<insert_validator>(ctx->registry);
+    ctx->validator      = std::make_shared<insert_validator>(ctx->registry);
+    ctx->schema_version = storage->get_storage_version();
 
-    ctx->backend->initialize_schema(storage->get_storage_version());
+    ctx->backend->initialize_schema(ctx->schema_version);
 
     return ctx;
 }
 
+writer_variant_t
+writer_t::impl::create_core(const std::unique_ptr<storage_t>& storage)
+{
+    if(!storage)
+    {
+        throw std::invalid_argument("Provided pointer to a non-existing storage!");
+    }
+
+    const auto version = storage->get_storage_version();
+    auto       ctx     = create_writer_context(storage);
+
+    if(version == version_t{ 3, 0, 0 })
+    {
+        return writer_impl_core<writer_policy_3_0_0>(std::move(ctx));
+    }
+    if(version == version_t{ 3, 0, 1 })
+    {
+        return writer_impl_core<writer_policy_3_0_1>(std::move(ctx));
+    }
+    if(version == version_t{ 3, 0, 2 })
+    {
+        return writer_impl_core<writer_policy_3_0_2>(std::move(ctx));
+    }
+    if(version == version_t{ 3, 0, 3 })
+    {
+        return writer_impl_core<writer_policy_3_0_3>(std::move(ctx));
+    }
+    if(version == version_t{ 3, 0, 4 })
+    {
+        return writer_impl_core<writer_policy_3_0_4>(std::move(ctx));
+    }
+    if(version == version_t{ 3, 0, 5 })
+    {
+        return writer_impl_core<writer_policy_3_0_5>(std::move(ctx));
+    }
+
+    throw std::runtime_error("No writer for schema " + version.to_string());
+}
+
 writer_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
-: writer_impl_core<active_policy_t>(create_writer_context(storage))
+: m_core(create_core(storage))
 , m_storage(std::move(storage))
 {}
 

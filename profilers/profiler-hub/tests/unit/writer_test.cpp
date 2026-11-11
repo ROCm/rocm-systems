@@ -61,14 +61,14 @@ protected:
     std::string m_uuid = "testuuid0000";
 };
 
-TEST_F(writer_test, get_storage_version_defaults_to_3_0_1_when_not_specified)
+TEST_F(writer_test, get_storage_version_defaults_to_newest_writable_schema)
 {
     const storage_t storage{ m_db_path, m_uuid };
 
     const auto version = storage.get_storage_version();
     EXPECT_EQ(version.major, 3);
     EXPECT_EQ(version.minor, 0);
-    EXPECT_EQ(version.patch, 1);
+    EXPECT_EQ(version.patch, 5);
 }
 
 TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
@@ -88,7 +88,7 @@ TEST_F(writer_test, get_storage_version_resolves_unspecified_to_newest_writable)
     const auto version = storage.get_storage_version();
     EXPECT_EQ(version.major, 3);
     EXPECT_EQ(version.minor, 0);
-    EXPECT_EQ(version.patch, 1);
+    EXPECT_EQ(version.patch, 5);
 }
 
 TEST_F(writer_test, initialize_schema_default_version_succeeds)
@@ -99,7 +99,7 @@ TEST_F(writer_test, initialize_schema_default_version_succeeds)
 
 TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
 {
-    // version_t{} selects the newest schema the writer can populate, currently 3.0.1.
+    // version_t{} selects the newest schema the writer can populate, currently 3.0.5.
     EXPECT_NO_THROW({ auto writer = make_writer(version_t{}); });
 }
 
@@ -115,14 +115,17 @@ TEST_F(writer_test, construct_storage_accepts_supported_writable_schemas)
 {
     EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 0 } }));
     EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 1 } }));
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 2 } }));
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 3 } }));
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 4 } }));
+    EXPECT_NO_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 5 } }));
 }
 
 TEST_F(writer_test, construct_storage_rejects_schema_the_writer_cannot_write)
 {
-    // 3.0.2 and 3.0.5 are embedded. The writer can populate 3.0.0 and 3.0.1.
-    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 2 } }),
+    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 6 } }),
                  std::runtime_error);
-    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 3, 0, 5 } }),
+    EXPECT_THROW((storage_t{ m_db_path, m_uuid, version_t{ 4, 0, 0 } }),
                  std::runtime_error);
 }
 
@@ -773,6 +776,94 @@ TEST_F(writer_test, insert_kernel_dispatch_data_is_readable_after_flush)
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].start_timestamp, 1000);
     EXPECT_EQ(events[0].end_timestamp, 2000);
+}
+
+TEST_F(writer_test, memory_copy_graph_id_is_rejected_on_schema_3_0_1)
+{
+    auto                             writer = make_writer(version_t{ 3, 0, 1 });
+    writer_types::memory_copy_data_t data;
+    data.graph_node_id = 4;
+    try
+    {
+        writer->insert_memory_copy_data(data, {});
+        FAIL() << "schema 3.0.1 stored graph_node_id";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("memory_copy.graph_node_id"),
+                  std::string::npos);
+    }
+}
+
+TEST_F(writer_test, graph_launch_is_rejected_before_3_0_2_and_stored_from_3_0_2)
+{
+    auto early = make_writer(version_t{ 3, 0, 1 });
+    EXPECT_THROW(early->insert_graph_launch_data({}, {}), std::runtime_error);
+
+    auto writer = make_writer(version_t{ 3, 0, 2 });
+    register_node_and_process(*writer);
+    writer_types::graph_launch_data_t data;
+    data.graph_exec_id         = 3;
+    data.kernel_dispatch_count = 1;
+    data.start_timestamp       = 10;
+    data.end_timestamp         = 20;
+    writer_types::trace_environment_t env;
+    env.node_id    = 1;
+    env.process_id = 100;
+    EXPECT_NO_THROW(writer->insert_graph_launch_data(data, env));
+}
+
+TEST_F(writer_test, hip_event_is_rejected_before_3_0_4_and_stored_from_3_0_4)
+{
+    auto early = make_writer(version_t{ 3, 0, 2 });
+    EXPECT_THROW(early->insert_hip_event_data({}, {}), std::runtime_error);
+
+    auto writer = make_writer(version_t{ 3, 0, 4 });
+    register_node_and_process(*writer);
+    writer_types::hip_event_data_t data;
+    data.name             = "hipEventRecord";
+    data.hip_event_handle = 9;
+    data.start_timestamp  = 10;
+    data.end_timestamp    = 20;
+    writer_types::trace_environment_t env;
+    env.node_id    = 1;
+    env.process_id = 100;
+    EXPECT_NO_THROW(writer->insert_hip_event_data(data, env));
+}
+
+TEST_F(writer_test, pmc_event_location_is_rejected_on_3_0_5)
+{
+    auto                           writer = make_writer(version_t{ 3, 0, 5 });
+    writer_types::pmc_event_data_t data;
+    data.xcc = 1;
+    try
+    {
+        writer->insert_pmc_event_data(data, {});
+        FAIL() << "schema 3.0.5 stored pmc_event.xcc";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("pmc_event.xcc"), std::string::npos);
+        EXPECT_NE(std::string(error.what()).find("pmc_info"), std::string::npos);
+    }
+}
+
+TEST_F(writer_test, kernel_dispatch_graph_id_is_rejected_on_schema_3_0_1)
+{
+    auto writer = make_writer(version_t{ 3, 0, 1 });
+
+    writer_types::kernel_dispatch_data_t data;
+    data.graph_exec_id = 7;
+
+    try
+    {
+        writer->insert_kernel_dispatch_data(data, {});
+        FAIL() << "schema 3.0.1 stored graph_exec_id";
+    } catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("kernel_dispatch.graph_exec_id"), std::string::npos);
+        EXPECT_NE(message.find("3.0.1"), std::string::npos);
+        EXPECT_NE(message.find("3.0.2"), std::string::npos);
+    }
 }
 
 }  // namespace

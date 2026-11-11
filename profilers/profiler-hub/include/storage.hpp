@@ -18,9 +18,10 @@ class storage_t
 public:
     /**
      * @brief Construct a storage handle backed by a database on disk.
-     * Writes schema 3.0.1. That version is ignored when only reading an existing
-     * database. This overload is a separate exported symbol. A defaulted third argument
-     * would not keep the two-argument symbol in the shared library.
+     * Writes the newest schema the writer supports (currently 3.0.5). That version is
+     * ignored when only reading an existing database. This overload is a separate
+     * exported symbol. A defaulted third argument would not keep the two-argument
+     * symbol in the shared library.
      * @param database_path Path to the on-disk rocpd database
      * @param uuid Unique identifier embedded into this storage's table names
      */
@@ -30,7 +31,7 @@ public:
      * @brief Construct a storage handle that writes `schema_version`.
      * Ignored when only reading an existing database. version_t{} selects the newest
      * schema the writer supports. Any other version must be one the writer can
-     * populate. Currently those are 3.0.0 and 3.0.1. version_t{} selects 3.0.1.
+     * populate. Currently those are 3.0.0 through 3.0.5. version_t{} selects 3.0.5.
      * @param database_path Path to the on-disk rocpd database
      * @param uuid Unique identifier embedded into this storage's table names
      * @param schema_version rocpd schema version to initialize when writing
@@ -48,8 +49,8 @@ public:
 
     /**
      * @brief Schema version the writer creates for this storage
-     * @return The resolved writable version. version_t{} is returned as 3.0.1.
-     *         An explicit 3.0.0 or 3.0.1 is returned unchanged.
+     * @return The resolved writable version. version_t{} is returned as 3.0.5.
+     *         An explicit 3.0.0 through 3.0.5 is returned unchanged.
      */
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
 

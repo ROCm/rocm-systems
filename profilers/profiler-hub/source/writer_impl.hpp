@@ -11,9 +11,16 @@
 #include "writers/writer_context.hpp"
 #include "writers/writer_policy_traits.hpp"
 
+#include "writers/schema_v3/schema_3_0_1/writer_policy.hpp"
+#include "writers/schema_v3/schema_3_0_2/writer_policy.hpp"
+#include "writers/schema_v3/schema_3_0_3/writer_policy.hpp"
+#include "writers/schema_v3/schema_3_0_4/writer_policy.hpp"
+#include "writers/schema_v3/schema_3_0_5/writer_policy.hpp"
 #include "writers/schema_v3/writer_policy.hpp"
 
 #include <memory>
+#include <utility>
+#include <variant>
 
 namespace profiler_hub
 {
@@ -119,6 +126,19 @@ public:
         m_memory_alloc_writer->insert(memory_alloc_data, trace_environment);
     }
 
+    void insert_graph_launch_data(
+        const writer_types::graph_launch_data_t& graph_launch_data,
+        const writer_types::trace_environment_t& trace_environment)
+    {
+        m_graph_launch_writer->insert(graph_launch_data, trace_environment);
+    }
+
+    void insert_hip_event_data(const writer_types::hip_event_data_t&    hip_event_data,
+                               const writer_types::trace_environment_t& trace_environment)
+    {
+        m_hip_event_writer->insert(hip_event_data, trace_environment);
+    }
+
     void flush_in_memory_data_to_disk() { m_ctx->backend->flush(); }
 
 private:
@@ -131,18 +151,157 @@ private:
     std::unique_ptr<typename Policy::memory_alloc_writer_t>    m_memory_alloc_writer;
     std::unique_ptr<typename Policy::region_writer_t>          m_region_writer;
     std::unique_ptr<typename Policy::pmc_event_writer_t>       m_pmc_event_writer;
+    std::unique_ptr<typename Policy::graph_launch_writer_t>    m_graph_launch_writer;
+    std::unique_ptr<typename Policy::hip_event_writer_t>       m_hip_event_writer;
 };
 
-using active_policy_t = writer_policy_v3;
+// One core per schema. The storage version picks the alternative once, in the
+// constructor, the same way PR 5347 picks schema v3 or v4.
+using writer_variant_t = std::variant<writer_impl_core<writer_policy_3_0_0>,
+                                      writer_impl_core<writer_policy_3_0_1>,
+                                      writer_impl_core<writer_policy_3_0_2>,
+                                      writer_impl_core<writer_policy_3_0_3>,
+                                      writer_impl_core<writer_policy_3_0_4>,
+                                      writer_impl_core<writer_policy_3_0_5>>;
 
-struct writer_t::impl : writer_impl_core<active_policy_t>
+struct writer_t::impl
 {
     explicit impl(std::unique_ptr<profiler_hub::storage_t> storage);
 
+    void register_node_info(const writer_types::node_info_t& node_info)
+    {
+        dispatch([&](auto& core) { core.register_node_info(node_info); });
+    }
+
+    void register_process_info(const writer_types::process_info_t& process_info)
+    {
+        dispatch([&](auto& core) { core.register_process_info(process_info); });
+    }
+
+    void register_agent_info(const writer_types::agent_info_t& agent_info)
+    {
+        dispatch([&](auto& core) { core.register_agent_info(agent_info); });
+    }
+
+    void register_pmc_info(const writer_types::pmc_info_t& pmc_info)
+    {
+        dispatch([&](auto& core) { core.register_pmc_info(pmc_info); });
+    }
+
+    void register_thread_info(const writer_types::thread_info_t& thread_info)
+    {
+        dispatch([&](auto& core) { core.register_thread_info(thread_info); });
+    }
+
+    void register_stream_info(const writer_types::stream_info_t& stream_info)
+    {
+        dispatch([&](auto& core) { core.register_stream_info(stream_info); });
+    }
+
+    void register_queue_info(const writer_types::queue_info_t& queue_info)
+    {
+        dispatch([&](auto& core) { core.register_queue_info(queue_info); });
+    }
+
+    void register_code_object_info(
+        const writer_types::code_object_info_t& code_object_info)
+    {
+        dispatch([&](auto& core) { core.register_code_object_info(code_object_info); });
+    }
+
+    void register_kernel_symbol_info(
+        const writer_types::kernel_symbol_info_t& kernel_symbol_info)
+    {
+        dispatch(
+            [&](auto& core) { core.register_kernel_symbol_info(kernel_symbol_info); });
+    }
+
+    void register_track_info(const writer_types::track_info_t& track)
+    {
+        dispatch([&](auto& core) { core.register_track_info(track); });
+    }
+
+    void register_string(std::string_view str)
+    {
+        dispatch([&](auto& core) { core.register_string(str); });
+    }
+
+    void insert_region_data(const writer_types::region_data_t&       region_data,
+                            const writer_types::trace_environment_t& trace_environment)
+    {
+        dispatch(
+            [&](auto& core) { core.insert_region_data(region_data, trace_environment); });
+    }
+
+    void insert_pmc_event_data(const writer_types::pmc_event_data_t&     pmc_event_data,
+                               const writer_types::pmc_info_unique_id_t& pmc_unique_id)
+    {
+        dispatch([&](auto& core) {
+            core.insert_pmc_event_data(pmc_event_data, pmc_unique_id);
+        });
+    }
+
+    void insert_kernel_dispatch_data(
+        const writer_types::kernel_dispatch_data_t& kernel_dispatch_data,
+        const writer_types::trace_environment_t&    trace_environment)
+    {
+        dispatch([&](auto& core) {
+            core.insert_kernel_dispatch_data(kernel_dispatch_data, trace_environment);
+        });
+    }
+
+    void insert_memory_copy_data(
+        const writer_types::memory_copy_data_t&  memory_copy_data,
+        const writer_types::trace_environment_t& trace_environment)
+    {
+        dispatch([&](auto& core) {
+            core.insert_memory_copy_data(memory_copy_data, trace_environment);
+        });
+    }
+
+    void insert_memory_alloc_data(
+        const writer_types::memory_alloc_data_t& memory_alloc_data,
+        const writer_types::trace_environment_t& trace_environment)
+    {
+        dispatch([&](auto& core) {
+            core.insert_memory_alloc_data(memory_alloc_data, trace_environment);
+        });
+    }
+
+    void insert_graph_launch_data(
+        const writer_types::graph_launch_data_t& graph_launch_data,
+        const writer_types::trace_environment_t& trace_environment)
+    {
+        dispatch([&](auto& core) {
+            core.insert_graph_launch_data(graph_launch_data, trace_environment);
+        });
+    }
+
+    void insert_hip_event_data(const writer_types::hip_event_data_t&    hip_event_data,
+                               const writer_types::trace_environment_t& trace_environment)
+    {
+        dispatch([&](auto& core) {
+            core.insert_hip_event_data(hip_event_data, trace_environment);
+        });
+    }
+
+    void flush_in_memory_data_to_disk()
+    {
+        dispatch([](auto& core) { core.flush_in_memory_data_to_disk(); });
+    }
+
 private:
+    template <typename Fn>
+    void dispatch(Fn&& fn)
+    {
+        std::visit(std::forward<Fn>(fn), m_core);
+    }
+
     static std::shared_ptr<writer_context> create_writer_context(
         const std::unique_ptr<storage_t>& storage);
+    static writer_variant_t create_core(const std::unique_ptr<storage_t>& storage);
 
+    writer_variant_t                         m_core;
     std::unique_ptr<profiler_hub::storage_t> m_storage;
 };
 
