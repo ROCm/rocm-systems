@@ -314,7 +314,7 @@ __host__ void HostInterface::putmem_signal(
     [[maybe_unused]] size_t nelems, [[maybe_unused]] uint64_t* sig_addr,
     [[maybe_unused]] uint64_t signal, [[maybe_unused]] int sig_op,
     [[maybe_unused]] int pe, [[maybe_unused]] WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->put_signal(dest, source, nelems, sig_addr, signal, sig_op, pe);
     return;
@@ -328,7 +328,7 @@ __host__ void HostInterface::putmem_signal(
 __host__ uint64_t HostInterface::signal_fetch(
     [[maybe_unused]] const uint64_t* sig_addr,
     [[maybe_unused]] WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     return w->signal_fetch(sig_addr);
   }
@@ -343,7 +343,7 @@ __host__ void HostInterface::signal_wait_until(
     [[maybe_unused]] uint64_t* sig_addr, [[maybe_unused]] int cmp,
     [[maybe_unused]] uint64_t cmp_value,
     [[maybe_unused]] WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->signal_wait_until(sig_addr, cmp, cmp_value);
     return;
