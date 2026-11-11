@@ -8,7 +8,7 @@
 
 #include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v4.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {

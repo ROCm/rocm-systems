@@ -3,6 +3,7 @@
 
 // Tests for scalar moves, conditional selection, and immediate extension.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/integer_helpers.h"
 
 #include <array>

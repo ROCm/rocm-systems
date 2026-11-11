@@ -6,10 +6,10 @@
 // SAD and saturation rules adapted from rocjitsu shared/simd_glue.h and
 // lib/python/amdisa/codegen/execute/vector_special.py.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "integer/sad_impl.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <stdint.h>
 

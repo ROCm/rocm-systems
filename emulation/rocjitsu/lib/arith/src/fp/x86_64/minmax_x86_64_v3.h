@@ -7,7 +7,7 @@
 #pragma once
 
 #include "common/bits.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 #include <stdint.h>
 

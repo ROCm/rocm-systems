@@ -3,6 +3,7 @@
 
 // Tests for scalar FP comparisons and FP-status results.
 
+#include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/compare_helpers.h"
 
 // Check scalar predicates, SCC aliases, and FP-status expectations.

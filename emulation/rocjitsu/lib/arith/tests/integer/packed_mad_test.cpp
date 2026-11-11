@@ -4,7 +4,7 @@
 // Tests for packed 16-bit multiply-add and saturation.
 
 #include "integer/packed_mad_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <gtest/gtest.h>
 

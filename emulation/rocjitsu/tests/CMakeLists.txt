@@ -218,6 +218,21 @@ add_test(
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND NOT CMAKE_CROSSCOMPILING
+    AND CMAKE_GENERATOR MATCHES "^Ninja"
+)
+    add_test(
+        NAME cmake.build_path_cache
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_build_path_cache.py
+            ${CMAKE_COMMAND} ${CMAKE_CXX_COMPILER} "${CMAKE_CXX_COMPILER_ARG1}"
+            ${CMAKE_MAKE_PROGRAM}
+    )
+    set_tests_properties(cmake.build_path_cache PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Exercise the native runtime resolved by the configured Python environment.
     # Reinstall native changes first, or put an uninstalled build on PATH when
@@ -2242,11 +2257,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
     )
     rj_configure_target(vm_shared_memory_api_test TEST)
-    target_compile_definitions(
+    rj_add_test_path(
         vm_shared_memory_api_test
-        PRIVATE
-            RJ_VM_API_LIBRARY="$<TARGET_FILE:rocjitsu_shared>"
-            RJ_VM_API_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
+        RJ_VM_API_LIBRARY
+        "$<TARGET_FILE:rocjitsu_shared>"
+    )
+    rj_add_test_path(
+        vm_shared_memory_api_test
+        RJ_VM_API_CONFIG
+        "${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
     )
     add_dependencies(vm_shared_memory_api_test rocjitsu_shared rocjitsu_memory)
     foreach(_backing IN ITEMS native zero-hard-limit)

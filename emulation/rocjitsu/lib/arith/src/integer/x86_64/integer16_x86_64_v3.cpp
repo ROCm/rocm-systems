@@ -6,7 +6,7 @@
 
 #include "integer/integer16.h"
 #include "integer/x86_64/packed_integer_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_integer.h"
 
 #include <immintrin.h>
 #include <stdint.h>

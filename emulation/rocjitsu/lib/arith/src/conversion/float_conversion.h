@@ -11,7 +11,7 @@
 #include "conversion/conversion32.h"
 #include "conversion/conversion64.h"
 #include "conversion/model/conversion.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 namespace conversion_detail {

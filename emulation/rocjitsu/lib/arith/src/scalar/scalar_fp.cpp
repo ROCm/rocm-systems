@@ -7,11 +7,11 @@
 // Scalar operations follow rocjitsu generated/shared/execute_shared.h. GFX1201
 // captures establish the output-flush exceptions and multiplication threshold.
 
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "fp/binary.h"
 #include "fp/minmax_impl.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 

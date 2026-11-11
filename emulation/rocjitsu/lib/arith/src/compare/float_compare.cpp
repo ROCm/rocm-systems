@@ -7,10 +7,10 @@
 // Raw ordering, signed-zero normalization and predicate inversion follow
 // rocjitsu's shared/comparison.h, with guest input flushing before ordering.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "compare/float_compare_impl.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_compare.h"
 
 #include <stdint.h>
 

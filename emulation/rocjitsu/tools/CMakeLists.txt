@@ -184,37 +184,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE -static-libstdc++ -static-libgcc
         )
     endif()
-    file(
-        RELATIVE_PATH
-        _rj_keeper_relative
-        "${CMAKE_INSTALL_FULL_LIBDIR}"
-        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
-    )
-    file(
-        RELATIVE_PATH
-        _rj_keeper_bin_relative
-        "${CMAKE_INSTALL_FULL_BINDIR}"
-        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
-    )
-    file(
-        RELATIVE_PATH
-        _rj_keeper_test_relative
-        "${CMAKE_INSTALL_FULL_DATADIR}/rocjitsu/tests/bin"
-        "${CMAKE_INSTALL_FULL_LIBEXECDIR}/rocjitsu/rocjitsu-memory"
-    )
-    foreach(_target rocjitsu_memory rocjitsu_kmd)
-        target_compile_definitions(
-            ${_target}
-            PRIVATE
-                RJ_MEMORY_KEEPER_BUILD_LIBDIR="$<TARGET_FILE_DIR:rocjitsu_shared>"
-                RJ_MEMORY_KEEPER_BUILD_BINDIR="$<TARGET_FILE_DIR:rocjitsu_bin>"
-                RJ_MEMORY_KEEPER_BUILD_TESTDIR="$<$<BOOL:${BUILD_TESTING}>:$<TARGET_FILE_DIR:rocjitsu_tests>>"
-                RJ_MEMORY_KEEPER_BUILD_PATH="$<TARGET_FILE:rocjitsu_memory>"
-                RJ_MEMORY_KEEPER_INSTALL_PATH="${_rj_keeper_relative}"
-                RJ_MEMORY_KEEPER_BIN_INSTALL_PATH="${_rj_keeper_bin_relative}"
-                RJ_MEMORY_KEEPER_TEST_INSTALL_PATH="${_rj_keeper_test_relative}"
-        )
-    endforeach()
     add_dependencies(rocjitsu_kmd rocjitsu_memory)
     install(
         TARGETS rocjitsu_memory

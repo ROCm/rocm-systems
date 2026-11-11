@@ -4,7 +4,7 @@
 // AVX-512 bit-exact mixed-precision FMA with per-lane scalar repair.
 
 #include "common/compiler.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/mixed_fma.h"
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"

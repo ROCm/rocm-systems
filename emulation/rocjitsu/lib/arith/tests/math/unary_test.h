@@ -18,7 +18,7 @@
 #include "math/half_unary_reference.h"
 #include "math/unary_goldens.h"
 #include "math/unary_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <bit>
 
 #include <cmath>

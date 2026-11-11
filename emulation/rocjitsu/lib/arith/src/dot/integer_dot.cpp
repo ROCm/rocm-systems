@@ -5,10 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 // Integer DOT semantics follow rocjitsu codegen/execute/packed.py.
 
-#include "common/internal.h"
 #include "common/simd.h"
+#include "common/validation.h"
 #include "dot/operand_halves.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <stdint.h>
 

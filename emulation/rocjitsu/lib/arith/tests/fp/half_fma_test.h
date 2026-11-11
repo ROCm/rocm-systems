@@ -14,7 +14,7 @@
 #include "fp/fma_simd_test.h"
 #include "fp/half_fma_reference.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
 #include <stdint.h>

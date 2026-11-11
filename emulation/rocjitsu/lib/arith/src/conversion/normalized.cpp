@@ -5,10 +5,10 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "conversion/normalized.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 
