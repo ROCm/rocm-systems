@@ -638,51 +638,56 @@ rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  auto created = std::make_unique<rj_daemon_t>();
-  created->socket_path = socket_path;
+  // Keep ownership outside the fatal boundary so a failed launch cannot unwind
+  // and join the engine before it has been asked to stop.
+  std::unique_ptr<rj_daemon_t> created;
+  return [&]() noexcept -> rj_status_t {
+    created = std::make_unique<rj_daemon_t>();
+    created->socket_path = socket_path;
 
-  rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
-  if (status != ROCJITSU_STATUS_SUCCESS)
-    return status;
+    rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
+    if (status != ROCJITSU_STATUS_SUCCESS)
+      return status;
 
-  // Daemon callers supply the same configuration as local-mode callers, so
-  // install its plugins before any client can submit work. With no explicit
-  // directory, the loader discovers modules relative to librocjitsu or the
-  // statically linked rocjitsu CLI.
-  status = rj_vm_load_plugins(created->vm, json, nullptr);
-  if (status != ROCJITSU_STATUS_SUCCESS) {
-    rj_vm_destroy(created->vm);
-    created->vm = nullptr;
-    return status;
-  }
-
-  status = bind_socket(created.get());
-  if (status != ROCJITSU_STATUS_SUCCESS) {
-    rj_vm_destroy(created->vm);
-    created->vm = nullptr;
-    remove_owned_socket(created.get());
-    return status;
-  }
-
-  created->engine_thread = std::jthread([state = created.get()] {
-    const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
-    if (run_status != ROCJITSU_STATUS_SUCCESS ||
-        !state->stop_requested.load(std::memory_order_acquire)) {
-      mark_error(state);
+    // Daemon callers supply the same configuration as local-mode callers, so
+    // install its plugins before any client can submit work. With no explicit
+    // directory, the loader discovers modules relative to librocjitsu or the
+    // statically linked rocjitsu CLI.
+    status = rj_vm_load_plugins(created->vm, json, nullptr);
+    if (status != ROCJITSU_STATUS_SUCCESS) {
+      rj_vm_destroy(created->vm);
+      created->vm = nullptr;
+      return status;
     }
-  });
-  created->accept_thread =
-      std::jthread([state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
 
-  rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
-  if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
-                                               std::memory_order_acq_rel)) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_ERROR;
-  }
+    status = bind_socket(created.get());
+    if (status != ROCJITSU_STATUS_SUCCESS) {
+      rj_vm_destroy(created->vm);
+      created->vm = nullptr;
+      remove_owned_socket(created.get());
+      return status;
+    }
 
-  *daemon = created.release();
-  return ROCJITSU_STATUS_SUCCESS;
+    created->engine_thread = std::jthread([state = created.get()] {
+      const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
+      if (run_status != ROCJITSU_STATUS_SUCCESS ||
+          !state->stop_requested.load(std::memory_order_acquire)) {
+        mark_error(state);
+      }
+    });
+    created->accept_thread = std::jthread(
+        [state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
+
+    rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
+    if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
+                                                 std::memory_order_acq_rel)) {
+      teardown(created.get());
+      return ROCJITSU_STATUS_ERROR;
+    }
+
+    *daemon = created.release();
+    return ROCJITSU_STATUS_SUCCESS;
+  }();
 }
 
 rj_status_t rj_daemon_stop(rj_daemon_t *daemon) {
