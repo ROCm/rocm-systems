@@ -247,7 +247,7 @@ protected:
 
   /// Issue one tensor DMA instruction, as execution does, and return whether it
   /// produced a race.
-  bool transfer(int wave, bool is_load, std::span<const TensorDmaLdsRange> ranges) {
+  bool transfer(int wave, bool is_load, std::span<const LdsByteRange> ranges) {
     // Each access gets a distinct PC so reports are not deduplicated.
     waves[wave]->pc += 16;
     record_tensor_instruction(wave, is_load);
@@ -257,11 +257,11 @@ protected:
     return sink->str().find("RACE ", previous) != std::string::npos;
   }
 
-  bool tensor_load(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+  bool tensor_load(int wave, std::initializer_list<LdsByteRange> ranges) {
     return transfer(wave, true, std::span(ranges.begin(), ranges.size()));
   }
 
-  bool tensor_store(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+  bool tensor_store(int wave, std::initializer_list<LdsByteRange> ranges) {
     return transfer(wave, false, std::span(ranges.begin(), ranges.size()));
   }
 
@@ -1056,6 +1056,14 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesStillTakesATensorcntSlot) {
   tensor_store(0, {});
   wait_tensorcnt(0, 1);
   EXPECT_FALSE(ds_read(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, RetainedFootprintDoesNotBorrowTheIssueRanges) {
+  std::array ranges{LdsByteRange{.address = 64, .bytes = 4}};
+  EXPECT_FALSE(transfer(0, /*is_load=*/true, ranges));
+  ranges[0] = {.address = 128, .bytes = 4};
+  EXPECT_FALSE(ds_read(1, 128));
+  EXPECT_TRUE(ds_read(1, 64));
 }
 
 TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWaitCoversIt) {
@@ -2947,9 +2955,7 @@ TEST(RaceDetectorPluginTest, DualOffsetIntervalsPreserveUnionAndInstructionLifet
       // footprint, even when every lane and both address sets overlap.
       const IntervalSet &accessed = events.ldsIntervals(EventId{1});
       for (int remaining : {1, 0}) {
-        PendingWaitCount wait;
-        wait.add(WaitCounterType::LGKMCNT, remaining);
-        race.dispatch(wait);
+        race.applyWaitCounter(WaitCounterType::LGKMCNT, remaining);
         race.flushBarrierPendingEvents();
         EXPECT_EQ(events.status(EventId{0}), EventStatus::RETIRED);
         EXPECT_EQ(events.status(EventId{1}),
@@ -3667,16 +3673,12 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
         EXPECT_EQ(events.pendingCounterIncrement(slot, WaitCounterType::DSCNT), 0);
       }
       EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
-      PendingWaitCount wait;
-      wait.add(global_counter, 0);
-      race.dispatch(wait);
+      race.applyWaitCounter(global_counter, 0);
       if (slot_event) {
         EXPECT_EQ(events.status(slot), EventStatus::WAVE_COMPLETE);
       }
       EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
-      wait.updates.clear();
-      wait.add(WaitCounterType::DSCNT, 0);
-      race.dispatch(wait);
+      race.applyWaitCounter(WaitCounterType::DSCNT, 0);
       // A single-wave workgroup retires a completed event with LDS bytes at once;
       // one without LDS bytes stays wave-complete until the registry trims it.
       EXPECT_EQ(events.status(event),

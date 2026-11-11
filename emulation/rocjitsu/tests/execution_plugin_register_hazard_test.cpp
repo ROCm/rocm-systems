@@ -827,9 +827,7 @@ TEST(RegisterHazardPluginTest, CounterOnlyIssuesParticipateInLdsPartialWaits) {
     EXPECT_EQ(race.getDetector()->events().access(events.back()), LdsAccess::None);
     EXPECT_TRUE(race.getDetector()->events().ldsIntervals(events.back()).empty());
     if (waited) {
-      PendingWaitCount wait;
-      wait.add(WaitCounterType::VMCNT, 1);
-      race.dispatch(wait);
+      race.applyWaitCounter(WaitCounterType::VMCNT, 1);
     }
     race.getDetector()->validateRead(0x80, race.getWaveId(), 0, 4, MemoryOrderClass::UNORDERED);
     const auto output = reports(h.sink->str());

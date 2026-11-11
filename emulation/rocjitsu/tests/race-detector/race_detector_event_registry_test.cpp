@@ -12,6 +12,7 @@
 #include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
+using rocjitsu::amdgpu::LdsByteRange;
 
 TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   // Counter-only events can be trimmed after completion; they carry no LDS
@@ -29,9 +30,7 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
     wave.registerCounterEvent(
         testInstruction(static_cast<uint64_t>(i)),
         CounterObligations{rocjitsu::amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM});
-    PendingWaitCount wait;
-    wait.add(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
-    wave.dispatch(wait);
+    wave.applyWaitCounter(rocjitsu::amdgpu::WaitCounterType::VMCNT, 0);
   }
 
   EXPECT_GT(detector.events().trimmedCount(), 0);
@@ -178,9 +177,7 @@ void asyncLoadTile(WaveRaceState &wave, uint64_t pc, uint32_t address) {
 }
 
 void waitAsynccnt(WaveRaceState &wave, int count) {
-  PendingWaitCount wait;
-  wait.add(WaitCounterType::ASYNCCNT, count);
-  wave.dispatch(wait);
+  wave.applyWaitCounter(WaitCounterType::ASYNCCNT, count);
 }
 
 TEST(RaceDetector, SingleWave_CompletedLdsEventsAreRetiredWithoutABarrier) {
