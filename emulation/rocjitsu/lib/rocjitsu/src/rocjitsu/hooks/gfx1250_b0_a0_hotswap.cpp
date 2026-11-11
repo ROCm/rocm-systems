@@ -430,14 +430,15 @@ template <typename Fn> ScopeGuard<Fn> make_scope_guard(Fn fn) {
   return ScopeGuard<Fn>(std::move(fn));
 }
 
-hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader);
+hsa_status_t HSA_API reader_create_from_file(hsa_file_t file,
+                                             hsa_code_object_reader_t *reader) noexcept;
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
-                                               hsa_code_object_reader_t *reader);
+                                               hsa_code_object_reader_t *reader) noexcept;
 hsa_status_t HSA_API reader_destroy(hsa_code_object_reader_t reader);
 hsa_status_t HSA_API executable_destroy(hsa_executable_t executable);
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
-                                            hsa_loaded_code_object_t *loaded);
+                                            hsa_loaded_code_object_t *loaded) noexcept;
 hsa_status_t HSA_API load_program_code_object(hsa_executable_t executable,
                                               hsa_code_object_reader_t reader, const char *options,
                                               hsa_loaded_code_object_t *loaded);
@@ -946,7 +947,7 @@ void hold_claimed_translation_for_test() {}
 void override_translation_status_for_test(rj_status_t &, uint8_t *&, size_t &) {}
 #endif // RJ_HOTSWAP_TEST_HOOKS
 
-bool install(HsaApiTable *table) {
+bool install(HsaApiTable *table) noexcept {
   std::lock_guard lock(g_state.lifecycle_mutex);
   if (g_state.core != nullptr) {
     log_error("OnLoad refused: hook is already installed");
@@ -1023,7 +1024,7 @@ bool install(HsaApiTable *table) {
   return true;
 }
 
-void uninstall() {
+void uninstall() noexcept {
   std::lock_guard lock(g_state.lifecycle_mutex);
   CoreApiTable *core = g_state.core;
   // Swap the published snapshot out for nullptr. Any callback still holding the
@@ -1250,7 +1251,7 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
 }
 
 hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t size,
-                                               hsa_code_object_reader_t *reader) {
+                                               hsa_code_object_reader_t *reader) noexcept {
   // Reject a null output pointer before forwarding: the lower/vendor API may write
   // through it without checking, so fail fast the way ROCr's own layer does.
   if (reader == nullptr)
@@ -1266,7 +1267,8 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
   return capture_reader(*api, reader, copy_bytes(code_object, size));
 }
 
-hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_reader_t *reader) {
+hsa_status_t HSA_API reader_create_from_file(hsa_file_t file,
+                                             hsa_code_object_reader_t *reader) noexcept {
   if (reader == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
@@ -1280,7 +1282,7 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
 }
 
 hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
-                                  hsa_code_object_reader_t *reader) {
+                                  hsa_code_object_reader_t *reader) noexcept {
   if (reader == nullptr)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
@@ -1342,7 +1344,7 @@ hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
 
 hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_agent_t agent,
                                             hsa_code_object_reader_t reader, const char *options,
-                                            hsa_loaded_code_object_t *loaded) {
+                                            hsa_loaded_code_object_t *loaded) noexcept {
   const std::shared_ptr<const OriginalApi> api = g_state.active_api.load(std::memory_order_acquire);
   if (api == nullptr)
     return HSA_STATUS_ERROR;
