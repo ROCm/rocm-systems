@@ -629,11 +629,11 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   // Each lane polls its own assigned subset of sync flags.
+  // Senders signal at their team rank, so index flags by j (not world PE).
   for (int j = tid; j < pe_size; j += step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
-    long *sync_flag = &pSync[fcollect_pSync_offset + dest_pe];
+    long *sync_flag = &pSync[fcollect_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
-    pSync[fcollect_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[fcollect_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_wave()) {
@@ -735,12 +735,11 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j += step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flag = &pSync[fcollect_pSync_offset + dest_pe];
+    long *sync_flag = &pSync[fcollect_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
 
-    pSync[fcollect_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[fcollect_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
 

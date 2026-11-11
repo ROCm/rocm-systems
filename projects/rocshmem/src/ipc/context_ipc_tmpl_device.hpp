@@ -937,14 +937,13 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
 
   // wait until everyone has obtained their designated data
   for (int j = tid; j < pe_size; j+= step_size) {
-    int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flag = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flag = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flag) != 1) { }
 
     //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
