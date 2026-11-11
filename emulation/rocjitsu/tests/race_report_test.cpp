@@ -315,27 +315,27 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
     const char *operation;
   } cases[] = {
       {Space::VGPR, MemoryEventType::GLOBAL_TO_VGPR, false, 0, false, "VGPR v2", "RAW",
-       "global memory into VGPRs"},
+       "load into VGPRs"},
       {Space::VGPR, MemoryEventType::LDS_TO_VGPR, true, 0, false, "VGPR v2", "WAW",
-       "LDS into VGPRs"},
+       "load into VGPRs"},
       {Space::SGPR, MemoryEventType::GLOBAL_TO_SGPR, false, 0, false, "SGPR s2", "RAW",
-       "global memory into SGPRs"},
+       "transfer from global memory into SGPRs"},
       {Space::TTMP, MemoryEventType::GLOBAL_TO_TTMP, true, 0, false, "TTMP ttmp2", "WAW",
-       "global memory into TTMPs"},
+       "transfer from global memory into TTMPs"},
       {Space::LDS, MemoryEventType::VGPR_TO_LDS, false, 1, false, "LDS byte 2", "RAW",
-       "VGPRs into LDS"},
+       "transfer from VGPRs into LDS"},
       {Space::LDS, MemoryEventType::VGPR_TO_LDS, false, 1, true, "LDS byte 2", "RAW",
-       "VGPRs into LDS"},
+       "transfer from VGPRs into LDS"},
       {Space::LDS, MemoryEventType::LDS_TO_VGPR, true, 1, false, "LDS byte 2", "WAR",
-       "LDS into VGPRs"},
+       "transfer from LDS into VGPRs"},
       {Space::LDS, MemoryEventType::LDS_TO_VGPR, true, 1, true, "LDS byte 2", "WAR",
-       "LDS into VGPRs"},
+       "transfer from LDS into VGPRs"},
       {Space::LDS, MemoryEventType::LDS_TO_GLOBAL, true, 1, false, "LDS byte 2", "WAR",
-       "LDS into global memory"},
+       "transfer from LDS into global memory"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 0, false, "LDS byte 2", "RAW",
-       "global memory into LDS"},
+       "transfer from global memory into LDS"},
       {Space::LDS, MemoryEventType::GLOBAL_TO_LDS, false, 1, true, "LDS byte 2", "RAW",
-       "global memory into LDS"},
+       "transfer from global memory into LDS"},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.operation);
@@ -357,9 +357,8 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4);
     EXPECT_NE(report.find(test.resource), std::string::npos);
     EXPECT_NE(report.find(std::string("(") + test.hazard + ")"), std::string::npos);
-    EXPECT_NE(
-        report.find(std::string("Conflict: transfer from ") + test.operation + " at PC 0x100"),
-        std::string::npos);
+    EXPECT_NE(report.find(std::string("Conflict: ") + test.operation + " at PC 0x100"),
+              std::string::npos);
     EXPECT_NE(report.find("Current access: " + std::string(test.write ? "write" : "read") +
                           " at PC 0x200"),
               std::string::npos);
@@ -432,7 +431,7 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
     const std::string prefix =
         "Race on VGPR v2 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RAW).\n"
         "  Current access: read at PC 0x200.\n"
-        "  Conflict: transfer from global memory into VGPRs at PC 0x100, wave 0.\n"
+        "  Conflict: load into VGPRs at PC 0x100, wave 0.\n"
         "  Completion for wave 0 is not guaranteed; pending counters: ";
     EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
               prefix + test.both + ".\n");
