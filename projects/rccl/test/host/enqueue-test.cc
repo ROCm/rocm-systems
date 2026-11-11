@@ -2001,7 +2001,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionKeepsOnlyTheNamedGenera
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
-  // Prefix matching yields several bits ("RING" -> all three protocols); all must survive.
+  // Prefix matching yields several bits ("RING" -> every Ring protocol); all must survive. The NaN
+  // cell is only filled under NCCL_PROTO=NaN, so the family here is the other three.
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
@@ -2010,8 +2011,9 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlgSelectionAcceptsAFamilyOfRows) {
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
-  for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
-  EXPECT_EQ(NCCL_NUM_PROTOCOLS, tbl.countWritten());
+  for (int p : {NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE})
+    EXPECT_TRUE(tbl.written(NCCL_ALGO_RING, p)) << "p=" << p;
+  EXPECT_EQ(3, tbl.countWritten());
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleCell) {

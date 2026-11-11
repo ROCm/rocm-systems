@@ -341,6 +341,12 @@ TEST_F(CostModelMicrotest, EveryIdDispatchesToItsFamilyModel) {
       EXPECT_EQ(ModelKind::None, g_lastModel) << "tuning id " << id << " has no model but something ran";
       continue;
     }
+    if (id < kSymOffset && id % NCCL_NUM_PROTOCOLS == NCCL_PROTO_NAN) {
+      // NaN rows are priced only under NCCL_PROTO=NaN, which this fixture does not set.
+      EXPECT_EQ(ModelKind::None, g_lastModel) << "tuning id " << id << " priced without NCCL_PROTO=NaN";
+      EXPECT_EQ(0, result.valid) << "tuning id " << id;
+      continue;
+    }
     EXPECT_EQ(ExpectedKind(id), g_lastModel) << "tuning id " << id << " routed to the wrong family";
     EXPECT_EQ(1, result.valid) << "tuning id " << id;
     EXPECT_FLOAT_EQ(g_modelTimeUs, result.timeUs) << "tuning id " << id;
@@ -348,7 +354,7 @@ TEST_F(CostModelMicrotest, EveryIdDispatchesToItsFamilyModel) {
 }
 
 TEST_F(CostModelMicrotest, UnimplementedCombinationsAreIgnoredNotFree) {
-  // The ten {nullptr,...} rows are combinations that do not exist. The selector is an argmin
+  // The fifteen {nullptr,...} rows are combinations that do not exist. The selector is an argmin
   // over timeUs, so a default 0 would make an unbuildable kernel beat every real one.
   EnableEverything();
   int nullRows = 0;
@@ -359,8 +365,8 @@ TEST_F(CostModelMicrotest, UnimplementedCombinationsAreIgnoredNotFree) {
     EXPECT_EQ(0, result.valid) << "tuning id " << id;
     EXPECT_FLOAT_EQ(NCCL_TUNING_IGNORE, result.timeUs) << "tuning id " << id;
   }
-  // CollNetDirect/Chain, NVLS/NVLSTree under LL and LL128, plus PAT under both.
-  EXPECT_EQ(10, nullRows);
+  // CollNetDirect/Chain, NVLS/NVLSTree and PAT under LL, LL128 and NaN.
+  EXPECT_EQ(15, nullRows);
 }
 
 TEST_F(CostModelMicrotest, OutOfRangeIdIsRejectedRatherThanIndexed) {

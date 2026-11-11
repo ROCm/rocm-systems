@@ -2803,7 +2803,7 @@ TEST_F(NetSendProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);  // the pool and the LL128 staging bank
-  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+  EXPECT_EQ(net_.regMrs.size(), 3u);  // LL, LL128 and SIMPLE; a shared p2p connection has no NaN buffer
 }
 
 TEST_F(NetSendProxyConnectMicrotest, SharedComms_OneLocalRankConnectsOthersReuse) {
@@ -2905,7 +2905,7 @@ TEST_F(NetSendProxyConnectMicrotest, HsaDmaBuf_RegistersDeviceBuffersByFd) {
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
-  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE; LL stays in host memory
+  ASSERT_EQ(net_.regMrDmaBufs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);  // all but LL, which stays in host memory
   EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL)), NCCL_PTR_HOST);
   for (const auto& m : net_.regMrDmaBufs) {
     EXPECT_EQ(m.type, NCCL_PTR_CUDA);
@@ -2962,7 +2962,7 @@ TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBuf_RegistersDeviceBuffersAgainstBa
   EXPECT_EQ(exports_[0].ptr, bank.gpuPtr);
   EXPECT_EQ(exports_[0].size, (size_t)bank.size);
   EXPECT_EQ(exports_[0].flags, (unsigned long long)hipMemRangeFlagDmaBufMappingTypePcie);
-  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE
+  ASSERT_EQ(net_.regMrDmaBufs.size(), (size_t)NCCL_NUM_PROTOCOLS - 1);  // all but LL
   for (const auto& m : net_.regMrDmaBufs) {
     EXPECT_EQ(m.fd, bank.dmaBufFd);
     EXPECT_EQ(m.offset, (uint64_t)(static_cast<char*>(m.data) - bank.gpuPtr));
@@ -3327,7 +3327,7 @@ TEST_F(NetRecvProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
   EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kP2pLl128Size);
   EXPECT_EQ(devAllocs_, 2);
-  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+  EXPECT_EQ(net_.regMrs.size(), 3u);  // LL, LL128 and SIMPLE; a shared p2p connection has no NaN buffer
 }
 
 TEST_F(NetRecvProxyConnectMicrotest, DedicatedWithLlBuffersFlag_AddsNoStaging) {
