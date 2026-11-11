@@ -1,6 +1,7 @@
 name: Auto Label PRs
 
-on:
+# Labels PRs through the API only; PR head code is never checked out.
+on: # zizmor: ignore[dangerous-triggers]
   pull_request:
     types: [opened, synchronize, reopened, closed]
   workflow_run:
@@ -19,7 +20,7 @@ jobs:
       contents: read
     steps:
       - name: Add/Remove labels based on branch names and ABI results
-        uses: actions/github-script@v6
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6.4.1
         with:
           script: |
             const pr = context.payload.pull_request;
