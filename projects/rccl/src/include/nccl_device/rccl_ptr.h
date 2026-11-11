@@ -1,4 +1,5 @@
-#pragma once
+#ifndef _NCCL_DEVICE_RCCL_PTR_H_
+#define _NCCL_DEVICE_RCCL_PTR_H_
 
 /*
 Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
@@ -103,3 +104,5 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // Deprecated alias for RCCL_LL_FIFO_SYS_SCOPE; kept for source-level backward
 // compatibility with out-of-tree users of this installed header.
 #define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE
+
+#endif // _NCCL_DEVICE_RCCL_PTR_H_
