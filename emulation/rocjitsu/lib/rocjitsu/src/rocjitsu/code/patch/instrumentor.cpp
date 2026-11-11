@@ -25,6 +25,7 @@
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -1263,11 +1264,15 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
     std::vector<std::pair<RegClass, uint16_t>> sources;
     for (const InstrumentationPoint &point : points_)
       for (const ProbeArgValue &arg : point.probe_args) {
-        if (arg.source != ProbeArgSource::EntryVgprLane0 && arg.source != ProbeArgSource::EntrySgpr)
+        const std::optional<RegClass> source_class = entry_register_class(arg.source);
+        if (!source_class)
           continue;
-        const auto source =
-            std::pair{arg.source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR,
-                      arg.register_index};
+        if (arg.source == ProbeArgSource::EntryTtmp &&
+            arg.register_index >= REGISTER_SET_MAX_TTMPS) {
+          report(error_out, "entry TTMP capture exceeds the trap-temporary register file");
+          return std::nullopt;
+        }
+        const std::pair<RegClass, uint16_t> source = {*source_class, arg.register_index};
         if (std::ranges::find(sources, source) == sources.end())
           sources.push_back(source);
       }
@@ -1282,11 +1287,14 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
         return std::nullopt;
       }
       const uint16_t destination = planned->storage.entry_temp_base + index;
-      if (source_class == RegClass::SGPR) {
+      if (source_class == RegClass::SGPR || source_class == RegClass::TTMP) {
         OptionalStringDiagnosticSink record_error(error_out);
         const util::DiagnosticEmitter error(record_error);
-        const util::FailureOr<uint32_t> word =
-            build_s_mov_b32(destination, source_index, arch_, &error);
+        const util::FailureOr<uint32_t> word = build_s_mov_b32(
+            destination,
+            source_class == RegClass::TTMP ? amdgpu::kTtmpSelectorFirst + source_index
+                                           : source_index,
+            arch_, &error);
         if (word.failed())
           return std::nullopt;
         patch.words.push_back(word.value());

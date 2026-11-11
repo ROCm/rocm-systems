@@ -119,6 +119,7 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 
 #include <gtest/gtest.h>
 
@@ -791,26 +792,35 @@ TEST_F(DbiRdna4EntryPrologueSim, DispatchAtTheOriginalEntrySkipsThePrologue) {
   expect_dispatch_at_the_original_entry_skips_the_prologue();
 }
 
-void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch) {
+void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch, ProbeArgSource source) {
   SCOPED_TRACE(arch.sim_arch);
+  const bool trap_temporary = source == ProbeArgSource::EntryTtmp;
+  const uint16_t scalar_index = trap_temporary ? 9 : 0;
+  const uint16_t scalar_operand =
+      trap_temporary ? amdgpu::kTtmpSelectorFirst + scalar_index : scalar_index;
   const util::FailureOr<uint32_t> guest_write = build_v_mov_b32_src(0, 135, arch.arch);
   const util::FailureOr<uint32_t> guest_read = build_v_mov_b32_src(4, 256, arch.arch);
+  const util::FailureOr<uint32_t> scalar_read = build_s_mov_b32(0, scalar_operand, arch.arch);
   const util::FailureOr<uint32_t> scalar_guest_output = build_v_mov_b32_src(0, 0, arch.arch);
   const util::FailureOr<uint32_t> scalar_output = build_v_mov_b32_src(2, 256, arch.arch);
   const util::FailureOr<uint32_t> vector_output = build_v_mov_b32_src(3, 257, arch.arch);
-  const util::FailureOr<uint32_t> scalar_write = build_s_mov_b32(0, 128, arch.arch);
+  // User shaders can read TTMPs but cannot overwrite them. The SGPR case
+  // destroys its source; the TTMP case observes the CP's launch value instead.
+  const util::FailureOr<uint32_t> scalar_write =
+      trap_temporary ? build_s_nop(0, arch.arch) : build_s_mov_b32(scalar_operand, 128, arch.arch);
   const util::FailureOr<uint32_t> nop = build_s_nop(0, arch.arch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(arch.arch);
   const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch.arch);
   ASSERT_TRUE(guest_write.succeeded());
   ASSERT_TRUE(guest_read.succeeded());
-  ASSERT_TRUE(scalar_guest_output.succeeded());
+  ASSERT_TRUE(scalar_read.succeeded() && scalar_guest_output.succeeded());
   ASSERT_TRUE(scalar_output.succeeded());
   ASSERT_TRUE(vector_output.succeeded());
   ASSERT_TRUE(scalar_write.succeeded() && nop.succeeded() && end.succeeded() && ret.succeeded());
   const std::vector<uint8_t> target = test::with_descriptor_metadata(
       test::make_kernarg_kernel_elf({scalar_write.value(), guest_write.value(), guest_read.value(),
-                                     nop.value(), scalar_guest_output.value(), end.value()},
+                                     nop.value(), scalar_read.value(), scalar_guest_output.value(),
+                                     end.value()},
                                     64, arch.e_flags, kGuestKernargSize, arch.wave32, 3, 0, 1, 1),
       arch.arch);
   const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
@@ -824,7 +834,7 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch) {
   point.anchor_offset = 12;
   point.probe_obj = &probe;
   point.probe_symbol = "entry_inputs";
-  point.probe_args = {{.source = ProbeArgSource::EntrySgpr, .register_index = 0},
+  point.probe_args = {{.source = source, .register_index = scalar_index},
                       {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0}};
   instrumentor.add_point(point);
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
@@ -836,23 +846,37 @@ void expect_scalar_and_vector_entry_snapshots(const PrologueSimArch &arch) {
   ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
   if (arch.wave32)
     sim.set_wave32_dispatch();
+  // Workgroup one receives TTMP9 = 1, distinct from TTMP8's queue packet ID
+  // and the zero-valued trap temporaries of a dispatch at the origin.
+  if (trap_temporary)
+    sim.set_workgroup_count_x(2);
   sim.set_kernarg(make_wrapper_image());
   sim.set_entry_offset(*entry);
-  const std::vector<std::vector<uint32_t>> values =
-      sim.run_and_read_vgprs(test::section_words(patched, ".text"),
-                             test::patched_private_segment_size(patched), {2, 3, 4, 0});
+  const std::vector<std::vector<uint32_t>> values = sim.run_and_read_vgprs(
+      test::section_words(patched, ".text"), test::patched_private_segment_size(patched),
+      {2, 3, 4, 0}, trap_temporary ? 1u : 0u);
   ASSERT_EQ(values.size(), 4u);
+  for (const std::vector<uint32_t> &value : values)
+    ASSERT_EQ(value.size(), arch.wave_size);
   for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
-    EXPECT_EQ(values[0][lane], static_cast<uint32_t>(kGuestKernargSentinel));
+    EXPECT_EQ(values[0][lane], trap_temporary ? 1u : static_cast<uint32_t>(kGuestKernargSentinel));
     EXPECT_EQ(values[1][lane], 0u);
     EXPECT_EQ(values[2][lane], 7u);
-    EXPECT_EQ(values[3][lane], 0u);
+    EXPECT_EQ(values[3][lane], trap_temporary ? 1u : 0u);
   }
 }
 
 TEST(DbiEntrySnapshotSim, ScalarAndVectorInputsSurviveGuestOverwrites) {
   for (const PrologueSimArch arch : {kCdna3, kCdna4, kRdna4})
-    ASSERT_NO_FATAL_FAILURE(expect_scalar_and_vector_entry_snapshots(arch));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_scalar_and_vector_entry_snapshots(arch, ProbeArgSource::EntrySgpr));
+}
+
+TEST(DbiEntrySnapshotSim, TrapTemporaryLaunchValueAndVectorSnapshotReachProbe) {
+  const PrologueSimArch cdna5{"cdna5", ROCJITSU_CODE_ARCH_CDNA5, EF_AMDGPU_MACH_AMDGCN_GFX1250, 32,
+                              true};
+  ASSERT_NO_FATAL_FAILURE(
+      expect_scalar_and_vector_entry_snapshots(cdna5, ProbeArgSource::EntryTtmp));
 }
 
 } // namespace

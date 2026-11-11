@@ -446,9 +446,11 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
       if (capture.sgpr < *plan.entry_storage_base + 2 ||
           capture.sgpr >= *plan.entry_storage_base + 4 || capture.sgpr >= sgpr_bound ||
-          (capture.source_class != RegClass::SGPR && capture.source_class != RegClass::VGPR) ||
-          capture.source_index >= (capture.source_class == RegClass::SGPR
-                                       ? sgpr_bound
+          (capture.source_class != RegClass::SGPR && capture.source_class != RegClass::VGPR &&
+           capture.source_class != RegClass::TTMP) ||
+          capture.source_index >= (capture.source_class == RegClass::SGPR ? sgpr_bound
+                                   : capture.source_class == RegClass::TTMP
+                                       ? REGISTER_SET_MAX_TTMPS
                                        : std::min(plan.kernel_vgpr_count, 256u)) ||
           entry_storage.intersects({RegClass::SGPR, capture.sgpr, 1}) ||
           std::ranges::find(captured_registers,
@@ -460,19 +462,18 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       entry_storage.expand(RegisterRef{RegClass::SGPR, capture.sgpr, 1});
       captured_registers.emplace_back(capture.source_class, capture.source_index);
     }
-    for (const ProbeArgValue &arg : plan.probe_args)
-      if ((arg.source == ProbeArgSource::EntryVgprLane0 ||
-           arg.source == ProbeArgSource::EntrySgpr) &&
-          std::ranges::none_of(
-              plan.entry_register_captures, [&](const EntryRegisterCapture &capture) {
-                return capture.source_index == arg.register_index &&
-                       capture.source_class == (arg.source == ProbeArgSource::EntrySgpr
-                                                    ? RegClass::SGPR
-                                                    : RegClass::VGPR);
-              })) {
+    for (const ProbeArgValue &arg : plan.probe_args) {
+      const std::optional<RegClass> source_class = entry_register_class(arg.source);
+      if (source_class && std::ranges::none_of(plan.entry_register_captures,
+                                               [&](const EntryRegisterCapture &capture) {
+                                                 return capture.source_index ==
+                                                            arg.register_index &&
+                                                        capture.source_class == *source_class;
+                                               })) {
         report(error_out, "entry register argument has no framework-owned entry capture");
         return false;
       }
+    }
     // Excluding the pair from the envelope's temps is not enough on its own: the
     // probe body runs with the pair still holding the pointer, and a body that
     // writes it destroys the value for every site after this one. Nothing saves
@@ -630,6 +631,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
     case ProbeArgSource::EntrySgpr:
+    case ProbeArgSource::EntryTtmp:
     case ProbeArgSource::EntryVgprLane0:
       envelope_words += 1;
       break;
@@ -880,6 +882,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       case ProbeArgSource::EntrySgpr:
         source = "EntrySgpr";
         break;
+      case ProbeArgSource::EntryTtmp:
+        source = "EntryTtmp";
+        break;
       case ProbeArgSource::EntryVgprLane0:
         source = "EntryVgprLane0";
         break;
@@ -924,12 +929,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
     case ProbeArgSource::EntrySgpr:
+    case ProbeArgSource::EntryTtmp:
     case ProbeArgSource::EntryVgprLane0: {
       const std::vector<EntryRegisterCapture>::const_iterator captured = std::ranges::find_if(
           plan.entry_register_captures, [&](const EntryRegisterCapture &value) {
             return value.source_index == arg.register_index &&
-                   value.source_class ==
-                       (arg.source == ProbeArgSource::EntrySgpr ? RegClass::SGPR : RegClass::VGPR);
+                   value.source_class == entry_register_class(arg.source);
           });
       if (captured == plan.entry_register_captures.end()) {
         report(error_out, "probe-call emission: missing entry register capture");
