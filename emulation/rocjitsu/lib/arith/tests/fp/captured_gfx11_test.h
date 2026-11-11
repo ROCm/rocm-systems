@@ -16,8 +16,8 @@
 
 namespace rocjitsu::arith::test {
 
-// One captured lane. mode is the hardware MODE register with DX10_CLAMP set: rounding in bits
-// 3:0, denormals in bits 7:4 and IEEE in bit 9. Sources and result are raw register values; a
+// One captured lane. mode is the hardware MODE register: rounding in bits 3:0, denormals in bits
+// 7:4, DX10_CLAMP in bit 8 and IEEE in bit 9. Sources and result are raw register values; a
 // 16-bit result includes the destination's untouched half, which the capture filled with 0xa5.
 struct CapturedGfx11 {
   const char *name;
@@ -30,6 +30,9 @@ struct CapturedGfx11 {
 template <int Width> uint64_t gfx11_guest_flags(uint32_t mode) {
   constexpr int shift = Width == 32 ? 0 : 2;
   uint64_t flags = uint64_t((mode >> shift) & 3) << 24;
+  if (!(mode & 0x100)) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
   if (!(mode & (0x10U << shift))) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   }

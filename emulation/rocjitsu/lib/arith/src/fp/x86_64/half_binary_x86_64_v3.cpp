@@ -130,7 +130,9 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       }
       auto encoded = half_narrow<legacy>(value, flags & RJ_ARITH_FP16_OVFL);
       if constexpr (arithmetic) {
-        if (preserve_input_snan && !(m & RJ_ARITH_ALU_CLAMP)) {
+        // DX10_CLAMP off lets a NaN through CLAMP, so the selected sNaN is restored as well.
+        if (preserve_input_snan &&
+            (!(m & RJ_ARITH_ALU_CLAMP) || (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
           // Restore selected raw sNaNs, with ABS, NEG and the SUB sign flip, after F16C has
           // quieted them.
           auto raw_half = [](__m256i words, int shift, bool abs, bool negate) {

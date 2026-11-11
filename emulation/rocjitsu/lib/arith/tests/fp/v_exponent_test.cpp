@@ -304,32 +304,32 @@ using rocjitsu::arith::test::CapturedGfx11;
 // gfx1100 LDEXP lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source
 // is returned unquieted, also under directed rounding and OMOD.
 const CapturedGfx11 ldexp_f16_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
-    {"E32RoundDown", 0, 0x5a, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x24f27c01, 0x151c0000, 0, 0xa5a5fc01},
-    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x00, 0x5aa27c01, 0xa6020000, 0, 0xa5a57c01},
-    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+    {"E32Mode00", 0, 0x100, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x15a, 0xcb4d7c01, 0x80fd0000, 0, 0xa5a57c01},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x24f27c01, 0x151c0000, 0, 0xa5a5fc01},
+    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x100, 0x5aa27c01, 0xa6020000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xfcd07c01, 0xe94fffff, 0, 0xfcd0a5a5},
 };
 const CapturedGfx11 ldexp_f32_lanes[] = {
-    {"Mode00", 0, 0x00, 0x7f800001, 0x0, 0, 0x7f800001},
-    {"RoundDown", 0, 0x5a, 0x7f800001, 0x1, 0, 0x7f800001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7f800001, 0x0, 0, 0xff800001},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x7f800001, 0x0, 0, 0x7f800001},
+    {"Mode00", 0, 0x100, 0x7f800001, 0x0, 0, 0x7f800001},
+    {"RoundDown", 0, 0x15a, 0x7f800001, 0x1, 0, 0x7f800001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7f800001, 0x0, 0, 0xff800001},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7f800001, 0x0, 0, 0x7f800001},
 };
 // FREXP_MANT returns a signaling NaN source unquieted in the same corpus.
 const CapturedGfx11 frexp_mant_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegativePayload", 0, 0xf0, 0xfff027eaf1f97f65, 0, 0, 0xfff027eaf1f97f65},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegativePayload", 0, 0x1f0, 0xfff027eaf1f97f65, 0, 0, 0xfff027eaf1f97f65},
 };
 const CapturedGfx11 ldexp_f64_lanes[] = {
-    {"Mode00", 0, 0x00, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
-    {"RoundDown", 0, 0x5a, 0x7ff0000000000001, 0x1, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0x0, 0, 0xfff0000000000001},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"Mode00", 0, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"RoundDown", 0, 0x15a, 0x7ff0000000000001, 0x1, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0x0, 0, 0xfff0000000000001},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
 };
 
 } // namespace

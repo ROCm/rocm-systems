@@ -403,26 +403,41 @@ using rocjitsu::arith::test::CapturedGfx11;
 // gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source is
 // returned unquieted, also under directed rounding and OMOD.
 const CapturedGfx11 mul_f16_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x6b007c01, 0x4f160000, 0, 0xa5a57c01},
-    {"E32RoundDown", 0, 0x5a, 0x323e0000, 0xd51d7c01, 0, 0xa5a57c01},
-    {"NegB", RJ_ARITH_ALU_NEG_B, 0xf0, 0xde7e0000, 0xa4cc7c01, 0, 0xa5a5fc01},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x32a07c01, 0xab200000, 0, 0xa5a57c01},
-    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+    {"E32Mode00", 0, 0x100, 0x6b007c01, 0x4f160000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x15a, 0x323e0000, 0xd51d7c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0xde7e0000, 0xa4cc7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x32a07c01, 0xab200000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xfdc50400, 0x5e2a0000, 0, 0xfdc5a5a5},
+};
+
+// gfx1100 (W7900) CLAMP lanes with a signaling-NaN source, also under OMOD (active with output
+// flushing). DX10_CLAMP clear lets the NaN through CLAMP, unquieted with IEEE clear and quieted
+// with IEEE set; DX10_CLAMP set clamps it to 0.
+const CapturedGfx11 mul_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57e01},
+    {"Mul2Dx10ClampOff", RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_2, 0x000, 0xa5a57c01, 0xa5a53c00, 0,
+     0xa5a57c01},
+    {"Mul2Dx10ClampOn", RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_2, 0x100, 0xa5a57c01, 0xa5a53c00, 0,
+     0xa5a50000},
+    {"Mul2IeeeSet", RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_2, 0x200, 0xa5a57c01, 0xa5a53c00, 0,
+     0xa5a57e01},
 };
 
 // gfx1100 MUL_F64 returns the first NaN source with its modifiers applied, quieted only when
 // MODE.IEEE is set. IEEE-set lanes are from the gfx1100 v2 capture (hw2-gfx1100).
 const CapturedGfx11 mul_f64_lanes[] = {
-    {"SignalingFirst", 0, 0xf0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
-    {"NegativeQuietFirst", 0, 0xf0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
-    {"SignalingSecondRoundZero", 0, 0xff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
+    {"SignalingFirst", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
+    {"NegativeQuietFirst", 0, 0x1f0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
+    {"SignalingSecondRoundZero", 0, 0x1ff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
      0xfff8000000000000},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
-    {"IeeeSetSignalingFirst", 0, 0x2f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"IeeeSetSignalingFirst", 0, 0x3f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
      0x7ff8000000000001},
-    {"IeeeSetNegativeQuietFirst", 0, 0x2f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
+    {"IeeeSetNegativeQuietFirst", 0, 0x3f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
      0xfff8000000000000},
 };
 
@@ -433,6 +448,13 @@ TEST(FpMulF16Gfx11, CapturedSignalingNans) {
   using rocjitsu::arith::test::check_captured_gfx11;
   check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
   check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
+}
+
+// Compatibility reproduces captured gfx1100 clamped FP16 MUL NaN lanes.
+TEST(FpMulF16Gfx11, CapturedClampedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
 }
 
 // Compatibility reproduces captured gfx1100 FP64 MUL NaN lanes.

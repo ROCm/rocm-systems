@@ -880,17 +880,17 @@ using rocjitsu::arith::test::CapturedGfx11;
 // returned unquieted, and 0 * infinity gives the default NaN even with a NaN addend. IEEE-set
 // lanes are from the gfx1100 v2 capture (hw2-gfx1100).
 const CapturedGfx11 fma_f64_lanes[] = {
-    {"SignalingB", 0, 0x00, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
-    {"SignalingBRoundDown", 0, 0x5a, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
-    {"SignalingAddend", 0, 0xf0, 0x0, 0x0, 0x7ff0000000000001, 0x7ff0000000000001},
-    {"SignalingBeforeQuiet", 0, 0xf0, 0x7ff0000000000001, 0x7ff8000000000000, 0x0,
+    {"SignalingB", 0, 0x100, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingBRoundDown", 0, 0x15a, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingAddend", 0, 0x1f0, 0x0, 0x0, 0x7ff0000000000001, 0x7ff0000000000001},
+    {"SignalingBeforeQuiet", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0x0,
      0x7ff0000000000001},
-    {"InvalidProductQuietAddend", 0, 0xf0, 0x7ff0000000000000, 0x0, 0x7ff8000000000000,
+    {"InvalidProductQuietAddend", 0, 0x1f0, 0x7ff0000000000000, 0x0, 0x7ff8000000000000,
      0xfff8000000000000},
-    {"NegC", RJ_ARITH_ALU_NEG_C, 0xf0, 0x7ff0000000000001, 0x0, 0x7ff8000000000000,
+    {"NegC", RJ_ARITH_ALU_NEG_C, 0x1f0, 0x7ff0000000000001, 0x0, 0x7ff8000000000000,
      0x7ff0000000000001},
-    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x00, 0x7ff0000000000001, 0x0, 0x0, 0x7ff0000000000001},
-    {"IeeeSetInvalidProductQuietAddend", 0, 0x200, 0x0, 0x7ff0000000000000, 0x7ff8000000000000,
+    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x100, 0x7ff0000000000001, 0x0, 0x0, 0x7ff0000000000001},
+    {"IeeeSetInvalidProductQuietAddend", 0, 0x300, 0x0, 0x7ff0000000000000, 0x7ff8000000000000,
      0xfff8000000000000},
 };
 

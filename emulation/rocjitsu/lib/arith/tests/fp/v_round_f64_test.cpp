@@ -286,36 +286,36 @@ using rocjitsu::arith::test::CapturedGfx11;
 // gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): each operation returns a
 // signaling NaN source unquieted, with ABS/NEG applied, also under directed rounding and OMOD.
 const CapturedGfx11 ceil_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
 };
 const CapturedGfx11 floor_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegAPayload", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff29526f4863633, 0, 0, 0xfff29526f4863633},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegAPayload", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff29526f4863633, 0, 0, 0xfff29526f4863633},
 };
 const CapturedGfx11 fract_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"AbsAPayload", RJ_ARITH_ALU_ABS_A, 0xf0, 0xfff563bc5abbaeb9, 0, 0, 0x7ff563bc5abbaeb9},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"AbsAPayload", RJ_ARITH_ALU_ABS_A, 0x1f0, 0xfff563bc5abbaeb9, 0, 0, 0x7ff563bc5abbaeb9},
 };
 const CapturedGfx11 rndne_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
 };
 const CapturedGfx11 trunc_f64_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"E32RoundDown", 0, 0x5a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
-    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x00, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32Mode00", 0, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"E32RoundDown", 0, 0x15a, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff0000000000001, 0, 0, 0xfff0000000000001},
+    {"Mul4", RJ_ARITH_ALU_OMOD_4, 0x100, 0x7ff0000000000001, 0, 0, 0x7ff0000000000001},
 };
 
 } // namespace

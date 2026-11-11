@@ -337,43 +337,62 @@ using rocjitsu::arith::test::CapturedGfx11;
 // gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source is
 // returned unquieted, after NEG and the SUB sign flip, also under directed rounding and OMOD.
 const CapturedGfx11 add_f16_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0x63377c01, 0x12680000, 0, 0xa5a57c01},
-    {"E32RoundDown", 0, 0x5a, 0xaabb0000, 0xd5d77c01, 0, 0xa5a57c01},
-    {"NegB", RJ_ARITH_ALU_NEG_B, 0xf0, 0x2d450000, 0x452b7c01, 0, 0xa5a5fc01},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0xc9457c01, 0xba620000, 0, 0xa5a57c01},
-    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+    {"E32Mode00", 0, 0x100, 0x63377c01, 0x12680000, 0, 0xa5a57c01},
+    {"E32RoundDown", 0, 0x15a, 0xaabb0000, 0xd5d77c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0x2d450000, 0x452b7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0xc9457c01, 0xba620000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xaf2ec100, 0xfd498000, 0, 0xfd49a5a5},
 };
 const CapturedGfx11 sub_f16_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0xbd0b7c01, 0x78430000, 0, 0xa5a57c01},
-    {"E32RoundDownSubtrahend", 0, 0x5a, 0x7a990000, 0x0e867c01, 0, 0xa5a5fc01},
-    {"NegB", RJ_ARITH_ALU_NEG_B, 0xf0, 0xadab0000, 0xb5ff7c01, 0, 0xa5a57c01},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x76637c01, 0xb7bd0000, 0, 0xa5a57c01},
-    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+    {"E32Mode00", 0, 0x100, 0xbd0b7c01, 0x78430000, 0, 0xa5a57c01},
+    {"E32RoundDownSubtrahend", 0, 0x15a, 0x7a990000, 0x0e867c01, 0, 0xa5a5fc01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0xadab0000, 0xb5ff7c01, 0, 0xa5a57c01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x76637c01, 0xb7bd0000, 0, 0xa5a57c01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xa6ec83ff, 0xfce20000, 0, 0x7ce2a5a5},
 };
 const CapturedGfx11 subrev_f16_lanes[] = {
-    {"E32Mode00", 0, 0x00, 0xa4e67c01, 0x42b40000, 0, 0xa5a5fc01},
-    {"E32RoundDown", 0, 0x5a, 0x940d0000, 0x9faf7c01, 0, 0xa5a57c01},
-    {"NegB", RJ_ARITH_ALU_NEG_B, 0xf0, 0x1b0d0000, 0x0e5b7c01, 0, 0xa5a5fc01},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0xc29d7c01, 0x569b0000, 0, 0xa5a5fc01},
-    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+    {"E32Mode00", 0, 0x100, 0xa4e67c01, 0x42b40000, 0, 0xa5a5fc01},
+    {"E32RoundDown", 0, 0x15a, 0x940d0000, 0x9faf7c01, 0, 0xa5a57c01},
+    {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0x1b0d0000, 0x0e5b7c01, 0, 0xa5a5fc01},
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0xc29d7c01, 0x569b0000, 0, 0xa5a5fc01},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0x4d62fe00, 0x7d338000, 0, 0x7d33a5a5},
+};
+
+// gfx1100 (W7900) CLAMP lanes with a signaling-NaN source. DX10_CLAMP clear lets the NaN
+// through CLAMP, unquieted with IEEE clear and quieted with IEEE set; DX10_CLAMP set gives 0.
+const CapturedGfx11 add_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"Dx10ClampOffFlush", RJ_ARITH_ALU_CLAMP, 0x000, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57c01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a57e01},
+};
+const CapturedGfx11 sub_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a5fc01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a53c00, 0xa5a57c01, 0, 0xa5a5fe01},
+};
+const CapturedGfx11 subrev_f16_clamp_lanes[] = {
+    {"Dx10ClampOff", RJ_ARITH_ALU_CLAMP, 0x0f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a5fc01},
+    {"Dx10ClampOn", RJ_ARITH_ALU_CLAMP, 0x1f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a50000},
+    {"IeeeSet", RJ_ARITH_ALU_CLAMP, 0x2f0, 0xa5a57c01, 0xa5a53c00, 0, 0xa5a5fe01},
 };
 
 // gfx1100 ADD_F64 returns the first NaN source with its modifiers applied, quieted only when
 // MODE.IEEE is set. IEEE-set lanes are from the gfx1100 v2 capture (hw2-gfx1100).
 const CapturedGfx11 add_f64_lanes[] = {
-    {"SignalingFirst", 0, 0xf0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
-    {"NegativeQuietFirst", 0, 0xf0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
-    {"PayloadFirst", 0, 0xf0, 0x7ff8000012345678, 0x7ff8000000000000, 0, 0x7ff8000012345678},
-    {"SignalingSecondRoundZero", 0, 0xff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
-    {"NegA", RJ_ARITH_ALU_NEG_A, 0xf0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
+    {"SignalingFirst", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0, 0x7ff0000000000001},
+    {"NegativeQuietFirst", 0, 0x1f0, 0xfff8000000000000, 0x7ff8000000000000, 0, 0xfff8000000000000},
+    {"PayloadFirst", 0, 0x1f0, 0x7ff8000012345678, 0x7ff8000000000000, 0, 0x7ff8000012345678},
+    {"SignalingSecondRoundZero", 0, 0x1ff, 0x0, 0x7ff0000000000001, 0, 0x7ff0000000000001},
+    {"NegA", RJ_ARITH_ALU_NEG_A, 0x1f0, 0x7ff8000000000000, 0x7ff8000000000000, 0,
      0xfff8000000000000},
-    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x00, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
-    {"IeeeSetSignalingFirst", 0, 0x2f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
+    {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
+    {"IeeeSetSignalingFirst", 0, 0x3f0, 0x7ff0000000000001, 0x7ff8000000000000, 0,
      0x7ff8000000000001},
-    {"IeeeSetNegativeQuietFirst", 0, 0x2f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
+    {"IeeeSetNegativeQuietFirst", 0, 0x3f0, 0xfff8000000000000, 0x7ff8000000000000, 0,
      0xfff8000000000000},
 };
 
@@ -388,6 +407,17 @@ TEST(FpAddSubF16Gfx11, CapturedSignalingNans) {
   check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_lanes);
   check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_lanes);
   check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_lanes);
+}
+
+// Compatibility reproduces captured gfx1100 clamped FP16 ADD/SUB/SUBREV NaN lanes.
+TEST(FpAddSubF16Gfx11, CapturedClampedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11;
+  check_captured_gfx11<32, 16>(rj_arith_v_add_f16_w32, add_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_add_f16_w64, add_f16_clamp_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_sub_f16_w32, sub_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_sub_f16_w64, sub_f16_clamp_lanes);
+  check_captured_gfx11<32, 16>(rj_arith_v_subrev_f16_w32, subrev_f16_clamp_lanes);
+  check_captured_gfx11<64, 16>(rj_arith_v_subrev_f16_w64, subrev_f16_clamp_lanes);
 }
 
 // Compatibility reproduces captured gfx1100 FP64 ADD NaN lanes.
