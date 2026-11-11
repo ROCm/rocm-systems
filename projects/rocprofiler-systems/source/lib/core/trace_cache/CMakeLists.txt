@@ -20,6 +20,7 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.hpp
     ${CMAKE_CURRENT_LIST_DIR}/collection_sink.hpp
     ${CMAKE_CURRENT_LIST_DIR}/counter_samples.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counter_schema_table.hpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_parser.hpp

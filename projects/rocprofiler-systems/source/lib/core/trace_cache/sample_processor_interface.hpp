@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+#include "core/trace_cache/counter_samples.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
 #include "library/pmc/collectors/cpu/sample.hpp"
@@ -36,6 +37,8 @@ public:
     virtual void handle(const hipfile_pmc_sample& sample)      = 0;
     virtual void handle(const backtrace_region_sample& sample) = 0;
     virtual void handle(const kfd_sample& sample)              = 0;
+    virtual void handle(const counter_batch& batch)            = 0;
+    virtual void handle(const gap_marker& gap)                 = 0;
 
     virtual void prepare_for_processing() = 0;
     virtual void finalize_processing()    = 0;
