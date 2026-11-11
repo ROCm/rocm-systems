@@ -148,7 +148,7 @@ struct RocrEntryPoints {
   decltype(hsa_ext_image_import)* hsa_ext_image_import_;
   decltype(hsa_ext_image_export)* hsa_ext_image_export_;
   decltype(hsa_ext_image_destroy_v2)* hsa_ext_image_destroy_v2_;
-  decltype(hsa_ext_sampler_create_v2)* hsa_ext_sampler_create_v2_;
+  decltype(hsa_ext_sampler_create_v3)* hsa_ext_sampler_create_v3_;
   decltype(hsa_ext_sampler_destroy)* hsa_ext_sampler_destroy_;
   decltype(hsa_ext_image_create_with_layout)* hsa_ext_image_create_with_layout_;
   decltype(hsa_ext_image_mipmap_array_get_level)* hsa_ext_image_mipmap_array_get_level_;
@@ -690,8 +690,8 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_ext_image_destroy_v2)(agent, image);
   }
   static hsa_status_t sampler_create(hsa_agent_t agent,
-    const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor, hsa_ext_sampler_t* sampler) {
-    return ROCR_DYN(hsa_ext_sampler_create_v2)(agent, sampler_descriptor, sampler);
+    const hsa_ext_sampler_descriptor_v3_t* sampler_descriptor, hsa_ext_sampler_t* sampler) {
+    return ROCR_DYN(hsa_ext_sampler_create_v3)(agent, sampler_descriptor, sampler);
   }
   static hsa_status_t sampler_destroy(hsa_agent_t agent, hsa_ext_sampler_t sampler) {
     return ROCR_DYN(hsa_ext_sampler_destroy)(agent, sampler);

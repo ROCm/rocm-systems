@@ -37,6 +37,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include "util/diagnostic.h"
@@ -1493,6 +1494,82 @@ TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
 }
 TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
   expect_missing_anchor_restore_runs_probe_full_mask();
+}
+
+void expect_scalar_relative_probe(bool relative_source, bool with_probe,
+                                  uint16_t selected_value = 7) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  ASSERT_LE(selected_value, 64);
+  const util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(kArch);
+  ASSERT_TRUE(m0_operand.succeeded());
+  const std::array<util::FailureOr<uint32_t>, 6> setup = {
+      build_s_mov_b32(0, 128, kArch),
+      build_s_mov_b32(2, static_cast<uint16_t>(128 + selected_value), kArch),
+      build_s_mov_b32(4, 139, kArch),
+      build_s_mov_b32(m0_operand.value(), 130, kArch),
+      relative_source ? build_sop1_encoding(kArch, cdna4::kSMovrelsB32Sop1, 10, 0)
+                      : build_s_mov_b32(10, 4, kArch),
+      build_s_endpgm(kArch)};
+  std::vector<uint32_t> words;
+  for (const util::FailureOr<uint32_t> &word : setup) {
+    ASSERT_TRUE(word.succeeded());
+    words.push_back(word.value());
+  }
+  if (with_probe) {
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint8_t> image = test::make_gfx950_kernel_elf(words, 0);
+    const std::vector<uint8_t> probe_image =
+        test::make_gfx950_probe_elf("relative_guest_probe", {ret.value()});
+    const AmdGpuCodeObject source(image.data(), image.size());
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    ASSERT_TRUE(source.is_valid() && probe.is_valid());
+    Instrumentor instrumentor(source, kArch);
+    instrumentor.add_point({.anchor_offset = 16,
+                            .probe_obj = &probe,
+                            .probe_symbol = "relative_guest_probe",
+                            .probe_args = {}});
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (relative_source) {
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+    }
+    // On rejection execute the pristine program. An erroneously admitted image
+    // is executed too, so the hidden read exposes actual register corruption.
+    if (!result.elf_bytes.empty()) {
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      words = test::section_words(candidate, ".text");
+    }
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+  test::DbiSim simulator;
+  ASSERT_NO_FATAL_FAILURE(simulator.initialize("cdna4", 64));
+  const std::optional<uint64_t> observed = simulator.run_and_read_sgpr64(words, 0, 10);
+  ASSERT_TRUE(observed) << "guest did not halt";
+  EXPECT_EQ(static_cast<uint32_t>(*observed), relative_source ? selected_value : 11u);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithoutProbeIsEleven) {
+  expect_scalar_relative_probe(false, false);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithProbeIsEleven) {
+  expect_scalar_relative_probe(false, true);
+}
+
+TEST(DbiScalarRelativeProbe, RelativeGuestWithoutProbeReadsTheM0SelectedRegister) {
+  expect_scalar_relative_probe(true, false);
+  expect_scalar_relative_probe(true, false, 17);
+}
+
+TEST(DbiScalarRelativeProbe, RejectsProbeWithoutChangingTheRelativeGuest) {
+  expect_scalar_relative_probe(true, true);
 }
 
 } // namespace
