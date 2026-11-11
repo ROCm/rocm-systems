@@ -176,6 +176,38 @@ class SpawnProc {
     return tokens;
   }
 
+#if HT_WIN
+  static bool envNamesEqual(const std::string& left, const std::string& right) {
+    if (left.size() != right.size()) return false;
+    for (size_t i = 0; i < left.size(); ++i) {
+      unsigned char l = static_cast<unsigned char>(left[i]);
+      unsigned char r = static_cast<unsigned char>(right[i]);
+      if (std::tolower(l) != std::tolower(r)) return false;
+    }
+    return true;
+  }
+
+  static void eraseEnvKey(std::map<std::string, std::string>& vars, const std::string& key) {
+    for (auto it = vars.begin(); it != vars.end();) {
+      if (envNamesEqual(it->first, key)) {
+        it = vars.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  static void eraseEnvKey(std::set<std::string>& names, const std::string& key) {
+    for (auto it = names.begin(); it != names.end();) {
+      if (envNamesEqual(*it, key)) {
+        it = names.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+#endif
+
   int doSpawn(const std::string& commandLineArgs) {
     std::vector<std::string> argStorage;
     argStorage.push_back(exeName_);
@@ -216,21 +248,12 @@ class SpawnProc {
     std::vector<char> envBlock;
     LPVOID lpEnvironment = NULL;
     if (!envVars_.empty() || !clearedEnv_.empty()) {
-      auto namesEqual = [](const std::string& left, const std::string& right) {
-        if (left.size() != right.size()) return false;
-        for (size_t i = 0; i < left.size(); ++i) {
-          unsigned char l = static_cast<unsigned char>(left[i]);
-          unsigned char r = static_cast<unsigned char>(right[i]);
-          if (std::tolower(l) != std::tolower(r)) return false;
-        }
-        return true;
-      };
       auto replacedOrCleared = [&](const std::string& key) {
         for (const auto& kv : envVars_) {
-          if (namesEqual(kv.first, key)) return true;
+          if (envNamesEqual(kv.first, key)) return true;
         }
         for (const auto& keyToClear : clearedEnv_) {
-          if (namesEqual(keyToClear, key)) return true;
+          if (envNamesEqual(keyToClear, key)) return true;
         }
         return false;
       };
@@ -378,13 +401,23 @@ class SpawnProc {
 
   // Sets an environment variable on the child.
   void setEnv(const std::string& key, const std::string& value) {
+#if HT_WIN
+    eraseEnvKey(envVars_, key);
+    eraseEnvKey(clearedEnv_, key);
+#else
     clearedEnv_.erase(key);
+#endif
     envVars_[key] = value;
   }
 
   // Removes an environment variable from the child.
   void clearEnv(const std::string& key) {
+#if HT_WIN
+    eraseEnvKey(envVars_, key);
+    eraseEnvKey(clearedEnv_, key);
+#else
     envVars_.erase(key);
+#endif
     clearedEnv_.insert(key);
   }
 
