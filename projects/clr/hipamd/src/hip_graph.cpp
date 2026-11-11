@@ -12,6 +12,9 @@
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
 
+#include <map>
+#include <set>
+
 namespace hip {
 
 std::vector<hip::Stream*> g_captureStreams;
@@ -77,18 +80,21 @@ inline hipMemcpy3DParms ihipLinearAsMemcpy3DParms(void* dst, const void* src, si
 inline hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                                    hip::GraphNode* const* pDependencies, size_t numDependencies,
                                    bool capture, int devId) {
-  graph->AddNode(graphNode);
-  std::unordered_set<hip::GraphNode*> DuplicateDep;
-  for (size_t i = 0; i < numDependencies; i++) {
-    if ((!hip::GraphNode::isNodeValid(pDependencies[i])) ||
-        (graph != pDependencies[i]->GetParentGraph())) {
-      return hipErrorInvalidValue;
+  {
+    amd::ScopedLock lock(graph->NodeLock());
+    graph->AddNode(graphNode);
+    std::unordered_set<hip::GraphNode*> DuplicateDep;
+    for (size_t i = 0; i < numDependencies; i++) {
+      if ((!hip::GraphNode::isNodeValid(pDependencies[i])) ||
+          (graph != pDependencies[i]->GetParentGraph())) {
+        return hipErrorInvalidValue;
+      }
+      if (DuplicateDep.find(pDependencies[i]) != DuplicateDep.end()) {
+        return hipErrorInvalidValue;
+      }
+      DuplicateDep.insert(pDependencies[i]);
+      pDependencies[i]->AddEdgeDep(graphNode);
     }
-    if (DuplicateDep.find(pDependencies[i]) != DuplicateDep.end()) {
-      return hipErrorInvalidValue;
-    }
-    DuplicateDep.insert(pDependencies[i]);
-    pDependencies[i]->AddEdgeDep(graphNode);
   }
   if (capture == false) {
     {
@@ -2865,6 +2871,186 @@ hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode
   }));
 }
 
+// Distinguishes nodes of the same type that cannot stand in for each other without a function or
+// copy-path change.
+static uintptr_t UpdatePairingSubKey(GraphNode* node) {
+  switch (node->GetType()) {
+    case hipGraphNodeTypeKernel: {
+      hipKernelNodeParams params{};
+      static_cast<GraphKernelNode*>(node)->GetParams(&params);
+      return reinterpret_cast<uintptr_t>(params.func);
+    }
+    case hipGraphNodeTypeMemcpy:
+      return static_cast<uintptr_t>(node->GetMemcpyNodeKind());
+    default:
+      return 0;
+  }
+}
+
+static bool IsPositionalPairingValid(const std::vector<GraphNode*>& oldNodes,
+                                     const std::vector<GraphNode*>& newNodes) {
+  std::unordered_map<GraphNode*, GraphNode*> newToOld;
+  newToOld.reserve(newNodes.size());
+  for (size_t i = 0; i < newNodes.size(); ++i) {
+    newToOld.emplace(newNodes[i], oldNodes[i]);
+  }
+  for (size_t i = 0; i < newNodes.size(); ++i) {
+    if (newNodes[i]->GetType() != oldNodes[i]->GetType() ||
+        UpdatePairingSubKey(newNodes[i]) != UpdatePairingSubKey(oldNodes[i]) ||
+        !HasMatchingDependencies(oldNodes[i]->GetDependencies(), newNodes[i]->GetDependencies(),
+                                 newToOld)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Pairs the nodes of a new graph with those of an instantiated graph by structure rather than by
+// creation order, so a graph whose independent nodes were created in a different order (e.g.
+// captured from several threads) still updates. newNodes must be in topological order. On success
+// matched[i] is the new node paired with oldNodes[i].
+static hipGraphExecUpdateResult PairNodesForUpdate(const std::vector<GraphNode*>& oldNodes,
+                                                   const std::vector<GraphNode*>& newNodes,
+                                                   std::vector<GraphNode*>& matched,
+                                                   GraphNode** errorNode) {
+  using Key = std::vector<uintptr_t>;
+  const size_t count = oldNodes.size();
+
+  std::unordered_map<GraphNode*, size_t> oldIndex;
+  oldIndex.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    oldIndex.emplace(oldNodes[i], i);
+  }
+
+  // Keys start with the sorted indices of the already paired parents; the narrower maps append the
+  // node type and then the sub key.
+  std::vector<Key> parentKey(count);
+  std::vector<size_t> unpairedParents(count);
+  std::vector<uintptr_t> subKey(count);
+  for (size_t i = 0; i < count; ++i) {
+    const auto& deps = oldNodes[i]->GetDependencies();
+    Key& key = parentKey[i];
+    key.push_back(deps.size());
+    for (auto* dep : deps) {
+      auto it = oldIndex.find(dep);
+      if (it == oldIndex.end()) {
+        *errorNode = nullptr;
+        return hipGraphExecUpdateErrorTopologyChanged;
+      }
+      key.push_back(it->second);
+    }
+    std::sort(key.begin() + 1, key.end());
+    unpairedParents[i] = deps.size();
+    subKey[i] = UpdatePairingSubKey(oldNodes[i]);
+  }
+
+  std::map<Key, std::set<size_t>> byParents, byParentsType, byParentsTypeSub;
+  auto forEachKey = [&](size_t i, auto&& fn) {
+    Key key = parentKey[i];
+    fn(byParents, key);
+    key.push_back(oldNodes[i]->GetType());
+    fn(byParentsType, key);
+    key.push_back(subKey[i]);
+    fn(byParentsTypeSub, key);
+  };
+  auto makeAvailable = [&](size_t i) {
+    forEachKey(i, [i](auto& index, const Key& key) { index[key].insert(i); });
+  };
+  for (size_t i = 0; i < count; ++i) {
+    if (unpairedParents[i] == 0) {
+      makeAvailable(i);
+    }
+  }
+
+  auto childTypes = [](GraphNode* node) {
+    std::vector<int> types;
+    types.reserve(node->GetOutDegree());
+    for (auto* child : node->GetEdges()) {
+      types.push_back(child->GetType());
+    }
+    std::sort(types.begin(), types.end());
+    return types;
+  };
+  // Graphs recaptured from the same streams keep each node's stream and position, which settles
+  // ties between interchangeable siblings consistently across the whole graph.
+  std::map<std::pair<const void*, uint64_t>, size_t> oldByCaptureOrigin;
+  for (size_t i = 0; i < count; ++i) {
+    if (oldNodes[i]->GetCaptureStream() != nullptr) {
+      oldByCaptureOrigin.emplace(
+          std::make_pair(oldNodes[i]->GetCaptureStream(), oldNodes[i]->GetCaptureSeq()), i);
+    }
+  }
+  auto pick = [&](const std::set<size_t>& candidates, GraphNode* node) {
+    if (candidates.size() > 1) {
+      if (node->GetCaptureStream() != nullptr) {
+        auto it = oldByCaptureOrigin.find(
+            std::make_pair(node->GetCaptureStream(), node->GetCaptureSeq()));
+        if (it != oldByCaptureOrigin.end() && candidates.count(it->second) != 0) {
+          return it->second;
+        }
+      }
+      const auto wanted = childTypes(node);
+      for (size_t i : candidates) {
+        if (oldNodes[i]->GetOutDegree() == node->GetOutDegree() &&
+            childTypes(oldNodes[i]) == wanted) {
+          return i;
+        }
+      }
+    }
+    return *candidates.begin();
+  };
+
+  std::unordered_map<GraphNode*, size_t> pairedIndex;
+  pairedIndex.reserve(count);
+  matched.assign(count, nullptr);
+  for (auto* node : newNodes) {
+    const auto& deps = node->GetDependencies();
+    Key key;
+    key.reserve(deps.size() + 3);
+    key.push_back(deps.size());
+    for (auto* dep : deps) {
+      auto it = pairedIndex.find(dep);
+      if (it == pairedIndex.end()) {
+        *errorNode = node;
+        return hipGraphExecUpdateErrorTopologyChanged;
+      }
+      key.push_back(it->second);
+    }
+    std::sort(key.begin() + 1, key.end());
+    if (byParents.find(key) == byParents.end()) {
+      *errorNode = node;
+      return hipGraphExecUpdateErrorTopologyChanged;
+    }
+    key.push_back(node->GetType());
+    auto sameType = byParentsType.find(key);
+    if (sameType == byParentsType.end()) {
+      *errorNode = node;
+      return hipGraphExecUpdateErrorNodeTypeChanged;
+    }
+    key.push_back(UpdatePairingSubKey(node));
+    auto sameSub = byParentsTypeSub.find(key);
+    const size_t i =
+        pick(sameSub != byParentsTypeSub.end() ? sameSub->second : sameType->second, node);
+
+    matched[i] = node;
+    pairedIndex.emplace(node, i);
+    forEachKey(i, [i](auto& index, const Key& k) {
+      auto it = index.find(k);
+      it->second.erase(i);
+      if (it->second.empty()) {
+        index.erase(it);
+      }
+    });
+    for (auto* child : oldNodes[i]->GetEdges()) {
+      auto it = oldIndex.find(child);
+      if (it != oldIndex.end() && --unpairedParents[it->second] == 0) {
+        makeAvailable(it->second);
+      }
+    }
+  }
+  return hipGraphExecUpdateSuccess;
+}
+
 hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                               hipGraphNode_t* hErrorNode_out,
                               hipGraphExecUpdateResult* updateResult_out) {
@@ -2895,6 +3081,18 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
 
   std::unordered_map<hip::GraphNode*, hip::GraphNode*> newToOldNodeMap;
   if (!originalTopologyUnchanged) {
+    if (!IsPositionalPairingValid(oldGraphExecNodes, newGraphNodes)) {
+      std::vector<hip::GraphNode*> matched;
+      hip::GraphNode* errorNode = nullptr;
+      const hipGraphExecUpdateResult result =
+          PairNodesForUpdate(oldGraphExecNodes, newGraphNodes, matched, &errorNode);
+      if (result != hipGraphExecUpdateSuccess) {
+        *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(errorNode);
+        *updateResult_out = result;
+        HIP_RETURN(hipErrorGraphExecUpdateFailure);
+      }
+      newGraphNodes = std::move(matched);
+    }
     newToOldNodeMap.reserve(newGraphNodeCount);
     for (size_t i = 0; i < newGraphNodeCount; ++i) {
       newToOldNodeMap.emplace(newGraphNodes[i], oldGraphExecNodes[i]);

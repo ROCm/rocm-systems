@@ -245,6 +245,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
     dev_id_ = node.dev_id_;
+    captureStream_ = node.captureStream_;
+    captureSeq_ = node.captureSeq_;
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
@@ -477,6 +479,12 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   Graph* GetParentGraph() { return parentGraph_; }
   GraphNode* GetOriginalNode() const { return originalNode_; }
+  void SetCaptureOrigin(const void* stream, uint64_t seq) {
+    captureStream_ = stream;
+    captureSeq_ = seq;
+  }
+  const void* GetCaptureStream() const { return captureStream_; }
+  uint64_t GetCaptureSeq() const { return captureSeq_; }
   //! True when committed params have stale packets from a failed recapture.
   bool NeedsRecapture() const { return needsRecapture_; }
   void SetNeedsRecapture(bool needsRecapture) { needsRecapture_ = needsRecapture; }
@@ -595,6 +603,10 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
   int dev_id_;  //!< Device Id when node is created(dev id from capture stream/current device
                 //!< when explicitly added)
+  //! Stream that captured this node and its position on that stream within the capture. Used
+  //! only as a hint to pair otherwise interchangeable nodes in hipGraphExecUpdate.
+  const void* captureStream_ = nullptr;
+  uint64_t captureSeq_ = 0;
   bool wait_ = false;
   //! Dependencies to preserve when a disabled node has no command to carry its wait list.
   amd::Command::EventWaitList eventWaitList_;
@@ -738,12 +750,17 @@ class Graph {
   GraphNode* AddExternalEventWaitNode(hip::GraphNode* pDependencies, size_t numDependencies,
     hipEvent_t event) {
     GraphNode* node = new GraphEventWaitNode(event);
+    amd::ScopedLock lock(nodeLock_);
     for (size_t i = 0; i < numDependencies; i++) {
       pDependencies[i].AddEdgeDep(node);
     }
     AddNode(node);
     return node;
   }
+
+  //! Serializes node and edge insertion. Streams captured from different host threads
+  //! all add nodes to the origin stream's graph.
+  amd::Monitor& NodeLock() { return nodeLock_; }
 
   void RemoveManualNodesDuringCapture() {
     capturedNodes_.erase(capturedNodes_.begin(), capturedNodes_.end());
@@ -1077,6 +1094,7 @@ class Graph {
   uint64_t updateTopoOrderVersion_ = ~uint64_t{0};
   std::vector<Node> updateTopoOrder_;
   amd::Monitor updateTopoOrderLock_;  //!< Guards the updateTopoOrder_ cache rebuild
+  amd::Monitor nodeLock_;
   //! Map of device ID to vector of streams allocated for that device during graph execution.
   //! Each device may require multiple streams to handle parallel execution of graph nodes.
   std::unordered_map<int, std::vector<hip::Stream*>> streams_dev_;
@@ -4190,6 +4208,7 @@ inline void hip::Stream::SetLastCapturedNode(hip::GraphNode* graphNode) {
     return;
   }
   lastCapturedNodes_ = {graphNode};
+  graphNode->SetCaptureOrigin(this, ++captureSeq_);
   // Every caller passes a node freshly created on this stream during capture,
   // so this is the point where a captured kernel inherits the stream priority.
   // Fork/join propagation goes through AddCrossCapturedNode, which never
