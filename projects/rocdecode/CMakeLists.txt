@@ -320,6 +320,7 @@ if(_deps_met)
   install(FILES utils/video_post_process.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/utils)
   install(FILES data/videos/AMD_driving_virtual_20-H265.mp4 data/videos/AMD_driving_virtual_20-H265.265 data/videos/AMD_driving_virtual_20-H264.mp4 data/videos/AMD_driving_virtual_20-H264.264 data/videos/AMD_driving_virtual_20-AV1.mp4 data/videos/AMD_driving_virtual_20-AV1.ivf data/videos/AMD_driving_virtual_20-VP9.ivf DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/video)
   install(DIRECTORY data/frames/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/frames)
+  install(FILES data/md5/AMD_driving_virtual_20-H265.md5 data/md5/AMD_driving_virtual_20-H264.md5 data/md5/AMD_driving_virtual_20-AV1.md5 data/md5/AMD_driving_virtual_20-VP9.md5 DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/md5)
   # install license information - {ROCM_PATH}/share/doc/rocdecode
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
   # install test cmake
@@ -372,7 +373,7 @@ if(_deps_met)
   )
 
   # Install the export set for use with the install-tree
-  install(EXPORT ${PROJECT_NAME}-targets 
+  install(EXPORT ${PROJECT_NAME}-targets
     FILE ${PROJECT_NAME}-targets.cmake
     NAMESPACE ${PROJECT_NAME}::
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
