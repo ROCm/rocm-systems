@@ -286,6 +286,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
+- **Fixed duplicate and stale AI NIC handles after reinitializing the library**.  
+  - After a shut down, a NIC-only session listed every AI NIC one extra time for each earlier session and grew its memory use. AI NIC handles from before the shut down also kept working, and an init that followed one failing during GPU discovery could hang. Each init now lists every AI NIC once, rejects old handles, and no longer hangs.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

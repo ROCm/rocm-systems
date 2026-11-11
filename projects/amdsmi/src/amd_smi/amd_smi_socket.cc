@@ -18,6 +18,10 @@ AMDSmiSocket::~AMDSmiSocket() {
     delete cpu_core_processors_[i];
   }
   cpu_core_processors_.clear();
+  for (uint32_t i = 0; i < ainic_processors_.size(); i++) {
+    delete ainic_processors_[i];
+  }
+  ainic_processors_.clear();
   for (uint32_t i = 0; i < nic_processors_.size(); i++) {
     delete nic_processors_[i];
   }

@@ -546,7 +546,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
       LOG_INFO(ss);
       continue;
     }
-    ai_nic_info_.emplace_back(ai_nic_info);
 
     auto [domain, bus, device_id, function] = parse_bdfid(bdfid);
 
@@ -577,7 +576,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
   }
   return AMDSMI_STATUS_SUCCESS;
 }
-const auto& AMDSmiSystem::get_ai_nic_info() const { return ai_nic_info_; }
 
 amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
 #ifdef BRCM_NIC
@@ -740,27 +738,28 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& soc
 }
 
 amdsmi_status_t AMDSmiSystem::cleanup() {
+  // The sockets own every processor and all init flags share them, so free them whatever the
+  // flags; a NIC-only init has no GPU or CPU teardown that would free them.
+  for (uint32_t i = 0; i < sockets_.size(); i++) {
+    delete sockets_[i];
+  }
+  sockets_.clear();
+  processors_.clear();
+  nic_processors_.clear();
+  switch_processors_.clear();
+  ainic_processors_.clear();
+  // Null the context once destroyed: every native GPU init starts with a cleanup() of the
+  // already shut down system. Keep this ahead of the GPU teardown, which returns early on failure.
+  if (ainic_ctx_ != nullptr) {
+    smi_nic_destroy_context(ainic_ctx_);
+    ainic_ctx_ = nullptr;
+  }
 #ifdef ENABLE_ESMI_LIB
   if (init_flag_ & AMDSMI_INIT_AMD_CPUS) {
-    for (uint32_t i = 0; i < sockets_.size(); i++) {
-      delete sockets_[i];
-    }
-    processors_.clear();
-    sockets_.clear();
     esmi_exit();
   }
 #endif
   if (init_flag_ & AMDSMI_INIT_AMD_GPUS) {
-    // we do not need to delete the processors, deleting sockets takes care of this
-    if (!processors_.empty()) {
-      processors_.clear();
-    }
-    for (uint32_t i = 0; i < sockets_.size(); i++) {
-      delete sockets_[i];
-    }
-    if (!sockets_.empty()) {
-      sockets_.clear();
-    }
     drm_.cleanup();
 #ifdef ENABLE_WSL_BACKEND
     bool used_wsl = WSLGPUBackend::IsActive();
@@ -775,9 +774,6 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
 #ifdef ENABLE_WSL_BACKEND
     }
 #endif
-  }
-  if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
-    smi_nic_destroy_context(ainic_ctx_);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
