@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Source-qualified topology model assembled from passive hardware facts.
+//! Source-qualified graph of passive topology reports.
 //!
-//! The fact values in `crate::topology` stand alone. The records here associate
+//! The fact values in `crate::topology` stand alone. This graph associates
 //! them with sources and nodes in one `TopologySnapshot`. Node and source IDs
 //! are indices into that snapshot, never persistent native identities. Native
 //! node IDs are scoped by their source: a KFD node ordinal and a Linux NUMA ID
@@ -13,8 +13,8 @@
 //! association.
 //!
 //! Nodes need not have an activatable endpoint, and an endpoint may attach to
-//! more than one node. Routes are directed reports by one source, not a
-//! physical switch graph or permission to map memory. KFD sources have a
+//! more than one node. Routes are directed reports by one source; the graph
+//! does not infer paths or permission to map memory. KFD sources have a
 //! checked native generation; host OS observations are best effort and have
 //! no atomic generation in common with KFD or another driver.
 

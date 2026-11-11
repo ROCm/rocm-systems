@@ -5,9 +5,9 @@
 //!
 //! The records defined here describe hardware independently of a topology
 //! graph: an endpoint can be opened directly, and cache, link, PCI, and GPU
-//! information can be used without a node ID. `model` defines the sources,
-//! nodes, and relationships that bind those facts into one snapshot. Its public
-//! types are re-exported here so callers have one topology interface.
+//! information can be used without a node ID. `graph` binds those facts to
+//! source-qualified nodes and reported relationships in one snapshot. Its
+//! public types are re-exported here so callers have one topology interface.
 //!
 //! An endpoint is a passive discovery record. Optional facts from other
 //! sources may be populated later. Inspecting or cloning one does not activate
@@ -20,13 +20,13 @@ use crate::memory::{DeviceAccess, HostCacheability};
 use std::ops::{BitOr, BitOrAssign};
 
 mod gpu;
+mod graph;
 pub mod host;
-mod model;
 pub mod platform;
 pub use gpu::{
     GpuInfo, GpuQueueCapabilities, GpuScratchEncoding, GpuSdmaDialect, GpuTargetProfile,
 };
-pub use model::{
+pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
     MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
     TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
