@@ -3,6 +3,7 @@
 
 set(TEST_SRC
     test_hip_peer_copy_contract.cc
+    test_hip_peer_direction_contract.cc
 )
 
 hip_add_exe_to_target(NAME ContractPeerCopyTest

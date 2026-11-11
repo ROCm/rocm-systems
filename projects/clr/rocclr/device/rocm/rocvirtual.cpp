@@ -8,6 +8,7 @@
 #include "device/rocm/rocdevice.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rockernel.hpp"
+#include "device/rocm/rocp2p_direction.hpp"
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
@@ -4275,21 +4276,40 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   Memory* dstDevMem = static_cast<roc::Memory*>(
       cmd.destination().getDeviceMemory(*cmd.destination().getContext().devices()[0]));
 
-  bool p2pAllowed = false;
-  // Loop through all available P2P devices for the destination buffer
-  for (auto agent : dstDevMem->dev().p2pAgents()) {
-    // Find the device, which is matching the current
-    if (agent.handle == dev().getBackendDevice().handle) {
-      p2pAllowed = true;
-      break;
-    }
-
-    for (auto agent : srcDevMem->dev().p2pAgents()) {
-      if (agent.handle == dev().getBackendDevice().handle) {
-        p2pAllowed = true;
-        break;
+  // Peer access is directed: KFD only records a direction when the peer BAR is
+  // addressable from the executing device. p2pAgents() lists the agents that
+  // can access a device's memory, so the executing device must appear in the
+  // list of the peer buffer it has to reach. The old code OR-ed the two lists,
+  // so a copy executed on a third device was allowed as long as it could reach
+  // either buffer; the blit then touched an unreachable BAR and killed the
+  // process with SIGSEGV. Require the executing device to reach every peer
+  // buffer it touches.
+  const hsa_agent_t copy_agent = dev().getBackendDevice();
+  auto canReach = [&copy_agent](const Device& target) {
+    for (const auto& agent : target.p2pAgents()) {
+      if (agent.handle == copy_agent.handle) {
+        return true;
       }
     }
+    return false;
+  };
+
+  const bool copy_on_src = (srcDevMem->dev().getBackendDevice().handle == copy_agent.handle);
+  const bool copy_on_dst = (dstDevMem->dev().getBackendDevice().handle == copy_agent.handle);
+
+  const auto role = ::roc::p2p::SelectRole(copy_on_src, copy_on_dst);
+  const bool p2pAllowed =
+      ::roc::p2p::CanBlit(role, canReach(srcDevMem->dev()), canReach(dstDevMem->dev()));
+
+  // Device init allocates the staging buffer whenever the topology has a
+  // directed pair that cannot be reached directly, and fails init if that
+  // allocation fails. If the buffer is still missing the copy cannot be
+  // completed; report the failure without marking the destination as written.
+  if (!p2pAllowed && (dev().P2PStage() == nullptr)) {
+    LogError("P2P staging buffer is not available");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+    profilingEnd();
+    return;
   }
 
   // Synchronize source and destination memory
