@@ -75,6 +75,14 @@ If the SDK's HIP headers are older than this tree, pass
 `-DHRR_HIP_INCLUDE_DIRS="<repo>/projects/hip/include;<repo>/projects/clr/hipamd/include"`
 as CI does.
 
+## Running the CPU-only tests from an install
+
+Tests labelled `cpu-only` (unit, handler, generator rules) need no GPU.
+Configure with `-DHRR_BUILD_TESTS=ON -DHRR_INSTALL_TESTS=ON`, then run
+`cmake --install` and `ctest --test-dir <prefix>/share/hrr/test -L cpu-only`.
+The installed tree holds the unit and handler binaries and finds
+`<prefix>/bin/hrr-playback` itself. Integration tests are not installed.
+
 ## Running the integration tests
 
 1. Build `amdhip64` with capture compiled in. The tree has no CMake option for it, so
