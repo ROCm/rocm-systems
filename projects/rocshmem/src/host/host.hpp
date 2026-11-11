@@ -44,7 +44,7 @@
 #include "bootstrap/bootstrap.hpp"
 #include "mpi_instance.hpp"
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
 namespace rocshmem { namespace net { class VerbsHost; } }
 #endif
 
@@ -416,7 +416,7 @@ class HostInterface {
 
   int find_avail_pool_entry();
 
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   /**
    * @brief Optional verbs host transport (selected by ROCSHMEM_HOST_TRANSPORT=verbs).
    *
