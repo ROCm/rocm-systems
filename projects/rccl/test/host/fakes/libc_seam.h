@@ -88,6 +88,7 @@ DIR* micro_opendir(const char*);
 struct dirent* micro_readdir(DIR*);
 int micro_closedir(DIR*);
 ssize_t micro_readlink(const char*, char*, size_t);
+ssize_t micro_readlinkat(int, const char*, char*, size_t);
 int micro_ioctl(int, unsigned long, ...);
 int micro_atexit(void (*)(void));
 int micro_clock_gettime(clockid_t, struct timespec*);
@@ -147,6 +148,7 @@ sighandler_t micro_signal(int, sighandler_t);
 #define readdir micro_readdir
 #define closedir micro_closedir
 #define readlink micro_readlink
+#define readlinkat micro_readlinkat
 #define ioctl micro_ioctl
 #define atexit micro_atexit
 #define clock_gettime micro_clock_gettime

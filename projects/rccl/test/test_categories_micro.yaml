@@ -30,6 +30,7 @@ test_categories:
       - "RasPeersMicrotest.*"
       # ras/diagnostics_env.cc
       - "RasDiagnosticsEnvMicrotest.*"
+      - "RasDiagnosticsPciMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/client_support.cc
