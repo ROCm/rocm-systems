@@ -128,47 +128,11 @@ void TestBase::SetUp(uint64_t init_flags) {
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
 
-  err = amdsmi_get_socket_handles(&socket_count_, nullptr);
+  err = EnumerateHandles();
   if (err != AMDSMI_STATUS_SUCCESS) {
     setup_failed_ = true;
   }
   ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-
-  // allocate memory
-  sockets_.resize(socket_count_);
-  err = amdsmi_get_socket_handles(&socket_count_, sockets_.data());
-  if (err != AMDSMI_STATUS_SUCCESS) {
-    setup_failed_ = true;
-  }
-  ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-
-  // collect devices from sockets
-  num_monitor_devs_ = 0;
-  for (uint32_t i = 0; i < socket_count_; i++) {
-    // Get all devices of the socket
-    uint32_t device_count = 0;
-    err = amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
-    if (err != AMDSMI_STATUS_SUCCESS) {
-      setup_failed_ = true;
-    }
-    ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-
-    std::vector<amdsmi_processor_handle> processor_handles(device_count);
-    err = amdsmi_get_processor_handles(sockets_[i], &device_count, processor_handles.data());
-    if (err != AMDSMI_STATUS_SUCCESS) {
-      setup_failed_ = true;
-    }
-    ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-    // store the device handles for following tests
-    for (uint32_t j = 0; j < device_count; j++) {
-      if (num_monitor_devs_ >= MAX_MONITOR_DEVICES) {
-        setup_failed_ = true;
-        ASSERT_EQ(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS, AMDSMI_STATUS_SUCCESS);
-      }
-      processor_handles_[num_monitor_devs_] = processor_handles[j];
-      num_monitor_devs_++;
-    }
-  }
 
   if (num_monitor_devs_ == 0) {
     IF_VERB(STANDARD) {
@@ -176,6 +140,40 @@ void TestBase::SetUp(uint64_t init_flags) {
       std::cout << "No AMD SMI tests can be run." << std::endl;
     }
   }
+}
+
+amdsmi_status_t TestBase::EnumerateHandles() {
+  socket_count_ = 0;
+  sockets_.clear();
+  num_monitor_devs_ = 0;
+  amdsmi_status_t err = amdsmi_get_socket_handles(&socket_count_, nullptr);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    return err;
+  }
+  sockets_.resize(socket_count_);
+  err = amdsmi_get_socket_handles(&socket_count_, sockets_.data());
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    return err;
+  }
+  for (uint32_t i = 0; i < socket_count_; i++) {
+    uint32_t device_count = 0;
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, nullptr);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      return err;
+    }
+    std::vector<amdsmi_processor_handle> processor_handles(device_count);
+    err = amdsmi_get_processor_handles(sockets_[i], &device_count, processor_handles.data());
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      return err;
+    }
+    for (uint32_t j = 0; j < device_count; j++) {
+      if (num_monitor_devs_ >= MAX_MONITOR_DEVICES) {
+        return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+      }
+      processor_handles_[num_monitor_devs_++] = processor_handles[j];
+    }
+  }
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 void TestBase::PrintDeviceHeader(amdsmi_processor_handle dv_ind) {
