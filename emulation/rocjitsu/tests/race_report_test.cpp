@@ -139,6 +139,67 @@ TEST(RaceReportTraceTest, ElisionNeverHidesASingleInstruction) {
   EXPECT_EQ(printed.size() + elided_count(report), 200u);
 }
 
+TEST(RaceReportTraceTest, CompactsNopsWithoutAbsorbingMarkedInstructions) {
+  Trace trace;
+  for (uint64_t pc = 0x100; pc <= 0x114; pc += 4)
+    trace.push(InstructionSnapshot{pc, std::array{0xbf800000u}, false, true});
+  const auto disassemble = [](const InstructionSnapshot &) { return "s_nop 0"; };
+  EXPECT_EQ(formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 5)),
+            "       PC     Instruction\n"
+            "  ==>  0x100  s_nop 0  ; <-- wave 0 lane 0\n"
+            "       0x104  s_nop 0  ; 4 executions, through PC 0x110\n"
+            "  ==>  0x114  s_nop 0  ; <-- wave 0 lane 0\n");
+}
+
+TEST(RaceReportTraceTest, NopRunsRespectEncodingAndPcContinuity) {
+  Trace trace;
+  trace.push(snapshot(0x100, 0));
+  for (uint64_t pc : {0x104u, 0x108u, 0x10cu, 0x110u, 0x200u, 0x204u})
+    trace.push(
+        InstructionSnapshot{pc, std::array{pc < 0x10c ? 0xbf800000u : 0xbf800007u}, false, true});
+  trace.push(snapshot(0x208, 1));
+  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 7));
+  EXPECT_NE(report.find("2 executions, through PC 0x108\n"), std::string::npos);
+  EXPECT_NE(report.find("2 executions, through PC 0x110\n"), std::string::npos);
+  EXPECT_NE(report.find("2 executions, through PC 0x204\n"), std::string::npos);
+  EXPECT_EQ(rows(report).size(), 5u);
+}
+
+TEST(RaceReportTraceTest, ContextCountsExecutionsBeforeCompactionAndKeepsGapsSeparate) {
+  Trace trace;
+  for (uint64_t pc = 0x100; pc <= 0x11c; pc += 4)
+    trace.push(InstructionSnapshot{pc, std::array{0xbf800000u}, false, true});
+  const auto disassemble = [](const InstructionSnapshot &) { return "s_nop 0"; };
+  const auto short_report = formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 4);
+  EXPECT_EQ(short_report, "       PC     Instruction\n"
+                          "  ==>  0x100  s_nop 0  ; <-- wave 0 lane 0\n"
+                          "       0x104  s_nop 0\n"
+                          "       ... 4 instructions elided ...\n"
+                          "       0x118  s_nop 0\n"
+                          "  ==>  0x11c  s_nop 0  ; <-- wave 0 lane 0\n");
+  const auto full_report = formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 256);
+  EXPECT_NE(full_report.find("6 executions, through PC 0x118\n"), std::string::npos);
+  EXPECT_EQ(elided_count(full_report), 0u);
+  const auto odd_report = formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 5);
+  EXPECT_EQ(elided_count(odd_report), 3u);
+  EXPECT_NE(odd_report.find("2 executions, through PC 0x118\n"), std::string::npos);
+}
+
+TEST(RaceReportConfigTest, ValidatesTraceContextAtConstruction) {
+  for (const char *config : {static_cast<const char *>(nullptr), "", "{}", R"({"trace_context":2})",
+                             R"({"trace_context":3})", R"({"trace_context":256})"}) {
+    SCOPED_TRACE(config ? config : "null");
+    EXPECT_NO_THROW({ RaceDetectorPlugin plugin(config); });
+  }
+  for (const char *config :
+       {"{", "[]", "null", R"({"trace_context":-1})", R"({"trace_context":0})",
+        R"({"trace_context":1})", R"({"trace_context":257})", R"({"trace_context":1e30})",
+        R"({"trace_context":2.5})", R"({"trace_context":true})", R"({"trace_context":"128"})"}) {
+    SCOPED_TRACE(config);
+    EXPECT_THROW({ RaceDetectorPlugin plugin(config); }, std::invalid_argument);
+  }
+}
+
 TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding) {
   Trace trace;
   for (uint32_t i = 0; i < 6; ++i)

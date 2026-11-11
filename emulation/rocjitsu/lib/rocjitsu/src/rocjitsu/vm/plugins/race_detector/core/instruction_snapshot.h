@@ -26,11 +26,12 @@ public:
 
   /// @brief Copy the complete encoding of the instruction at `pc`.
   /// @param preserve_in_trace Whether reports keep this instruction when eliding a trace.
+  /// @param is_nop Whether the decoded instruction is an s_nop.
   /// @pre `encoding` contains between one and kMaxWords words.
   constexpr InstructionSnapshot(uint64_t pc, std::span<const uint32_t> encoding,
-                                bool preserve_in_trace = false)
+                                bool preserve_in_trace = false, bool is_nop = false)
       : pc_(pc), word_count_(static_cast<uint8_t>(encoding.size())),
-        preserve_in_trace_(preserve_in_trace) {
+        preserve_in_trace_(preserve_in_trace), is_nop_(is_nop) {
     assert(!encoding.empty() && encoding.size() <= kMaxWords);
     std::ranges::copy(encoding, words_.begin());
   }
@@ -42,9 +43,10 @@ public:
 
   /// Whether reports keep this instruction when eliding a trace.
   constexpr bool preserve_in_trace() const { return preserve_in_trace_; }
+  constexpr bool is_nop() const { return is_nop_; }
 
   /// Equal when the PCs and encodings are equal; unused words are always zero,
-  /// and the retention policy is derived from the encoding.
+  /// and the reporting metadata is derived from the encoding.
   friend constexpr bool operator==(const InstructionSnapshot &,
                                    const InstructionSnapshot &) = default;
 
@@ -53,6 +55,7 @@ private:
   std::array<uint32_t, kMaxWords> words_{};
   uint8_t word_count_;
   bool preserve_in_trace_;
+  bool is_nop_;
 };
 
 } // namespace rocjitsu::plugins::race_detector
