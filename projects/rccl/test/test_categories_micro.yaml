@@ -31,6 +31,7 @@ test_categories:
       # ras/diagnostics_env.cc
       - "RasDiagnosticsEnvMicrotest.*"
       - "RasDiagnosticsPciMicrotest.*"
+      - "RasDiagnosticsPciIsolatedTest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
       # ras/client_support.cc

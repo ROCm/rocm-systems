@@ -122,7 +122,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     this binary entirely, so no seam can reach it without changing the
     binary's own build configuration.
   - `ras/diagnostics_pci.cc` (`RAS_DIAGNOSTICS_PCI_CC_PATH`, from
-    `ras-diagnostics-pci-test.cc`); suite `RasDiagnosticsPciMicrotest.*`.
+    `ras-diagnostics-pci-test.cc`); suites `RasDiagnosticsPciMicrotest.*` and
+    `RasDiagnosticsPciIsolatedTest.*`. The conclusive-tool collector case runs in
+    its own process to keep the once-only tool cache independent of fallback tests.
     Covers RDMA tool classification, selected GPU/NIC pairs, IOMMU sysfs reads,
     ATS parsing, collection and report validation through shared diagnostic,
     topology and libc hooks. No external tools or host PCI devices are accessed.

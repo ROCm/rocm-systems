@@ -1,12 +1,22 @@
-#include <gtest/gtest.h>
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Host-only microtests for src/ras/diagnostics_pci.cc.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <gtest/gtest.h>
+
+#include "../common/ProcessIsolatedTestRunner.hpp"
 #include "alloc.h"
 #include "comm.h"
 #include "ScopedHook.h"
@@ -52,11 +62,6 @@ class RasDiagnosticsPciMicrotest : public ::testing::Test {
     ResetDiagnosticsFakes();
     ResetTopoStubs();
     ResetUtilsFakes();
-    g_ncclDiagChildRun = [](const char*, int, char* output, int, bool* truncated) {
-      output[0] = '\0';
-      *truncated = false;
-      return 127;
-    };
     EXPECT_EQ(RAS_DIAG_RDMA_TOPO_UNAVAILABLE, rasDiagnosticsRdmaTopoResult()->state);
     g_realpath = [](const char*, char*) -> char* { return nullptr; };
     g_pciAllocationCalls = 0;
@@ -88,6 +93,15 @@ class RasDiagnosticsPciMicrotest : public ::testing::Test {
   }
 
   using Summarizer = ncclResult_t (*)(const rasDiagnosticsContext*, const rasDiagnosticsReporter*, const char*, int);
+
+  static ncclResult_t NetProperties(ncclTopoNetPropertiesSnapshot** target, int* count, int device = 0) {
+    *count = device + 1;
+    *target = static_cast<ncclTopoNetPropertiesSnapshot*>(std::calloc(*count, sizeof(**target)));
+    if (!*target) return ncclSystemError;
+    (*target)[device].propertiesValid = true;
+    std::strcpy((*target)[device].pciPath, "0000:81:00.0");
+    return ncclSuccess;
+  }
 
   void CheckReport(Summarizer summarize, const std::vector<char>& records,
                    const std::vector<std::string>& expected) {
@@ -136,10 +150,61 @@ class RasDiagnosticsPciMicrotest : public ::testing::Test {
   }
 };
 
+TEST(RasDiagnosticsPciIsolatedTest, Collect_ConclusiveToolResultSkipsFallbackAndUsesCache) {
+  RUN_ISOLATED_TEST("Pci_ConclusiveToolResultSkipsFallbackAndUsesCache", []() {
+    ResetLibcFakes();
+    ResetDiagnosticsFakes();
+    ResetTopoStubs();
+    ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
+    ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
+    ScopedHook child(g_ncclDiagChildRun,
+      [](const char* command, int timeout, char* target, int size, bool* truncated) {
+        EXPECT_STREQ("rdma_topo check", command);
+        EXPECT_EQ(2, timeout);
+        DeliverChildOutput("OK\tlink\n", target, size, nullptr, nullptr, truncated);
+        return 0;
+      });
+    ScopedHook properties(g_ncclTopoGetNetPropertiesSnapshot,
+      [](ncclComm*, bool, ncclTopoNetPropertiesSnapshot**, int*) {
+        ADD_FAILURE() << "Conclusive rdma_topo must skip network snapshots";
+        return ncclInternalError;
+      });
+    ScopedHook open(g_open, [](const char*, int, mode_t) {
+      ADD_FAILURE() << "Conclusive rdma_topo must skip sysfs reads";
+      return -1;
+    });
+    rasDiagnosticsContext context{};
+    rasDiagnosticsLocalData data{};
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsRdmaTopoCollectLocal(&context, &data));
+    ncclUniquePtr<char> rdmaRecords(data.records);
+    ASSERT_EQ(1, data.nRecords);
+    const auto* rdma = rasDiagnosticsRdmaTopoDataFromRecord(data.records);
+    EXPECT_EQ(RAS_DIAG_RDMA_TOPO_SOURCE_TOOL, rdma->source);
+    EXPECT_EQ(RAS_DIAG_RDMA_TOPO_RAN, rdma->rdmaTopoState);
+    EXPECT_EQ(0, rdma->rdmaTopo.exitCode);
+    EXPECT_FALSE(rdma->rdmaTopo.reportedIssue);
+    EXPECT_STREQ("OK\tlink", rdma->rdmaTopo.sample);
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsIommuCollectLocal(&context, &data));
+    ncclUniquePtr<char> iommuRecords(data.records);
+    ASSERT_EQ(1, data.nRecords);
+    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, rasDiagnosticsIommuDataFromRecord(data.records)->fallbackState);
+    ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context, &data));
+    ncclUniquePtr<char> atsRecords(data.records);
+    ASSERT_EQ(1, data.nRecords);
+    EXPECT_EQ(RAS_DIAG_PCI_FALLBACK_SKIPPED, rasDiagnosticsAtsDataFromRecord(data.records)->fallbackState);
+    EXPECT_EQ(RAS_DIAG_RDMA_TOPO_RAN, rasDiagnosticsRdmaTopoResult()->state);
+    EXPECT_EQ(1, child.calls);
+    EXPECT_EQ(0, properties.calls);
+    EXPECT_EQ(0, open.calls);
+    ras_test::ResetNcclComms();
+  });
+}
+
 TEST_F(RasDiagnosticsPciMicrotest, Bdf_ValidatesSeparatorsAndExtractsFinalPathComponent) {
   for (const char* valid : {"0000:81:00.0", "abcdef0:Ab:Cd.E"}) EXPECT_TRUE(rasDiagnosticsPciValidBdf(valid));
-  for (const char* invalid : std::initializer_list<const char*>{nullptr, "", "000:81:00.0", "000000000:81:00.0", "0000/81:00.0",
-                              "0000:81/00.0", "0000:81:00/0", "0000:8g:00.0"}) {
+  for (const char* invalid : std::initializer_list<const char*>{
+         nullptr, "", "000:81:00.0", "000000000:81:00.0", "0000/81:00.0",
+         "0000:81/00.0", "0000:81:00/0", "0000:8g:00.0"}) {
     EXPECT_FALSE(rasDiagnosticsPciValidBdf(invalid));
   }
   char bdf[RAS_DIAG_PCI_BDF_BYTES] = {};
@@ -155,9 +220,7 @@ TEST_F(RasDiagnosticsPciMicrotest, Bdf_ValidatesSeparatorsAndExtractsFinalPathCo
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, IommuGroup_UsesDirectoryRelativeLinkAndRejectsInvalidIds) {
-  int opens = 0, links = 0;
   ScopedHook open(g_open, [&](const char* path, int flags, mode_t) {
-    ++opens;
     EXPECT_STREQ("/sys/bus/pci/devices/0000:81:00.0", path);
     EXPECT_EQ(O_RDONLY | O_DIRECTORY | O_CLOEXEC, flags);
     return 37;
@@ -167,7 +230,6 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuGroup_UsesDirectoryRelativeLinkAndReject
          {"/2147483648", -1}, {"/-1", -1}, {"/37x", -1}, {"/", -1}, {"/999999999999999999999", -1}}) {
     SCOPED_TRACE(item.first);
     ScopedHook link(g_readlinkat, [&](int fd, const char* name, char* target, size_t capacity) -> ssize_t {
-      ++links;
       EXPECT_EQ(37, fd);
       EXPECT_STREQ("iommu_group", name);
       EXPECT_EQ(PATH_MAX - 1, capacity);
@@ -177,42 +239,38 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuGroup_UsesDirectoryRelativeLinkAndReject
     const auto group = rasDiagnosticsPciReadIommuGroup("0000:81:00.0");
     EXPECT_EQ(item.second, group.id);
     EXPECT_EQ(item.second < 0 ? RAS_DIAG_IOMMU_GROUP_UNAVAILABLE : RAS_DIAG_IOMMU_GROUP_AVAILABLE, group.state);
+    EXPECT_EQ(1, link.calls);
   }
-  EXPECT_EQ(7, opens);
-  EXPECT_EQ(7, links);
+  EXPECT_EQ(7, open.calls);
   EXPECT_EQ((std::vector<int>(7, 37)), g_closedFds);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, IommuGroup_MissingDeniedTruncatedAndOpenFailure) {
-  int links = 0;
   ScopedHook open(g_open, [](const char*, int, mode_t) { return 38; });
   for (int error : {ENOENT, EACCES, EIO}) {
     ScopedHook link(g_readlinkat, [&](int, const char*, char*, size_t) -> ssize_t {
-      ++links;
       errno = error;
       return -1;
     });
     const auto group = rasDiagnosticsPciReadIommuGroup("0000:81:00.0");
     EXPECT_EQ(error == ENOENT ? RAS_DIAG_IOMMU_GROUP_NONE : RAS_DIAG_IOMMU_GROUP_UNAVAILABLE, group.state);
     EXPECT_EQ(-1, group.id);
+    EXPECT_EQ(1, link.calls);
   }
   ScopedHook truncated(g_readlinkat, [&](int, const char*, char*, size_t capacity) -> ssize_t {
-    ++links;
     return capacity;
   });
   EXPECT_EQ(RAS_DIAG_IOMMU_GROUP_UNAVAILABLE, rasDiagnosticsPciReadIommuGroup("0000:81:00.0").state);
   g_open = [](const char*, int, mode_t) { return -1; };
   EXPECT_EQ(RAS_DIAG_IOMMU_GROUP_UNAVAILABLE, rasDiagnosticsPciReadIommuGroup("0000:81:00.0").state);
   EXPECT_EQ(RAS_DIAG_IOMMU_GROUP_UNAVAILABLE, rasDiagnosticsPciReadIommuGroup("bad").state);
-  EXPECT_EQ(4, links);
+  EXPECT_EQ(1, truncated.calls);
   EXPECT_EQ((std::vector<int>(4, 38)), g_closedFds);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, IommuMode_RetriesInterruptedReadsAndChecksCompleteInput) {
   rasDiagnosticsIommuGroup group{RAS_DIAG_IOMMU_GROUP_AVAILABLE, 93};
-  int opens = 0;
   ScopedHook open(g_open, [&](const char* path, int flags, mode_t) {
-    ++opens;
     EXPECT_STREQ("/sys/kernel/iommu_groups/93/type", path);
     EXPECT_EQ(O_RDONLY | O_CLOEXEC, flags);
     return 41;
@@ -221,27 +279,25 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuMode_RetriesInterruptedReadsAndChecksCom
          {"identity\n", RAS_DIAG_IOMMU_MODE_PASSTHROUGH}, {"DMA \t\n", RAS_DIAG_IOMMU_MODE_ON},
          {"DMA-FQ", RAS_DIAG_IOMMU_MODE_ON}, {"unknown", RAS_DIAG_IOMMU_MODE_UNAVAILABLE},
          {"", RAS_DIAG_IOMMU_MODE_UNAVAILABLE}}) {
-    int reads = 0;
-    ScopedHook read(g_read, [&](int fd, void* target, size_t capacity) -> ssize_t {
+    HookOf<decltype(g_read)> read(g_read, [&](int fd, void* target, size_t capacity) -> ssize_t {
       EXPECT_EQ(41, fd);
-      ++reads;
-      if (reads == 1 || reads == 3) { errno = EINTR; return -1; }
-      if (reads > 2) { EXPECT_EQ(1u, capacity); return 0; }
+      if (read.calls == 1 || read.calls == 3) { errno = EINTR; return -1; }
+      if (read.calls > 2) { EXPECT_EQ(1u, capacity); return 0; }
       EXPECT_EQ(31u, capacity);
       std::memcpy(target, item.first.data(), item.first.size());
       return item.first.size();
     });
     EXPECT_EQ(item.second, rasDiagnosticsIommuReadMode(&group));
-    EXPECT_EQ(item.first.empty() || item.first.back() == '\n' ? 2 : 4, reads);
+    EXPECT_EQ(item.first.empty() || item.first.back() == '\n' ? 2 : 4, read.calls);
   }
-  EXPECT_EQ(5, opens);
+  EXPECT_EQ(5, open.calls);
   EXPECT_EQ((std::vector<int>(5, 41)), g_closedFds);
   group.state = RAS_DIAG_IOMMU_GROUP_NONE;
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, rasDiagnosticsIommuReadMode(&group));
   group.state = RAS_DIAG_IOMMU_GROUP_UNAVAILABLE;
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_UNAVAILABLE, rasDiagnosticsIommuReadMode(&group));
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_UNAVAILABLE, rasDiagnosticsIommuReadMode(nullptr));
-  EXPECT_EQ(5, opens);
+  EXPECT_EQ(5, open.calls);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, RdmaRun_ClassifiesToolResultsWithoutSpawningProcesses) {
@@ -265,9 +321,8 @@ TEST_F(RasDiagnosticsPciMicrotest, RdmaRun_ClassifiesToolResultsWithoutSpawningP
   };
   for (const auto& item : cases) {
     SCOPED_TRACE(::testing::Message() << item.text << ':' << item.status);
-    int calls = 0;
-    ScopedHook child(g_ncclDiagChildRun, [&](const char* command, int timeout, char* target, int size, bool* truncated) {
-      ++calls;
+    ScopedHook child(g_ncclDiagChildRun,
+      [&](const char* command, int timeout, char* target, int size, bool* truncated) {
       EXPECT_STREQ("rdma_topo check", command);
       EXPECT_EQ(2, timeout);
       EXPECT_EQ(4096, size);
@@ -277,7 +332,7 @@ TEST_F(RasDiagnosticsPciMicrotest, RdmaRun_ClassifiesToolResultsWithoutSpawningP
     });
     rasDiagnosticsRdmaTopoCache cache{};
     rasDiagnosticsRdmaTopoRun(&cache);
-    EXPECT_EQ(1, calls);
+    EXPECT_EQ(1, child.calls);
     EXPECT_EQ(item.state, cache.state);
     EXPECT_EQ(item.status, cache.exitCode);
     EXPECT_EQ(item.issue, cache.reportedIssue);
@@ -288,12 +343,11 @@ TEST_F(RasDiagnosticsPciMicrotest, RdmaRun_ClassifiesToolResultsWithoutSpawningP
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, RdmaCache_ReusesResultWithoutRunningAnotherChild) {
-  int calls = 0;
-  ScopedHook child(g_ncclDiagChildRun, [&](const char*, int, char*, int, bool*) { ++calls; return 0; });
+  ScopedHook child(g_ncclDiagChildRun, [](const char*, int, char*, int, bool*) { return 0; });
   const auto* first = rasDiagnosticsRdmaTopoResult();
   EXPECT_EQ(first, rasDiagnosticsRdmaTopoResult());
   EXPECT_EQ(RAS_DIAG_RDMA_TOPO_UNAVAILABLE, first->state);
-  EXPECT_EQ(0, calls);
+  EXPECT_EQ(0, child.calls);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, RdmaSample_PrefersIssueAndBoundsOutput) {
@@ -310,9 +364,7 @@ TEST_F(RasDiagnosticsPciMicrotest, RdmaSample_PrefersIssueAndBoundsOutput) {
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, AddPair_ResolvesPhysicalDeviceAndDeduplicatesFullPair) {
-  int resolves = 0;
   ScopedHook resolve(g_realpath, [&](const char* path, char* target) {
-    ++resolves;
     EXPECT_STREQ("/sys/class/infiniband/mlx5_7/device", path);
     std::strcpy(target, "/sys/devices/0000:81:00.0");
     return target;
@@ -321,7 +373,7 @@ TEST_F(RasDiagnosticsPciMicrotest, AddPair_ResolvesPhysicalDeviceAndDeduplicates
   rasDiagnosticsPciAddPair(0x41000, "mlx5_7", "/wrong", &snapshot);
   rasDiagnosticsPciAddPair(0x41000, nullptr, "0000:81:00.0", &snapshot);
   rasDiagnosticsPciAddPair(0x42000, "bad/name", "0000:81:00.0", &snapshot);
-  EXPECT_EQ(1, resolves);
+  EXPECT_EQ(1, resolve.calls);
   ASSERT_EQ(2, snapshot.nPairs);
   EXPECT_EQ(0x41000, snapshot.pairs[0].gpuBusId);
   EXPECT_EQ(0x42000, snapshot.pairs[1].gpuBusId);
@@ -369,22 +421,14 @@ TEST_F(RasDiagnosticsPciMicrotest, SnapshotNet_UsesSelectedProxyGpuAndRejectsRem
   peers[2].hostHash = peers[1].hostHash = 43;
   peers[1].busId = 0x51000;
   comm->graphs[NCCL_ALGO_RING].nChannels = 1;
-  int snapshots = 0, selections = 0;
   ScopedHook properties(g_ncclTopoGetNetPropertiesSnapshot,
     [&](ncclComm* actual, bool initialized, ncclTopoNetPropertiesSnapshot** target, int* count) {
-      ++snapshots;
       EXPECT_EQ(comm.get(), actual);
       EXPECT_TRUE(initialized);
-      *target = static_cast<ncclTopoNetPropertiesSnapshot*>(std::calloc(2, sizeof(**target)));
-      if (!*target) return ncclSystemError;
-      (*target)[1].propertiesValid = true;
-      std::strcpy((*target)[1].pciPath, "0000:81:00.0");
-      *count = 2;
-      return ncclSuccess;
+      return NetProperties(target, count, 1);
     });
   ScopedHook select(g_ncclTopoGetNetDev,
     [&](ncclComm* actual, int rank, ncclTopoGraph* graph, int channel, int peer, int64_t* id, int* dev, int* proxy) {
-      ++selections;
       EXPECT_EQ(comm.get(), actual);
       EXPECT_EQ(2, rank);
       EXPECT_EQ(&comm->graphs[NCCL_ALGO_RING], graph);
@@ -406,8 +450,8 @@ TEST_F(RasDiagnosticsPciMicrotest, SnapshotNet_UsesSelectedProxyGpuAndRejectsRem
   rasDiagnosticsPciSnapshotNet(comm.get(), true, &snapshot);
   EXPECT_EQ(0, snapshot.nPairs);
   EXPECT_EQ(1, snapshot.netSelectionIncomplete);
-  EXPECT_EQ(2, snapshots);
-  EXPECT_EQ(2, selections);
+  EXPECT_EQ(2, properties.calls);
+  EXPECT_EQ(2, select.calls);
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, SnapshotNet_HandlesMissingPropertiesAndNvlsHeadSelection) {
@@ -427,10 +471,7 @@ TEST_F(RasDiagnosticsPciMicrotest, SnapshotNet_HandlesMissingPropertiesAndNvlsHe
       EXPECT_FALSE(initialized);
       *count = propertyCount;
       if (result == ncclSuccess && propertyCount) {
-        *target = static_cast<ncclTopoNetPropertiesSnapshot*>(std::calloc(1, sizeof(**target)));
-        if (!*target) return ncclSystemError;
-        (*target)->propertiesValid = true;
-        std::strcpy((*target)->pciPath, "0000:81:00.0");
+        return NetProperties(target, count);
       }
       return result;
     });
@@ -513,7 +554,8 @@ TEST_F(RasDiagnosticsPciMicrotest, AtsFill_DeduplicatesNicsAcrossGpusAndPreserve
   EXPECT_EQ(1, data.netSelectionIncomplete);
   EXPECT_EQ(1, data.netSelectionTruncated);
   EXPECT_EQ(1, data.lspciOutputTruncated);
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsFillRecord(&snapshot, &cache, nullptr, true, false, &data));
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsFillRecord(&snapshot, &cache,
+    "0000:81:00.0 NIC\n\tATSCtl: Enable+", true, false, &data));
   EXPECT_EQ(RAS_DIAG_ATS_UNAVAILABLE, data.nics[0].state);
   cache.state = RAS_DIAG_RDMA_TOPO_RAN;
   ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsFillRecord(&snapshot, &cache, nullptr, false, false, &data));
@@ -544,7 +586,8 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuSummary_MatchingAndMismatchedGroups) {
   mismatch.pairs[0].nic.group.id = 39;
   ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsIommuSummarize, Records(std::vector{mismatch}),
     {"[INFO] IOMMU mode: enabled (DMA remapping) for 2 relevant device(s) across 1/1 ranks in comm 0x123",
-     "[INFO] IOMMU groups: GPU and NIC groups differ on 1 pair(s) in comm 0x123; first rank 0 GPU group 37 NIC 0000:81:00.0 group 39"}));
+     "[INFO] IOMMU groups: GPU and NIC groups differ on 1 pair(s) in comm 0x123; "
+     "first rank 0 GPU group 37 NIC 0000:81:00.0 group 39"}));
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, AtsSummary_EnabledAndDisabledReportsDoNotContradictEachOther) {
@@ -558,7 +601,8 @@ TEST_F(RasDiagnosticsPciMicrotest, AtsSummary_EnabledAndDisabledReportsDoNotCont
 TEST_F(RasDiagnosticsPciMicrotest, Summaries_RejectMalformedHeadersContextsAndAllocationFailure) {
   const Summarizer summaries[] = {rasDiagnosticsRdmaTopoSummarize, rasDiagnosticsIommuSummarize,
                                   rasDiagnosticsAtsSummarize};
-  const std::vector<char> inputs[] = {Records(std::vector{Rdma()}), Records(std::vector{Iommu()}), Records(std::vector{Ats()})};
+  const std::vector<char> inputs[] = {
+    Records(std::vector{Rdma()}), Records(std::vector{Iommu()}), Records(std::vector{Ats()})};
   for (size_t index = 0; index < std::size(summaries); index++) {
     SCOPED_TRACE(index);
     auto summarize = summaries[index];
@@ -595,7 +639,8 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuSummary_MixedModesUnavailableGroupsAndDi
      "[INFO] IOMMU mode: passthrough on 1 device(s); first rank 0 device 0000:41:00.0 in comm 0x123",
      "[INFO] IOMMU mode: unavailable on 1 device(s); first rank 0 device 0000:81:00.0 in comm 0x123",
      "[INFO] IOMMU groups: comparison unavailable on 1 GPU/NIC pair(s) in comm 0x123",
-     "[INFO] IOMMU groups: unavailable on 1 pair(s) in comm 0x123; first rank 0 GPU group 37 NIC 0000:81:00.0 group -1"}));
+     "[INFO] IOMMU groups: unavailable on 1 pair(s) in comm 0x123; "
+     "first rank 0 GPU group 37 NIC 0000:81:00.0 group -1"}));
   auto disabled = Iommu(RAS_DIAG_IOMMU_MODE_OFF);
   disabled.pairs[0].gpu.group = disabled.pairs[0].nic.group = {RAS_DIAG_IOMMU_GROUP_NONE, -1};
   ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsIommuSummarize, Records(std::vector{disabled}),
@@ -624,7 +669,8 @@ TEST_F(RasDiagnosticsPciMicrotest, IommuSummary_SharedDevicesAreCountedOncePerRa
 TEST_F(RasDiagnosticsPciMicrotest, AtsSummary_ReportsRootUnavailableAndTruncatedInputs) {
   ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsAtsSummarize, Records(std::vector{Ats(RAS_DIAG_ATS_NEEDS_ROOT)}),
     {"[INFO] ATS state: PCIe capabilities require root access on 1 rank/NIC pair(s) across 1/1 ranks in comm 0x123",
-     "[INFO] ATS state: PCIe capabilities inaccessible on 1 rank/NIC pair(s) in comm 0x123; first rank 0 NIC 0000:81:00.0"}));
+     "[INFO] ATS state: PCIe capabilities inaccessible on 1 rank/NIC pair(s) in comm 0x123; "
+     "first rank 0 NIC 0000:81:00.0"}));
   ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsAtsSummarize, Records(std::vector{Ats(RAS_DIAG_ATS_UNAVAILABLE)}),
     {"[INFO] ATS state: unavailable across 1/1 ranks in comm 0x123",
      "[INFO] ATS state: ATSCtl unavailable on 1 rank/NIC pair(s) in comm 0x123; first rank 0 NIC 0000:81:00.0"}));
@@ -650,8 +696,10 @@ TEST_F(RasDiagnosticsPciMicrotest, FallbackSummaries_DistinguishSkippedMissingAn
       iommuLines = {"[INFO] IOMMU mode: unable to identify relevant GPU/NIC pairs on 1/1 ranks in comm 0x123"};
       atsLines = {"[INFO] ATS state: unable to identify relevant NICs on 1/1 ranks in comm 0x123"};
     } else if (state == RAS_DIAG_PCI_FALLBACK_TOPOLOGY_NOT_READY) {
-      iommuLines = {"[INFO] IOMMU mode: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 1 ranks"};
-      atsLines = {"[INFO] ATS state: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 1 ranks"};
+      iommuLines = {"[INFO] IOMMU mode: incomplete for comm 0x123: "
+                    "topology-dependent data was unavailable for 1 of 1 ranks"};
+      atsLines = {"[INFO] ATS state: incomplete for comm 0x123: "
+                  "topology-dependent data was unavailable for 1 of 1 ranks"};
     }
     ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsIommuSummarize, Records(std::vector{iommu}), iommuLines));
     ASSERT_NO_FATAL_FAILURE(CheckReport(rasDiagnosticsAtsSummarize, Records(std::vector{ats}), atsLines));
@@ -659,13 +707,16 @@ TEST_F(RasDiagnosticsPciMicrotest, FallbackSummaries_DistinguishSkippedMissingAn
 }
 
 TEST_F(RasDiagnosticsPciMicrotest, Summaries_MissingRanksSuppressCompleteResults) {
-  const Summarizer summaries[] = {rasDiagnosticsRdmaTopoSummarize, rasDiagnosticsIommuSummarize, rasDiagnosticsAtsSummarize};
-  std::vector<char> records[] = {Records(std::vector{Rdma()}), Records(std::vector{Iommu()}), Records(std::vector{Ats()})};
+  const Summarizer summaries[] = {
+    rasDiagnosticsRdmaTopoSummarize, rasDiagnosticsIommuSummarize, rasDiagnosticsAtsSummarize};
+  std::vector<char> records[] = {
+    Records(std::vector{Rdma()}), Records(std::vector{Iommu()}), Records(std::vector{Ats()})};
   const char* names[] = {"rdma_topo check", "IOMMU mode", "ATS state"};
   for (size_t index = 0; index < std::size(summaries); index++) {
     reinterpret_cast<rasDiagnosticsRankHeader*>(records[index].data())->commNRanks = 2;
     ASSERT_NO_FATAL_FAILURE(CheckReport(summaries[index], records[index],
-      {std::string("[INFO] ") + names[index] + ": diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}));
+      {std::string("[INFO] ") + names[index] +
+        ": diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}));
   }
 }
 
@@ -699,8 +750,10 @@ TEST_F(RasDiagnosticsPciMicrotest, Summaries_RejectMalformedPayloadsBeforeReport
   iommu.nPairsTruncated = 1;
   auto ats = Ats();
   ats.nNics = RAS_DIAG_PCI_MAX_NET_DEVS + 1;
-  const Summarizer summaries[] = {rasDiagnosticsRdmaTopoSummarize, rasDiagnosticsIommuSummarize, rasDiagnosticsAtsSummarize};
-  const std::vector<char> records[] = {Records(std::vector{rdma}), Records(std::vector{iommu}), Records(std::vector{ats})};
+  const Summarizer summaries[] = {
+    rasDiagnosticsRdmaTopoSummarize, rasDiagnosticsIommuSummarize, rasDiagnosticsAtsSummarize};
+  const std::vector<char> records[] = {
+    Records(std::vector{rdma}), Records(std::vector{iommu}), Records(std::vector{ats})};
   for (size_t index = 0; index < std::size(summaries); index++) {
     SCOPED_TRACE(index);
     EXPECT_EQ(ncclInternalError, summaries[index](&context_, &reporter_, records[index].data(), records[index].size()));
@@ -742,7 +795,8 @@ TEST_F(RasDiagnosticsPciMicrotest, AtsSummary_PartialSelectionDoesNotReportOk) {
 
 TEST_F(RasDiagnosticsPciMicrotest, Collect_NoCommunicatorsAndInvalidArguments) {
   rasDiagnosticsLocalData data{};
-  for (auto collect : {rasDiagnosticsRdmaTopoCollectLocal, rasDiagnosticsIommuCollectLocal, rasDiagnosticsAtsCollectLocal}) {
+  for (auto collect :
+       {rasDiagnosticsRdmaTopoCollectLocal, rasDiagnosticsIommuCollectLocal, rasDiagnosticsAtsCollectLocal}) {
     EXPECT_EQ(ncclInternalError, collect(nullptr, &data));
     EXPECT_EQ(ncclInternalError, collect(&context_, nullptr));
     ASSERT_EQ(ncclSuccess, collect(&context_, &data));
@@ -762,12 +816,7 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
     [&](ncclComm* comm, bool initialized, ncclTopoNetPropertiesSnapshot** target, int* count) {
       EXPECT_EQ(owned.comm.get(), comm);
       EXPECT_TRUE(initialized);
-      *target = static_cast<ncclTopoNetPropertiesSnapshot*>(std::calloc(1, sizeof(**target)));
-      if (!*target) return ncclSystemError;
-      (*target)->propertiesValid = true;
-      std::strcpy((*target)->pciPath, "0000:81:00.0");
-      *count = 1;
-      return ncclSuccess;
+      return NetProperties(target, count);
     });
   ScopedHook select(g_ncclTopoGetNetDev,
     [&](ncclComm* comm, int rank, ncclTopoGraph* graph, int channel, int peer, int64_t* id, int* dev, int* proxy) {
@@ -808,16 +857,18 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
   EXPECT_STREQ("0000:81:00.0", iommu->pairs[0].nic.bdf);
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, iommu->pairs[0].gpu.mode);
   EXPECT_EQ(RAS_DIAG_IOMMU_MODE_OFF, iommu->pairs[0].nic.mode);
-  EXPECT_EQ((std::vector<std::string>{"/sys/bus/pci/devices/0000:41:00.0", "/sys/bus/pci/devices/0000:81:00.0"}), opened);
+  EXPECT_EQ((std::vector<std::string>{
+              "/sys/bus/pci/devices/0000:41:00.0", "/sys/bus/pci/devices/0000:81:00.0"}), opened);
   EXPECT_EQ(2, link.calls);
   EXPECT_EQ(1, busId.calls);
   EXPECT_EQ((std::vector<int>{51, 51}), g_closedFds);
-  ScopedHook child(g_ncclDiagChildRun, [](const char* command, int timeout, char* target, int size, bool* truncated) {
+  int lspciExit = 0;
+  ScopedHook child(g_ncclDiagChildRun, [&](const char* command, int timeout, char* target, int size, bool* truncated) {
     EXPECT_STREQ("lspci -D -vvv", command);
     EXPECT_EQ(2, timeout);
     EXPECT_EQ(1024 * 1024, size);
     DeliverChildOutput("0000:81:00.0 NIC\n\tATSCtl: Enable+\n", target, size, nullptr, nullptr, truncated);
-    return 0;
+    return lspciExit;
   });
   ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context_, &data));
   ncclUniquePtr<char> atsRecords(data.records);
@@ -831,6 +882,15 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_SelectedNicDrivesIommuAndAtsPayloads)
   EXPECT_EQ(1, child.calls);
   EXPECT_EQ(2, properties.calls);
   EXPECT_EQ(2, select.calls);
+  lspciExit = 1;
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsAtsCollectLocal(&context_, &data));
+  ncclUniquePtr<char> failedAtsRecords(data.records);
+  ASSERT_EQ(1, data.nRecords);
+  const auto* failedAts = rasDiagnosticsAtsDataFromRecord(data.records);
+  ASSERT_EQ(1, failedAts->nNics);
+  EXPECT_EQ(RAS_DIAG_ATS_UNAVAILABLE, failedAts->nics[0].state);
+  EXPECT_EQ(1, failedAts->lspciUnavailable);
+  EXPECT_EQ(2, child.calls);
   for (int failCall : {1, 2, 3}) {
     SCOPED_TRACE(failCall);
     g_pciAllocationCalls = 0;
@@ -850,10 +910,8 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_RecordsTopologyNotReadyAndFiltersComm
   context_.hasCommFilter = true;
   context_.commFilter = {0x123, 0x456, 0x789};
   context_.commNRanks = 8;
-  int snapshots = 0;
   ScopedHook properties(g_ncclTopoGetNetPropertiesSnapshot,
     [&](ncclComm* comm, bool initialized, ncclTopoNetPropertiesSnapshot**, int*) {
-      ++snapshots;
       EXPECT_EQ(selected.comm.get(), comm);
       EXPECT_FALSE(initialized);
       return ncclInProgress;
@@ -871,7 +929,7 @@ TEST_F(RasDiagnosticsPciMicrotest, Collect_RecordsTopologyNotReadyAndFiltersComm
   ncclUniquePtr<char> rdmaRecords(data.records);
   ASSERT_EQ(1, data.nRecords);
   EXPECT_EQ(RAS_DIAG_RDMA_TOPO_SOURCE_FALLBACK, rasDiagnosticsRdmaTopoDataFromRecord(data.records)->source);
-  EXPECT_EQ(2, snapshots);
+  EXPECT_EQ(2, properties.calls);
   for (int failCall : {1, 2}) {
     g_pciAllocationCalls = 0;
     g_pciFailAllocation = failCall;
