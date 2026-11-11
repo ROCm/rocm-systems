@@ -127,9 +127,10 @@ def test_ReduceMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step_fa
 #
 # GinReduceKernel folds every peer's slice in ascending rank order and stores
 # the result into the root's recvbuff; the perf binary's data check (-c 1) exits
-# non-zero on any wrong element. Sizes straddle the kernel's 48 MiB switch from
-# the grid-stride schedule to the warp-unrolled one, and roots cover both ends
-# of the rank range so the root-directed store is exercised off rank 0.
+# non-zero on any wrong element. The partial-tile size leaves each rank's slice
+# a few packs past a whole number of warp tiles, so the tail path runs too, and
+# roots cover both ends of the rank range so the root-directed store is
+# exercised off rank 0.
 #
 # Requires a single node with all ranks LSA-reachable, an MPI launcher, and a
 # GIN-SDMA-capable RCCL build, so it is skipped unless RCCL_TESTS_GIN_SDMA_REDUCE
@@ -161,16 +162,18 @@ _reduce_gin_skip = pytest.mark.skipif(
            "a single-node GIN-SDMA-capable machine to enable.")
 
 
-def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root):
+def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root, impl=3, ctas=REDUCE_CTAS):
     if REDUCE_NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for GIN-SDMA Reduce")
     size = str(int(total_bytes))
     gin_kv = ["NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7"] + REDUCE_XENV
+    # The later -D overrides the helper's -D 3; -D 4 is out-of-place only.
+    impl_args = ["-D", "4", "-O", "1"] if impl == 4 else []
     args = (
         mpi_launch_prefix(request, REDUCE_LAUNCHER, REDUCE_NP, REDUCE_MPI_OPTS)
         + gin_env_xflags(gin_kv)
-        + gin_perf_argv(REDUCE_EXE, size, dtype, REDUCE_CTAS,
-                        extra=["-o", op, "-r", str(root)])
+        + gin_perf_argv(REDUCE_EXE, size, dtype, ctas,
+                        extra=impl_args + ["-o", op, "-r", str(root)])
     )
     cmd = " ".join(shlex.quote(a) for a in args)
     hang_msg = gin_hang_msg(
@@ -182,7 +185,7 @@ def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root):
 
 
 @_reduce_gin_skip
-@pytest.mark.parametrize("total_mib", [1, 64])
+@pytest.mark.parametrize("size", ["1MiB", "64MiB", "partial-tile"])
 @pytest.mark.parametrize("dtype, op", [
     ("int32", "sum"),
     ("float", "sum"),
@@ -191,8 +194,32 @@ def _run_reduce_gin_sdma(request, total_bytes, dtype, op, root):
     ("double", "prod"),
 ])
 @pytest.mark.parametrize("root_pos", ["first", "last"])
-def test_ReduceGinSdma(request, total_mib, dtype, op, root_pos):
+def test_ReduceGinSdma(request, size, dtype, op, root_pos):
     root = 0 if root_pos == "first" else REDUCE_NP - 1
-    rc, _ = _run_reduce_gin_sdma(request, total_mib * MiB, dtype, op, root)
-    assert rc == 0, "Reduce -D 3 data check failed at {} MiB, dtype={}, op={}, root={}".format(
-        total_mib, dtype, op, root)
+    # 5 packs of 16 B past 1 MiB per rank.
+    total_bytes = {"1MiB": MiB, "64MiB": 64 * MiB, "partial-tile": REDUCE_NP * (MiB + 5 * 16)}[size]
+    rc, _ = _run_reduce_gin_sdma(request, total_bytes, dtype, op, root)
+    assert rc == 0, "Reduce -D 3 data check failed at {} bytes, dtype={}, op={}, root={}".format(
+        total_bytes, dtype, op, root)
+
+
+# GinSdmaReduceKernel (deviceImpl 4). With fewer than 2N CTAs owners fold and
+# store straight to the root ("cu"); with at least 2N, dedicated CTAs issue the
+# SDMA puts and owners stage results for an SDMA copy to the root ("sdma").
+# 64 MiB splits each partition into several chunks.
+@_reduce_gin_skip
+@pytest.mark.parametrize("total_mib", [1, 64])
+@pytest.mark.parametrize("dtype, op", [
+    ("float", "sum"),
+    ("bfloat16", "avg"),
+])
+@pytest.mark.parametrize("path", ["cu", "sdma"])
+@pytest.mark.parametrize("root_pos", ["first", "last"])
+def test_ReduceGinSdmaPut(request, total_mib, dtype, op, path, root_pos):
+    root = 0 if root_pos == "first" else REDUCE_NP - 1
+    ctas = REDUCE_NP if path == "cu" else max(2 * REDUCE_NP, 16)
+    if ctas > 128:
+        pytest.skip("reduce_perf -V is capped at 128 CTAs")
+    rc, _ = _run_reduce_gin_sdma(request, total_mib * MiB, dtype, op, root, impl=4, ctas=ctas)
+    assert rc == 0, "Reduce -D 4 data check failed at {} MiB, dtype={}, op={}, path={}, root={}".format(
+        total_mib, dtype, op, path, root)
