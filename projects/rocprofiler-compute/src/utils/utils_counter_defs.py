@@ -48,6 +48,16 @@ SUPPORTED_DENOM: Dict[str, str] = {
     "per_kernel": UNIT_COUNTER,
 }
 
+# Hardware counters packed with every formula that contains $denom.
+# Profile time does not know --normal-unit, so list every counter a later
+# unit might need. A name the profile does not collect is dropped.
+# Empty this tuple to stop adding them.
+DENOM_COLOCATED_COUNTERS: Tuple[str, ...] = (
+    "SQ_WAVES",
+    "GRBM_GUI_ACTIVE",
+    "GRBM_GUI_ACTIVE_sum",
+)
+
 
 def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
     """Return the architecture-specific built-in variables for *gpu_series*.
@@ -155,6 +165,19 @@ def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
     # variable matches cannot be counters
     hw_counter_matches -= variable_matches
     return hw_counter_matches, variable_matches
+
+
+def denom_colocated_counters(text: str) -> Set[str]:
+    """Hardware counters packed with a formula that uses $denom.
+
+    Returns an empty set when the formula does not name $denom, or when
+    DENOM_COLOCATED_COUNTERS is empty. The caller drops names the profile
+    does not collect.
+    """
+    _hw, variables = parse_counters_text(text)
+    if "denom" not in variables:
+        return set()
+    return set(DENOM_COLOCATED_COUNTERS)
 
 
 def extract_counters_and_variables(

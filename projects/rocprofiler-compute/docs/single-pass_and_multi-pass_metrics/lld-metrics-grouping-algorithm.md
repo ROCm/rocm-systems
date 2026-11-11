@@ -62,7 +62,7 @@ flowchart TD
   S --> S1{Any PMC in that set<br/>still outside every bucket?}
   S1 -->|no| SM{More multi-pass metric PMC sets?}
   SM -->|yes| S
-  SM -->|no| G[Leftover multi-pass metric PMCs are placed.<br/>Each new bucket is an extra pass.<br/>gfx942 adds none: 14 total, +0]
+  SM -->|no| G[Leftover multi-pass metric PMCs are placed.<br/>Each new bucket is an extra pass.<br/>gfx942 adds none: 16 total, +0]
   S1 -->|yes| S2{A subset fits<br/>an existing bucket?}
   S2 -->|yes| S3[Place the largest fitting subset<br/>into the existing bucket<br/>that accepts the most]
   S2 -->|no| S4{Any remaining PMC<br/>fits an empty bucket?}
@@ -100,10 +100,10 @@ Analyze reads all of a metric's counters from the same pass. Code: `src/utils/me
 
 - **Which pass.** In an ordinary profile, the name in `{counter}@pass:{key}` is the result file name without its prefix and suffix (`_pass_key_from_result_file`): `results_pmc_perf_3.csv.gz` becomes `pmc_perf_3`. `--iteration-multiplexing` writes one result file for the whole run, so that file name is not a pass label and the rows do not carry a pass field. Analyze does not build per-pass columns in that mode. It fills empty counter cells from other launches of the same kernel, and same-pass bind does not run.
 - **Per-pass columns.** Only a counter that appears in more than one pass is suffixed (`PassLayout.duplicated` in `process_rocpd_csv`). A counter that appears in one pass keeps its bare name, and that column is the value from that pass. This applies when each pass has its own result file.
-- **Pass selection.** `select_pass` chooses the pass from the expression's hardware PMC set. When several passes hold the whole set, the lowest-numbered pass wins (`pmc_perf_2` before `pmc_perf_10`). `$denom` is replaced from `--normal-unit` before this choice. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE`. Packing does not add those counters because an expression contains `$denom`. `per_wave` and `per_cycle` stay unset unless the selected pass already holds the counter. `select_pass_with_normalization_fallback` does not take either counter from another pass.
+- **Pass selection.** `select_pass` chooses the pass from the expression's hardware PMC set. When several passes hold the whole set, the lowest-numbered pass wins (`pmc_perf_2` before `pmc_perf_10`). `$denom` is replaced from `--normal-unit` before this choice. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE` (`GRBM_GUI_ACTIVE_sum` on gfx1250). Profile time does not know the later unit, so packing adds `DENOM_COLOCATED_COUNTERS` to every formula that contains `$denom`: `SQ_WAVES`, `GRBM_GUI_ACTIVE`, and `GRBM_GUI_ACTIVE_sum`. A name the profile does not collect is dropped. Clearing that tuple stops adding them. Analyze still does not take `SQ_WAVES` or `GRBM` from another pass. `per_wave` and `per_cycle` stay unset unless the selected pass holds the counter. `select_pass_with_normalization_fallback` does not take either counter from another pass.
 - **Duration.** `Start_Timestamp` and `End_Timestamp` are read from the selected pass's rows, so `End_Timestamp - Start_Timestamp` is the duration of that expression's pass. Timestamps do not take part in choosing the pass. If the selected pass has no duration, a metric that divides by it stays unset.
 - **Kernel launch.** Grid size, workgroup size, LDS and scratch allocation, and VGPR, AGPR, and SGPR counts are dispatch-record columns, not perfmon counters, and do not select or reject a pass.
-- **Failed read.** If the selected pass does not hold every counter the expression needs, the metric stays unset and warns. That includes `SQ_WAVES` for `per_wave` and `GRBM_GUI_ACTIVE` for `per_cycle`. Analyze does not fall back to a value taken from another pass. A denominator that is on the same pass still evaluates.
+- **Failed read.** If the selected pass does not hold every counter the expression needs, the metric stays unset and warns when the profile copied a counter. A profile that copied no counters keeps the merged values and warns once to profile again. That includes `SQ_WAVES` for `per_wave` and `GRBM_GUI_ACTIVE` for `per_cycle` on a profile that copied a counter. Analyze does not fall back to a value taken from another pass when a counter was copied. A denominator that is on the same pass still evaluates.
 
 ---
 
@@ -111,7 +111,7 @@ Analyze reads all of a metric's counters from the same pass. Code: `src/utils/me
 
 The TCC handling here is a **short-term solution**. Those rules live in one module so a later design can replace them. A general way to handle other replicated blocks is **out of scope**. [Other replicated blocks](#other-replicated-blocks-out-of-scope) records that boundary.
 
-An L2 channel map can change between replays, so the counters one expression joins share a pass. A TCC counter is read once per L2 channel. When one is chosen, every channel of that counter goes in the same pass. gfx942 is the example, not the only architecture, and the pass count there stays **14**. On gfx908 and gfx115x, use that chip's own L2 channel count. Do not multiply it by the number of dies.
+An L2 channel map can change between replays, so the counters one expression joins share a pass. A TCC counter is read once per L2 channel. When one is chosen, every channel of that counter goes in the same pass. gfx942 is the example, not the only architecture, and the full layout there is **16** passes after the `$denom` counters are co-located. The TCC rule does not open a pass of its own. On gfx908 and gfx115x, use that chip's own L2 channel count. Do not multiply it by the number of dies.
 
 A `_LEVEL` counter adds up the outstanding requests every cycle. Dividing it by the request count gives latency, so each `_LEVEL` counter must share a pass with its request counter.
 

@@ -12,10 +12,12 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
+    reject_counter_bearing_composite_extents,
+    transform_expression,
     update_denominator_string,
     update_normal_unit_string,
 )
-from utils.utils_counter_defs import UNIT_COUNTER
+from utils.utils_counter_defs import UNIT_COUNTER, extract_counters_and_variables
 
 # =============================================================================
 # Tests for utils.metrics.expression
@@ -122,6 +124,11 @@ class TestExpression:
         "formula, blocked_node",
         [
             ('"".__class__', "Attribute"),
+            ("obj.__class__", "Attribute"),
+            ("_collect.__class__", "Attribute"),
+            ("df.columns", "Attribute"),
+            ("foo.bar", "Attribute"),
+            ("_collect.ipc_issued_a.extra", "Attribute"),
             ("(lambda: 1)()", "Lambda"),
             ("[x for x in (1,)]", "ListComp"),
             ("(x for x in (1,))", "GeneratorExp"),
@@ -146,3 +153,69 @@ class TestExpression:
             result = build_eval_string('"".__class__')
         assert result == ""
         assert mock_warning.called
+
+    def test_collect_piece_sum_inside_min_is_one_expression(self) -> None:
+        """MIN of _collect pieces is accepted and is not a PMC column."""
+        formula = "MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)"
+        assert transform_expression(ast.parse(formula), formula) is True
+        reduced = build_eval_string(formula)
+        assert reduced == (
+            "to_min(collect_piece('_collect.ipc_issued_a')"
+            " + collect_piece('_collect.ipc_issued_b'))"
+        )
+        assert "raw_pmc_df" not in reduced
+
+    def test_collect_sum_avg_still_skips_the_ast(self) -> None:
+        """COLLECT_SUM averages stay on the composite path, not this parser."""
+        formula = "COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)"
+        assert build_eval_string(formula) == ""
+
+    @pytest.mark.parametrize(
+        "formula",
+        [
+            "_collect.__class__",
+            "df.columns",
+            "foo.bar",
+            "obj.__class__",
+            "_collect.ipc_issued_a.extra",
+        ],
+    )
+    def test_disallowed_attributes_do_not_build(self, formula: str) -> None:
+        """Dunder and ordinary attribute access still produce no eval string."""
+        with patch("utils.metrics.expression.console_warning") as mock_warning:
+            result = build_eval_string(formula)
+        assert result == ""
+        assert mock_warning.called
+
+
+class TestCompositeExtents:
+    """min, max, and peak on a composite parent must not name a counter."""
+
+    @pytest.mark.parametrize(
+        "extent",
+        [
+            "MAX(SQ_WAVES / $numActiveCUs)",
+            "MIN(TCP_TOTAL_CACHE_ACCESSES_sum / $denom)",
+            "$numActiveCUs * 64",
+        ],
+    )
+    def test_counter_bearing_extent_is_rejected(self, extent):
+        body = {"avg": "COLLECT_SUM(_collect.a, _collect.b)", "max": extent}
+        with pytest.raises(ValueError, match="must not reintroduce a PMC set"):
+            reject_counter_bearing_composite_extents("Hit Rate", body)
+
+    @pytest.mark.parametrize("extent", [None, "None", "", "100", "$max_sclk * 2"])
+    def test_counter_free_extent_is_allowed(self, extent):
+        body = {"avg": "COLLECT_SUM(_collect.a, _collect.b)", "peak": extent}
+        reject_counter_bearing_composite_extents("Hit Rate", body)
+
+    def test_extent_counters_match_the_allocator(self):
+        extent = "MAX(SQ_WAVES / $numActiveCUs)"
+        allocator_counters, _ = extract_counters_and_variables(
+            extent, "MI300", include_supported_denom=False
+        )
+        body = {"avg": "COLLECT_RATIO(_collect.a, _collect.b)", "min": extent}
+        with pytest.raises(ValueError) as raised:
+            reject_counter_bearing_composite_extents("AI L1", body, "MI300")
+        assert str(sorted(allocator_counters)) in str(raised.value)
+        assert {"SQ_WAVES", "SQ_BUSY_CU_CYCLES"} <= allocator_counters

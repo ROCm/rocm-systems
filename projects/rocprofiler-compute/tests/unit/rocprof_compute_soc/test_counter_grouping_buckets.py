@@ -3,6 +3,7 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import CounterFile
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
@@ -12,6 +13,13 @@ from rocprof_compute_soc.counter_grouping_buckets import (
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from tests.unit.rocprof_compute_soc.test_soc_base import PERFMON_CONFIG
+
+
+def _groups_by_label(rows, profile, gpu_series):
+    return {
+        label: counters
+        for _key, counters, label in iter_metric_groups((), rows, gpu_series, profile)
+    }
 
 
 @pytest.mark.misc
@@ -49,6 +57,34 @@ def test_counters_fit_one_bucket_accum_costs_two():
     assert counters_fit_one_bucket(five_plus_base_and_accum, PERFMON_CONFIG)
     six_plus_base_and_accum = five_plus_base_and_accum | {"SQ_VALU_MFMA_BUSY_CYCLES"}
     assert not counters_fit_one_bucket(six_plus_base_and_accum, PERFMON_CONFIG)
+
+
+@pytest.mark.misc
+def test_sp_valu_and_sq_vmem_do_not_fit_one_pass():
+    """gfx1250: both families charge SQ, and SP FLOP counters return zero together."""
+    sq_budget = {"SQ": 8}
+    sp_only = frozenset({"SP_VALU_FLOPS_FP32", "SQ_INSTS_VALU"})
+    vmem_only = frozenset({"SQ_VMEM_REQ", "SQ_INSTS_VMEM"})
+    mixed = frozenset({"SP_VALU_FLOPS_FP32", "SQ_VMEM_REQ"})
+    assert counters_fit_one_bucket(sp_only, sq_budget)
+    assert counters_fit_one_bucket(vmem_only, sq_budget)
+    assert not counters_fit_one_bucket(mixed, sq_budget)
+    assert rebuild_counter_file("0", sq_budget, set(mixed)) is None
+
+
+@pytest.mark.misc
+def test_one_family_still_accepts_counters_outside_the_other():
+    """A pass records its family and still takes counters that are not the other."""
+    bucket = CounterFile("0", {"SQ": 8, "GRBM": 2, "TA": 2})
+    assert bucket.add("SP_VALU_FLOPS_FP32")
+    assert bucket.add("GRBM_GUI_ACTIVE")
+    assert bucket.add("TA_BUSY")
+    assert bucket.add("SQ_INSTS")
+    assert bucket.add("SQ_WAVES")
+    assert not bucket.add("SQ_VMEM_REQ")
+    stored = set(flat_counters_in_perfmon_file(bucket))
+    assert "SQ_VMEM_REQ" not in stored
+    assert {"SP_VALU_FLOPS_FP32", "GRBM_GUI_ACTIVE", "TA_BUSY", "SQ_INSTS"} <= stored
 
 
 @pytest.mark.misc
@@ -109,3 +145,49 @@ def test_iter_metric_groups_reads_only_the_given_inputs():
         (frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}), "1700.1701.1 (waves)"),
         (frozenset({"SQ_WAVES", "TCC_HIT[0]", "TCC_HIT[1]"}), "2.2.1 (tcc hits)"),
     ]
+
+
+@pytest.mark.misc
+def test_denom_formula_gains_colocated_counters_present_in_the_profile():
+    """A $denom formula picks up listed counters this profile collects."""
+    rows = [
+        ("1", 1, 0, "with denom", ["TA_BUSY / $denom"]),
+        ("1", 1, 1, "without denom", ["TA_BUSY"]),
+        ("1", 1, 2, "already named", ["TA_BUSY / $denom + SQ_WAVES"]),
+        ("1", 1, 3, "other variable", ["TA_BUSY / $denominator"]),
+    ]
+    profile = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}
+    groups = _groups_by_label(rows, profile, "MI300")
+    assert groups["1.1.0 (with denom)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE",
+    })
+    assert groups["1.1.1 (without denom)"] == frozenset({"TA_BUSY"})
+    assert groups["1.1.2 (already named)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE",
+    })
+    assert groups["1.1.3 (other variable)"] == frozenset({"TA_BUSY"})
+
+    gfx1250 = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE_sum"}
+    groups = _groups_by_label(rows, gfx1250, "GFX1250_SERIES")
+    assert groups["1.1.0 (with denom)"] == frozenset({
+        "TA_BUSY",
+        "SQ_WAVES",
+        "GRBM_GUI_ACTIVE_sum",
+    })
+
+
+@pytest.mark.misc
+def test_empty_denom_list_adds_nothing(monkeypatch):
+    """Clearing DENOM_COLOCATED_COUNTERS leaves a $denom formula unchanged."""
+    monkeypatch.setattr(
+        "utils.utils_counter_defs.DENOM_COLOCATED_COUNTERS",
+        (),
+    )
+    rows = [("1", 1, 0, "with denom", ["TA_BUSY / $denom"])]
+    profile = {"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE", "GRBM_GUI_ACTIVE_sum"}
+    groups = _groups_by_label(rows, profile, "MI300")
+    assert groups["1.1.0 (with denom)"] == frozenset({"TA_BUSY"})

@@ -15,11 +15,19 @@ from typing import (
     Tuple,
 )
 
+from utils.metrics.expression import (
+    is_composite_avg_formula,
+    reject_counter_bearing_composite_extents,
+)
 from utils.utils_common import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
 )
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import (
+    denom_colocated_counters,
+    extract_counters_and_variables,
+)
+from vendored import yaml
 
 from .counter_file import CounterFile, flat_counters_in_perfmon_file
 
@@ -27,8 +35,8 @@ if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
 
 _MetricGroup = Tuple[Tuple[Any, ...], FrozenSet[str], str]
-# (stem_id, panel_id, metric_idx, metric_name, expressions)
-_YamlMetric = Tuple[str, Any, int, str, List[str]]
+# (stem_id, panel_id, metric_idx, metric_name, expressions[, metric body])
+_YamlMetric = Tuple[Any, ...]
 
 
 def counters_fit_one_bucket(
@@ -62,6 +70,54 @@ def rebuild_counter_file(
     return counter_file
 
 
+def _metric_record(
+    item: object,
+) -> Tuple[Any, Any, Any, Any, str, Optional[Dict[str, Any]]]:
+    """Normalize an analysis-config metric, a 5-tuple, or a 6-tuple."""
+    if hasattr(item, "expressions"):
+        text = "\n".join(str(part) for part in item.expressions)
+        body = item.metric if isinstance(getattr(item, "metric", None), dict) else None
+        if body is None:
+            body = _metric_body(text)
+        return (
+            item.stem_id,
+            item.table_id,
+            item.metric_idx,
+            item.metric_name,
+            text,
+            body,
+        )
+    stem_id, panel_id, metric_idx, metric_name = item[:4]
+    payload = item[4]
+    body = item[5] if len(item) > 5 and isinstance(item[5], dict) else None
+    if isinstance(payload, list):
+        text = "\n".join(str(part) for part in payload)
+    else:
+        text = str(payload)
+        if body is None:
+            body = _metric_body(text)
+    return stem_id, panel_id, metric_idx, metric_name, text, body
+
+
+def _metric_body(metric_yaml: str) -> Optional[Dict[str, Any]]:
+    try:
+        body = yaml.safe_load(metric_yaml)
+    except yaml.YAMLError:
+        return None
+    if isinstance(body, dict):
+        return body
+    return None
+
+
+def _composite_formula(body: Dict[str, Any]) -> Optional[str]:
+    formula = body.get("avg")
+    if not isinstance(formula, str):
+        formula = body.get("value")
+    if isinstance(formula, str) and is_composite_avg_formula(formula):
+        return formula
+    return None
+
+
 def iter_metric_groups(
     priority_metric_ids: Iterable[str],
     yaml_metrics: Iterable[_YamlMetric],
@@ -71,31 +127,41 @@ def iter_metric_groups(
     """Metric PMC groups in priority-tier order for the profiled counters.
 
     profile_counters is already expanded, so a TCC channel template in a
-    formula matches the channel counters it holds.
+    formula matches the channel counters it holds. Composite parents are not
+    a second PMC pack.
     """
     priority_keys = _priority_metric_keys(priority_metric_ids)
+    raw_metrics = list(yaml_metrics)
+
     rows: List[_MetricGroup] = []
-    for item in yaml_metrics:
-        if hasattr(item, "expressions"):
-            stem_id = item.stem_id
-            panel_id = item.table_id
-            metric_idx = item.metric_idx
-            metric_name = item.metric_name
-            expressions = item.expressions
-        else:
-            stem_id, panel_id, metric_idx, metric_name, expressions = item
+    for item in raw_metrics:
+        (
+            stem_id,
+            panel_id,
+            metric_idx,
+            metric_name,
+            metric_text,
+            body,
+        ) = _metric_record(item)
+        if body is not None:
+            reject_counter_bearing_composite_extents(metric_name, body, gpu_series)
+            if _composite_formula(body) is not None:
+                continue
+        elif any(is_composite_avg_formula(line) for line in metric_text.splitlines()):
+            continue
         formula_hw, _ = extract_counters_and_variables(
-            "\n".join(expressions),
+            metric_text,
             gpu_series,
             include_supported_denom=False,
         )
-        counters = _profiled_counters(formula_hw, profile_counters)
+        formula_hw.update(denom_colocated_counters(metric_text))
+        panel_key = str(panel_id) if panel_id is not None else ""
+        counters = _profiled_counters(set(formula_hw), profile_counters)
         if not counters:
             continue
         tier = 0 if (stem_id, panel_id, metric_idx) in priority_keys else 1
-        panel_s = str(panel_id) if panel_id is not None else ""
-        sort_key = (tier, -len(counters), stem_id, panel_s, metric_idx)
-        label = f"{stem_id}.{panel_s}.{metric_idx} ({metric_name})"
+        sort_key = (tier, -len(counters), stem_id, panel_key, metric_idx)
+        label = f"{stem_id}.{panel_key}.{metric_idx} ({metric_name})"
         rows.append((sort_key, counters, label))
     rows.sort(key=lambda row: row[0])
     return rows

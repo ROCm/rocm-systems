@@ -221,7 +221,7 @@ def validate_arch(
     """Validate one architecture directory. Returns list of errors."""
     errors: list[str] = []
 
-    panel_files = sorted(arch_dir.glob("*.yaml"))
+    panel_files = cm_utils.panel_yaml_paths(arch_dir)
     actual_by_id: dict[int, Path] = {}
     actual_order: list[int] = []
 

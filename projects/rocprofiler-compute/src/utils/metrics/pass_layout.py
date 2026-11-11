@@ -36,6 +36,10 @@ class PassLayout:
     def has_duplicates(self) -> bool:
         return bool(self.duplicated)
 
+    @property
+    def is_multi_pass(self) -> bool:
+        return len(self.pass_keys) > 1
+
     def ordinal(self, pass_key: str) -> int:
         return self.pass_keys.index(pass_key)
 
