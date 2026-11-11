@@ -172,7 +172,8 @@ delta(N) = S1 - S0, delta(N+1) = S2 - S1
 N completes when all its kernel channels and all its proxy ops have stopped.
 Profiler callbacks never read hardware; before N+1's kernel is launched
 (`KernelLaunch` event) the launching thread waits for S1, so the wait is not
-counted as kernel time.
+counted as kernel time. Nothing else waits: a Coll start that finds S1 still
+pending (graph replay, host-callback launches) marks its record `unavailable`.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -201,11 +202,15 @@ stats, marked `"stale": true` because ionic refreshes them about every 5 s; and
 
 - `rdma` lists non-zero deltas plus the ionic volume counters; a counter that
   went backwards (wrapped) is omitted.
-- `overlapped`: other work (another collective, P2P, or a collective below
-  `ACCL_PROFILER_MIN_SIZE_BYTES`) may have run in the window.
+- `overlapped`: other work may have run in the window: another collective, a
+  proxy op no record owns (P2P, a collective below
+  `ACCL_PROFILER_MIN_SIZE_BYTES`) while it is live, or a proxy op that started
+  after its collective completed (`late_proxy_ops`). Symmetric collectives have
+  no proxy ops and are not tracked.
 - `unavailable`: a read failed or timed out, or no device is configured. The
   collective is never affected.
-- `launch_wait_us`: how long the launch waited for this window's "before" read.
+- `launch_wait_us`: time `KernelLaunch` spent waiting: for this comm's
+  previous collective to finish (`ACCL_NET_GRACE_US`) and for the "before" read.
 - The summary adds `net_counters` (records, overlapped, unavailable,
   `records_with_read_error`, `queued_at_finalize`, `late_proxy_ops`, reads and
   read times, per-device totals of clean windows). A record not written by
@@ -220,25 +225,34 @@ python3 net_tel_report.py /path/to/output/ [--warmup 5] [--trace net_trace.json]
 It prints, per message size, `NETWORK_SUSPECT` (loss/retransmit counters, or
 ECN/CNP), `CLEAN`, or `INCONCLUSIVE` (fewer than 3 clean windows, most windows
 overlapped/unavailable, no NIC traffic, or non-ionic counter names) with the
-counters, side and ranks behind it; loss is often visible only on the
-receiving NIC, so all ranks are pooled. It also prints exec time with the read
-skew removed: ranks read at different speeds after the app's barrier, and a
-rank's kernel waits for the slowest peer, so
-`corrected = exec - (max launch_wait_us over the comm's ranks - own)`.
-`--trace` writes Chrome trace JSON (chrome://tracing, ui.perfetto.dev): one
-process per host, one thread per rank, a slice per window and per read
-(per-host `CLOCK_MONOTONIC`, not aligned across hosts).
+counters, side and ranks behind it. Loss is often visible only on the
+receiving NIC, so all ranks are pooled and every rank needs a clean window.
+Other non-zero counters are listed but do not change the verdict. It also
+prints exec time with the read skew removed: ranks read at different speeds
+after the app's barrier, and a rank's kernel waits for the slowest peer, so
+`corrected = max(0, exec - (max launch_wait_us over the comm's ranks - own))`.
+That assumes the ranks reach each launch together (a per-collective barrier);
+sizes where many records clamp at 0 are marked `!`. `--trace` writes Chrome
+trace JSON (chrome://tracing, ui.perfetto.dev): one process per host, one
+thread per rank process, a slice per window and per read, and a NIC counter
+track per rank (per-host `CLOCK_MONOTONIC`, not aligned across hosts).
 
 Caveats:
 - Per-collective numbers need a serialized app, e.g. rccl-tests `-z 1`, and
   `ACCL_PROFILER_MIN_SIZE_BYTES=0`.
-- Counters are per NIC: ranks sharing a NIC share windows.
+- Counters are per NIC: ranks and other processes sharing a NIC share windows.
+  Traffic without proxy-op events (CE collectives, RMA, GPU-initiated) is
+  invisible to the chain.
+- The chain is per process: several GPUs per process (rccl-tests `-g >1`)
+  overlap every window.
+- Every kernel launch waits, including P2P-only plans. A collective that
+  completes with no proxy op on a multi-node comm delays its read by 200 us.
 - The read wait (about 1-2 ms per collective) shows up in wall-clock benchmark
   time; `coll_exec_time_us` includes the gap to the slowest peer's read (see
   the corrected time above).
 - With AINIC CTS offload, a remote rank leaving the barrier early can start
   sending before this rank's read finishes.
-- CUDA graphs are not supported.
+- CUDA graphs are not supported (records come out `unavailable`/`overlapped`).
 
 ## Requirements
 

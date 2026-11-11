@@ -152,8 +152,13 @@ __hidden void acclCtxRelease(struct acclCommContext* ctx) { acclCtxUnref(ctx); }
 
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
+  // Net counters: next-fit, so a freed slot keeps finalized=1 for a while and a
+  // proxy op that starts late is recognised instead of joining the next tenant.
+  int base = ctx->net.enabled ? ctx->collNextFit : 0;
+  for (int n = 0; n < ACCL_COLL_POOL_SIZE; n++) {
+    int i = (base + n) % ACCL_COLL_POOL_SIZE;
     if (!ctx->collPoolUsed[i]) {
+      ctx->collNextFit = (i + 1) % ACCL_COLL_POOL_SIZE;
       ctx->collPoolUsed[i] = 1;
       // Clear around the mutex, never through it, and hold it while clearing: a
       // stale KernelCh stop writes nKernelChCompleted under this lock, and that
@@ -541,8 +546,11 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 
   // With net counters on, the worker writes the record once the "after"
   // snapshot is read.
+  pthread_mutex_lock(&coll->mutex);
+  int nStarted = coll->nProxyOpsStarted;
+  pthread_mutex_unlock(&coll->mutex);
   if (!ctx->net.enabled ||
-      acclNetCollComplete(ctx, &ctx->net, &coll->net, &rec, coll->nProxyOpsStarted) != 0) {
+      acclNetCollComplete(ctx, &ctx->net, &coll->net, &rec, nStarted) != 0) {
     acclWriteRecord(ctx, &rec, NULL);
   }
 }
@@ -846,7 +854,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
   }
 
   if (eDescr->type == ncclProfileP2p) {
-    if (ctx->net.enabled) acclNetUntrackedStart();
+    if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
     *eHandle = NULL;
     return ncclSuccess;
   }
@@ -855,14 +863,14 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     // Check message size filter
     size_t msgSize = (size_t)acclDatatypeSize(eDescr->coll.datatype) * eDescr->coll.count;
     if (msgSize < ctx->minMsgSize) {
-      if (ctx->net.enabled) acclNetUntrackedStart();
+      if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
       *eHandle = NULL;
       return ncclSuccess;
     }
 
     struct acclCollInfo* coll = acclAllocColl(ctx);
     if (!coll) {
-      if (ctx->net.enabled) acclNetUntrackedStart();
+      if (ctx->net.enabled) acclNetUntrackedStart(&ctx->net);
       *eHandle = NULL;
       return ncclSuccess;
     }
@@ -889,12 +897,10 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
     // Proxy ops are posted after this returns, so no NIC traffic of this
-    // collective precedes its "before" snapshot. A reported 0 channels is
-    // either a symmetric plan's non-head task, which never gets KernelCh
-    // events, or 256 channels: neither can be tracked to completion.
-    if (ctx->net.enabled) {
-      if (coll->nChannelsRaw) acclNetCollStart(&ctx->net, &coll->net);
-      else acclNetUntrackedStart();
+    // collective precedes its "before" snapshot. Symmetric plans (proto "")
+    // have no proxy ops and their non-head tasks get no KernelCh events.
+    if (ctx->net.enabled && coll->proto && coll->proto[0]) {
+      acclNetCollStart(&ctx->net, &coll->net);
     }
 
     *eHandle = coll;
@@ -945,22 +951,29 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclProxyOpInfo* op = acclAllocProxyOp(ctx);
     if (!op) {
+      // Unprofiled traffic: no window it reaches can be called clean.
+      if (ctx->net.enabled) {
+        if (parentColl) acclNetCollFlag(&parentColl->net);
+        else acclNetUntrackedStart(NULL);
+      }
       *eHandle = NULL;
       return ncclSuccess;
     }
     op->type = ncclProfileProxyOp;
     op->parentObj = parentColl;
     op->commCtx = ctx;
-    int late = 0;
+    int late = 0, tracked = 0;
     if (parentColl) {
       pthread_mutex_lock(&parentColl->mutex);
       parentColl->nProxyOpsStarted++;
       late = parentColl->finalized;
+      tracked = parentColl->net.tracked;
       pthread_mutex_unlock(&parentColl->mutex);
     }
-    if (ctx->net.enabled) {
-      if (late) acclNetLateProxyOp(&ctx->net);
-      else if (!parentColl) acclNetUntrackedStart();
+    // Late: the collective already completed, so this traffic is in a later window.
+    if (ctx->net.enabled && (late || !tracked)) {
+      op->netUntracked = 1;
+      acclNetUntrackedOpStart(&ctx->net, late);
     }
     op->channelId = eDescr->proxyOp.channelId;
     op->peer = eDescr->proxyOp.peer;
@@ -1053,6 +1066,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
   if (type == ncclProfileProxyOp) {
     struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)eHandle;
     op->tsStopUs = acclGetTimeUs();
+    if (op->netUntracked) acclNetUntrackedOpStop();
 
     struct acclCollInfo* coll = (struct acclCollInfo*)op->parentObj;
     struct acclCommContext* ctx = (struct acclCommContext*)op->commCtx;

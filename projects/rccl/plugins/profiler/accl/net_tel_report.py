@@ -10,10 +10,14 @@ Prints, per collective and message size:
     counters, side and ranks behind it;
   - exec time with the read skew removed: a rank's kernel also waits for a
     peer whose counter read finished later, so
-    corrected = exec - (max launch_wait over the comm's ranks - own launch_wait).
+    corrected = max(0, exec - (max launch_wait over the comm's ranks - own)).
+    This assumes the ranks reach the launch together, as after the app's
+    per-collective barrier (rccl-tests -z 1); records clamped at 0 show where
+    that does not hold.
 
 --trace writes Chrome trace JSON (chrome://tracing, ui.perfetto.dev): one
-process per host, one thread per rank, a slice per counter window and per read.
+process per host, one thread per rank process, a slice per counter window and
+per read, and a per-rank NIC counter track.
 Timestamps are each host's CLOCK_MONOTONIC and are not aligned across hosts.
 """
 import argparse
@@ -53,6 +57,10 @@ NET_CONGESTION_COUNTERS = {
     'rx_rdma_cnp_pkts': 'sender',
 }
 VOLUME = ('tx_rdma_ucast_bytes', 'rx_rdma_ucast_bytes')
+# Volume, including AINIC's hardware CTS control traffic: never a symptom.
+VOLUME_ALL = VOLUME + ('tx_rdma_ucast_pkts', 'rx_rdma_ucast_pkts',
+                       'tx_rdma_ccl_cts_bytes', 'tx_rdma_ccl_cts_pkts',
+                       'rx_rdma_ccl_cts_bytes', 'rx_rdma_ccl_cts_pkts')
 MIN_USABLE = 3
 
 FILE_RE = re.compile(r'accl_profiler_rank(\d+)_(.+)_pid(\d+)_(0x[0-9a-fA-F]+)\.jsonl$')
@@ -61,7 +69,9 @@ FILE_RE = re.compile(r'accl_profiler_rank(\d+)_(.+)_pid(\d+)_(0x[0-9a-fA-F]+)\.j
 @dataclass
 class Rec:
     rank: int
+    n_ranks: int
     host: str
+    pid: int
     comm: str
     coll: str
     sn: int
@@ -81,7 +91,11 @@ class Verdict:
     tx_bytes_per_coll: float
     # counter -> (sum of deltas, records hit, sorted ranks)
     drivers: Dict[str, Tuple[int, int, List[int]]] = field(default_factory=dict)
-    pause_frames: int = 0
+    # non-zero counters on neither list: shown, never drive the verdict
+    other: Dict[str, Tuple[int, int, List[int]]] = field(default_factory=dict)
+    pause_rx: int = 0
+    pause_tx: int = 0
+    n_no_net: int = 0
     reason: str = ''
 
 
@@ -97,21 +111,21 @@ def expand_inputs(paths: List[str]) -> List[str]:
     files = []
     for p in paths:
         if os.path.isdir(p):
-            files.extend(sorted(glob.glob(os.path.join(p, '*.jsonl'))))
+            files.extend(sorted(glob.glob(os.path.join(p, '**', '*.jsonl'), recursive=True)))
         else:
             files.append(p)
     return files
 
 
 def load(paths: List[str], warmup: int = 5) -> Tuple[List[Rec], List[dict]]:
-    """Records and summary lines from every file; drops the first `warmup`
-    records of each (file, coll, size), ordered by sequence number."""
+    """Records and summary lines from every file. Drops the first `warmup`
+    sequence numbers of each (comm, coll, size), the same ones on every rank, so
+    skew groups stay whole."""
     recs: List[Rec] = []
     summaries: List[dict] = []
     for path in expand_inputs(paths):
         m = FILE_RE.search(os.path.basename(path))
-        host, comm = (m.group(2), m.group(4)) if m else ('?', path)
-        groups: Dict[Tuple[str, int], List[Rec]] = defaultdict(list)
+        host, pid, comm = (m.group(2), int(m.group(3)), m.group(4)) if m else ('?', 0, path)
         with open(path, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
@@ -127,16 +141,23 @@ def load(paths: List[str], warmup: int = 5) -> Tuple[List[Rec], List[dict]]:
                 cp, hdr = obj.get('coll_perf'), obj.get('header')
                 if not cp or not hdr:
                     continue
-                r = Rec(rank=hdr.get('rank', 0), host=host, comm=comm,
-                        coll=cp.get('coll', ''), sn=cp.get('coll_sn', 0),
-                        size=cp.get('coll_msg_size_bytes', 0),
-                        exec_us=cp.get('coll_exec_time_us', 0.0),
-                        net=obj.get('net_counters'))
-                groups[(r.coll, r.size)].append(r)
-        for g in groups.values():
-            g.sort(key=lambda r: r.sn)
-            recs.extend(g[warmup:] if warmup > 0 else g)
-    return recs, summaries
+                recs.append(Rec(rank=hdr.get('rank', 0), n_ranks=hdr.get('n_ranks', 1),
+                                host=host, pid=pid, comm=comm,
+                                coll=cp.get('coll', ''), sn=cp.get('coll_sn', 0),
+                                size=cp.get('coll_msg_size_bytes', 0),
+                                exec_us=cp.get('coll_exec_time_us', 0.0),
+                                net=obj.get('net_counters')))
+    if warmup <= 0:
+        return recs, summaries
+    sns: Dict[Tuple[str, str, int], set] = defaultdict(set)
+    for r in recs:
+        sns[(r.comm, r.coll, r.size)].add(r.sn)
+    drop = {k: set(sorted(v)[:warmup]) for k, v in sns.items()}
+    emptied = [k for k, v in sns.items() if len(v) <= warmup]
+    if emptied:
+        print(f"WARNING: warmup={warmup} consumed every record of {len(emptied)} "
+              f"(comm, coll, size) group(s)", file=sys.stderr)
+    return [r for r in recs if r.sn not in drop[(r.comm, r.coll, r.size)]], summaries
 
 
 def rdma_deltas(net: dict) -> Dict[str, int]:
@@ -147,45 +168,72 @@ def rdma_deltas(net: dict) -> Dict[str, int]:
     return out
 
 
-def pause_frames(net: dict) -> int:
-    total = 0
+def pause_frames(net: dict) -> Tuple[int, int]:
+    """(rx, tx) pause/PFC frame counts; durations and transitions excluded."""
+    rx = tx = 0
     for dev in net.get('devices') or []:
         for k, v in (dev.get('ethtool') or {}).items():
-            if k != 'stale' and 'pause' in k and 'us_count' not in k:
-                total += v
-    return total
+            if k == 'stale' or not ('pause' in k or 'pfc' in k):
+                continue
+            if any(x in k for x in ('us_count', 'duration', 'transition')):
+                continue
+            if 'rx' in k:
+                rx += v
+            elif 'tx' in k:
+                tx += v
+    return rx, tx
 
 
 def usable(r: Rec) -> bool:
     return bool(r.net) and not r.net.get('overlapped') and not r.net.get('unavailable')
 
 
-def verdicts(recs: List[Rec]) -> Dict[Tuple[str, int], Verdict]:
-    """Per (coll, msg_size) verdict from clean windows only. Overlapped windows
-    hold other work; ethtool deltas are stale on ionic (about 5 s refresh) and
-    never drive a verdict."""
-    groups: Dict[Tuple[str, int], List[Rec]] = defaultdict(list)
+def _hits(deltas, name):
+    hits = [(r.rank, d[name]) for r, d in deltas if d.get(name, 0) > 0]
+    if not hits:
+        return None
+    return (sum(v for _, v in hits), len(hits), sorted({rk for rk, _ in hits}))
+
+
+def verdicts(recs: List[Rec]) -> Dict[Tuple[str, str, int], Verdict]:
+    """Per (comm, coll, msg_size) verdict from clean windows only. Overlapped
+    windows hold other work; ethtool deltas are stale on ionic (about 5 s
+    refresh) and never drive a verdict. Every rank must contribute a clean
+    window: loss is often visible only on the receiver."""
+    groups: Dict[Tuple[str, str, int], List[Rec]] = defaultdict(list)
     for r in recs:
-        groups[(r.coll, r.size)].append(r)
+        groups[(r.comm, r.coll, r.size)].append(r)
     out = {}
-    for key, rs in sorted(groups.items()):
+    for key, all_rs in sorted(groups.items()):
+        rs = [r for r in all_rs if r.net is not None]
+        if not rs:
+            continue
         good = [r for r in rs if usable(r)]
-        n_over = sum(1 for r in rs if r.net and r.net.get('overlapped'))
-        n_unav = sum(1 for r in rs if not r.net or r.net.get('unavailable'))
+        n_over = sum(1 for r in rs if r.net.get('overlapped'))
+        n_unav = sum(1 for r in rs if r.net.get('unavailable'))
         deltas = [(r, rdma_deltas(r.net)) for r in good]
         drivers = {}
         for name in list(NET_LOSS_COUNTERS) + list(NET_CONGESTION_COUNTERS):
-            hits = [(r.rank, d[name]) for r, d in deltas if d.get(name, 0) > 0]
-            if hits:
-                drivers[name] = (sum(v for _, v in hits), len(hits),
-                                 sorted({rk for rk, _ in hits}))
+            h = _hits(deltas, name)
+            if h:
+                drivers[name] = h
+        other = {}
+        for name in sorted({k for _, d in deltas for k in d}):
+            if name in NET_LOSS_COUNTERS or name in NET_CONGESTION_COUNTERS or name in VOLUME_ALL:
+                continue
+            h = _hits(deltas, name)
+            if h:
+                other[name] = h
         tx = sum(d.get('tx_rdma_ucast_bytes', 0) for _, d in deltas)
         traffic = sum(d.get(k, 0) for _, d in deltas for k in VOLUME)
         known = any('tx_rdma_ucast_bytes' in d for _, d in deltas)
+        pauses = [pause_frames(r.net) for r in good]
         v = Verdict('CLEAN', len(rs), len(good), n_over, n_unav,
-                    tx / len(good) if good else 0.0, drivers,
-                    sum(pause_frames(r.net) for r in good))
+                    tx / len(good) if good else 0.0, drivers, other,
+                    sum(p[0] for p in pauses), sum(p[1] for p in pauses),
+                    len(all_rs) - len(rs))
         loss = [k for k in drivers if k in NET_LOSS_COUNTERS]
+        unseen = sorted({(r.host, r.rank) for r in rs} - {(r.host, r.rank) for r in good})
         if len(good) < MIN_USABLE or 2 * len(good) < len(rs):
             v.verdict = 'INCONCLUSIVE'
             v.reason = f"{len(good)}/{len(rs)} usable ({n_over} overlapped, {n_unav} unavailable)"
@@ -199,6 +247,9 @@ def verdicts(recs: List[Rec]) -> Dict[Tuple[str, int], Verdict]:
         elif drivers:
             v.verdict = 'NETWORK_SUSPECT'
             v.reason = 'congestion signalled (ECN/CNP), no loss'
+        elif unseen:
+            v.verdict = 'INCONCLUSIVE'
+            v.reason = 'no clean window on rank(s) ' + ','.join(str(rk) for _, rk in unseen)
         elif traffic == 0:
             v.verdict = 'INCONCLUSIVE'
             v.reason = 'no NIC traffic in the windows'
@@ -209,21 +260,27 @@ def verdicts(recs: List[Rec]) -> Dict[Tuple[str, int], Verdict]:
 def correct_skew(recs: List[Rec]) -> None:
     """Sets corrected_us. Ranks of one comm launch collective sn after their own
     read; a rank whose read ended earlier waits inside its kernel for the
-    slowest one, so that difference is taken back out."""
+    slowest one, so that difference is taken back out. Only whole groups with
+    no timed-out read: a timed-out wait is not skew."""
     groups: Dict[Tuple[str, str, int], List[Rec]] = defaultdict(list)
     for r in recs:
         if r.net and 'launch_wait_us' in r.net:
             groups[(r.comm, r.coll, r.sn)].append(r)
     for rs in groups.values():
+        if len(rs) < rs[0].n_ranks or any(r.net.get('unavailable') for r in rs):
+            continue
         latest = max(r.net['launch_wait_us'] for r in rs)
         for r in rs:
             r.corrected_us = max(0.0, r.exec_us - (latest - r.net['launch_wait_us']))
 
 
-def print_summaries(summaries: List[dict]) -> None:
+def print_summaries(summaries: List[dict], have_records: bool) -> None:
     nets = [s['net_counters'] for s in summaries if 'net_counters' in s]
     if not nets:
-        print("No net_counters in any summary line (run with ACCL_NET_COUNTERS=1).")
+        if have_records:
+            print("No summary line with net_counters (did the run reach finalize?)")
+        else:
+            print("No net_counters in any record (run with ACCL_NET_COUNTERS=1).")
         return
     tot = defaultdict(int)
     for n in nets:
@@ -237,21 +294,23 @@ def print_summaries(summaries: List[dict]) -> None:
           f"{tot['records_with_read_error']} with read errors, "
           f"{tot['queued_at_finalize']} not written by finalize, "
           f"{tot['late_proxy_ops']} late proxy ops")
-    print(f"Counter reads: {tot['reads']}, mean {read_mean:.0f} us, "
-          f"max {max(n.get('read_us_max', 0) for n in nets)} us")
+    if tot['reads']:
+        print(f"Counter reads: {tot['reads']}, mean {read_mean:.0f} us, "
+              f"max {max(n.get('read_us_max', 0) for n in nets)} us")
     incomplete = sum(1 for s in summaries if not s.get('complete', True))
     if incomplete:
         print(f"WARNING: {incomplete} file(s) report complete=false", file=sys.stderr)
 
 
-def print_verdicts(vs: Dict[Tuple[str, int], Verdict]) -> None:
+def print_verdicts(vs: Dict[Tuple[str, str, int], Verdict]) -> None:
+    multi = len({k[0] for k in vs}) > 1
     print(f"\n{'='*140}")
     print("  NETWORK VERDICT per message size "
-          "(clean windows only; ethtool pause frames are stale context)")
+          "(clean windows only; ethtool pause frames rx/tx are stale context)")
     print(f"{'='*140}")
     print(f"{'Coll':>14s} {'Size':>8s} │ {'Usable':>9s} │ {'Verdict':>15s} │ "
-          f"{'TxMB/coll':>10s} {'Pause*':>7s} │ Drivers (sum, records hit, side, ranks)")
-    for (coll, sz), v in vs.items():
+          f"{'TxMB/coll':>10s} {'Pause*rx/tx':>13s} │ Drivers (sum, records hit, side, ranks)")
+    for (comm, coll, sz), v in vs.items():
         parts = []
         for name, (total, hits, ranks) in sorted(v.drivers.items(), key=lambda kv: -kv[1][0]):
             side = NET_LOSS_COUNTERS.get(name) or NET_CONGESTION_COUNTERS.get(name, '')
@@ -262,42 +321,63 @@ def print_verdicts(vs: Dict[Tuple[str, int], Verdict]) -> None:
         detail = '; '.join(parts) if parts else (v.reason or '-')
         if parts and v.reason:
             detail = f"[{v.reason}] {detail}"
-        print(f"{coll:>14s} {fmt_size(sz):>8s} │ {v.n_usable:>4d}/{v.n_records:<4d} │ "
-              f"{v.verdict:>15s} │ {v.tx_bytes_per_coll / 1e6:10.3f} {v.pause_frames:7d} │ {detail}")
+        if v.other:
+            detail += ' | other: ' + ', '.join(
+                f"{k}={t} ({h}/{v.n_usable}, ranks {','.join(map(str, rk))})"
+                for k, (t, h, rk) in v.other.items())
+        if v.n_no_net:
+            detail += f' | {v.n_no_net} record(s) without net_counters'
+        label = f"{comm} {coll}" if multi else coll
+        print(f"{label:>14s} {fmt_size(sz):>8s} │ {v.n_usable:>4d}/{v.n_records:<4d} │ "
+              f"{v.verdict:>15s} │ {v.tx_bytes_per_coll / 1e6:10.3f} "
+              f"{f'{v.pause_rx}/{v.pause_tx}':>13s} │ {detail}")
+
+
+CLAMP_WARN = 0.05
 
 
 def print_timing(recs: List[Rec]) -> None:
-    groups: Dict[Tuple[str, int], List[Rec]] = defaultdict(list)
+    groups: Dict[Tuple[str, str, int], List[Rec]] = defaultdict(list)
     for r in recs:
         if r.corrected_us is not None:
-            groups[(r.coll, r.size)].append(r)
+            groups[(r.comm, r.coll, r.size)].append(r)
     if not groups:
         return
+    multi = len({k[0] for k in groups}) > 1
     print(f"\n{'='*140}")
-    print("  EXEC TIME with counter-read skew removed (us; skew = exec - corrected)")
+    print("  EXEC TIME with counter-read skew removed (us, medians; skew = exec - corrected).")
+    print("  Assumes ranks reach each launch together (per-collective barrier, e.g. "
+          "rccl-tests -z 1); '!' marks sizes where it does not hold.")
     print(f"{'='*140}")
-    print(f"{'Coll':>14s} {'Size':>8s} │ {'n':>5s} │ {'ExecRaw':>10s} {'ExecCorr':>10s} │ "
-          f"{'SkewMean':>9s} {'SkewP99':>9s} {'SkewMax':>9s} │ {'LaunchWait':>10s}")
-    for (coll, sz), rs in sorted(groups.items()):
+    print(f"{'Coll':>14s} {'Size':>8s} │ {'n':>5s} {'clamped':>7s} │ {'ExecRaw':>10s} {'ExecCorr':>10s} │ "
+          f"{'Skew':>9s} {'SkewP99':>9s} {'SkewMax':>9s} │ {'LaunchWait':>10s}")
+    for (comm, coll, sz), rs in sorted(groups.items()):
         skew = sorted(r.exec_us - r.corrected_us for r in rs)
-        wait = statistics.mean(r.net['launch_wait_us'] for r in rs)
-        print(f"{coll:>14s} {fmt_size(sz):>8s} │ {len(rs):5d} │ "
-              f"{statistics.mean(r.exec_us for r in rs):10.1f} "
-              f"{statistics.mean(r.corrected_us for r in rs):10.1f} │ "
-              f"{statistics.mean(skew):9.1f} {skew[int(0.99 * (len(skew) - 1))]:9.1f} "
-              f"{skew[-1]:9.1f} │ {wait:10.1f}")
+        clamped = sum(1 for r in rs if r.corrected_us == 0.0 and r.exec_us > 0)
+        mark = '!' if clamped > CLAMP_WARN * len(rs) else ' '
+        label = f"{comm} {coll}" if multi else coll
+        print(f"{label:>14s} {fmt_size(sz):>8s} │ {len(rs):5d} {clamped:6d}{mark} │ "
+              f"{statistics.median(r.exec_us for r in rs):10.1f} "
+              f"{statistics.median(r.corrected_us for r in rs):10.1f} │ "
+              f"{statistics.median(skew):9.1f} {skew[int(0.99 * (len(skew) - 1))]:9.1f} "
+              f"{skew[-1]:9.1f} │ {statistics.median(r.net['launch_wait_us'] for r in rs):10.1f}")
 
 
 def build_trace(recs: List[Rec]) -> dict:
     hosts = sorted({r.host for r in recs})
     pid = {h: i + 1 for i, h in enumerate(hosts)}
+    # One thread per rank process and comm; the OS pid keeps comms apart.
+    tids: Dict[Tuple[str, int, str, int], int] = {}
+    for r in sorted(recs, key=lambda r: (r.host, r.rank, r.comm, r.pid)):
+        tids.setdefault((r.host, r.pid, r.comm, r.rank), len(tids) + 1)
+    multi = len({r.comm for r in recs}) > 1
     events = []
     for h in hosts:
         events.append({"ph": "M", "name": "process_name", "pid": pid[h],
                        "args": {"name": h}})
-    for h, rank in sorted({(r.host, r.rank) for r in recs}):
-        events.append({"ph": "M", "name": "thread_name", "pid": pid[h], "tid": rank,
-                       "args": {"name": f"rank {rank}"}})
+    for (h, _, comm, rank), tid in tids.items():
+        events.append({"ph": "M", "name": "thread_name", "pid": pid[h], "tid": tid,
+                       "args": {"name": f"rank {rank}" + (f" {comm}" if multi else "")}})
     for r in recs:
         n = r.net
         if not n or 'before_ts_us' not in n:
@@ -313,13 +393,15 @@ def build_trace(recs: List[Rec]) -> dict:
             args["exec_corrected_us"] = round(r.corrected_us, 2)
         cat = "overlapped" if n.get('overlapped') else (
             "unavailable" if n.get('unavailable') else ("suspect" if symptoms else "window"))
+        tid = tids[(r.host, r.pid, r.comm, r.rank)]
         events.append({"ph": "X", "cat": cat, "name": f"{r.coll} {fmt_size(r.size)}",
-                       "pid": pid[r.host], "tid": r.rank, "ts": n['before_ts_us'],
+                       "pid": pid[r.host], "tid": tid, "ts": n['before_ts_us'],
                        "dur": max(0, n['after_ts_us'] - n['before_ts_us']), "args": args})
         events.append({"ph": "X", "cat": "read", "name": "counter read",
-                       "pid": pid[r.host], "tid": r.rank, "ts": n['after_ts_us'],
+                       "pid": pid[r.host], "tid": tid, "ts": n['after_ts_us'],
                        "dur": n.get('after_read_us', 0)})
-        events.append({"ph": "C", "name": f"rank {r.rank} NIC", "pid": pid[r.host],
+        events.append({"ph": "C", "name": f"rank {r.rank} NIC" + (f" {r.comm}" if multi else ""),
+                       "pid": pid[r.host],
                        "ts": n['after_ts_us'],
                        "args": {"tx_MB": d.get('tx_rdma_ucast_bytes', 0) / 1e6,
                                 "loss": sum(v for k, v in symptoms.items()
@@ -339,11 +421,11 @@ def main(argv=None) -> int:
     recs, summaries = load(args.inputs, args.warmup)
     with_net = [r for r in recs if r.net is not None]
     print(f"Loaded {len(recs)} records, {len(with_net)} with net_counters")
-    print_summaries(summaries)
+    print_summaries(summaries, bool(with_net))
     if not with_net:
         return 1
     correct_skew(with_net)
-    print_verdicts(verdicts(with_net))
+    print_verdicts(verdicts(recs))
     print_timing(with_net)
     if args.trace:
         with open(args.trace, 'w', encoding='utf-8') as f:

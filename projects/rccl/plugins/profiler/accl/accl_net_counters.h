@@ -67,6 +67,7 @@ struct acclNetCommStats {
   int      closed;       // set at finalize
   int      queued;       // records waiting for their "after" snapshot
   int      launchSeen;   // KernelLaunch fired since the last Coll start
+  int      graceOff;     // this comm pipelines: skip the launch grace
   uint64_t launchWaitUs;
   uint64_t lastReadSeq;
   uint64_t reads;        // distinct "after" reads behind this comm's records
@@ -109,9 +110,15 @@ ACCL_HIDDEN char* acclNetFinalize(struct acclNetCommStats* st, int* lost);
 ACCL_HIDDEN void acclNetKernelLaunch(struct acclNetCommStats* st);
 ACCL_HIDDEN void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs);
 ACCL_HIDDEN void acclNetCollPosted(struct acclNetCollState* cs);
-ACCL_HIDDEN void acclNetUntrackedStart(void);
-// A proxy op whose collective had already completed: its traffic is in a later window.
-ACCL_HIDDEN void acclNetLateProxyOp(struct acclNetCommStats* st);
+// Work no record owns (P2P, filtered or symmetric colls): flags the windows it
+// can reach. st may be NULL.
+ACCL_HIDDEN void acclNetUntrackedStart(struct acclNetCommStats* st);
+// A proxy op no tracked record owns, live until acclNetUntrackedOpStop. late:
+// its collective had already completed.
+ACCL_HIDDEN void acclNetUntrackedOpStart(struct acclNetCommStats* st, int late);
+ACCL_HIDDEN void acclNetUntrackedOpStop(void);
+// Traffic of this collective the plugin cannot follow (e.g. proxy-op pool full).
+ACCL_HIDDEN void acclNetCollFlag(struct acclNetCollState* cs);
 // Queues rec for the worker, which writes it once the "after" snapshot is read.
 // Returns 0 if queued; otherwise the caller writes rec itself.
 // nProxyOps: proxy ops that started; 0 on a multi-node comm delays the read

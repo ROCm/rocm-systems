@@ -78,6 +78,7 @@ struct acclProxyOpInfo {
   uint64_t totalFlushUs;
   uint64_t totalGpuRecvWaitUs;
   int      stepsCompleted;
+  int      netUntracked;   // counted by acclNetUntrackedOpStart
 };
 
 // Per collective record
@@ -230,6 +231,7 @@ struct acclCommContext {
   struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
   int                      collPoolUsed[ACCL_COLL_POOL_SIZE];
   pthread_mutex_t          collPoolMutex;
+  int                      collNextFit;
 
   struct acclProxyOpInfo   proxyOpPool[ACCL_PROXY_OP_POOL_SIZE];
   int                      proxyOpPoolUsed[ACCL_PROXY_OP_POOL_SIZE];

@@ -97,7 +97,8 @@ static struct {
   uint64_t        readSeq;          // bumped per requested read
   uint64_t        timedOutSeq;      // a read some caller already gave up on
   int             stopping;         // last finalize is joining the worker
-  int             graceOff;         // app pipelines: skip the launch grace
+  int             untrackedLive;    // untracked proxy ops started, not yet stopped
+  uint64_t        untrackedLastUs;
   struct acclNetCollState* inflight[ACCL_NET_MAX_INFLIGHT];
   int             nInflight;
   int             dirty;            // untracked work launched since the last tracked start
@@ -525,7 +526,8 @@ static void acclEthOpen(struct acclNetDev* d) {
 // ============================================================================
 static void acclNetReadSw(struct acclNetSnapshot* s) {
   s->nSw = -1;
-  RcclTelemetrySwSnapshot sw[ACCL_NET_MAX_SW];
+  // Headroom: a librccl with a larger struct writes past our ACCL_NET_MAX_SW entries.
+  RcclTelemetrySwSnapshot sw[4 * ACCL_NET_MAX_SW];
   int n = 0;
   if (gAcclNetHooks.swCaptureFn) n = gAcclNetHooks.swCaptureFn(sw, ACCL_NET_MAX_SW);
   else if (g.swCapture) n = g.swCapture(sw, ACCL_NET_MAX_SW);
@@ -541,6 +543,8 @@ static void acclNetReadSw(struct acclNetSnapshot* s) {
 }
 
 static void acclNetRequestReadLocked(void);
+static int acclNetUntrackedActive(void);
+static void acclNetFlagPendingJobs(void);
 
 // Worker thread only.
 static struct acclNetSnapshot* acclNetReadAll(char* rx) {
@@ -655,6 +659,25 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
   }
 }
 
+// Writes and frees one job; drops gNetMu around the write. snap NULL: no counters.
+static void acclNetWriteJobLocked(struct acclNetJob* job, struct acclNetSnapshot* snap) {
+  struct acclStr js = {NULL, 0, 0, 0};
+  if (snap) acclNetFormat(&js, job, snap);
+  pthread_mutex_unlock(&gNetMu);
+  acclWriteRecord(job->ctx, &job->rec, js.oom ? NULL : js.p);
+  free(js.p);
+  acclSnapUnref(job->before);
+  struct acclCommContext* ctx = job->ctx;
+  pthread_mutex_lock(&gNetMu);
+  job->st->queued--;
+  pthread_cond_broadcast(&g.doneCv);
+  pthread_mutex_unlock(&gNetMu);
+  // Last: st lives inside ctx.
+  acclCtxRelease(ctx);
+  free(job);
+  pthread_mutex_lock(&gNetMu);
+}
+
 static void* acclNetWorker(void* arg) {
   char* rx = (char*)arg;
   pthread_mutex_lock(&gNetMu);
@@ -665,6 +688,7 @@ static void* acclNetWorker(void* arg) {
     g.reading = g.head;
     g.head = g.tail = NULL;
     g.nJobs = 0;
+    if (acclNetUntrackedActive()) acclNetFlagPendingJobs();
     int settle = 0;
     for (struct acclNetJob* j = g.reading; j; j = j->next) settle |= j->settle;
     pthread_mutex_unlock(&gNetMu);
@@ -684,21 +708,7 @@ static void* acclNetWorker(void* arg) {
     while (jobs) {
       struct acclNetJob* job = jobs;
       jobs = job->next;
-      struct acclStr js = {NULL, 0, 0, 0};
-      acclNetFormat(&js, job, snap);
-      pthread_mutex_unlock(&gNetMu);
-      acclWriteRecord(job->ctx, &job->rec, js.oom ? NULL : js.p);
-      free(js.p);
-      acclSnapUnref(job->before);
-      struct acclCommContext* ctx = job->ctx;
-      pthread_mutex_lock(&gNetMu);
-      job->st->queued--;
-      pthread_cond_broadcast(&g.doneCv);
-      pthread_mutex_unlock(&gNetMu);
-      // Last: st lives inside ctx.
-      acclCtxRelease(ctx);
-      free(job);
-      pthread_mutex_lock(&gNetMu);
+      acclNetWriteJobLocked(job, snap);
     }
   }
   pthread_mutex_unlock(&gNetMu);
@@ -714,9 +724,10 @@ static void acclNetRequestReadLocked(void) {
   pthread_cond_signal(&g.workCv);
 }
 
-// Queued records whose window has closed must not wait for a later trigger.
-static void acclNetKickLocked(void) {
-  if (g.head && g.nInflight == 0 && !g.readPending) acclNetRequestReadLocked();
+// Untracked proxy ops still sending. An op whose stop never arrives (non-net
+// transports) stops counting after ACCL_NET_STUCK_US without a new one.
+static int acclNetUntrackedActive(void) {
+  return g.untrackedLive > 0 && acclNetNowUs() - g.untrackedLastUs < ACCL_NET_STUCK_US;
 }
 
 static void acclNetFlagInflight(void) {
@@ -727,13 +738,6 @@ static void acclNetFlagInflight(void) {
 static void acclNetFlagPendingJobs(void) {
   for (struct acclNetJob* j = g.reading; j; j = j->next) j->overlapped = 1;
   for (struct acclNetJob* j = g.head; j; j = j->next) j->overlapped = 1;
-}
-
-// This comm's collectives whose proxy ops are posted, i.e. from an earlier plan.
-static int acclNetInflightOf(struct acclNetCommStats* st) {
-  int n = 0;
-  for (int i = 0; i < g.nInflight; i++) n += g.inflight[i]->owner == st && g.inflight[i]->posted;
-  return n;
 }
 
 // A collective the plugin never sees complete (e.g. no KernelCh events) would
@@ -749,27 +753,27 @@ static void acclNetEvictStuckLocked(void) {
   }
 }
 
-// Grace for the previous collective's proxy tail. Once it times out the app is
-// pipelining, so stop waiting until a launch finds nothing of its own in flight.
-static void acclNetGraceLocked(struct acclNetCommStats* st) {
-  if (acclNetInflightOf(st) == 0) {
-    g.graceOff = 0;
-  } else if (!g.graceOff) {
-    uint64_t deadline = acclNetNowUs() + g.graceUs;
-    while (acclNetInflightOf(st) > 0 && acclNetWaitUntil(deadline)) {}
-    if (acclNetInflightOf(st) > 0) g.graceOff = 1;
-  }
+// Queued records whose window has closed must not wait for a later trigger.
+static void acclNetKickLocked(void) {
+  acclNetEvictStuckLocked();
+  if (g.head && g.nInflight == 0 && !g.readPending) acclNetRequestReadLocked();
+}
+
+// This comm's collectives whose proxy ops are posted, i.e. from an earlier plan.
+static int acclNetInflightOf(struct acclNetCommStats* st) {
+  int n = 0;
+  for (int i = 0; i < g.nInflight; i++) n += g.inflight[i]->owner == st && g.inflight[i]->posted;
+  return n;
 }
 
 // Wait for the read that opens the next collective's window. Never waits while
-// tracked collectives are still running: that work is already overlapped, and
-// waiting would serialize an application that does not serialize itself. A
-// read that already timed out once is not waited for again.
-// Returns 0 if the read is still pending.
+// tracked collectives or untracked proxy ops are still running: that work is
+// already overlapped, and waiting would serialize an application that does
+// not serialize itself. A read that already timed out once is not waited for
+// again. Returns 0 if the read is still pending.
 static int acclNetWaitReadLocked(void) {
-  acclNetEvictStuckLocked();
-  if (g.nInflight > 0) return 1;
   acclNetKickLocked();
+  if (g.nInflight > 0 || acclNetUntrackedActive()) return 1;
   if (!g.cur && !g.readPending) acclNetRequestReadLocked();
   if (g.readPending && g.readSeq == g.timedOutSeq) return 0;
   uint64_t deadline = acclNetNowUs() + g.waitUs;
@@ -778,32 +782,42 @@ static int acclNetWaitReadLocked(void) {
   return !g.readPending;
 }
 
+// User thread, before the kernel launch: the only place that waits.
 void acclNetKernelLaunch(struct acclNetCommStats* st) {
   pthread_mutex_lock(&gNetMu);
   uint64_t t0 = acclNetNowUs();
-  acclNetGraceLocked(st);
+  // Grace for the previous collective's proxy tail. Once it times out this
+  // comm is pipelining, so stop waiting until a launch finds nothing of its
+  // own in flight.
+  if (acclNetInflightOf(st) == 0) {
+    st->graceOff = 0;
+  } else if (!st->graceOff) {
+    uint64_t deadline = acclNetNowUs() + g.graceUs;
+    while (acclNetInflightOf(st) > 0 && acclNetWaitUntil(deadline)) {}
+    if (acclNetInflightOf(st) > 0) st->graceOff = 1;
+  }
   acclNetWaitReadLocked();
   st->launchWaitUs = acclNetNowUs() - t0;
   st->launchSeen = 1;
   pthread_mutex_unlock(&gNetMu);
 }
 
+// Never blocks: on the eager path the kernel is already running, and on the
+// host-callback path this is a HIP callback.
 void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs) {
   pthread_mutex_lock(&gNetMu);
-  uint64_t t0 = acclNetNowUs();
-  // Host-callback (graph) launches reach here without a KernelLaunch first.
-  if (!st->launchSeen) acclNetGraceLocked(st);
-  int readDone = acclNetWaitReadLocked();
-  cs->launchWaitUs = (st->launchSeen ? st->launchWaitUs : 0) + (acclNetNowUs() - t0);
+  acclNetKickLocked();
+  int readDone = !g.readPending;
+  cs->launchWaitUs = st->launchSeen ? st->launchWaitUs : 0;
   st->launchSeen = 0;
   cs->tracked = 1;
   cs->owner = st;
   cs->startUs = acclNetNowUs();
   cs->before = acclSnapRef(g.cur);
   cs->unavailable = !readDone || !cs->before;
-  // The late read will land inside this collective.
+  // The pending read will land inside this collective.
   if (!readDone) acclNetFlagPendingJobs();
-  if (g.dirty || g.nInflight > 0) {
+  if (g.dirty || g.nInflight > 0 || acclNetUntrackedActive()) {
     cs->overlapped = 1;
     acclNetFlagInflight();
   }
@@ -824,18 +838,42 @@ void acclNetCollPosted(struct acclNetCollState* cs) {
   pthread_mutex_unlock(&gNetMu);
 }
 
-void acclNetLateProxyOp(struct acclNetCommStats* st) {
-  pthread_mutex_lock(&gNetMu);
-  st->lateProxyOps++;
-  pthread_mutex_unlock(&gNetMu);
-  acclNetUntrackedStart();
-}
-
-void acclNetUntrackedStart(void) {
-  pthread_mutex_lock(&gNetMu);
+static void acclNetUntrackedLocked(struct acclNetCommStats* st) {
   g.dirty = 1;
   acclNetFlagInflight();
   if (g.readPending) acclNetFlagPendingJobs();
+  // A KernelLaunch for untracked work must not be charged to the next coll.
+  if (st) st->launchSeen = 0;
+}
+
+void acclNetUntrackedStart(struct acclNetCommStats* st) {
+  pthread_mutex_lock(&gNetMu);
+  acclNetUntrackedLocked(st);
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetUntrackedOpStart(struct acclNetCommStats* st, int late) {
+  pthread_mutex_lock(&gNetMu);
+  if (late) st->lateProxyOps++;
+  g.untrackedLive++;
+  g.untrackedLastUs = acclNetNowUs();
+  acclNetUntrackedLocked(NULL);
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetUntrackedOpStop(void) {
+  pthread_mutex_lock(&gNetMu);
+  if (g.untrackedLive > 0) g.untrackedLive--;
+  // Its traffic may have reached a window that is already being read.
+  if (g.readPending) acclNetFlagPendingJobs();
+  if (g.untrackedLive == 0) acclNetKickLocked();
+  pthread_mutex_unlock(&gNetMu);
+}
+
+void acclNetCollFlag(struct acclNetCollState* cs) {
+  pthread_mutex_lock(&gNetMu);
+  if (cs->tracked) cs->overlapped = 1;
+  acclNetUntrackedLocked(NULL);
   pthread_mutex_unlock(&gNetMu);
 }
 
@@ -857,10 +895,11 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   pthread_mutex_lock(&gNetMu);
   acclNetRemoveInflightLocked(cs);
   if (!job || st->closed) {
+    // Written without counters; the chain still has to move past its traffic.
     free(job);
     acclSnapUnref(cs->before);
     cs->before = NULL;
-    acclNetKickLocked();
+    if (g.nInflight == 0 && !g.readPending && !g.stop) acclNetRequestReadLocked();
     pthread_mutex_unlock(&gNetMu);
     return -1;
   }
@@ -884,6 +923,7 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   return 0;
 }
 
+// A collective dropped without completing may still be sending.
 void acclNetCollDrop(struct acclNetCollState* cs) {
   if (!cs->tracked) return;
   pthread_mutex_lock(&gNetMu);
@@ -891,6 +931,7 @@ void acclNetCollDrop(struct acclNetCollState* cs) {
   acclSnapUnref(cs->before);
   cs->before = NULL;
   cs->tracked = 0;
+  acclNetUntrackedLocked(NULL);
   acclNetKickLocked();
   pthread_mutex_unlock(&gNetMu);
 }
@@ -1046,7 +1087,7 @@ int acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, int nNodes) {
   g.swCapture = (int (*)(RcclTelemetrySwSnapshot*, int))acclNetFindSwCapture();
   g.stop = 0;
   g.dirty = 0;
-  g.graceOff = 0;
+  g.untrackedLive = 0;
   g.nInflight = 0;
   g.head = g.tail = g.reading = NULL;
   g.nJobs = 0;
@@ -1069,14 +1110,14 @@ int acclNetInit(struct acclNetCommStats* st, int rank, int nRanks, int nNodes) {
 }
 
 // Called with gNetMu held, before the devices are closed.
-static char* acclNetSummaryJsonLocked(struct acclNetCommStats* st) {
+static char* acclNetSummaryJsonLocked(struct acclNetCommStats* st, int lost) {
   struct acclStr js = {NULL, 0, 0, 0};
   acclStrAppend(&js, ",\"net_counters\":{\"records\":%lu,\"overlapped\":%lu,\"unavailable\":%lu,"
                 "\"records_with_read_error\":%lu,\"queued_at_finalize\":%d,"
                 "\"late_proxy_ops\":%lu,\"reads\":%lu,"
                 "\"read_us_mean\":%.1f,\"read_us_max\":%lu,\"totals\":{",
                 (unsigned long)st->records, (unsigned long)st->overlapped,
-                (unsigned long)st->unavailable, (unsigned long)st->readErrors, st->queued,
+                (unsigned long)st->unavailable, (unsigned long)st->readErrors, lost,
                 (unsigned long)st->lateProxyOps, (unsigned long)st->reads,
                 st->reads ? (double)st->readUsSum / (double)st->reads : 0.0,
                 (unsigned long)st->readUsMax);
@@ -1115,6 +1156,8 @@ char* acclNetFinalize(struct acclNetCommStats* st, int* lost) {
   if (last) {
     g.stop = 1;
     g.stopping = 1;
+    // No new jobs once the worker is going away.
+    st->closed = 1;
     if (g.head) acclNetRequestReadLocked();
     pthread_cond_signal(&g.workCv);
     pthread_mutex_unlock(&gNetMu);
@@ -1122,12 +1165,22 @@ char* acclNetFinalize(struct acclNetCommStats* st, int* lost) {
     pthread_join(worker, &rx);
     free(rx);
     pthread_mutex_lock(&gNetMu);
+    // Queued after the worker's last read: write them without counters.
+    struct acclNetJob* left = g.head;
+    g.head = g.tail = NULL;
+    g.nJobs = 0;
+    while (left) {
+      struct acclNetJob* job = left;
+      left = job->next;
+      if (job->st == st) (*lost)++;
+      acclNetWriteJobLocked(job, NULL);
+    }
   }
-  *lost = st->queued;
-  if (st->queued > 0) {
-    ACCL_NET_WARN("ACCL Profiler: %d net-counter record(s) not written before the summary", st->queued);
+  *lost += st->queued;
+  if (*lost > 0) {
+    ACCL_NET_WARN("ACCL Profiler: %d net-counter record(s) not written before the summary", *lost);
   }
-  char* summary = acclNetSummaryJsonLocked(st);
+  char* summary = acclNetSummaryJsonLocked(st, *lost);
   st->closed = 1;
   if (last) {
     acclSnapUnref(g.cur);

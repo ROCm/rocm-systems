@@ -14,9 +14,9 @@ S = 1048576
 
 
 def _rec(sn, rank=0, size=S, exec_us=100.0, overlapped=False, unavailable=False,
-         rdma=None, ethtool=None, launch_wait_us=1500, net=True):
+         rdma=None, ethtool=None, launch_wait_us=1500, net=True, n_ranks=2):
     rec = {
-        "header": {"rank": rank, "n_ranks": 2},
+        "header": {"rank": rank, "n_ranks": n_ranks},
         "coll_perf": {"coll": "AllReduce", "coll_sn": sn, "coll_msg_size_bytes": size,
                       "coll_exec_time_us": exec_us, "decomposition": {}},
     }
@@ -41,9 +41,12 @@ def _write(tmp_path, lines, rank=0, host="nodeA", comm="0xabc"):
     return str(p)
 
 
+KEY = ("0xabc", "AllReduce", S)
+
+
 def _verdict(tmp_path, lines):
     recs, _ = load([_write(tmp_path, lines)], warmup=0)
-    return verdicts(recs)[("AllReduce", S)]
+    return verdicts(recs)[KEY]
 
 
 def test_clean_with_enough_usable_records(tmp_path):
@@ -58,7 +61,7 @@ def test_loss_on_receiver_pools_ranks(tmp_path):
     b = _write(tmp_path, [_rec(i, rank=1, rdma={"resp_rx_outouf_seq": 4})
                           for i in range(3)], rank=1)
     recs, _ = load([a, b], warmup=0)
-    v = verdicts(recs)[("AllReduce", S)]
+    v = verdicts(recs)[KEY]
     assert v.verdict == "NETWORK_SUSPECT"
     assert v.reason == "loss/retransmit"
     assert v.drivers["resp_rx_outouf_seq"] == (12, 3, [1])
@@ -104,7 +107,9 @@ def test_unknown_driver_is_inconclusive(tmp_path):
         r = json.loads(_rec(i))
         r["net_counters"]["devices"][0]["rdma"] = {"out_of_sequence": 0}
         lines.append(json.dumps(r))
-    assert _verdict(tmp_path, lines).verdict == "INCONCLUSIVE"
+    v = _verdict(tmp_path, lines)
+    assert v.verdict == "INCONCLUSIVE"
+    assert "not ionic" in v.reason
 
 
 def test_no_traffic_is_inconclusive(tmp_path):
@@ -118,7 +123,46 @@ def test_stale_ethtool_never_drives_a_verdict(tmp_path):
     eth = {"stale": True, "frames_rx_pripause": 1000}
     v = _verdict(tmp_path, [_rec(i, ethtool=eth) for i in range(3)])
     assert v.verdict == "CLEAN"
-    assert v.pause_frames == 3000
+    assert (v.pause_rx, v.pause_tx) == (3000, 0)
+
+
+def test_never_usable_rank_is_inconclusive(tmp_path):
+    a = _write(tmp_path, [_rec(i, rank=0) for i in range(15)], rank=0)
+    b = _write(tmp_path, [_rec(i, rank=1, unavailable=True) for i in range(15)], rank=1)
+    recs, _ = load([a, b], warmup=0)
+    v = verdicts(recs)[KEY]
+    assert v.verdict == "INCONCLUSIVE"
+    assert "rank(s) 1" in v.reason
+
+
+def test_unlisted_counters_are_shown_not_judged(tmp_path):
+    v = _verdict(tmp_path, [_rec(i, rdma={"req_rx_dup_response": 5,
+                                          "tx_rdma_ccl_cts_pkts": 9}) for i in range(3)])
+    assert v.verdict == "CLEAN"
+    assert v.other == {"req_rx_dup_response": (15, 3, [0])}
+
+
+def test_records_without_net_counters_are_counted(tmp_path):
+    v = _verdict(tmp_path, [_rec(i) for i in range(3)] + [_rec(9, net=False)])
+    assert v.n_no_net == 1
+    assert v.n_records == 3
+
+
+def test_comms_are_judged_separately(tmp_path):
+    a = _write(tmp_path, [_rec(i) for i in range(3)], comm="0x1")
+    b = _write(tmp_path, [_rec(i, rdma={"tx_rdma_retx_pkts": 1}) for i in range(3)], comm="0x2")
+    recs, _ = load([a, b], warmup=0)
+    vs = verdicts(recs)
+    assert vs[("0x1", "AllReduce", S)].verdict == "CLEAN"
+    assert vs[("0x2", "AllReduce", S)].verdict == "NETWORK_SUSPECT"
+
+
+def test_warmup_drops_the_same_sns_on_every_rank(tmp_path):
+    # Rank 1 is missing sn 0: dropping per file would desync the skew groups.
+    a = _write(tmp_path, [_rec(i, rank=0) for i in range(4)], rank=0)
+    b = _write(tmp_path, [_rec(i, rank=1) for i in range(1, 4)], rank=1)
+    recs, _ = load([a, b], warmup=2)
+    assert sorted((r.rank, r.sn) for r in recs) == [(0, 2), (0, 3), (1, 2), (1, 3)]
 
 
 def test_warmup_drops_lowest_sn_per_size(tmp_path):
@@ -142,10 +186,27 @@ def test_skew_correction_uses_the_slowest_rank(tmp_path):
     assert got == {0: 300.0, 1: 310.0}
 
 
+def test_skew_correction_skips_groups_with_a_timed_out_read(tmp_path):
+    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000)], rank=0)
+    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1000000,
+                               unavailable=True)], rank=1)
+    recs, _ = load([a, b], warmup=0)
+    correct_skew(recs)
+    assert all(r.corrected_us is None for r in recs)
+
+
+def test_skew_correction_skips_incomplete_groups(tmp_path):
+    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000, n_ranks=3)], rank=0)
+    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1600, n_ranks=3)], rank=1)
+    recs, _ = load([a, b], warmup=0)
+    correct_skew(recs)
+    assert all(r.corrected_us is None for r in recs)
+
+
 def test_skew_correction_stays_within_a_comm(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=500.0, launch_wait_us=1000)],
+    a = _write(tmp_path, [_rec(0, rank=0, exec_us=500.0, launch_wait_us=1000, n_ranks=1)],
                rank=0, comm="0x1")
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=500.0, launch_wait_us=5000)],
+    b = _write(tmp_path, [_rec(0, rank=1, exec_us=500.0, launch_wait_us=5000, n_ranks=1)],
                rank=1, comm="0x2")
     recs, _ = load([a, b], warmup=0)
     correct_skew(recs)
@@ -153,7 +214,8 @@ def test_skew_correction_stays_within_a_comm(tmp_path):
 
 
 def test_trace_has_windows_reads_and_counters(tmp_path):
-    a = _write(tmp_path, [_rec(0), _rec(1, rdma={"tx_rdma_retx_pkts": 2})], rank=0)
+    a = _write(tmp_path, [_rec(0, n_ranks=1), _rec(1, rdma={"tx_rdma_retx_pkts": 2}, n_ranks=1)],
+               rank=0)
     recs, _ = load([a], warmup=0)
     correct_skew(recs)
     t = build_trace(recs)
@@ -165,10 +227,20 @@ def test_trace_has_windows_reads_and_counters(tmp_path):
     assert sum(1 for e in ev if e.get("cat") == "read") == 2
     assert any(e["ph"] == "M" and e["args"]["name"] == "nodeA" for e in ev)
     assert all(e["ph"] != "C" or "tx_MB" in e["args"] for e in ev)
+    assert windows[0]["args"]["exec_corrected_us"] == 100.0
+
+
+def test_trace_keeps_comms_on_separate_threads(tmp_path):
+    a = _write(tmp_path, [_rec(0, n_ranks=1)], comm="0x1")
+    b = _write(tmp_path, [_rec(0, n_ranks=1)], comm="0x2")
+    recs, _ = load([a, b], warmup=0)
+    ev = build_trace(recs)["traceEvents"]
+    tids = {e["tid"] for e in ev if e["ph"] == "X"}
+    assert len(tids) == 2
 
 
 def test_main_prints_report_and_writes_trace(tmp_path, capsys):
-    path = _write(tmp_path, [_rec(i) for i in range(4)] +
+    path = _write(tmp_path, [_rec(i, n_ranks=1) for i in range(4)] +
                   [json.dumps({"summary": {"complete": True, "net_counters": {
                       "records": 4, "overlapped": 0, "unavailable": 0, "reads": 4,
                       "read_us_mean": 1400.0, "read_us_max": 1500}}})])
@@ -181,7 +253,78 @@ def test_main_prints_report_and_writes_trace(tmp_path, capsys):
     assert json.loads(trace.read_text())["traceEvents"]
 
 
+def test_inputs_are_found_recursively(tmp_path):
+    sub = tmp_path / "run" / "r1"
+    sub.mkdir(parents=True)
+    _write(sub, [_rec(0)])
+    recs, _ = load([str(tmp_path / "run")], warmup=0)
+    assert len(recs) == 1
+
+
 def test_main_without_net_counters_fails(tmp_path, capsys):
     path = _write(tmp_path, [_rec(i, net=False) for i in range(3)])
     assert main([path, "--warmup", "0"]) == 1
     assert "ACCL_NET_COUNTERS=1" in capsys.readouterr().out
+
+
+def test_skew_groups_by_sn(tmp_path):
+    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000),
+                          _rec(1, rank=0, exec_us=400.0, launch_wait_us=1000)], rank=0)
+    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1600),
+                          _rec(1, rank=1, exec_us=400.0, launch_wait_us=1000)], rank=1)
+    recs, _ = load([a, b], warmup=0)
+    correct_skew(recs)
+    got = {(r.rank, r.sn): r.corrected_us for r in recs}
+    assert got == {(0, 0): 300.0, (1, 0): 310.0, (0, 1): 400.0, (1, 1): 400.0}
+
+
+def test_skew_correction_clamps_at_zero(tmp_path):
+    a = _write(tmp_path, [_rec(0, rank=0, exec_us=100.0, launch_wait_us=0)], rank=0)
+    b = _write(tmp_path, [_rec(0, rank=1, exec_us=100.0, launch_wait_us=5000)], rank=1)
+    recs, _ = load([a, b], warmup=0)
+    correct_skew(recs)
+    assert {r.rank: r.corrected_us for r in recs} == {0: 0.0, 1: 100.0}
+
+
+def test_tx_per_coll_and_pause_use_usable_records_only(tmp_path):
+    eth = {"stale": True, "frames_tx_pripause": 4, "rx_pripause_3_1us_count": 99}
+    lines = [_rec(i, ethtool=eth) for i in range(3)]
+    lines.append(_rec(9, overlapped=True, rdma={"tx_rdma_ucast_bytes": 10 * S}, ethtool=eth))
+    v = _verdict(tmp_path, lines)
+    assert v.tx_bytes_per_coll == S
+    assert (v.pause_rx, v.pause_tx) == (0, 12)
+
+
+def test_devices_are_summed(tmp_path):
+    r = json.loads(_rec(0))
+    r["net_counters"]["devices"].append(
+        {"name": "rdma1", "rdma": {"tx_rdma_ucast_bytes": S, "tx_rdma_retx_pkts": 1},
+         "ethtool": None})
+    lines = [json.dumps(r)] + [_rec(i) for i in range(1, 3)]
+    v = _verdict(tmp_path, lines)
+    assert v.drivers["tx_rdma_retx_pkts"] == (1, 1, [0])
+    assert v.tx_bytes_per_coll == S * 4 / 3
+
+
+def test_trace_marks_overlapped_windows(tmp_path):
+    a = _write(tmp_path, [_rec(0, overlapped=True, n_ranks=1)])
+    recs, _ = load([a], warmup=0)
+    cats = [e["cat"] for e in build_trace(recs)["traceEvents"] if e["ph"] == "X"]
+    assert cats == ["overlapped", "read"]
+
+
+def test_incomplete_summary_warns(tmp_path, capsys):
+    path = _write(tmp_path, [_rec(0, n_ranks=1),
+                             json.dumps({"summary": {"complete": False, "net_counters": {
+                                 "records": 1, "queued_at_finalize": 1}}})])
+    main([path, "--warmup", "0"])
+    captured = capsys.readouterr()
+    assert "complete=false" in captured.err
+    assert "1 not written by finalize" in captured.out
+
+
+def test_bad_lines_and_foreign_files_are_tolerated(tmp_path):
+    p = tmp_path / "other.jsonl"
+    p.write_text("not json\n" + _rec(0, n_ranks=1) + "\n")
+    recs, _ = load([str(p)], warmup=0)
+    assert len(recs) == 1 and recs[0].host == "?"
