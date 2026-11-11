@@ -29,6 +29,8 @@ class IpcMappingGuard {
 
   IpcMappingGuard(const IpcMappingGuard&) = delete;
   IpcMappingGuard(IpcMappingGuard&&) = delete;
+  IpcMappingGuard& operator=(const IpcMappingGuard&) = delete;
+  IpcMappingGuard& operator=(IpcMappingGuard&&) = delete;
 
   ~IpcMappingGuard() {
     // No Catch macros, don't want to possibly throw in the destructor

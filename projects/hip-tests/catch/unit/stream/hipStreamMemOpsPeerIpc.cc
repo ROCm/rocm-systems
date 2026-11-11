@@ -117,6 +117,8 @@ class ImportedWindowGuard {
 
   ImportedWindowGuard(const ImportedWindowGuard&) = delete;
   ImportedWindowGuard(ImportedWindowGuard&&) = delete;
+  ImportedWindowGuard& operator=(const ImportedWindowGuard&) = delete;
+  ImportedWindowGuard& operator=(ImportedWindowGuard&&) = delete;
 
   ~ImportedWindowGuard() {
     // No Catch macros, don't want to possibly throw in the destructor

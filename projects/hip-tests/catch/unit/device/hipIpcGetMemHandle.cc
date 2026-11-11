@@ -134,6 +134,8 @@ class VmmMappingGuard {
 
   VmmMappingGuard(const VmmMappingGuard&) = delete;
   VmmMappingGuard(VmmMappingGuard&&) = delete;
+  VmmMappingGuard& operator=(const VmmMappingGuard&) = delete;
+  VmmMappingGuard& operator=(VmmMappingGuard&&) = delete;
 
   ~VmmMappingGuard() {
     // No Catch macros, don't want to possibly throw in the destructor
