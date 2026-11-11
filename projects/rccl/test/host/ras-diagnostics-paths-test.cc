@@ -146,83 +146,43 @@ TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_FiltersRegistryAndPacksOnlyIni
   EXPECT_EQ(RAS_DIAG_PATHS_LOCAL_GPU_MISSING, rasDiagnosticsPathsDataFromRecord(local.records)->state);
 }
 
-TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_FilteredInProgressCommUsesAvailableTopology) {
+TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_InitializationAndFilterControlTopologyReadiness) {
   ras_test::OwnedComm selected(0x123, 0x456, 0x789, 0);
   ras_test::OwnedComm other(0x123, 0x456, 0x790, 0);
   auto topology = std::make_unique<ncclTopoSystem>();
   topology->nodes[GPU].count = 1;
   topology->nodes[GPU].nodes[0].gpu.rank = 0;
-  selected.comm->topo = topology.get();
   selected.comm->nRanks = 1;
-  selected.comm->initState = ncclInProgress;
-  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({other.comm.get(), selected.comm.get()}));
-  context_.hasCommFilter = true;
   context_.commFilter = {0x123, 0x456, 0x789};
-  rasDiagnosticsLocalData local{};
-
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
-  std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
-
-  ASSERT_EQ(1, local.nRecords);
-  EXPECT_EQ(RAS_DIAG_PATHS_AVAILABLE, rasDiagnosticsPathsDataFromRecord(local.records)->state);
-  EXPECT_EQ(1u << PATH_LOC, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_InProgressWithoutReadyTopologyReportsUnavailable) {
-  ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
-  comm.comm->initState = ncclInProgress;
-  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
-  for (bool filtered : {false, true}) {
-    SCOPED_TRACE(filtered);
-    context_.hasCommFilter = filtered;
-    context_.commFilter = {0x123, 0x456, 0x789};
+  struct Case {
+    const char* name;
+    ncclResult_t initState;
+    bool filtered;
+    bool topologyReady;
+    rasDiagnosticsPathsState expected;
+  };
+  const Case cases[] = {
+      {"filtered in progress", ncclInProgress, true, true, RAS_DIAG_PATHS_AVAILABLE},
+      {"unfiltered in progress", ncclInProgress, false, true, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY},
+      {"filtered failed", ncclSystemError, true, true, RAS_DIAG_PATHS_AVAILABLE},
+      {"filtered missing topology", ncclInProgress, true, false, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY},
+      {"unfiltered missing topology", ncclInProgress, false, false, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    selected.comm->initState = test.initState;
+    selected.comm->topo = test.topologyReady ? topology.get() : nullptr;
+    context_.hasCommFilter = test.filtered;
+    const std::vector<ncclComm*> comms = test.filtered ? std::vector{other.comm.get(), selected.comm.get()}
+                                                     : std::vector{selected.comm.get()};
+    ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms(comms));
     rasDiagnosticsLocalData local{};
     ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
     std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
     ASSERT_EQ(1, local.nRecords);
-    EXPECT_EQ(RAS_DIAG_PATHS_TOPOLOGY_NOT_READY, rasDiagnosticsPathsDataFromRecord(local.records)->state);
-    EXPECT_EQ(0u, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
+    EXPECT_EQ(test.expected, rasDiagnosticsPathsDataFromRecord(local.records)->state);
+    EXPECT_EQ(test.expected == RAS_DIAG_PATHS_AVAILABLE ? 1u << PATH_LOC : 0u,
+              rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
   }
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_UnfilteredInProgressCommDoesNotReadAvailableTopology) {
-  ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
-  auto topology = std::make_unique<ncclTopoSystem>();
-  topology->nodes[GPU].count = 1;
-  topology->nodes[GPU].nodes[0].gpu.rank = 0;
-  comm.comm->topo = topology.get();
-  comm.comm->nRanks = 1;
-  comm.comm->initState = ncclInProgress;
-  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
-  rasDiagnosticsLocalData local{};
-
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
-  std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
-
-  ASSERT_EQ(1, local.nRecords);
-  EXPECT_EQ(RAS_DIAG_PATHS_TOPOLOGY_NOT_READY, rasDiagnosticsPathsDataFromRecord(local.records)->state);
-  EXPECT_EQ(0u, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_FilteredFailedCommStillUsesAvailableTopology) {
-  ras_test::OwnedComm comm(0x123, 0x456, 0x789, 0);
-  auto topology = std::make_unique<ncclTopoSystem>();
-  topology->nodes[GPU].count = 1;
-  topology->nodes[GPU].nodes[0].gpu.rank = 0;
-  comm.comm->topo = topology.get();
-  comm.comm->nRanks = 1;
-  comm.comm->initState = ncclSystemError;
-  ASSERT_NO_FATAL_FAILURE(ras_test::InstallNcclComms({comm.comm.get()}));
-  context_.hasCommFilter = true;
-  context_.commFilter = {0x123, 0x456, 0x789};
-  rasDiagnosticsLocalData local{};
-
-  ASSERT_EQ(ncclSuccess, rasDiagnosticsPathsCollectLocal(&context_, &local));
-  std::unique_ptr<char, decltype(&std::free)> owner(local.records, std::free);
-
-  ASSERT_EQ(1, local.nRecords);
-  EXPECT_EQ(RAS_DIAG_PATHS_AVAILABLE, rasDiagnosticsPathsDataFromRecord(local.records)->state);
-  EXPECT_EQ(1u << PATH_LOC, rasDiagnosticsPathsDataFromRecord(local.records)->pathMask);
 }
 
 TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_NoEligibleCommsPublishesNoRecords) {
@@ -255,35 +215,46 @@ TEST_F(RasDiagnosticsPathsMicrotest, CollectLocal_NullArgumentsAreRejected) {
   EXPECT_EQ(nullptr, local.records);
 }
 
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_CompleteUniformRanksReportOk) {
+TEST_F(RasDiagnosticsPathsMicrotest, Summarize_ReportsExactLinesForCompletePartialAndUnavailableRanks) {
   const uint32_t mask = (1u << PATH_LOC) | (1u << PATH_SYS) | (1u << PATH_NET);
-  ASSERT_EQ(ncclSuccess, Summarize({{1, mask}, {0, mask}}));
-  EXPECT_EQ((std::vector<std::string>{"[OK]   Paths: self+SYS+NET across 2 ranks in comm 0x123"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_PartialPathTypesReportExactRankCounts) {
-  ASSERT_EQ(ncclSuccess, Summarize({{1, (1u << PATH_LOC) | (1u << PATH_C2C)},
-                                   {0, (1u << PATH_LOC) | (1u << PATH_NET)}}));
-  EXPECT_EQ((std::vector<std::string>{"[INFO] Paths: self+C2C(1/2)+NET(1/2) across 2 ranks in comm 0x123"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_DisconnectedPathsAreInformationalEvenWhenUniform) {
-  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_DIS}, {1, 1u << PATH_DIS}}));
-  EXPECT_EQ((std::vector<std::string>{"[INFO] Paths: DIS across 2 ranks in comm 0x123"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_MissingGpuReportsRankAndPartialPaths) {
-  ASSERT_EQ(ncclSuccess, Summarize({{1, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING}, {0, 1u << PATH_LOC}}));
-  EXPECT_EQ((std::vector<std::string>{
-      "[INFO] Paths: could not locate the rank's own GPU in the topology, so its paths are unknown -- {1} in comm 0x123",
-      "[INFO] Paths: self(1/2) across 2 ranks in comm 0x123"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_NotReadyAndIncompleteSuppressSuccessSummary) {
-  ASSERT_EQ(ncclSuccess, Summarize({{1, 1u << PATH_LOC, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}}));
-  EXPECT_EQ((std::vector<std::string>{
-      "[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789",
-      "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}), output_.lines);
+  const rasCommId first{0x123, 0x456, 0x789};
+  const rasCommId second{0x123, 0x456, 0x790};
+  const rasCommId third{0x123, 0x457, 0x789};
+  struct Case {
+    const char* name;
+    std::vector<Row> rows;
+    std::vector<std::string> expected;
+  };
+  const Case cases[] = {
+      {"uniform", {{1, mask}, {0, mask}}, {"[OK]   Paths: self+SYS+NET across 2 ranks in comm 0x123"}},
+      {"partial types", {{1, (1u << PATH_LOC) | (1u << PATH_C2C)}, {0, (1u << PATH_LOC) | (1u << PATH_NET)}},
+       {"[INFO] Paths: self+C2C(1/2)+NET(1/2) across 2 ranks in comm 0x123"}},
+      {"disconnected", {{0, 1u << PATH_DIS}, {1, 1u << PATH_DIS}}, {"[INFO] Paths: DIS across 2 ranks in comm 0x123"}},
+      {"missing GPU", {{1, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING}, {0, 1u << PATH_LOC}},
+       {"[INFO] Paths: could not locate the rank's own GPU in the topology, so its paths are unknown -- "
+        "{1} in comm 0x123",
+        "[INFO] Paths: self(1/2) across 2 ranks in comm 0x123"}},
+      {"incomplete and not ready", {{1, 1u << PATH_LOC, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}},
+       {"[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789",
+        "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}},
+      {"incomplete ready", {{0, 1u << PATH_LOC}},
+       {"[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}},
+      {"incomplete missing GPU", {{0, 1u << PATH_LOC, RAS_DIAG_PATHS_AVAILABLE, first, 3},
+                                  {1, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING, first, 3}},
+       {"[INFO] Paths: diagnostics incomplete, gathered 2/3 ranks in comm 0x123/0x456/0x789"}},
+      {"complete with unavailable topology", {{0, 1u << PATH_LOC}, {1, 0, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}},
+       {"[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}},
+      {"full communicator identity", {{0, 1u << PATH_NET, RAS_DIAG_PATHS_AVAILABLE, third, 1},
+                                       {0, 1u << PATH_SYS, RAS_DIAG_PATHS_AVAILABLE, second, 1},
+                                       {0, 1u << PATH_LOC, RAS_DIAG_PATHS_AVAILABLE, first, 1}},
+       {"[OK]   Paths: self across 1 ranks in comm 0x123", "[OK]   Paths: SYS across 1 ranks in comm 0x123",
+        "[OK]   Paths: NET across 1 ranks in comm 0x123"}}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.name);
+    output_ = {};
+    ASSERT_EQ(ncclSuccess, Summarize(test.rows));
+    EXPECT_EQ(test.expected, output_.lines);
+  }
 }
 
 TEST_F(RasDiagnosticsPathsMicrotest, Summarize_MissingGpuRankSetIsBoundedAndRetainsTotal) {
@@ -300,40 +271,6 @@ TEST_F(RasDiagnosticsPathsMicrotest, Summarize_MissingGpuRankSetIsBoundedAndReta
               "[INFO] Paths: could not locate the rank's own GPU in the topology, so its paths are unknown -- "
               "{0,1,2,3,4,5,6,7,...} (N=10) in comm 0x123"}),
             output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_IncompleteReadyRanksSuppressSuccessSummary) {
-  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC}}));
-  EXPECT_EQ((std::vector<std::string>{
-      "[INFO] Paths: diagnostics incomplete, gathered 1/2 ranks in comm 0x123/0x456/0x789"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_IncompleteRanksSuppressMissingGpuReport) {
-  const rasCommId id{0x123, 0x456, 0x789};
-  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC, RAS_DIAG_PATHS_AVAILABLE, id, 3},
-                                   {1, 0, RAS_DIAG_PATHS_LOCAL_GPU_MISSING, id, 3}}));
-  EXPECT_EQ((std::vector<std::string>{
-              "[INFO] Paths: diagnostics incomplete, gathered 2/3 ranks in comm 0x123/0x456/0x789"}),
-            output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_CompleteRanksWithUnavailableTopologySuppressSuccessSummary) {
-  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_LOC}, {1, 0, RAS_DIAG_PATHS_TOPOLOGY_NOT_READY}}));
-  EXPECT_EQ((std::vector<std::string>{
-      "[INFO] Paths: incomplete for comm 0x123: topology-dependent data was unavailable for 1 of 2 ranks"}), output_.lines);
-}
-
-TEST_F(RasDiagnosticsPathsMicrotest, Summarize_GroupsByFullCommunicatorIdentity) {
-  const rasCommId first{0x123, 0x456, 0x789};
-  const rasCommId second{0x123, 0x456, 0x790};
-  const rasCommId third{0x123, 0x457, 0x789};
-  ASSERT_EQ(ncclSuccess, Summarize({{0, 1u << PATH_NET, RAS_DIAG_PATHS_AVAILABLE, third, 1},
-                                   {0, 1u << PATH_SYS, RAS_DIAG_PATHS_AVAILABLE, second, 1},
-                                   {0, 1u << PATH_LOC, RAS_DIAG_PATHS_AVAILABLE, first, 1}}));
-  EXPECT_EQ((std::vector<std::string>{
-      "[OK]   Paths: self across 1 ranks in comm 0x123",
-      "[OK]   Paths: SYS across 1 ranks in comm 0x123",
-      "[OK]   Paths: NET across 1 ranks in comm 0x123"}), output_.lines);
 }
 
 TEST_F(RasDiagnosticsPathsMicrotest, Summarize_ReporterFailuresStopAtEachEmission) {
