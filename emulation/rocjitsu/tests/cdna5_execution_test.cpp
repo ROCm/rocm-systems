@@ -243,7 +243,7 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderScalarOffsetFailureDoesNotThrowOrC
     ASSERT_NE(load->execute, nullptr);
     wave->clear_instruction_execution_error();
     // Bypass the CU's legacy catch so restoring the throw fails this test.
-    ASSERT_NO_THROW(load->execute(*load, wave));
+    load->execute(*load, wave);
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
     EXPECT_EQ(load->data(), nullptr);
@@ -272,7 +272,7 @@ TEST(Gfx1250ExecutionTest, ArchitectureDecoderVectorScalarSourceFailureRejectsMe
     std::unique_ptr<Instruction> &load = decoded.value();
     ASSERT_NE(load->execute, nullptr);
     wave->clear_instruction_execution_error();
-    ASSERT_NO_THROW(load->execute(*load, wave));
+    load->execute(*load, wave);
     EXPECT_EQ(wave->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
     ASSERT_NE(load->data(), nullptr);

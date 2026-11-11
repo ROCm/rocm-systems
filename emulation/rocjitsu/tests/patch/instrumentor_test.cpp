@@ -397,7 +397,7 @@ TEST(MakeTrampolinePlan, UnsupportedArchitectureReturnsFailureWithoutThrowing) {
   site.original_bytes = {1, 2, 3, 4};
   std::string error;
   std::optional<TrampolinePlan> plan;
-  ASSERT_NO_THROW(plan = make_trampoline_plan(site, ROCJITSU_CODE_ARCH_RV32I, 0, &error));
+  plan = make_trampoline_plan(site, ROCJITSU_CODE_ARCH_RV32I, 0, &error);
   EXPECT_FALSE(plan.has_value());
   EXPECT_EQ(error, "Unimplemented instruction: s_nop for target architecture");
 }
@@ -2052,7 +2052,7 @@ TEST(InstrumentorProbePatch, RejectsNoSpillRdna2BoundaryDrainWithoutOutput) {
   pt.probe_symbol = "rj_test_probe";
   instr.add_point(pt);
 
-  EXPECT_NO_THROW({
+  {
     const auto result = instr.patch_with_debug_summaries();
     ASSERT_EQ(result.errors.size(), 1u);
     EXPECT_EQ(result.errors.front(),
@@ -2060,7 +2060,7 @@ TEST(InstrumentorProbePatch, RejectsNoSpillRdna2BoundaryDrainWithoutOutput) {
               "all-loads wait for target architecture");
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.patches.empty());
-  });
+  }
 }
 
 TEST(InstrumentorProbePatch, EmitsValidElfWithProbeMetadata) {

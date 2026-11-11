@@ -101,7 +101,7 @@ public:
 
   /// Select one local node. An empty selector is valid only for one-node input.
   /// Returns failure with one diagnostic for an unknown or ambiguous selection.
-  /// The returned pointer borrows this graph. Allocation failures may still throw.
+  /// The returned pointer borrows this graph.
   util::FailureOr<const SystemNode *> select_node(util::DiagnosticEmitter emit_error,
                                                   std::string_view node_id = {}) const;
 
@@ -120,7 +120,7 @@ public:
 
 /// Normalize and validate an in-scope FlatBuffers configuration. The returned
 /// graph does not retain any FlatBuffers pointers. Invalid input returns failure
-/// after emitting one diagnostic. Allocation and library failures may still throw.
+/// after emitting one diagnostic.
 util::FailureOr<SystemGraph> system_graph_from_fb(const fb::SimulationConfig *config,
                                                   util::DiagnosticEmitter emit_error);
 

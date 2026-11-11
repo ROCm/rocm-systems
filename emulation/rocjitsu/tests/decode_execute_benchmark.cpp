@@ -20,7 +20,6 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "test_encodings_util.h"
-#include "util/except.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/test_encodings.h"
@@ -88,13 +87,10 @@ std::vector<CorpusEntry> build_corpus(const Encoding *encodings, size_t num_enco
     auto cat = classify_mnemonic(te.mnemonic);
 
     // Try decode — skip if the synthesized encoding doesn't decode.
-    try {
-      auto *inst = decode_valid(decoder, te.words.data());
-      if (inst) {
-        corpus.push_back({te.mnemonic, te.words, cat});
-        delete inst;
-      }
-    } catch (...) {
+    auto *inst = decode_valid(decoder, te.words.data());
+    if (inst) {
+      corpus.push_back({te.mnemonic, te.words, cat});
+      delete inst;
     }
   }
   return corpus;
@@ -191,10 +187,7 @@ void run_benchmark(rj_code_arch_t arch, std::string_view arch_name, const Encodi
     for (const auto *entry : executable) {
       auto *inst = decode_valid(*decoder, entry->words.data());
       if (inst) {
-        try {
-          (void)cu->execute_instruction(inst, *wf);
-        } catch (...) {
-        }
+        (void)cu->execute_instruction(inst, *wf);
         delete inst;
         if (wf->is_halted()) {
           wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);

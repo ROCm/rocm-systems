@@ -44,7 +44,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -878,7 +877,7 @@ TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_NO_THROW(cu->step());
+  cu->step();
   EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
   EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
@@ -911,7 +910,7 @@ TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_NO_THROW(cu->step());
+  cu->step();
   EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
   EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
@@ -1473,9 +1472,9 @@ TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
     if (issue) {
       for (size_t i = 0; i < words.size(); ++i)
         mem.write32(wave->pc + 4 * i, words[i]);
-      EXPECT_NO_THROW(cu->step());
+      cu->step();
     } else {
-      EXPECT_NO_THROW(EXPECT_TRUE(cu->execute_instruction(inst.get(), *wave).failed()));
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wave).failed());
     }
     EXPECT_EQ(failures, 1u);
     EXPECT_EQ(wave->pc, 0x200000u);
@@ -1948,7 +1947,7 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsWithGwsAndWorkgroupBarrierWaiters) {
   ASSERT_NE(peer, nullptr);
   peer_cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
   peer_cu->gws_barrier_arrive(*peer, 0, 1);
-  EXPECT_NO_THROW((void)cu->run_quantum());
+  (void)cu->run_quantum();
   EXPECT_TRUE(waiter->is_halted());
   EXPECT_TRUE(sibling->is_halted());
   EXPECT_FALSE(store->any_parked());
@@ -1974,7 +1973,7 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
   waiter_cu->gws_barrier_arrive(*waiter, 0, 1);
   for (int i = 0; i < 3; ++i) {
     amdgpu::FunctionalQuantumResult result{};
-    ASSERT_NO_THROW(result = waiter_cu->run_quantum());
+    result = waiter_cu->run_quantum();
     EXPECT_TRUE(result.yielded);
     EXPECT_EQ(result.iterations, 1u);
     EXPECT_EQ(result.next_tick_delay(), amdgpu::ComputeUnitCore::kFunctionalQuantum);
@@ -1984,7 +1983,7 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
   ASSERT_NE(producer, nullptr);
   producer_cu->begin_workgroup(0, 0, 1);
   producer_cu->gws_barrier_arrive(*producer, 0, 1);
-  EXPECT_NO_THROW((void)waiter_cu->run_quantum());
+  (void)waiter_cu->run_quantum();
   EXPECT_TRUE(waiter->is_halted());
   EXPECT_FALSE(store->any_parked());
   producer->halt();
@@ -2041,19 +2040,19 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
     producer_cu->begin_workgroup(0, 0, 1);
     waiter_cu->gws_sema_p(*waiter, 0);
     for (int i = 0; i < (same_process ? 16 : 3); ++i) {
-      ASSERT_NO_THROW(producer_cu->step());
+      producer_cu->step();
       ASSERT_EQ(producer->pc, kPc + 4 * (i + 1));
-      ASSERT_NO_THROW(waiter_cu->step());
+      waiter_cu->step();
       EXPECT_EQ(waiter->state(), amdgpu::WfState::GWS_WAIT);
     }
     if (same_process) {
       producer_cu->gws_sema_v(*producer, 0);
-      ASSERT_NO_THROW(waiter_cu->step());
+      waiter_cu->step();
       EXPECT_NE(waiter->state(), amdgpu::WfState::GWS_WAIT);
       waiter->halt();
     } else {
-      ASSERT_NO_THROW(producer_cu->step());
-      EXPECT_NO_THROW(waiter_cu->step());
+      producer_cu->step();
+      waiter_cu->step();
       EXPECT_EQ(waiter->instruction_execution_error(),
                 amdgpu::InstructionExecutionError::GwsFailure);
       EXPECT_STREQ(waiter->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
@@ -2073,17 +2072,17 @@ TEST_P(DsGwsTest, WaitBudgetPausesAndCanBeDisabled) {
   cu->gws_sema_p(*wave, 0);
   wave->set_debug_suspended(true);
   for (int i = 0; i < 8; ++i)
-    EXPECT_NO_THROW(cu->step());
+    cu->step();
   wave->set_debug_suspended(false);
   wave->set_runtime_suspended(true);
   for (int i = 0; i < 8; ++i)
-    EXPECT_NO_THROW(cu->step());
+    cu->step();
   wave->set_runtime_suspended(false);
-  EXPECT_NO_THROW(cu->step());
+  cu->step();
   EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
   cu->set_gws_wait_limit(0);
   for (int i = 0; i < 8; ++i)
-    EXPECT_NO_THROW(cu->step());
+    cu->step();
   EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
   cu->gws_sema_v(*wave, 0);
   EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);

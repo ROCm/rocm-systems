@@ -1008,26 +1008,6 @@ if(RJ_BUILD_CONSAN_ANALYZER)
     )
     rj_configure_target(consan_analysis_test WARNINGS)
     rj_add_gtest_tests(consan_analysis_test)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        add_library(
-            consan_analyze_allocation_failure
-            SHARED
-            code/consan/analyze_allocation_failure.cpp
-        )
-        target_link_libraries(
-            consan_analyze_allocation_failure
-            PRIVATE ${CMAKE_DL_LIBS}
-        )
-        rj_configure_target(consan_analyze_allocation_failure WARNINGS)
-        add_test(
-            NAME ConSanAnalysis.CliUnexpectedException
-            COMMAND
-                ${Python3_EXECUTABLE} -B
-                ${CMAKE_CURRENT_SOURCE_DIR}/code/consan/analyze_exception_test.py
-                --analyzer $<TARGET_FILE:rj_consan_analyze> --injector
-                $<TARGET_FILE:consan_analyze_allocation_failure>
-        )
-    endif()
     if(CMAKE_NM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(
             NAME ConSanAnalysis.SymbolBoundary
@@ -1135,23 +1115,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(cache_allocation_failure_test WARNINGS)
     rj_add_gtest_tests(cache_allocation_failure_test)
-
-    # Keep allocation injection isolated from the main test executable.
-    add_executable(
-        queue_registration_allocation_failure_test
-        queue_registration_allocation_failure_test.cpp
-    )
-    target_link_libraries(
-        queue_registration_allocation_failure_test
-        PRIVATE
-            ${RJ_OBJECT_LIBS}
-            util
-            flatbuffers
-            Threads::Threads
-            GTest::gtest_main
-    )
-    rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
-    rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
@@ -4011,7 +3974,7 @@ if(RJ_ENABLE_HIP_TESTS)
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
-                --rocm-path=${ROCM_PATH} -std=c++20 -O2
+                --rocm-path=${ROCM_PATH} -std=c++20 -O2 -fno-exceptions
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
                 -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
                 ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
@@ -4646,7 +4609,7 @@ if(RJ_ENABLE_HIP_TESTS AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
         OUTPUT ${CVT_NARROW_BIN}
         COMMAND
             ${AMDCXX} -x hip --offload-arch=gfx950 --rocm-path=${ROCM_PATH}
-            -std=c++20 ${RJ_HIP_SANITIZER_FLAGS}
+            -std=c++20 -fno-exceptions ${RJ_HIP_SANITIZER_FLAGS}
             "-I$<JOIN:$<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
             -o ${CVT_NARROW_BIN}
             ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp

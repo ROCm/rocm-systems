@@ -11,7 +11,6 @@
 #include <array>
 #include <bit>
 #include <cstdint>
-#include <exception>
 #include <memory>
 #include <span>
 
@@ -77,11 +76,11 @@ public:
     ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
                  uint64_t pc, uint32_t vmid, Words words, bool enabled = true)
         : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
-          enabled_(enabled), exceptions_(std::uncaught_exceptions()) {}
+          enabled_(enabled) {}
 
     [[gnu::always_inline]] ~ScopedReturn() {
       if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
-          !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
+          !borrows_fetch_buffer(*instruction_, words_))
         cache_.put(pc_, vmid_, words_, instruction_);
     }
 
@@ -98,7 +97,6 @@ public:
     uint32_t vmid_;
     Words words_;
     bool enabled_;
-    int exceptions_;
   };
 
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.

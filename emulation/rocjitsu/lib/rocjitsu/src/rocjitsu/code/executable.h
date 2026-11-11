@@ -43,7 +43,6 @@ public:
   /// @brief Load an executable from the file at @p path.
   /// @details Expected loading and parsing failures leave is_valid() false.
   /// @param[in] path Path to an x86 HIP fat binary or standalone device ELF.
-  /// @throws std::bad_alloc if memory allocation fails.
   explicit Executable(const std::string &path);
 
   /// @brief Load an executable from an in-memory image.

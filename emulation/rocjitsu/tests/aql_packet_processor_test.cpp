@@ -379,7 +379,7 @@ TEST(AqlPacketProcessorTest, ReportsMalformedExtendedDispatchDimensionsWithoutTh
 
   auto bytes = packet_bytes(packet);
   AqlPacketProcessResult result{};
-  EXPECT_NO_THROW(result = processor.process(request_for(bytes)));
+  result = processor.process(request_for(bytes));
   EXPECT_EQ(result.packet.status, PacketProcessStatus::Malformed);
   EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
   EXPECT_EQ(result.diagnostic, AqlPacketDiagnostic::MalformedExtendedDispatchDimensions);
@@ -389,7 +389,7 @@ TEST(AqlPacketProcessorTest, ReportsMalformedExtendedDispatchDimensionsWithoutTh
   packet.cluster_count_x = std::numeric_limits<decltype(packet.cluster_count_x)>::max();
   packet.workgroup_size_x = std::numeric_limits<decltype(packet.workgroup_size_x)>::max();
   bytes = packet_bytes(packet);
-  EXPECT_NO_THROW(result = processor.process(request_for(bytes)));
+  result = processor.process(request_for(bytes));
   EXPECT_EQ(result.packet.status, PacketProcessStatus::Malformed);
   EXPECT_EQ(result.diagnostic, AqlPacketDiagnostic::MalformedExtendedDispatchDimensions);
   EXPECT_EQ(admissions, 0u);

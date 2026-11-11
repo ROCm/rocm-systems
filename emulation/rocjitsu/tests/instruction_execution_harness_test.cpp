@@ -6,7 +6,7 @@
 ///
 /// For each ISA, iterates auto-generated encodings that are safe to execute on
 /// a zeroed wavefront, decodes them, and calls execute(). Decode failures are
-/// rejected, and UnimplementedInst results must exactly match the explicit
+/// rejected, and unimplemented-instruction results must exactly match the explicit
 /// expectation for that ISA.
 
 #include "compute_unit_test_util.h"
@@ -64,7 +64,6 @@
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "test_encodings_util.h"
 #include "util/data_types.h"
-#include "util/except.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
 
@@ -89,7 +88,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <limits>
 #include <memory>
 #include <span>
@@ -738,20 +736,12 @@ void run_execution_harness(rj_code_arch_t arch, std::string_view arch_name,
     ASSERT_NE(wf, nullptr) << "Failed to dispatch WF for " << te.mnemonic;
 
     // Expected rejections use the result and retain a reason for diagnostics.
-    try {
-      if (cu->execute_instruction(inst.get(), *wf).succeeded()) {
-        ++executed;
-      } else if (wf->instruction_execution_error() ==
-                 amdgpu::InstructionExecutionError::UnimplementedInstruction) {
-        unimpl_list.emplace_back(te.mnemonic);
-      } else {
-        execution_fail_list.emplace_back(te.mnemonic);
-      }
-    } catch (const util::UnimplementedInst &) {
+    if (cu->execute_instruction(inst.get(), *wf).succeeded()) {
+      ++executed;
+    } else if (wf->instruction_execution_error() ==
+               amdgpu::InstructionExecutionError::UnimplementedInstruction) {
       unimpl_list.emplace_back(te.mnemonic);
-    } catch (const std::exception &error) {
-      execution_fail_list.emplace_back(std::string(te.mnemonic).append(": ").append(error.what()));
-    } catch (...) {
+    } else {
       execution_fail_list.emplace_back(te.mnemonic);
     }
 

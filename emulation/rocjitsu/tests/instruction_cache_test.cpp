@@ -27,7 +27,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -884,7 +883,7 @@ TEST(DecodedInstructionCacheTest, InFlightOwnershipPreventsReuse) {
   EXPECT_EQ(decoder.calls, 2u);
 }
 
-TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstructions) {
+TEST(DecodedInstructionCacheTest, FailedExecutionDoesNotRetainInstructions) {
   CountingDecoder decoder;
   amdgpu::DecodedInstructionCache cache;
   std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words{kSNop};
@@ -896,17 +895,9 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
     returned.discard();
   }
   EXPECT_EQ(decoder.calls, 1u);
-  try {
-    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
-    ASSERT_FALSE(decoded.failed());
-    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
-                                                           words);
-    throw std::runtime_error("execution callback failed");
-  } catch (const std::runtime_error &) {
-  }
   auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
   ASSERT_FALSE(decoded.failed());
-  EXPECT_EQ(decoder.calls, 3u);
+  EXPECT_EQ(decoder.calls, 2u);
 }
 
 // An external decoder may return an instruction whose raw encoding points into
@@ -1525,34 +1516,6 @@ TEST(InstructionCacheCuTest, ReentrantFaultCancellationKeepsAccessUntilIssueRetu
 
   ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_TRUE(lifetime.expired()) << "fault handling left the binding retained after issue";
-}
-
-TEST(InstructionCacheCuTest, ExceptionalQuantumReleasesTheProcessBeforeCancellation) {
-  GpuVm gpu_vm;
-  CuFixture fixture("vm_exception_lifetime_cu");
-  ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  auto backing = std::make_shared<ExecutableAddressSpace>(0);
-  auto owner = std::make_shared<rocjitsu::KfdProcess>(7);
-  const std::weak_ptr<rocjitsu::KfdProcess> lifetime = owner;
-  const auto handle =
-      gpu_vm.register_address_space(7, backing, backing, [owner](uint64_t, amdgpu::VmAccessKind) {
-        (void)owner;
-        throw std::runtime_error("fault callback failed");
-      });
-  ASSERT_TRUE(handle);
-  owner.reset();
-  fixture.cu()->set_gpu_vm(&gpu_vm);
-  auto *wf = fixture.launch(1, 0, kCodeBase + InstructionCache::kLineSize * 4);
-  ASSERT_NE(wf, nullptr);
-  wf->set_dispatch_id(1);
-  wf->set_process_id(7);
-  wf->set_address_space(handle);
-  EXPECT_THROW(fixture.cu()->run_quantum(), std::runtime_error);
-  ASSERT_TRUE(fixture.cu()->has_active_wfs());
-  ASSERT_TRUE(gpu_vm.unregister_address_space(handle));
-  EXPECT_TRUE(lifetime.expired()) << "exception unwinding must release the quantum snapshot";
-  fixture.cu()->abort_dispatch(1);
-  EXPECT_TRUE(lifetime.expired());
 }
 
 TEST(InstructionCacheCuTest, ActiveWaveSharesReporterAcrossQuantaAndDirectSteps) {

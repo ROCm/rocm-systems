@@ -26,13 +26,12 @@ void expect_restore_failure(const std::string &path, std::string_view expected) 
     message.assign(text);
     ++diagnostics;
   };
-  // Call below the C API's exception boundary: reverting a returned failure to
-  // a throw must fail this check even though the C API would catch it.
-  EXPECT_NO_THROW({
+  // Call the loader directly so failures are checked below the C API status mapping.
+  {
     util::FailureOr<config::LoadedConfig> result =
         config::restore_checkpoint(path, util::DiagnosticEmitter(sink));
     EXPECT_TRUE(result.failed());
-  });
+  }
   EXPECT_EQ(diagnostics, 1u);
   EXPECT_EQ(message, expected);
 }

@@ -259,14 +259,14 @@ TEST(CpuDispatchPoolTest, WorkerCancelsUnusedTicketsWhileCallerAndPeerAreGated) 
     target_gate->release_worker();
     EXPECT_EQ(target_run.wait_for(std::chrono::seconds(2)), std::future_status::ready);
     probe_gate->release();
-    EXPECT_NO_THROW(probe_run.get());
+    probe_run.get();
     for (const auto *wf : probe.wfs)
       EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
   }
   target_gate->release_all();
   foreign_gate->release();
-  EXPECT_NO_THROW(target_run.get());
-  EXPECT_NO_THROW(foreign_run.get());
+  target_run.get();
+  foreign_run.get();
   for (const auto *fixture : {&foreign, &target})
     for (const auto *wf : fixture->wfs)
       EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
@@ -315,7 +315,7 @@ TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
     const bool exceeded_width = gate->wait_for_entries(width + 1, std::chrono::milliseconds(100));
     gate->release();
     EXPECT_FALSE(exceeded_width) << "requested width " << width;
-    EXPECT_NO_THROW(run.get());
+    run.get();
     for (auto *wf : fixture.wfs)
       EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
   }
@@ -340,7 +340,7 @@ TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {
     }));
   }
   for (auto &run : runs)
-    EXPECT_NO_THROW(run.get());
+    run.get();
   for (const auto &fixture : fixtures) {
     for (auto *wf : fixture->wfs) {
       EXPECT_EQ(wf->trace_inst_count_, kRounds);
@@ -424,7 +424,7 @@ TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   fixture.memory.write32(kProgramBase, test::kUnimplementedInstruction);
 
-  EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
+  pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4);
   for (const auto &cu : fixture.cus)
     EXPECT_TRUE(cu->is_idle());
 }
@@ -452,8 +452,8 @@ TEST(CpuDispatchPoolTest, SubmittingThreadRunsOnlyItsOwnSubmission) {
   const auto own_status = own_run.wait_for(std::chrono::seconds(2));
   gate->release();
   EXPECT_EQ(own_status, std::future_status::ready);
-  EXPECT_NO_THROW(own_run.get());
-  EXPECT_NO_THROW(foreign_run.get());
+  own_run.get();
+  foreign_run.get();
   EXPECT_EQ(own.wfs.front()->trace_inst_count_, 1u);
   for (const auto *wf : foreign.wfs)
     EXPECT_EQ(wf->trace_inst_count_, 1u);

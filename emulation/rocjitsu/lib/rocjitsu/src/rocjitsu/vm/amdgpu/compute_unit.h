@@ -206,10 +206,7 @@ public:
   static util::Result validate(const Config &config, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Create a compute unit for the given architecture and execution mode.
-  /// @details Validation finishes before allocating execution state. Allocation failures may still
-  /// throw; already constructed resources are owned by RAII members and are cleaned during
-  /// unwinding. Diagnostic-sink exceptions propagate for both configuration and execution-mode
-  /// rejection.
+  /// @details Validation finishes before allocating execution state.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).
@@ -1361,7 +1358,6 @@ public:
   /// wavefront retains the reason for caller-owned diagnostics.
   /// Each call clears the previous error. Instruction stubs and operand failures
   /// leave the wavefront active; GWS rejection cancels its dispatch.
-  /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
                                    std::string *failure_detail = nullptr) {
     assert(inst->execute && "instruction execution backend is not linked");

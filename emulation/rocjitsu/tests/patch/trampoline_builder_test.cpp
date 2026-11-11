@@ -1033,10 +1033,10 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedSpillBuildersWithoutOutpu
     else
       plan.acc_spills.push_back({cls, 0, 0});
     std::string error;
-    EXPECT_NO_THROW({
+    {
       const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
       EXPECT_FALSE(bytes.has_value());
-    });
+    }
     EXPECT_EQ(error, cls == RegClass::SGPR ? "probe-call emission: spill bracket: Unimplemented "
                                              "instruction: v_writelane_b32 for target architecture"
                                            : "probe-call emission: spill bracket: Unimplemented "
@@ -1051,10 +1051,10 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedSpillBuildersWithoutOutpu
   plan.vgpr_spills.push_back({RegClass::VGPR, 0, 0});
   plan.acc_spills.push_back({RegClass::ACC_VGPR, 0, 4});
   std::string error;
-  EXPECT_NO_THROW({
+  {
     const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
     EXPECT_FALSE(bytes.has_value());
-  });
+  }
   EXPECT_EQ(error, "probe-call emission: spill bracket: Unimplemented instruction: scratch_store "
                    "of an AccVGPR on an arch without them");
 }
@@ -1064,10 +1064,10 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutpu
   plan.is_probe_call = true;
   plan.arch = ROCJITSU_CODE_ARCH_INVALID;
   std::string error;
-  EXPECT_NO_THROW({
+  {
     const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);
     EXPECT_FALSE(bytes.has_value());
-  });
+  }
   EXPECT_EQ(error, "probe-call emission: boundary drain: Unimplemented instruction: all-loads wait "
                    "for target architecture");
 }
@@ -1570,7 +1570,7 @@ TEST(TrampolineBuilder, UnsupportedArchitectureReturnsFailureWithoutPublishingBy
   plan.return_target = 0x104;
   std::string error;
   std::optional<TrampolineBytes> bytes;
-  ASSERT_NO_THROW(bytes = TrampolineBuilder::build(plan, &error));
+  bytes = TrampolineBuilder::build(plan, &error);
   EXPECT_FALSE(bytes.has_value());
   EXPECT_EQ(error, "Unimplemented instruction: s_branch for target architecture");
   EXPECT_EQ(plan.original_words, std::vector<uint32_t>{0xDEADBEEFu});
@@ -1585,7 +1585,7 @@ TEST(TrampolineBuilderPlan, UnsupportedSpecialOperandsLeaveReservationsUnpublish
     plan.preserve_m0 = special == 2;
     std::string error;
     bool planned = true;
-    ASSERT_NO_THROW(planned = TrampolineBuilder::plan_probe_call(plan, kProbeAbi, {}, {}, &error));
+    planned = TrampolineBuilder::plan_probe_call(plan, kProbeAbi, {}, {}, &error);
     EXPECT_FALSE(planned);
     EXPECT_FALSE(plan.is_probe_call);
     EXPECT_TRUE(plan.special_state_saves.empty());
@@ -1624,7 +1624,7 @@ TEST(TrampolineBuilderEmit, OversizedScalarDestinationsReturnFailuresWithoutThro
     }
     std::string error;
     std::optional<TrampolineBytes> bytes;
-    ASSERT_NO_THROW(bytes = TrampolineBuilder::emit_probe_call(plan, &error));
+    bytes = TrampolineBuilder::emit_probe_call(plan, &error);
     EXPECT_FALSE(bytes.has_value());
     EXPECT_EQ(error,
               "probe-call emission: " + std::string(instruction) + " encoding field out of range");

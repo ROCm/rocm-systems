@@ -609,7 +609,7 @@ TEST(ExecutionPluginTest, DispatchPacketCarriesExecutionShapeAndTargetMetadata) 
   packet.kernel_object = kernel_object;
   test::AqlQueue queue(fixture.mem, fixture.cp());
   queue.submit(packet);
-  ASSERT_NO_THROW(fixture.run_until_idle());
+  fixture.run_until_idle();
 
   auto dispatch = std::ranges::find_if(plugin->events, [](const auto &event) {
     return event.kind == HookEvent::DISPATCH_PACKET_PROCESSED;

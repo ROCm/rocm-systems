@@ -361,7 +361,6 @@ AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
   if (binding->initialize(std::move(registration), diagnostic.emitter()).failed()) {
     // Diagnostic sinks may query the adapter, so deliver outside its mutex.
     lock.unlock();
-    // Explicit emit propagates sink exceptions; destructor delivery catches them.
     (void)(emit_error.emit() << diagnostic.message()).emit();
     return {};
   }

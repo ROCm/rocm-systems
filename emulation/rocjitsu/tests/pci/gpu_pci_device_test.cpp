@@ -1345,7 +1345,7 @@ TEST_F(GpuDeviceMes, ResetReturnsFailureWhileGartBindingIsRetained) {
   const uint64_t translation_epoch = soc_.gpu_vm().lookup(gart)->translation_epoch;
   util::StringDiagnostic diagnostic;
   util::Result result;
-  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter());
   EXPECT_TRUE(result.failed());
   EXPECT_EQ(diagnostic.message(), "VMID-0 GART binding could not be cleared");
   EXPECT_EQ(soc_.gpu_vm().lookup(gart)->translation_epoch, translation_epoch);
@@ -1366,7 +1366,7 @@ TEST_F(GpuDeviceMes, ResetReturnsFailureAfterPartialQueueTeardown) {
   const uint64_t generation = device_.transport_session_generation();
   util::StringDiagnostic diagnostic;
   util::Result result;
-  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter());
   EXPECT_TRUE(result.failed());
   EXPECT_EQ(diagnostic.message(), "PCI queue state could not be cleared");
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);

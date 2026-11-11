@@ -463,7 +463,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsWrapsBeforeAddingAllocationBase)
   ASSERT_NE(wf->lds_base(), 0u);
   const uint32_t lds_base = wf->lds_base();
   sim.cu()->lds().write32(lds_base, 0xa5a5a5a5u);
-  EXPECT_NO_THROW(sim.engine->run());
+  sim.engine->run();
   EXPECT_EQ(sim.cu()->lds().read32(lds_base), expected);
 }
 
@@ -517,7 +517,7 @@ TEST(Gfx1250SimulationTest, GlobalStoreAsyncFromLdsWrapsBeforeAddingAllocationBa
   ASSERT_NE(wf->lds_base(), 0u);
   const uint32_t lds_base = wf->lds_base();
   sim.cu()->lds().write32(lds_base, expected);
-  EXPECT_NO_THROW(sim.engine->run());
+  sim.engine->run();
   EXPECT_EQ(sim.memory->read32(output_addr), expected);
 }
 
@@ -1463,7 +1463,7 @@ TEST(Gfx1250SimulationTest, RejectsUnsupportedClusterSize) {
                            /*cluster_size_x=*/amdgpu::kClusterMulticastMaskBits + 1,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_NO_THROW((void)sim.engine->step());
+  (void)sim.engine->step();
   EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
@@ -1481,7 +1481,7 @@ TEST(Gfx1250SimulationTest, RejectsMisalignedClusteredWorkgroupIdOffset) {
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_NO_THROW((void)sim.engine->step());
+  (void)sim.engine->step();
   EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
@@ -1498,7 +1498,7 @@ TEST(Gfx1250SimulationTest, RejectsIncompleteClusterGrid) {
   queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/0);
 
-  EXPECT_NO_THROW((void)sim.engine->step());
+  (void)sim.engine->step();
   EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(sim.memory->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(sim.cp()->dispatched_count(), 0u);
@@ -1650,7 +1650,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsNetNegativeDestination) {
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->lds_size(), lds_bytes_per_wg);
   sim.cu()->lds().write32(wf->lds_base(), kSentinel);
-  EXPECT_NO_THROW(sim.engine->run());
+  sim.engine->run();
   EXPECT_EQ(sim.cu()->lds().read32(wf->lds_base()), kSentinel);
 }
 
@@ -1695,7 +1695,7 @@ TEST(Gfx1250SimulationTest, GlobalLoadAsyncToLdsDropsDestinationPastWorkgroupAll
   ASSERT_EQ(wf->lds_size(), lds_bytes_per_wg);
   const uint32_t outside_allocation = wf->lds_base() + lds_bytes_per_wg;
   sim.cu()->lds().write32(outside_allocation, kSentinel);
-  EXPECT_NO_THROW(sim.engine->run());
+  sim.engine->run();
   EXPECT_EQ(sim.cu()->lds().read32(outside_allocation), kSentinel);
 }
 
@@ -1731,7 +1731,7 @@ TEST(Gfx1250SimulationTest, ClusterLoadAsyncToLdsDropsNetNegativeDestination) {
   ASSERT_EQ(targets.size(), 2u);
   for (const auto &target : targets)
     target.cu->lds().write32(target.lds_base, kSentinel);
-  EXPECT_NO_THROW(sim.engine->run());
+  sim.engine->run();
   for (const auto &target : targets)
     EXPECT_EQ(target.cu->lds().read32(target.lds_base), kSentinel);
 }

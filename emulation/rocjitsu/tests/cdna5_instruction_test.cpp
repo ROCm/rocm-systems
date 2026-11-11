@@ -2194,7 +2194,7 @@ TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
         sim.cu()->write_vgpr(base + reg, lane, 100u * reg + lane);
     ASSERT_NE(inst.execute, nullptr);
     wf->clear_instruction_execution_error();
-    ASSERT_NO_THROW(inst.execute(inst, wf));
+    inst.execute(inst, wf);
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
     EXPECT_EQ(wf->exec(), 0xAAAA'AAAAu);

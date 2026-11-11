@@ -219,7 +219,7 @@ TEST(DsMemorySnapshot, RejectsUnimplementedGdsWithoutPreparingPayload) {
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   // The CU translates legacy throws into failures, so also check the callback directly.
-  ASSERT_NO_THROW(inst->execute(*inst, fx.wf));
+  inst->execute(*inst, fx.wf);
   EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).failed());
   EXPECT_EQ(fx.wf->instruction_execution_error(),
             InstructionExecutionError::UnimplementedInstruction);

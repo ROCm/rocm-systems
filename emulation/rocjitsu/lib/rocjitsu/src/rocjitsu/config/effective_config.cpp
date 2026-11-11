@@ -15,7 +15,6 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -123,28 +122,22 @@ FailureOr<std::string> json_with_local_node(std::string_view json, std::string_v
       set_top_level_field(json, kNodeField, json_string(node_id), emit_error);
   if (rewritten.failed())
     return Result::failure();
-  try {
-    auto graph =
-        load_system_graph_from_string(rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error);
-    if (graph.failed())
-      return Result::failure();
-    auto node = graph.value().select_node(emit_error, node_id);
-    if (node.failed())
-      return Result::failure();
-    auto applied = with_parsed_simulation_config_json(
-        rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
-        [](const fb::SimulationConfig *config) -> FailureOr<std::string> {
-          return config->local_node() ? config->local_node()->str() : std::string{};
-        });
-    if (applied.failed())
-      return Result::failure();
-    if (applied.value() != node_id)
-      return emit_error.emit() << "cannot apply local_node to the simulation config";
-  } catch (const std::exception &error) {
-    // Graph construction and JSON parsing still allocate and may throw.
-    // Keep their existing launch-override containment until those are migrated.
-    return emit_error.emit() << error.what();
-  }
+  auto graph =
+      load_system_graph_from_string(rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error);
+  if (graph.failed())
+    return Result::failure();
+  auto node = graph.value().select_node(emit_error, node_id);
+  if (node.failed())
+    return Result::failure();
+  auto applied = with_parsed_simulation_config_json(
+      rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [](const fb::SimulationConfig *config) -> FailureOr<std::string> {
+        return config->local_node() ? config->local_node()->str() : std::string{};
+      });
+  if (applied.failed())
+    return Result::failure();
+  if (applied.value() != node_id)
+    return emit_error.emit() << "cannot apply local_node to the simulation config";
   return std::move(rewritten.value());
 }
 

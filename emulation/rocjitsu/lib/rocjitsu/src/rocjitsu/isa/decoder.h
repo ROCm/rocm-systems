@@ -101,7 +101,6 @@ public:
   /// Instruction::operator new/delete route through the active pool for O(1)
   /// alloc/free. Pooled instructions must be deleted on the bound thread while
   /// this pool is active, before the decoder is destroyed.
-  /// @throws std::bad_alloc if the initial pool allocation fails.
   void enable_pool() {
     if (!pool_)
       pool_ = std::make_unique<Pool>();

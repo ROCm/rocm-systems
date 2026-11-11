@@ -61,7 +61,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -341,7 +340,7 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
       {
         ScopedOperandDelegate inner(intermediate, delegate);
         ScopedOperandDelegate outer(*operand, &intermediate);
-        EXPECT_NO_THROW(instruction->execute(*instruction, fx.wf));
+        instruction->execute(*instruction, fx.wf);
         EXPECT_EQ(fx.wf->instruction_execution_error(),
                   InstructionExecutionError::MissingExecutionBackend);
         EXPECT_TRUE(fx.plugin->reads.empty());
@@ -398,7 +397,7 @@ TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
           EXPECT_TRUE(module_active);
           EXPECT_TRUE(ScopedOperandDelegate::active());
           auto &context = *static_cast<Context *>(opaque);
-          EXPECT_NO_THROW(context.instruction->execute(*context.instruction, context.wave));
+          context.instruction->execute(*context.instruction, context.wave);
         });
   EXPECT_EQ(fx.wf->instruction_execution_error(),
             InstructionExecutionError::MissingExecutionBackend);
@@ -412,7 +411,7 @@ TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
 }
 #endif
 
-TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
+TEST(RegisterAccessTest, ScopedOperandDelegateRestoresNestedBindings) {
   EXPECT_FALSE(ScopedOperandDelegate::active());
   Operand source(32, 1);
   Operand previous(32, 2);
@@ -427,13 +426,10 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
     helper.join();
     EXPECT_FALSE(helper_has_binding);
 
-    EXPECT_THROW(
-        {
-          ScopedOperandDelegate binding(source, &staged);
-          EXPECT_EQ(source.delegate(), &staged);
-          throw std::runtime_error("test");
-        },
-        std::runtime_error);
+    {
+      ScopedOperandDelegate binding(source, &staged);
+      EXPECT_EQ(source.delegate(), &staged);
+    }
     EXPECT_EQ(source.delegate(), &previous);
     EXPECT_TRUE(ScopedOperandDelegate::active());
   }

@@ -9,7 +9,6 @@
 #include <barrier>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -282,22 +281,6 @@ TEST(IntrusiveSharedPtr, IndependentHandlesCanCopyAndReleaseConcurrently) {
   EXPECT_EQ(destroyed.load(), 1);
 }
 
-class Throws {
-public:
-  explicit Throws(std::atomic<int> &destroyed) : member(destroyed) {
-    throw std::runtime_error("construction failed");
-  }
-  Tracked member;
-};
-
-TEST(IntrusiveSharedPtr, ConstructionFailureUnwindsMembers) {
-  std::atomic<int> destroyed{0};
-  EXPECT_THROW(
-      static_cast<void>(util::IntrusiveSharedPtr<util::RefCounted<Throws>>::make(destroyed)),
-      std::runtime_error);
-  EXPECT_EQ(destroyed.load(), 1);
-}
-
 TEST(RefCounted, ForwardsMoveOnlyValuesAndValueInitializesScalars) {
   using Pointer = util::IntrusiveSharedPtr<util::RefCounted<std::unique_ptr<int>>>;
   auto value = Pointer::make(std::make_unique<int>(17));
@@ -355,13 +338,6 @@ TEST(RefCountedNonAtomic, ForwardsMoveOnlyValuesAndValueInitializesScalars) {
   EXPECT_EQ(*value->value, 17);
   auto zero = NonAtomicIntPtr::make();
   EXPECT_EQ(zero->value, 0);
-}
-
-TEST(RefCountedNonAtomic, ConstructionFailureUnwindsMembers) {
-  using Pointer = util::IntrusiveSharedPtr<util::RefCountedNonAtomic<Throws>>;
-  std::atomic<int> destroyed{0};
-  EXPECT_THROW(static_cast<void>(Pointer::make(destroyed)), std::runtime_error);
-  EXPECT_EQ(destroyed.load(), 1);
 }
 
 TEST(RefCountedNonAtomic, DetachedVectorPreservesOtherOwners) {
