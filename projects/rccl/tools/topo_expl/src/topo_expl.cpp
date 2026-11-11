@@ -108,6 +108,10 @@ int main(int argc, char* argv[])
   extractArchAndGpus(desc->description, &gpusPerNode);
   int nranks = gpusPerNode * numNodes;
   printf("nnodes = %d, nranks = %d\n", numNodes, nranks);
+  if (nranks == 1) {
+    printf("Error: a single rank never selects an algo/proto; use -n 2 or more with this model\n");
+    return TOPO_EXPL_INVALID_ARG;
+  }
 
   // Create topology explorer context
   TopoExplConfig config;
