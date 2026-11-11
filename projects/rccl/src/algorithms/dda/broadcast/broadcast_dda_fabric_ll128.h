@@ -74,6 +74,9 @@ __launch_bounds__(512)
   const int8_t* src = reinterpret_cast<const int8_t*>(sendbuff);
   int8_t* dst = reinterpret_cast<int8_t*>(recvbuff);
 
+  // A wait saw the abort flag: skip the remaining waits, still publish the epoch.
+  bool aborted = false;
+
   if (selfRank == root) {
     const int peer = (root + 1 + (int)blockIdx.x) % nRanks;
     for (size_t g = blockIdx.y; g < nGroups; g += gridDim.y) {
@@ -97,9 +100,7 @@ __launch_bounds__(512)
 
     if (blockIdx.y == 0 && tid == 0) {
       uint32_t d0, f0, d1, f1;
-      // Last step on the root; on abort fall through to the common epilogue.
-      const bool tokSeen = ddaLLWaitLineFlags(&selfTok[peer], flag32, params, d0, f0, d1, f1);
-      (void)tokSeen;
+      aborted = !ddaLLWaitLineFlags(&selfTok[peer], flag32, params, d0, f0, d1, f1);
     }
   } else {
     if (flatBlockId == 0) {
@@ -121,18 +122,24 @@ __launch_bounds__(512)
 #else
       const bool landed = ddaLL128PollWire<kLine, kWarp>(wire, vr, flag, lane, params);
 #endif
-      if (!landed) break;
+      if (!landed) {
+        aborted = true;
+        break;
+      }
       const size_t rem = bytes - s * kSliceBytes;
       ddaLL128StoreRegs<int8_t, kLine, kAligned, kWarp>(dst + s * kSliceBytes, vr,
                                                        rem < kSliceBytes ? (int)rem : kSliceBytes, lane, flagLane);
       ddaLL128ClearWire<kWarp>(wire);
     }
 
-    if (flatBlockId == 0) {
+    if (!aborted && flatBlockId == 0) {
       for (int p = tid; p < nRanks; p += nthreads) {
         if (p == selfRank || p == root) continue;
         uint32_t d0, f0, d1, f1;
-        if (!ddaLLWaitLineFlags(&selfTok[p], flag32, params, d0, f0, d1, f1)) break;
+        if (!ddaLLWaitLineFlags(&selfTok[p], flag32, params, d0, f0, d1, f1)) {
+          aborted = true;
+          break;
+        }
       }
     }
   }
