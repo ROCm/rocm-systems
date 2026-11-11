@@ -101,15 +101,16 @@ int rj_arith_v_interp_p2_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
 // Each operand uses one VGPR. Guest input/output flushing applies to all
 // inputs/final results. IEEE mode and guest rounding flags are accepted; loose
 // arithmetic uses host rounding rather than implementing guest-directed rounding.
-// Compatibility uses the existing exact MUL backend for guest rounding, tininess,
-// and OMOD after applying MULLIT source predicates; it still omits FP status. APIs without
+// Bit-exact numeric semantics, to which Compatibility resolves, use the exact MUL
+// backend for guest rounding, tininess and OMOD after applying MULLIT source
+// predicates; FP status is omitted. APIs without
 // _gfx12 use RDNA3 TRAPSTS, _gfx12 uses EXCP_FLAG_USER; loose calls skip FP-status output,
 // exact FP status reporting in mode 3 is unsupported. Supports all A/B/C ABS/NEG, OMOD and CLAMP
 // modifiers. DPP8/DPP16 permute A before source modifiers. B and C retain
 // their lanes; inactive or DPP-filtered destinations remain unchanged. Host nearest-even rounding
 // with denormals enabled is required; exception flags may change. NaN payloads are unspecified.
-// Loose may differ in intermediate flushing and signed zero under OMOD;
-// Compatibility retains the hardware-matching intermediate flush ordering.
+// Loose may differ in intermediate flushing and signed zero under OMOD; exact
+// semantics retain the hardware-matching intermediate flush ordering.
 int rj_arith_v_mullit_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                               uint32_t *const *d, const uint32_t *const *a,
                               const uint32_t *const *b, const uint32_t *const *c,

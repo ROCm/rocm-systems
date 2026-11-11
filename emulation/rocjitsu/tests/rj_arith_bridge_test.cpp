@@ -9238,20 +9238,13 @@ TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
             auto instruction = fixture.decoder->decode_window(words);
             ASSERT_TRUE(instruction.succeeded());
             fixture.recorder->writes.clear();
-            const bool success =
-                fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
-                    .succeeded();
-            ASSERT_EQ(success, policy_kind != 2);
-            if (success) {
-              ASSERT_EQ(fixture.recorder->writes.size(), 1U);
-              EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
-            } else {
-              EXPECT_TRUE(fixture.recorder->writes.empty());
-            }
+            // Strict exact requests take the same path as Compatibility on both architectures.
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            ASSERT_EQ(fixture.recorder->writes.size(), 1U);
+            EXPECT_EQ(fixture.recorder->writes[0].lanes, exec_mask);
             const uint32_t result = fixture.cu->read_vgpr(fixture.base(), lanes - 1);
-            if (!success) {
-              EXPECT_EQ(result, 0x7fc12345U);
-            } else if (rdna3 && !dx10) {
+            if (rdna3 && !dx10) {
               EXPECT_GT(result & 0x7fffffffU, 0x7f800000U);
             } else {
               EXPECT_EQ(result, 0U);

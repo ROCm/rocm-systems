@@ -29,7 +29,8 @@ TEST(GraphicsMullitF32W64Gfx12, Arithmetic) {
                                             rocjitsu::arith::test::GraphicsFamily::Mullit, true);
 }
 
-// Selected MODE witnesses from rocjitsu's MULLIT regressions (#13669).
+// Selected MODE witnesses from rocjitsu's MULLIT regressions (#13669) and captures that
+// gfx1201 and gfx1100 agree on, in Compatibility and strict exact mode.
 TEST(GraphicsMullit, CompatibilityGuestMode) {
   using namespace rocjitsu::arith::test;
   constexpr struct {
@@ -46,20 +47,31 @@ TEST(GraphicsMullit, CompatibilityGuestMode) {
        RJ_ARITH_ALU_OMOD_2},
       {0x80800000, 0x3f800000, 0x3f800000, 0x80000000, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
        RJ_ARITH_ALU_OMOD_HALF},
+      // Captures: guest rounding of subnormal products, and a flushed C selecting -FLT_MAX.
+      {0x3fc00000, 1, 1, 2, 0},
+      {0x3fc00000, 1, 1, 1, RJ_ARITH_FP_ROUND_ZERO},
+      {0x3f000000, 0x807fffff, 1, 0x80400000, 0},
+      {0x3f000000, 0x807fffff, 1, 0x803fffff, RJ_ARITH_FP_ROUND_ZERO},
+      {0, 0, 1, 0, 0, RJ_ARITH_ALU_OMOD_HALF},
+      {0, 0, 1, 0xfeffffff, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       RJ_ARITH_ALU_OMOD_HALF},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (auto call : {rj_arith_v_mullit_f32_w32, rj_arith_v_mullit_f32_w32_gfx12}) {
-      for (const auto &sample : cases) {
-        Registers<4, 32> r;
-        r.v[0][0] = sample.a;
-        r.v[1][0] = sample.b;
-        r.v[2][0] = sample.c;
-        uint32_t status = 0x80000000U;
-        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | sample.fp, 1, sample.modifiers,
-                       r.v + 3, r.v, r.v + 1, r.v + 2, &status),
-                  RJ_ARITH_SUCCESS);
-        EXPECT_EQ(r.v[3][0], sample.expected);
-        EXPECT_EQ(status, 0x80000000U);
+    for (uint64_t semantics : hardware_semantics()) {
+      for (auto call : {rj_arith_v_mullit_f32_w32, rj_arith_v_mullit_f32_w32_gfx12}) {
+        for (const auto &sample : cases) {
+          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << (&sample - cases));
+          Registers<4, 32> r;
+          r.v[0][0] = sample.a;
+          r.v[1][0] = sample.b;
+          r.v[2][0] = sample.c;
+          uint32_t status = 0x80000000U;
+          ASSERT_EQ(call(cpu | semantics | sample.fp, 1, sample.modifiers, r.v + 3, r.v, r.v + 1,
+                         r.v + 2, &status),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[3][0], sample.expected);
+          EXPECT_EQ(status, 0x80000000U);
+        }
       }
     }
   }
