@@ -8,6 +8,8 @@ add_library(
     rj_arith
     STATIC
     mfma/mfma_half.cpp
+    mfma/mfma_f64.cpp
+    mfma/matrix_i8.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
     conversion/byte_conversion.cpp
