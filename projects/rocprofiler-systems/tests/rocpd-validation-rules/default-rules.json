@@ -107,6 +107,13 @@
                     "error_message": "Found rocpd_info_process rows with invalid extdata or environment JSON",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM rocpd_info_process WHERE COALESCE(json_valid(extdata), 0) = 0 OR COALESCE(json_valid(environment), 0) = 0"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify variables outside the allowlist (HOME) are not stored",
+                    "error_message": "Found a non-allowlisted environment variable (HOME) in a process environment",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_process WHERE json_extract(environment, '$.HOME') IS NOT NULL"
                 }
             ]
         }

@@ -42,6 +42,12 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
+# `rocprofv3 --doctor` execs this script. SYNC: DOCTOR_FLAG and DOCTOR_COMMAND in
+# source/lib/python/rocprofv3/doctor_result.py, and source/libexec/rocprofiler-sdk/
+# rocprofv3-doctor/CMakeLists.txt for where it is installed.
+DOCTOR_FLAG = "--doctor"
+DOCTOR_LIBEXEC_DIR = "@CMAKE_INSTALL_LIBEXECDIR@"
+
 # Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
 # tracing service allocates size_kb * 1024 bytes and rejects the config when
 # that byte count does not fit in a uint32_t. So although the option is named
@@ -184,6 +190,29 @@ def perfetto_buffer_size_kb(val):
     return value
 
 
+def get_mpi_env_int(var_name, label, minimum):
+    """Read an integer MPI environment variable, rejecting values that cannot be used.
+
+    Returns None when the variable is not set, which callers treat as "undetected".
+    """
+    if var_name not in os.environ:
+        return None
+
+    value = os.environ[var_name]
+    try:
+        result = int(value)
+    except ValueError:
+        fatal_error(f"MPI {label} variable {var_name}='{value}' is not an integer")
+
+    if result < minimum:
+        fatal_error(
+            f"MPI {label} variable {var_name}={result} is out of range "
+            f"(expected {minimum} or greater)"
+        )
+
+    return result
+
+
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """Detect MPI rank and size from the same MPI implementation's environment variables.
 
@@ -201,8 +230,13 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """
     # If custom environment variables are specified, use them exclusively
     if custom_rank_env is not None and custom_size_env is not None:
-        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
-        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        rank = get_mpi_env_int(custom_rank_env, "rank", 0)
+        size = get_mpi_env_int(custom_size_env, "world size", 1)
+        if rank is not None and size is not None and rank >= size:
+            fatal_error(
+                f"MPI rank variable {custom_rank_env}={rank} is out of range for world "
+                f"size variable {custom_size_env}={size} (expected 0-{size - 1})"
+            )
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
@@ -348,7 +382,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
 
 
 def get_att_paths(args):
-
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     if args.rocm_root is not None:
@@ -377,7 +410,6 @@ def get_att_paths(args):
 
 
 def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
-
     library_paths = get_att_paths(args)
 
     for path in library_paths:
@@ -478,7 +510,6 @@ class omptTraceArgAction(argparse.Action):
 
 
 def parse_arguments(args=None):
-
     usage_examples = """
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
@@ -542,7 +573,7 @@ For attachment profiling of running processes:
         "-o",
         "--output-file",
         help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -550,7 +581,7 @@ For attachment profiling of running processes:
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -1158,7 +1189,7 @@ For attachment profiling of running processes:
         "-p",
         "--pid",
         "--attach",
-        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        help="""Attach to a target process by pid and execute as a tool from within said process. Uses the tool library of the rocprofiler-sdk installation the target process is running when it can be located, otherwise the tool library of this installation (with a warning). Set ROCPROF_ATTACH_TOOL_LIBRARY to attach a different tool library. Options the target's rocprofiler-sdk does not support are skipped with warnings.""",
         type=int,
         default=None,
     )
@@ -1175,6 +1206,18 @@ For attachment profiling of running processes:
         "--attach-children",
         help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
         default=True,
+    )
+
+    # NOTE: --doctor is intercepted in main() before parse_arguments() runs, so
+    # this entry exists only to document the flag in --help. Any remaining
+    # arguments are forwarded verbatim to the doctor, which is why the
+    # interception cannot be deferred to argparse: flags such as --format have
+    # incompatible meanings in the two.
+    advanced_options.add_argument(
+        DOCTOR_FLAG,
+        action="store_true",
+        help="""Check whether this machine and ROCm installation are ready for profiling, report what would stop rocprofv3 from working and how to fix it, then exit. Options after --doctor configure the check (for example: rocprofv3 --doctor --format json); see rocprofv3 --doctor --help.""",
+        default=False,
     )
 
     add_parser_bool_argument(
@@ -1392,7 +1435,6 @@ def parse_text(text_file):
 
 
 def parse_input(input_file):
-
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
         warning("""
@@ -1608,7 +1650,6 @@ def int_auto(num_str):
 
 
 def run(app_args, args, **kwargs):
-
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
@@ -1779,20 +1820,31 @@ def run(app_args, args, **kwargs):
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
         update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
-    update_env(
-        "ROCP_TOOL_LIBRARIES",
-        f"{ROCPROF_TOOL_LIBRARY}",
-        append=True,
-    )
+    # in attach mode, rocprof-attach selects the tool library for the target process
+    if not args.pid:
+        update_env(
+            "ROCP_TOOL_LIBRARIES",
+            f"{ROCPROF_TOOL_LIBRARY}",
+            append=True,
+        )
     update_env(
         "LD_LIBRARY_PATH",
         f"{ROCM_DIR}/lib",
         append=True,
     )
 
-    _output_file = args.output_file
+    # -o/-d stay None so a typed option stays distinguishable from an inherited
+    # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
+    # this restores the effective values the argparse defaults used to supply
+    _output_file = (
+        args.output_file
+        if args.output_file is not None
+        else os.environ.get("ROCPROF_OUTPUT_FILE_NAME")
+    )
     _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        args.output_directory
+        if args.output_directory is not None
+        else os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
     )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
@@ -1803,11 +1855,6 @@ def run(app_args, args, **kwargs):
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
-
-    if args.list_avail and (
-        args.output_file is not None or args.output_directory is not None
-    ):
-        update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
         args.output_format = ["rocpd"]
@@ -2036,13 +2083,6 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
-    if args.pid:
-        update_env(
-            "ROCPROF_ATTACH_TOOL_LIBRARY",
-            ROCPROF_ATTACH_TOOL_LIBRARY,
-            overwrite_if_true=True,
-        )
-
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -2120,7 +2160,6 @@ def run(app_args, args, **kwargs):
             update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
-
         cfg_init_message = "\n- rocprofv3 configuration{}:\n".format(
             "" if app_pass is None else f" (pass {app_pass})"
         )
@@ -2151,38 +2190,42 @@ def run(app_args, args, **kwargs):
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
+
+        # rocprofv3-avail owns the library and the output file; pass it options
+        # and let it decide, so a direct invocation behaves the same way. Only a
+        # requested output location, -o/-d or an input file, diverts the listing
+        # from stdout. A placeholder in the name is expanded by rocprofv3-avail,
+        # so the listing shares the run's stem only when the name has none
+        avail_command = [sys.executable, path]
+        if args.output_file is not None or args.output_directory is not None:
+            avail_command += ["--output-directory", _output_path]
+            if _output_file is not None:
+                avail_command += ["--output-file", _output_file]
+        avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
+
         if app_args:
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pmc"],
-                env=app_env,
-            )
-            if exit_code != 0:
-                fatal_error("rocprofv3-avail exit with error")
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
+            if args.echo:
+                # the listing runs as its own process, so report it alongside the
+                # application command echoed at the end of this function
+                sys.stderr.flush()
+                print(f"command: {avail_command}")
+                sys.stdout.flush()
+            else:
+                try:
+                    subprocess.check_call(avail_command, env=app_env)
+                except subprocess.CalledProcessError as error:
+                    fatal_error(
+                        "rocprofv3-avail exit with error", exit_code=error.returncode
+                    )
         else:
-            app_args = [sys.executable, path, "info", "--pmc"]
+            # with no application to profile the listing is what rocprofv3 runs,
+            # so --echo and the exit code flow through the common path below
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
@@ -2190,10 +2233,18 @@ def run(app_args, args, **kwargs):
             update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
         update_env("ROCPROF_ATTACH_CHILDREN", "1" if args.attach_children else "0")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
+        # rocprof-attach prefers the tool library of the target's rocprofiler-sdk
+        # installation and falls back to this one
+        attach_args = [
+            sys.executable,
+            path,
+            "--fallback-tool-library",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+        ]
         if app_args:
-            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+            exit_code = subprocess.check_call(attach_args, env=app_env)
         else:
-            app_args = [sys.executable, path]
+            app_args = attach_args
 
     elif not app_args and not args.echo:
         log_config(app_env)
@@ -2309,7 +2360,6 @@ def run(app_args, args, **kwargs):
             )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
-
         if (
             not args.pc_sampling_beta_enabled
             and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
@@ -2339,7 +2389,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
     if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
-
         if (
             not args.spm_beta_enabled
             and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
@@ -2392,7 +2441,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
@@ -2537,7 +2585,74 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
+def find_doctor_script():
+    """Path of the script behind --doctor, or None.
+
+    Installed and build trees keep it at <prefix>/<libexecdir>/rocprofiler-sdk/;
+    a source checkout keeps it under source/libexec/.
+    """
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    libexec_dirs = ["libexec"]
+    if not DOCTOR_LIBEXEC_DIR.startswith("@"):
+        libexec_dirs.insert(0, DOCTOR_LIBEXEC_DIR)
+    candidates = [
+        os.path.join(prefix, libexec_dir, "rocprofiler-sdk", "rocprofv3-doctor")
+        for libexec_dir in libexec_dirs
+    ]
+    candidates.append(
+        os.path.join(
+            prefix,
+            "libexec",
+            "rocprofiler-sdk",
+            "rocprofv3-doctor",
+            "rocprofv3-doctor.py",
+        )
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def dispatch_doctor(raw_args):
+    """Replace this process with the doctor, passing the remaining arguments.
+
+    Intercepted before parse_arguments() because rocprofv3 and the doctor both
+    define --format and --output with different meanings; letting argparse see
+    the doctor's flags would be an error rather than a passthrough.
+
+    exec rather than a child process: no rocprofv3 process lingers while the
+    doctor runs (it would otherwise appear to the doctor as a running
+    profiler), and signals and the exit status pass straight through.
+    Returns only when the doctor cannot be started.
+    """
+    args = [itr for itr in raw_args if itr != DOCTOR_FLAG]
+    script = find_doctor_script()
+    if script is None:
+        sys.stderr.write(
+            "rocprofv3: the {} component is not installed next to this rocprofv3 "
+            "({}); reinstall rocprofiler-sdk\n".format(
+                DOCTOR_FLAG, os.path.dirname(os.path.realpath(__file__))
+            )
+        )
+        return 2
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.execv(sys.executable, [sys.executable, script] + args)
+    except OSError as exc:
+        sys.stderr.write("rocprofv3: cannot run {} ({})\n".format(script, exc))
+    return 2
+
+
 def main(argv=None):
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    # only rocprofv3's own options count: everything after "--" belongs to the
+    # application and must reach it verbatim, "--doctor" included
+    profiler_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
+    if DOCTOR_FLAG in profiler_args:
+        return dispatch_doctor(profiler_args)
 
     cmd_args, app_args = parse_arguments(argv)
 

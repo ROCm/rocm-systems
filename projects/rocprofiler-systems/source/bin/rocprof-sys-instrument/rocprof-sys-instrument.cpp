@@ -8,6 +8,7 @@
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/demangler.hpp"
 #include "dl/dl.hpp"
 #include "dynamic_dependency_listing.hpp"
@@ -37,8 +38,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <regex>
@@ -293,6 +296,7 @@ auto _activate =
 //
 int
 main(int argc, char** argv)
+try
 {
     argv0 = argv[0];
 
@@ -1170,6 +1174,28 @@ main(int argc, char** argv)
         return -1;
     }
 
+    // fail before any configuration/Dyninst work when there is nothing to instrument
+    if(_cmdc == 0)
+    {
+        parser.print_help(extra_help);
+        fprintf(stderr, "\nError! No command for dynamic instrumentation. Did you "
+                        "forget '--' before the application? Use "
+                        "\n\trocprof-sys-instrument <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
+                        "\n\trocprof-sys-instrument -o foo.inst -- ./foo\nwill output an "
+                        "instrumented version of 'foo' executable to 'foo.inst'\n");
+        return EXIT_FAILURE;
+    }
+
+    // mutname was resolved against the search paths in the argument pre-scan
+    if(!path::is_regular_file(mutname))
+    {
+        fprintf(stderr,
+                "Error! Application '%s' does not exist or is not a regular "
+                "file. Nothing to instrument.\n",
+                _cmdv[0]);
+        return EXIT_FAILURE;
+    }
+
     if(parser.exists("config"))
     {
         struct rocprofsys_env_config_s
@@ -1489,16 +1515,6 @@ main(int argc, char** argv)
     //                              MAIN
     //
     //----------------------------------------------------------------------------------//
-
-    if(_cmdc == 0)
-    {
-        parser.print_help(extra_help);
-        fprintf(stderr, "\nError! No command for dynamic instrumentation. Use "
-                        "\n\trocprof-sys-instrument <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
-                        "\n\trocprof-sys-instrument -o foo.inst -- ./foo\nwill output an "
-                        "instrumented version of 'foo' executable to 'foo.inst'\n");
-        return EXIT_FAILURE;
-    }
 
     verbprintf(1, "instrumentation target: %s\n", mutname.c_str());
 
@@ -2192,17 +2208,18 @@ main(int argc, char** argv)
 
     for(auto const& itr : env_vars)
     {
-        auto const _pos = itr.find('=');
-        if(_pos == std::string::npos)
+        auto const parsed = rocprofsys::utility::string::split_key_value(itr);
+        if(!parsed)
         {
             errprintf(0, "environment variable %s not in form VARIABLE=VALUE\n",
                       itr.c_str());
+            continue;
         }
-        auto const _var = itr.substr(0, _pos);
-        auto const _val = itr.substr(_pos + 1);
-        rocprofsys::set_env(_var.c_str(), _val, 0);
-        auto _expr = rocprofsys_call_expr(_var, _val);
-        env_variables.emplace_back(_expr.get(env_func));
+        auto const key   = std::string{ parsed->key };
+        auto const value = std::string{ parsed->value };
+        rocprofsys::set_env(key.c_str(), value, 0);
+        auto expression = rocprofsys_call_expr(key, value);
+        env_variables.emplace_back(expression.get(env_func));
     }
 
     //----------------------------------------------------------------------------------//
@@ -2874,6 +2891,10 @@ main(int argc, char** argv)
         log_ofs->close();
     }
     return code;
+} catch(const std::exception& err)
+{
+    std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
+    return EXIT_FAILURE;
 }
 
 //======================================================================================//

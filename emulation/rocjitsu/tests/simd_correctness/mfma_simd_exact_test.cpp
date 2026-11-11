@@ -40,21 +40,25 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
   for (auto [mode, seed] : trials_for(fmt)) {
     fx.seed(S0, IN_REGS, fmt, mode, seed + 1);
     fx.seed(S1, IN_REGS, fmt, mode, seed + 2);
-    auto reseed_acc = [&] { fx.seed(ACC, ACC_REGS, acc_fmt, Mode::RandomInt, seed + 3); };
+    auto reseed = [&] {
+      // Clear scalar results so an omitted SIMD store cannot match them.
+      fx.seed_words(DST, DST_REGS, seed + 4);
+      fx.seed(ACC, ACC_REGS, acc_fmt, Mode::RandomInt, seed + 3);
+    };
     for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
-      expect_bit_exact(label, mode, fx, reseed_acc, [&] { kernel(fx, const_acc); }, DST, DST_REGS);
+      expect_bit_exact(label, mode, fx, reseed, [&] { kernel(fx, const_acc); }, DST, DST_REGS);
       if (testing::Test::HasFatalFailure())
         return;
     }
   }
 }
 
-template <typename Ea, typename Eb>
-void run_f32(const char *label, Fmt fmt, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
-             uint32_t bits, Ea ea, Eb eb, uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0) {
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename Ea, typename Eb>
+void run_f32(const char *label, Fmt fmt, uint32_t bits, Ea ea, Eb eb, uint32_t cbsz = 0,
+             uint32_t abid = 0, uint32_t blgp = 0) {
   run_case(label, fmt, Fmt::F32, [=](MfmaFixture &fx, uint32_t const_acc) {
-    amdgpu::exec_f32(*fx.cu, M, N, K, B, bits, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
-                     fx.vbase + ACC, ea, eb, const_acc, cbsz, abid, blgp);
+    amdgpu::exec_f32<M, N, K, B>(*fx.cu, bits, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
+                                 fx.vbase + ACC, ea, eb, const_acc, cbsz, abid, blgp);
   });
 }
 
@@ -94,53 +98,54 @@ void expect_fixture_bit_exact(const char *label, const std::function<void(MfmaFi
 // --- exec_f32 generic, f16 inputs: every dispatched CDNA4 f16 shape ---
 TEST(MfmaSimdExact, F32_f16_AllShapes) {
   SKIP_IF_NO_SIMD();
-  const struct {
-    uint32_t m, n, k, b;
-  } shapes[] = {{16, 16, 32, 1}, {32, 32, 16, 1}, {32, 32, 8, 1}, {16, 16, 16, 1},
-                {4, 4, 4, 16},   {16, 16, 4, 4},  {32, 32, 4, 2}};
-  for (auto s : shapes)
-    run_f32("f32_f16", Fmt::F16, s.m, s.n, s.k, s.b, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<16, 16, 32, 1>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<32, 32, 16, 1>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<32, 32, 8, 1>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<16, 16, 16, 1>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<4, 4, 4, 16>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<16, 16, 4, 4>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
+  run_f32<32, 32, 4, 2>("f32_f16", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16);
 }
 
 // --- exec_f32 generic, bf16 inputs ---
 TEST(MfmaSimdExact, F32_bf16_AllShapes) {
   SKIP_IF_NO_SIMD();
-  const struct {
-    uint32_t m, n, k, b;
-  } shapes[] = {{16, 16, 32, 1}, {32, 32, 16, 1}, {4, 4, 4, 16}, {16, 16, 4, 4}, {32, 32, 4, 2}};
-  for (auto s : shapes)
-    run_f32("f32_bf16", Fmt::BF16, s.m, s.n, s.k, s.b, 16, amdgpu::extract_bf16,
-            amdgpu::extract_bf16);
+  run_f32<16, 16, 32, 1>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
+  run_f32<32, 32, 16, 1>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
+  run_f32<4, 4, 4, 16>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
+  run_f32<16, 16, 4, 4>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
+  run_f32<32, 32, 4, 2>("f32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16, amdgpu::extract_bf16);
 }
 
 // --- exec_f32 generic, fp8/bf8 inputs incl. mixed A/B pairs ---
 TEST(MfmaSimdExact, F32_f8_AllShapes) {
   SKIP_IF_NO_SIMD();
-  const struct {
-    uint32_t m, n, k;
-  } shapes[] = {{16, 16, 32}, {32, 32, 16}, {16, 16, 128}, {32, 32, 64}};
-  for (auto s : shapes) {
-    run_f32("f32_fp8", Fmt::FP8, s.m, s.n, s.k, 1, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-    run_f32("f32_bf8", Fmt::BF8, s.m, s.n, s.k, 1, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  }
-  run_f32("f32_fp8_bf8", Fmt::FP8, 16, 16, 32, 1, 8, amdgpu::extract_fp8, amdgpu::extract_bf8);
-  run_f32("f32_bf8_fp8", Fmt::BF8, 32, 32, 16, 1, 8, amdgpu::extract_bf8, amdgpu::extract_fp8);
+  run_f32<16, 16, 32, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  run_f32<16, 16, 32, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
+  run_f32<32, 32, 16, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  run_f32<32, 32, 16, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
+  run_f32<16, 16, 128, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  run_f32<16, 16, 128, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
+  run_f32<32, 32, 64, 1>("f32_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  run_f32<32, 32, 64, 1>("f32_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
+  run_f32<16, 16, 32, 1>("f32_fp8_bf8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_bf8);
+  run_f32<32, 32, 16, 1>("f32_bf8_fp8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_fp8);
 }
 
 // --- exec_f32 generic, f32 inputs (4x4 stays generic; bigger go specialized) ---
 TEST(MfmaSimdExact, F32_f32_Generic4x4) {
   SKIP_IF_NO_SIMD();
-  run_f32("f32_f32_4x4x1x16", Fmt::F32, 4, 4, 1, 16, 32, amdgpu::extract_f32, amdgpu::extract_f32);
-  run_f32("f32_f32_4x4x4x16", Fmt::F32, 4, 4, 4, 16, 32, amdgpu::extract_f32, amdgpu::extract_f32);
+  run_f32<4, 4, 1, 16>("f32_f32_4x4x1x16", Fmt::F32, 32, amdgpu::extract_f32, amdgpu::extract_f32);
+  run_f32<4, 4, 4, 16>("f32_f32_4x4x4x16", Fmt::F32, 32, amdgpu::extract_f32, amdgpu::extract_f32);
 }
 
 // --- cbsz/abid/blgp lane-permutation paths (folded into the SIMD hoist) ---
 TEST(MfmaSimdExact, F32_f16_Permuted) {
   SKIP_IF_NO_SIMD();
-  run_f32("f32_f16_cbsz1", Fmt::F16, 16, 16, 4, 4, 16, amdgpu::extract_f16, amdgpu::extract_f16,
-          /*cbsz=*/1, /*abid=*/0, /*blgp=*/0);
-  run_f32("f32_f16_blgp1", Fmt::F16, 16, 16, 4, 4, 16, amdgpu::extract_f16, amdgpu::extract_f16,
-          /*cbsz=*/0, /*abid=*/0, /*blgp=*/1);
+  run_f32<16, 16, 4, 4>("f32_f16_cbsz1", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16,
+                        /*cbsz=*/1, /*abid=*/0, /*blgp=*/0);
+  run_f32<16, 16, 4, 4>("f32_f16_blgp1", Fmt::F16, 16, amdgpu::extract_f16, amdgpu::extract_f16,
+                        /*cbsz=*/0, /*abid=*/0, /*blgp=*/1);
 }
 
 // --- specialized f16 kernels (constexpr dims + F16C bulk convert) ---

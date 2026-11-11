@@ -984,7 +984,7 @@ public:
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
-  std::array<uint32_t, 5> raw_words_{};
+  std::array<uint32_t, 3> raw_words_{};
   const Operand *nsa_vaddr_operand_ = nullptr;
 };
 

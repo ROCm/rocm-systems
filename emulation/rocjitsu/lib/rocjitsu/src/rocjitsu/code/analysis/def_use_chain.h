@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file def_use_chain.h
-/// @brief Instruction-level register def/use extraction for DBT dataflow.
+/// @brief Instruction-level register def/use extraction for DBT and DBI analyses.
 ///
 /// @details This is the bridge between decoded instructions and CFG-aware
 /// liveness. Operand membership determines direction: dst operands define
@@ -36,6 +36,8 @@
 
 #include "rocjitsu/isa/register_set.h"
 
+#include <cstdint>
+
 namespace rocjitsu {
 
 class Instruction;
@@ -52,7 +54,13 @@ class InstDefUse {
 public:
   /// @brief Extract explicit operand register refs.
   /// @param inst Decoded instruction whose operands have stable lifetimes.
-  InstDefUse(const Instruction &inst, const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr,
+  /// @param wave_size Wave width in lanes the instruction executes at, 32 or 64.
+  ///        At 32, an SGPR operand marked Operand::is_wave_mask() is narrowed to
+  ///        the one SGPR the instruction accesses. At 64 every operand keeps its
+  ///        decoded width. Required because neither width is safe for every
+  ///        consumer: a too-wide def over-kills in liveness.
+  InstDefUse(const Instruction &inst, uint8_t wave_size,
+             const Gfx1250VgprMsbAnalysis *vgpr_msb = nullptr,
              UnknownVgprDefPolicy unknown_vgpr_defs = UnknownVgprDefPolicy::Omit);
 
   RegisterSet defs; ///< Registers written (ordinary lanes + special singletons).

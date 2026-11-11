@@ -15,10 +15,10 @@
 //! activation have distinct ownership and native side effects. API frontends
 //! supply their own ABI validation, public ownership, and policy.
 #![deny(missing_docs)]
-mod cpu_cache;
 pub mod device;
 mod driver;
 mod error;
+pub mod host;
 pub mod memory;
 mod os;
 pub mod session;

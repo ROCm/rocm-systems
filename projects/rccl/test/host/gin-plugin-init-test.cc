@@ -19,15 +19,20 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include <memory>
 
 #include "nccl.h"
 #include "comm.h"
+#include "graph/topo.h"
 #include "nccl_gin.h"
 #include "plugin.h"
 
+#include "../common/ScopedEnv.hpp"
 #include "fakes/nccl_fakes.h"
 
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -67,71 +72,22 @@ const char* ncclGetPluginLibName(ncclPluginType) { return ""; }
 
 #include GIN_CC_PATH
 
+#include "fakes/gin_vtable_fake.h"
+
 namespace {
 
-struct FakeGin {
-  int initCalls = 0;
-  int devicesCalls = 0;
-  int finalizeCalls = 0;
-  ncclResult_t initResult = ncclSuccess;
-  ncclResult_t devicesResult = ncclSuccess;
-  int ndev = 0;
-  void* lastCtx = nullptr;
-  bool initNullFn = false;
-
-  static FakeGin*& currentPtr() {
-    static FakeGin* p = nullptr;
-    return p;
-  }
-  static FakeGin& current() { return *currentPtr(); }
-  static void setCurrent(FakeGin* p) { currentPtr() = p; }
-
-  static ncclResult_t Init(void** ctx, uint64_t /*commId*/, ncclDebugLogger_t) {
-    FakeGin& self = current();
-    ++self.initCalls;
-    if (self.initResult != ncclSuccess) return self.initResult;
-    // Match the NVIDIA leak: ncclGinIbInitType calloc'd an 8-byte config.
-    self.lastCtx = std::malloc(8);
-    if (ctx) *ctx = self.lastCtx;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Devices(int* ndev) {
-    FakeGin& self = current();
-    ++self.devicesCalls;
-    if (self.devicesResult != ncclSuccess) return self.devicesResult;
-    if (ndev) *ndev = self.ndev;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Finalize(void* ctx) {
-    FakeGin& self = current();
-    ++self.finalizeCalls;
-    std::free(ctx);
-    if (self.lastCtx == ctx) self.lastCtx = nullptr;
-    return ncclSuccess;
-  }
-
-  ncclGin_t vtable() {
-    ncclGin_t gin{};
-    gin.name = "GinInitLeakStub";
-    gin.init = initNullFn ? nullptr : &Init;
-    gin.devices = &Devices;
-    gin.finalize = &Finalize;
-    return gin;
-  }
-};
+using RcclUnitTesting::ScopedEnv;
 
 class GinPluginInitTest : public ::testing::Test {
  protected:
-  FakeGin fake_;
+  FakeGinVtable fake_;
   ncclGin_t gin_{};
   ginPluginLib_t pluginLib_{};
   ncclComm comm_{};
   void* ctx_ = nullptr;
 
   void SetUp() override {
-    FakeGin::setCurrent(&fake_);
+    FakeGinVtable::setCurrent(&fake_);
     gin_ = fake_.vtable();
     pluginLib_.ncclGin = &gin_;
     pluginLib_.state = ncclGinPluginStateInitReady;
@@ -146,7 +102,7 @@ class GinPluginInitTest : public ::testing::Test {
       std::free(fake_.lastCtx);
       fake_.lastCtx = nullptr;
     }
-    FakeGin::setCurrent(nullptr);
+    FakeGinVtable::setCurrent(nullptr);
   }
 
   ncclResult_t runInit() { return ncclGinPluginInit(&comm_, &pluginLib_, &ctx_); }
@@ -199,6 +155,295 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
   EXPECT_EQ(pluginLib_.state, ncclGinPluginStateDisabled);
   EXPECT_EQ(fake_.initCalls, 0);
   EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
+// AICOMRCCL-2739: ncclGinFinalize is the only path that finalizes a plugin for
+// a connected comm, which is both the per-comm context delete and the refCount
+// decrement. ncclGinHostFinalize used to memset ginState before this ran, so
+// the loop below saw numActiveBackends == 0 and skipped both.
+//
+// The other half of the pairing -- ncclGinHostFinalize preserving these records
+// and marking backends closed -- lives in gin-host-finalize-test.cc
+// (rccl-UnitTestsMicroGinHostFinalize). Both suites use fakes/gin_vtable_fake.h.
+// gin_host.cc cannot join this binary because
+// dev_runtime_micro_fakes.cc already defines the GIN host entry points for
+// dev-runtime-test.cc. GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext
+// covers the Anvil init-context path end to end.
+class GinFinalizeTest : public GinPluginInitTest {
+ protected:
+  std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();
+  std::unique_ptr<ncclTopoSystem> topo_ = std::make_unique<ncclTopoSystem>();
+
+  void SetUp() override {
+    GinPluginInitTest::SetUp();
+    pluginLib_.state = ncclGinPluginStateEnabled;
+    pluginLibs[0] = pluginLib_;
+    pluginLibs[0].refCount = kInitialRefCount;
+    comm_.sharedRes = sharedRes_.get();
+    topo_->nHosts = 1;
+    comm_.topo = topo_.get();
+  }
+
+  void TearDown() override {
+    std::memset(pluginLibs, 0, sizeof(pluginLibs));
+    GinPluginInitTest::TearDown();
+  }
+
+  // Stands in for a backend record left by ncclGinPluginAssignToComm.
+  void addActiveBackend(void* ginInstance) {
+    struct ncclGinState* ginState = &sharedRes_->ginState;
+    int idx = ginState->numActiveBackends++;
+    ginState->backends[idx].pluginIndex = 0;
+    ginState->backends[idx].ginInstance = ginInstance;
+    ginState->backends[idx].ncclGin = &gin_;
+  }
+
+  static constexpr int kInitialRefCount = 3;
+};
+
+TEST_F(GinFinalizeTest, ConnectedBackend_FinalizesContextAndDropsRefCount) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount - 1);
+  EXPECT_EQ(fake_.lastCtx, nullptr);  // Finalize() free()d the context it was handed
+}
+
+TEST_F(GinFinalizeTest, NeverConnected_NoBackendsIsANoOp) {
+  ASSERT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount);
+}
+
+// A new shared split after a sibling's host finalize must not re-arm supported
+// (that would let it reconnect through a ginInstance whose owning comm may be
+// freed), nor finalize the records early: ncclGinFinalize owns that.
+TEST_F(GinFinalizeTest, FinalizedBackends_SetDefaultBackendLeavesThemForGinFinalize) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ginState->supported = false;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_FALSE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount - 1);
+}
+
+// Control for the case above: a live backend in the global mask re-arms supported.
+TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
+// AICOMRCCL-3418: with NCCL_GIN_TYPE unset, a backend whose type is not listed in
+// RCCL_GIN_TYPE_LIST is not registered on the comm.
+TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  bool isAssigned = true;
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+    ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+    EXPECT_FALSE(isAssigned);
+    EXPECT_EQ(ginState->numActiveBackends, 0);
+  }
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,2");
+    ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+    EXPECT_TRUE(isAssigned);
+    ASSERT_EQ(ginState->numActiveBackends, 1);
+    EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
+  }
+}
+
+// An empty NCCL_GIN_TYPE is unset to ncclParamGinType(), so the list still filters.
+TEST_F(GinFinalizeTest, AssignToComm_EmptyGinType_StillHonorsGinTypesList) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  bool isAssigned = true;
+  ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+  EXPECT_FALSE(isAssigned);
+  EXPECT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+}
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// AICOMRCCL-3418: every registration order sorts to Anvil SDMA, then rocSHMEM GDA, then the proxy.
+TEST_F(GinFinalizeTest, SetDefaultBackend_OrdersSdmaThenGdaThenProxy) {
+  ncclGinType_t order[] = {NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_ANVIL_SDMA};
+  const uint64_t all = BIT(NCCL_GIN_TYPE_PROXY) | BIT(NCCL_GIN_TYPE_ROCSHMEM_GDA) | BIT(NCCL_GIN_TYPE_ANVIL_SDMA);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  std::sort(std::begin(order), std::end(order));
+  do {
+    ginState->numActiveBackends = 0;
+    for (ncclGinType_t type : order) {
+      addActiveBackend(nullptr);
+      ginState->backends[ginState->numActiveBackends - 1].ginType = type;
+    }
+    ASSERT_EQ(ncclGinSetDefaultBackend(&comm_, all), ncclSuccess);
+    ASSERT_EQ(ginState->numActiveBackends, 3);
+    EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_ANVIL_SDMA);
+    EXPECT_EQ(ginState->backends[1].ginType, NCCL_GIN_TYPE_ROCSHMEM_GDA);
+    EXPECT_EQ(ginState->backends[2].ginType, NCCL_GIN_TYPE_PROXY);
+  } while (std::next_permutation(std::begin(order), std::end(order)));
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+#endif
+
+TEST(GinTypeListTest, ParsesCommaSeparatedTypes) {
+  uint64_t mask = ~0ull;
+  EXPECT_TRUE(ncclGinParseTypeList("6,7", &mask));
+  EXPECT_EQ(mask, BIT(6) | BIT(7));
+  EXPECT_TRUE(ncclGinParseTypeList(" 2 , 6 ", &mask));
+  EXPECT_EQ(mask, BIT(2) | BIT(6));
+  EXPECT_TRUE(ncclGinParseTypeList("2,3,4,5,6,7", &mask));
+  EXPECT_EQ(mask, BIT(2) | BIT(3) | BIT(4) | BIT(5) | BIT(6) | BIT(7));
+  EXPECT_TRUE(ncclGinParseTypeList("", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+TEST(GinTypeListTest, FlagsInvalidEntriesAndKeepsValidOnes) {
+  uint64_t mask = 0;
+  EXPECT_FALSE(ncclGinParseTypeList("6,x,7", &mask));
+  EXPECT_EQ(mask, BIT(6) | BIT(7));
+  EXPECT_FALSE(ncclGinParseTypeList("0,64,-1,6x,,", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+// 1 and 8 are in range for the bitmask but name no backend, so a typo cannot
+// pass as a valid list that silently filters out every backend.
+TEST(GinTypeListTest, RejectsTypesThatNameNoBackend) {
+  uint64_t mask = 0;
+  EXPECT_FALSE(ncclGinParseTypeList("1,8,6", &mask));
+  EXPECT_EQ(mask, BIT(6));
+  EXPECT_FALSE(ncclGinParseTypeList("8", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+TEST(GinTypeListTest, GinTypeWinsOverGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+  EXPECT_FALSE(ncclGinTypeEnabled(6, /*enabledByDefault=*/false));
+  EXPECT_TRUE(ncclGinTypeEnabled(7, /*enabledByDefault=*/true));
+  {
+    ScopedEnv gdaAndProxy("RCCL_GIN_TYPE_LIST", "6,2");
+    EXPECT_TRUE(ncclGinTypeEnabled(6, false));
+    EXPECT_FALSE(ncclGinTypeEnabled(7, true));
+    ScopedEnv sdmaOnly("NCCL_GIN_TYPE", "7");
+    EXPECT_FALSE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
+  {
+    // A list with no valid entry is ignored, so the defaults apply.
+    ScopedEnv noValidEntry("RCCL_GIN_TYPE_LIST", "x");
+    EXPECT_FALSE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
+}
+
+// ncclParamGinType() reads an empty NCCL_GIN_TYPE as unset, so the list applies and,
+// without a list, each backend keeps its default.
+TEST(GinTypeListTest, EmptyGinTypeCountsAsUnset) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+    EXPECT_EQ(ncclGinTypeEnv(), nullptr);
+    EXPECT_FALSE(ncclGinTypeEnabled(6, /*enabledByDefault=*/false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, /*enabledByDefault=*/true));
+  }
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+    uint64_t mask = 0;
+    ASSERT_TRUE(ncclGinTypeListMask(&mask));
+    EXPECT_EQ(mask, BIT(6) | BIT(7));
+    EXPECT_TRUE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
+}
+
+// AICOMRCCL-3417: Anvil SDMA stays on a single physical host alongside PROXY.
+TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
+  void* anvil = std::malloc(8);
+  void* proxy = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  addActiveBackend(proxy);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
+  topo_->nHosts = 1;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
+                                     BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
+            ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 2);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+  std::free(anvil);
+  std::free(proxy);
+  fake_.lastCtx = nullptr;
+}
+
+// AICOMRCCL-3417: Anvil SDMA is dropped when topo reports more than one host,
+// including MNNVL pods that fold nNodes to 1. PROXY remains the default.
+TEST_F(GinFinalizeTest, AnvilSdma_DroppedOnMultiHostKeepsProxy) {
+  void* anvil = std::malloc(8);
+  void* proxy = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  addActiveBackend(proxy);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
+  topo_->nHosts = 2;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
+                                     BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
+            ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  std::free(proxy);
+  fake_.lastCtx = nullptr;
+}
+
+// AICOMRCCL-3417: Anvil-only on multi-host leaves zero backends and clears supported
+// so init.cc keeps globalGinSupport NONE.
+TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
+  void* anvil = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  topo_->nHosts = 2;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSuccess);
+  EXPECT_FALSE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 0);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
 }
 
 // Success path: keep the context, mark the plugin enabled, do not finalize.

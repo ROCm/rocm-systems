@@ -611,7 +611,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "263",
        "<None>",
-       "Number of insruction requests to the TC (No-Masking, nondeterministic)"},
+       "Number of instruction requests to the texture cache (TC)."},
       {"SQC_TC_DATA_ATOMIC_REQ",
        "SQ",
        "266",

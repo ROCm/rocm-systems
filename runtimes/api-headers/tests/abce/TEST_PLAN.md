@@ -24,6 +24,7 @@ ASLR off: `setarch "$(uname -m)" -R ./abce_unit_tests`.
 | Path | Purpose |
 |---|---|
 | `harness/abce_test_harness.hpp` | ISA table, frame walker, fake ring (plain memory, instant or manual engine, mapped-words or queue-ops backend), `Mapper` (builder + orchestrator + rings) |
+| `unit/device_test.cpp` | Device submitter on host-memory rings |
 | `unit/packet_fields_test.cpp` | Packet bit-field regressions |
 | `unit/validation_test.cpp` | Request validation and plan lifecycle |
 | `unit/profiling_test.cpp` | Timestamp ordering for profiled copies |
@@ -38,13 +39,15 @@ library so a library regression cannot also move the expectation.
 
 ### T0. Build hygiene (done)
 Every public header compiles standalone as C11 and as C++17 with `-Wall -Wextra -Werror`
-(`abce_cxx.h` C++ only; `abce_device.h` excluded, it needs a device compiler).
+(`abce_cxx.h` C++ only). That includes `abce_device.h`, which builds without HIP.
 
 ### T1. Packet fields (done)
 Regression pins for bug classes already hit in ROCr's SDMA path:
 64-bit fence/poll carry `sys` and system scope; 32-bit fence scope only on scope-field parts; fused
 wait/signal blocks are system scope for every fused kind (linear, swap, multicast, indirect); the
 indirect packet is compacted when wait/signal are absent and does not rely on a zeroed buffer.
+Classic and gfx125+ swap chunk counts and every emitted operand address preserve their respective
+64-byte and 32-byte alignment, including sizes between and above the two packet limits.
 
 Profiling (`unit/profiling_test.cpp`) pins the ordering ROCr fixed in ROCm/rocm-systems#12615: with a
 timestamp surface set, no fused body signals completion inline (the gfx125+ signal block is gone),
@@ -86,10 +89,13 @@ Currently: gfx90a large multicast with several engines returns `NO_LEGAL_ENGINE`
 `abce_cxx.h` RAII/ownership and error mapping; `abce_hsa.h` with a stubbed HSA table (queue
 creation, signal handling, pinned-memory lock failure paths).
 
-### T8. Planned: device header
-Compile `abce_device.h` for gfx942 and gfx1250 (hipcc, device-only) and check it is
-self-contained; run the device frame-builder against `abce_decode.h` through a HIP kernel writing
-into host-visible memory. Needs a ROCm toolchain, optionally a GPU.
+### T8. Device submitter (done)
+`unit/device_test.cpp` runs `abce_device.h`'s single-lane path on the host against plain-memory
+rings: signals, waits, handles, inline writes, exact frame sizes, folded wrap padding, the
+half-ring frame limit, non-blocking and signal-only submits, concurrent producers on one ring
+(every frame published once written, in order), and that the `*_one_lane` calls emit the same
+frames. Wave-aggregated multi-lane submits run only on a GPU, so hip-tests covers them. Hardware coverage is
+`hip-tests/catch/unit/copyEngine` (`DEBUG_CLR_ENABLE_ABCE=1 GPU_MAX_SDMA_DEVICE_QUEUES=16`).
 
 ### T9. Planned: hardware (needs a GPU, separate target)
 Round-trip data checks per op kind and size class (H2D, D2H, D2D, fill, swap, multicast, rect,
@@ -105,13 +111,34 @@ Apply each to a scratch copy of `include/`, rebuild, expect red:
 | drop `sys` on 64-bit fence / poll | `PacketFields.Fence64*`, `Poll64*` |
 | always emit the wait block in the indirect builder | `PacketFields.IndirectCopyIsCompacted*` |
 | drop swap alignment / support check | `Validation.SwapIsGated*` |
+| choose a classic swap chunk size that is not a multiple of 64 | `PacketFields.ChunkedSwapPreservesOperandAlignment` |
 | drop indirect gfx125 gate | `Validation.IndirectCopyNeedsGfx125Plus` |
 | `bytes >= size` -> `bytes > size` in reserve | `Ring.ARequestAtOrAbove*` (hangs; times out) |
 | fused size `1+6` -> `1+5` | `SizingMatchesEmission/gfx1250`, golden frames |
 | drop ring zeroing | `Ring.AcquiredRegionIsZeroed*` |
+| device payload written at the reservation start, not after the folded tail | `DeviceRing.AFrameThatWouldStraddle*` |
+| drop the half-ring check on folded reserves | `DeviceRing.AFrameLargerThanHalfTheRing*` |
+| pad with zero dwords, or one NOP past the 14-bit count | `DeviceRing.AFrameThatWouldStraddle*`, `PaddingPastOneCountedNop*` |
 | timestamps no longer force an epilogue (inline fused signal returns) | `Profiling*/gfx1250`, `ProfilingGfx125Plus.*` |
 | end timestamp emitted after the completion write | `Profiling.*` (all ISAs) |
 | timestamps no longer count as gate-requiring ordering work | `ProfilingGfx125Plus.ATimestampAlone*` |
+| device submit arms the caller's signal again | `DeviceCompletion.TheKernelNeverStores*` |
+| dependency wait compares `==` instead of `>=` (fused or POLL) | `DeviceDependency.AnUnmetDependency*` |
+| gfx9 SET is two 32-bit FENCEs, or allowed without atomics | `DeviceCompletion.SetOnGfx9IsOneAtomicSwap64`, `AddAndSubNeedDeviceAtomicsAndSetDoesBeforeGfx125` |
+| an unknown request kind is treated as a write | `DeviceHandle.AnUnknownRequestKindIsRefused` |
+| WRITE count is dwords rather than dwords - 1 | `DeviceWrite.*`, `DeviceFrames.*` |
+| fused ADD completion subtracts | `DeviceCompletion.AnUnorderedAddOnGfx125Plus*` |
+| device submit skips the handle or engine ABI check | `DeviceHandle.AMismatchedAbi*` |
+| a GCR part gets a device engine | `DeviceFrames.PartsWhoseCopiesNeedGcr*` |
+| a gfx125+ signal fuses into its copy without UNORDERED | `DeviceCompletion.ByDefaultAnAddOnGfx125Plus*` |
+| a non-blocking submit waits for room or queues a wait | `DeviceNonblocking.*` |
+| a signal-only submit fuses or emits a body | `DeviceSignal.*` |
+| a device producer publishes without waiting its turn | `DevicePublish.*` (threads share two CPUs; skipped under TSan) |
+| ADD allowed without device atomics | `DeviceCompletion.AddAndSubNeedDeviceAtomics*` |
+| a met dependency on a non-blocking submit still emits a wait, or a blocking one skips it | `DeviceDependency.ABlockingSubmitQueuesTheWait*` |
+| a fused builder signals only the last chunk | `Gfx125PlusSignals.*` |
+| an all-fused frame signals only its last body | `Gfx125PlusSignals.*` |
+| a chunked device copy fuses its signal | `DeviceCompletion.AChunkedGfx125PlusCopy*` |
 
 In debug builds the builder asserts also fire for the swap-alignment mutation; in release builds
 (asserts compiled out) only the validation test catches it.

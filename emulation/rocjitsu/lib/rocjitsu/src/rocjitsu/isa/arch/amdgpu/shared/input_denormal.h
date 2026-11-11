@@ -9,7 +9,7 @@
 /// Apply this stage before widening: an F16 subnormal is normal when represented in F32.
 /// Source modifiers and output-denormal handling are separate stages.
 
-#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 
 #include <cstdint>
 
@@ -24,26 +24,10 @@ struct Policy {
   static constexpr Policy make(uint32_t denorm_mode) { return {(denorm_mode & 1u) == 0}; }
 };
 
-namespace detail {
-
-/// @brief All ones where the magnitude is below the smallest normal, zero elsewhere.
-/// @details The subtraction borrows into the lane's top bit exactly when the
-/// magnitude is smaller, which avoids a mask type.
-template <typename Fmt, typename V> constexpr V below_normal(V bits) {
-  using Lane = typename Fmt::Lane;
-  const V magnitude = bits & Fmt::kMagnitude;
-  return Lane{0} - ((magnitude - Fmt::kMinNormal) >> (8 * sizeof(Lane) - 1));
-}
-
-} // namespace detail
-
 /// @brief Flush a subnormal source to a zero of the same sign when enabled.
 /// @details NaN, infinity, zero and normal encodings pass through unchanged.
 template <typename Fmt, typename V> constexpr V flush_input(V bits, const Policy &policy) {
-  static_assert(fp_format::is_lane_v<Fmt, V>);
-  if (!policy.flush_inputs)
-    return bits;
-  return bits & (~detail::below_normal<Fmt>(bits) | Fmt::kSign);
+  return policy.flush_inputs ? denormal::flush<Fmt>(bits) : bits;
 }
 
 /// @brief Mask to the source format and apply input flushing.

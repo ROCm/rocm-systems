@@ -208,18 +208,19 @@ class GraphKernelArgManager : public amd::ReferenceCountedObject,
   using KernelArgImpl = device::Settings::KernelArgImpl;
 };
 
-//! Per-GraphExecBase pool of HW event sets.
+//! Per-GraphExecBase pool of HW event sets, taken from the device's pool and given back to it
+//! when the graph is destroyed.
 class GraphSignalManager : public amd::ReferenceCountedObject {
  public:
   GraphSignalManager() : amd::ReferenceCountedObject() {}
   ~GraphSignalManager();
 
-  //! Pre-create `num_sets` signal sets of `count` signals each at instantiate
+  //! Take `num_sets` signal sets of `count` signals each at instantiate
   //! time, so launches never pay signal creation on the hot path.
   bool Prepopulate(amd::Device* device, int count, int num_sets);
 
   //! Acquire a ready signal set for a single launch. Pops from the free pool;
-  //! only creates a new set as a fallback if the pool is unexpectedly empty.
+  //! takes a new set from the device only if the pool is unexpectedly empty.
   bool AcquireSet(amd::Device* device, int count, std::vector<void*>& out_set);
 
   //! Re-arm a used set and return it to the free pool. Called from the launch
@@ -847,8 +848,10 @@ class Graph {
   //! Schedules nodes into batches for optimized execution
   hipError_t ScheduleNodesIntoBatches();
 
-  //! Find execution paths hierarchically, keeping child graphs separate
-  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths);
+  //! Find execution paths hierarchically, keeping child graphs separate.
+  //! skip_topo_check: the caller has already checked this graph for cycles.
+  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths,
+                                            bool skip_topo_check = false);
 
   //! Find all paths from a node using an explicit DFS over a node stack, with
   //! hierarchical handling of child graphs (only child graphs recurse)
@@ -1027,6 +1030,8 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
+    //! First node is an uncaptured SDMA memcpy behind a leading barrier.
+    bool leads_with_uncaptured_sdma = false;
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
     // Most urgent declared priority across this segment's nodes.
@@ -2041,7 +2046,7 @@ class GraphKernelNode : public GraphNode {
     }
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
-      command->SetProfiling();
+      command->RequireSignal();
     }
     commands_.emplace_back(command);
     return status;
@@ -3351,7 +3356,7 @@ class GraphEventRecordNode : public GraphNode {
     hip::Event* e = reinterpret_cast<hip::Event*>(event_);
     commands_.reserve(1);
     amd::Command* command = nullptr;
-    status = e->recordCommand(command, stream);
+    status = e->recordCommand(command, stream, 0, !hip::Event::kBatchFlush);
     commands_.emplace_back(command);
     return status;
   }

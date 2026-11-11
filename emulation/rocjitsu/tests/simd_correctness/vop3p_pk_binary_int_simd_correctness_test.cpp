@@ -14,13 +14,11 @@
 ///   v_pk_lshlrev_b16 / v_pk_lshrrev_b16 / v_pk_ashrrev_i16
 ///   v_pk_min_u16 / v_pk_max_u16 / v_pk_min_i16 / v_pk_max_i16
 ///
-/// Each 32-bit lane holds {low16, high16} packed. Default packing
-/// (op_sel = 0, op_sel_hi = 3) is what the SIMD fast path handles —
-/// non-default modes bail to scalar. The test sweeps 14 rotation seeds
-/// under full + partial EXEC; inputs cover overflow, sign-boundary,
-/// shift-saturation, and identical-pair cases on both halves
-/// independently.
+/// Each 32-bit lane holds two 16-bit values. The CDNA4 sweep uses default
+/// half selectors and 14 rotations under full and partial EXEC. The sign-bit
+/// cases below exercise non-default half selectors on newer architectures.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -115,15 +113,18 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3p_pk_bin_int_mem"), l2("vop3p_pk_bin_int_l2") {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : gpu_mem("vop3p_pk_bin_int_mem"), l2("vop3p_pk_bin_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3p_pk_bin_int", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_bin_int", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
+    decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -165,6 +166,8 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -194,6 +197,47 @@ void check_case(const Case &c, uint64_t exec) {
             << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
         EXPECT_EQ(scalar_out[lane], DST_SENTINEL)
             << c.name << " rot=" << rot << ": clobbered inactive lane " << lane;
+      }
+    }
+  }
+}
+
+TEST(Vop3pPkBinaryIntSimdCorrectness, AppliesSignBitsAfterSelectingSourceHalves) {
+  struct NegCase {
+    uint32_t words[2];
+    uint32_t expected;
+  };
+  // LLVM encodings for v6, v0, v1[, v2] on gfx1100, gfx1151, gfx1201 and gfx1250.
+  constexpr NegCase cases[] = {
+      {{0xcc00c206, 0x3c0a0300}, 0x7ffe8000}, // MAD_I16: negate low A and high B, clamp.
+      {{0xcc004406, 0x9c0a0300}, 0x7ffe800f}, // MAD_I16: negate both halves of C.
+      {{0xcc0a4a06, 0x32020300}, 0x80068003}, // ADD_U16: swap A's halves, negate low A and high B.
+      {{0xcc0a4106, 0x12020300}, 0x80060007}, // ADD_U16: select low A twice and negate only high A.
+      {{0xcc006006, 0x9c0a0300}, 0xfffe800d}, // MAD_I16: select high C twice and negate only low C.
+  };
+  ForceScalarGuard guard;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    const uint32_t base = fx.wf->vgpr_alloc().base;
+    fx.wf->set_exec(1);
+    fx.cu->write_vgpr(base, 0, 0xffff0003);
+    fx.cu->write_vgpr(base + 1, 0, 0x00030004);
+    fx.cu->write_vgpr(base + 2, 0, 0x00010003);
+    for (const NegCase &test_case : cases) {
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, test_case.words));
+      ASSERT_NE(inst, nullptr);
+      SCOPED_TRACE(inst->mnemonic());
+      for (bool force_scalar : {false, true}) {
+        SCOPED_TRACE(force_scalar);
+        util::set_force_scalar_for_testing(force_scalar);
+        fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
+        fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
+        ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+        EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), test_case.expected);
+        EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);
       }
     }
   }

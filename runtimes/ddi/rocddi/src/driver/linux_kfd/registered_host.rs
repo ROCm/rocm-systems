@@ -13,26 +13,39 @@ use super::drm;
 use super::memory::DeviceVm;
 use super::os_memory;
 use super::{errno, error, native_error};
+use crate::memory::device::registered_host_page_cover;
 use crate::memory::host::HostBackingLease;
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
+/// Native mapping phase retained across partial failure and retry.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MappingPhase {
+    /// No mapping request has been sent.
     NotMapped,
+    /// A map request may have changed some page-table entries.
     Mapping,
+    /// Mapping and synchronization completed.
     Mapped,
+    /// An unmap request may have changed some page-table entries.
     Unmapping,
+    /// Unmapping and synchronization completed.
     Unmapped,
 }
 
+/// Per-render-VM GEM registration and mapping progress for borrowed pages.
 struct VmMapping {
+    /// Render VM that owns the GEM handle and timeline.
     vm: Shared<DeviceVm>,
+    /// GEM USERPTR handle, or zero before registration.
     handle: u32,
+    /// Timeline used to prove VM update completion.
     timeline: u32,
+    /// Last known mapping phase.
     phase: MappingPhase,
+    /// Native operation may have completed despite reporting an error.
     uncertain: bool,
 }
 
@@ -142,13 +155,23 @@ impl VmMapping {
 
 /// One common GPU VA for a caller-owned page cover across requested render VMs.
 pub(crate) struct DrmRegisteredHost {
+    /// Creating VM retained through every peer registration.
     owner: Shared<DeviceVm>,
+    /// Native USERPTR handles and mapping progress in each render VM.
     mappings: Vec<VmMapping>,
+    /// Common GPU virtual address reserved for the page cover.
     reservation: Option<os_memory::Reservation>,
+    /// First caller-visible host byte.
     host_address: usize,
+    /// Owner of runtime-allocated pages, when present.
     backing: Option<HostBackingLease>,
+    /// Offset from the registered page cover to `host_address`.
     byte_offset: usize,
+    /// Exact public byte extent.
     size: u64,
+    /// Page cover measured from the aligned host base.
+    native_size: u64,
+    /// Prevents new access changes after cleanup begins.
     freeing: bool,
 }
 
@@ -180,18 +203,14 @@ impl DrmRegisteredHost {
                 "registered host extent exceeds host address width",
             )
         })?;
-        let byte_offset = host_address & (page - 1);
-        let host_base = host_address - byte_offset;
-        if host_address == 0
-            || size == 0
-            || size % page != 0
-            || host_base.checked_add(size).is_none()
-        {
-            return Err(error(
-                ErrorKind::InvalidArgument,
-                "registered host page cover is invalid",
-            ));
-        }
+        let (host_base, native_size) = registered_host_page_cover(host_address, size, page)
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::InvalidArgument,
+                    "registered host page cover is invalid",
+                )
+            })?;
+        let byte_offset = host_address - host_base;
         owner.check()?;
 
         let mut mappings = crate::memory::storage::try_vec_with_capacity(
@@ -220,7 +239,7 @@ impl DrmRegisteredHost {
             }
             if mappings
                 .iter()
-                .any(|mapping| mapping.vm.gpu_id() == peer.gpu_id())
+                .any(|mapping| mapping.vm.gpu_id == peer.gpu_id)
             {
                 return Err(error(
                     ErrorKind::InvalidArgument,
@@ -242,7 +261,7 @@ impl DrmRegisteredHost {
         let owner_slot = Owned::try_new_uninit()?;
         let alignment = usize::try_from(desc.alignment)
             .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
-        let reservation = os_memory::Reservation::new(size, alignment, bounds, false)
+        let reservation = os_memory::Reservation::new(native_size, alignment, bounds, false)
             .map_err(|source| native_error("registered GPU address reservation", source))?;
         let mut allocation = owner_slot.write(Self {
             owner,
@@ -252,12 +271,21 @@ impl DrmRegisteredHost {
             backing,
             byte_offset,
             size: desc.size,
+            native_size: native_size as u64,
             freeing: false,
         });
         let address = allocation.address()?;
         for mapping in &mut allocation.mappings {
             // SAFETY: This constructor retains the caller-owned page cover.
-            unsafe { mapping.map(host_base as u64, address, desc.size, permissions, uncached)? };
+            unsafe {
+                mapping.map(
+                    host_base as u64,
+                    address,
+                    native_size as u64,
+                    permissions,
+                    uncached,
+                )?;
+            };
         }
         allocation.owner.check()?;
         Ok(allocation)
@@ -277,7 +305,7 @@ impl DrmRegisteredHost {
             }),
             host_address: Some(self.host_address),
             size: self.size,
-            native_size: self.size,
+            native_size: self.native_size,
             physical_backing_id: [0; 2],
         }
     }
@@ -316,7 +344,7 @@ impl DrmRegisteredHost {
     }
 
     pub(crate) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
-        self.owner.shares_kfd(device) && self.owner.gpu_id() == device.gpu_id()
+        self.owner.shares_kfd(device) && self.owner.gpu_id == device.gpu_id
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
@@ -331,7 +359,7 @@ impl DrmRegisteredHost {
         }
         let address = self.address()?;
         for mapping in self.mappings.iter_mut().rev() {
-            mapping.free(address, self.size)?;
+            mapping.free(address, self.native_size)?;
         }
         if let Some(reservation) = self.reservation.as_mut() {
             reservation
@@ -346,7 +374,8 @@ impl DrmRegisteredHost {
 
 impl Drop for DrmRegisteredHost {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
             if self.mappings.iter().any(|mapping| {
                 mapping.handle != 0
                     || mapping.uncertain

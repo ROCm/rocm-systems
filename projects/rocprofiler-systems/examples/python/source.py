@@ -4,12 +4,11 @@
 # SPDX-License-Identifier: MIT
 
 import os
-import sys
-import time
+import random
+
 import rocprofsys
 import roctx
 from roctx.context_decorators import RoctxRange
-import random
 
 _prefix = ""
 
@@ -19,7 +18,7 @@ def fib(n):
 
 
 def _sum(arr):
-    print(f"----  in _sum")
+    print("----  in _sum")
     return sum(arr)
 
 

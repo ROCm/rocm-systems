@@ -472,25 +472,19 @@ StatsIoTracker::complete(uint64_t bytes) const noexcept
     auto endTime{std::chrono::steady_clock::now()};
     auto duration{std::chrono::duration_cast<std::chrono::microseconds>(endTime - m_startTime)};
     Context<StatsCollection>::get()->addIo(m_ioType, m_backend, bytes,
-                                           static_cast<uint64_t>(duration.count()), m_aligned);
+                                           static_cast<uint64_t>(duration.count()), m_aligned, m_deviceId);
 }
 
 void
-StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs,
-                       bool aligned) const noexcept
+StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs, bool aligned,
+                       int deviceId) const noexcept
 {
     Stats *stats{Context<IStatsServer>::get()->getStats()};
     if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
         return;
     }
-    size_t device{};
-    try {
-        device = static_cast<size_t>(Context<Hip>::get()->hipGetDevice());
-    }
-    catch (...) {
-        return;
-    }
-    auto *perGpuStats{stats->getPerGpuStats(device, backend)};
+    size_t device{static_cast<size_t>(deviceId)};
+    auto  *perGpuStats{stats->getPerGpuStats(device, backend)};
     if (perGpuStats == nullptr) {
         return;
     }
@@ -510,20 +504,14 @@ StatsCollection::addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint
 }
 
 void
-StatsCollection::error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept
+StatsCollection::error(IoType ioType, StatsBackend backend, uint64_t bytes, int deviceId) const noexcept
 {
     Stats *stats{Context<IStatsServer>::get()->getStats()};
     if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
         return;
     }
-    size_t device{};
-    try {
-        device = static_cast<size_t>(Context<Hip>::get()->hipGetDevice());
-    }
-    catch (...) {
-        return;
-    }
-    auto *perGpuStats{stats->getPerGpuStats(device, backend)};
+    size_t device{static_cast<size_t>(deviceId)};
+    auto  *perGpuStats{stats->getPerGpuStats(device, backend)};
     if (perGpuStats == nullptr) {
         return;
     }

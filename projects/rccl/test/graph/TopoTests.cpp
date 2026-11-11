@@ -9,6 +9,10 @@
 
 #include "graph/topo.h"
 #include "graph/xml.h"
+// rome_models.h relies on its includer for ncclResult_t and the topo types.
+#include "graph/rome_models.h"
+#include "comm.h"  // struct ncclComm, for the ncclTopoComputeP2pChannelsPerPeer case
+#include "graph.h" // ncclTopoComputeP2pChannelsPerPeer
 #include "gtest/gtest.h"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
@@ -19,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 // busIdToInt64 is an internal helper (declared in utils.h).
@@ -38,7 +43,7 @@ namespace RcclUnitTesting {
 
 class TopoTest : public ::testing::Test {
 protected:
-  static constexpr int kMaxXmlNodes = 64;
+  static constexpr int kMaxXmlNodes = 128;
 
   void SetUp() override {
     system =
@@ -102,30 +107,31 @@ protected:
 
   // GPU-to-GPU link entry connecting to a peer GPU. Default tclass 0x03 (VGA);
   // xml.cc now also writes PCI_ACCELERATOR_CLASS ("0x120000") for AMD GPUs.
-  void addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
-                  int count, const char* tclass = "0x03") {
+  struct ncclXmlNode* addGpuLink(struct ncclXmlNode* holder, const char* targetBusId,
+                                 int count, const char* tclass = "0x03") {
     struct ncclXmlNode* link = nullptr;
     EXPECT_EQ(xmlAddNode(xml, holder, "xgmi", &link), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "target", targetBusId), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(link, "tclass", tclass), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
+    return link;
   }
 
   // Rebuild the fixture XML tree. Needed when one TEST_F walks several CPU
-  // model-id cases and each case has to start from an empty <system>.
-  void resetXml() {
+  // model-id cases and each case has to start from an empty <system>, or when the tree outgrows
+  // kMaxXmlNodes.
+  void resetXml(int maxNodes = kMaxXmlNodes) {
     free(xml);
     xml = nullptr;
     root = nullptr;
-    ASSERT_EQ(xmlAlloc(&xml, kMaxXmlNodes), ncclSuccess);
+    ASSERT_EQ(xmlAlloc(&xml, maxNodes), ncclSuccess);
     ASSERT_EQ(xmlAddNode(xml, nullptr, "system", &root), ncclSuccess);
   }
 
-  // <cpu> populated with the attributes ncclTopoGetSystemFromXml() requires to
-  // build a full system (numaid, host id, x86 vendor/family/model).
+  // <cpu> with the attributes ncclTopoGetSystemFromXml() requires; defaults to a non-Rome Turin host.
   struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0,
-                                   const char* vendor = "AuthenticAMD", int familyId = 25,
-                                   int modelId = 1) {
+                                   const char* vendor = "AuthenticAMD", int familyId = 26,
+                                   int modelId = 2) {
     struct ncclXmlNode* cpu = nullptr;
     EXPECT_EQ(xmlAddNode(xml, root, "cpu", &cpu), ncclSuccess);
     char hash[32];
@@ -293,6 +299,44 @@ protected:
     return -1;
   }
 
+  // One host of a UALoE fabric clique: gfx1250 GPUs, each with a NIC under its own
+  // PCIe switch, and one <xgmi> entry per local peer stamped the way xml.cc stamps amd-smi's
+  // report. amd-smi only sees the GPUs of its own host, so no entry names another host's GPU, and
+  // every host reuses the same bus ids. With fabricSupported=0 the entries are 1-hop XGMI instead.
+  static constexpr int kFabricGpusPerHost = 4;
+  // XML nodes addFabricHost() adds; keep in sync with it.
+  static constexpr int kFabricGpuXmlNodes = 3;  // PCIe switch, GPU <pci>, <gpu>
+  static constexpr int kFabricNicXmlNodes = 3;  // NIC <pci>, <nic>, <net>
+  static constexpr int kFabricPeerEntries = kFabricGpusPerHost - 1;
+  static constexpr int kFabricHostXmlNodes =
+      1 /* <cpu> */ + kFabricGpusPerHost * (kFabricGpuXmlNodes + kFabricPeerEntries + kFabricNicXmlNodes);
+  static void fabricGpuBusId(int g, char* busId, size_t len) {
+    snprintf(busId, len, "0000:%02x:00.0", 0x11 + g * 0x10);
+  }
+  void addFabricHost(uint64_t hostHash, int baseRank, int fabricSupported) {
+    struct ncclXmlNode* cpu = addSystemCpu(hostHash);
+    struct ncclXmlNode* gpus[kFabricGpusPerHost] = {};
+    for (int g = 0; g < kFabricGpusPerHost; g++) {
+      char switchBus[32], gpuBus[32], nicBus[32];
+      snprintf(switchBus, sizeof(switchBus), "0000:%02x:00.0", 0x10 + g * 0x10);
+      fabricGpuBusId(g, gpuBus, sizeof(gpuBus));
+      snprintf(nicBus, sizeof(nicBus), "0000:%02x:00.0", 0x12 + g * 0x10);
+      struct ncclXmlNode* pciSwitch = addPciBridge(cpu, switchBus);
+      struct ncclXmlNode* gpuPci = addGpuPci(pciSwitch, gpuBus, "gfx1250", baseRank + g, /*dev=*/g);
+      EXPECT_EQ(xmlGetSub(gpuPci, "gpu", &gpus[g]), ncclSuccess);
+      addNic(pciSwitch, nicBus, /*dev=*/g);
+    }
+    for (int g = 0; g < kFabricGpusPerHost; g++) {
+      for (int p = 0; p < kFabricGpusPerHost; p++) {
+        if (p == g) continue;
+        char peerBus[32];
+        fabricGpuBusId(p, peerBus, sizeof(peerBus));
+        struct ncclXmlNode* link = addGpuLink(gpus[g], peerBus, /*count=*/1, PCI_ACCELERATOR_CLASS);
+        EXPECT_EQ(xmlSetAttrInt(link, "fabric_supported", fabricSupported), ncclSuccess);
+      }
+    }
+  }
+
   struct ncclTopoSystem* buildSystemWithPaths(uint64_t host) {
     struct ncclTopoSystem* built = buildSystem(host);
     if (built == nullptr) return nullptr;
@@ -300,14 +344,33 @@ protected:
     return built;
   }
 
-  static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
-                                       struct ncclTopoNode* to) {
+  // What ncclTopoGetSystem() stamps on the fused <system>: 1 when the comm spans cliques (scale-out).
+  void setCrossClique(int crossClique) {
+    EXPECT_EQ(xmlSetAttrInt(root, "cross_clique", crossClique), ncclSuccess);
+  }
+
+  // Two fused hosts of one clique, both stamped with the same fabric_supported.
+  struct ncclTopoSystem* buildTwoFabricHosts(uint64_t hostA, uint64_t hostB, int fabricSupported,
+                                             int crossClique = 1) {
+    setCrossClique(crossClique);
+    addFabricHost(hostA, /*baseRank=*/0, fabricSupported);
+    addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, fabricSupported);
+    return buildSystemWithPaths(hostA);
+  }
+
+  static struct ncclTopoLink* findLinkOfType(struct ncclTopoNode* from,
+                                             struct ncclTopoNode* to, int type) {
     if (from == nullptr || to == nullptr) return nullptr;
     for (int i = 0; i < from->nlinks; i++) {
-      if (from->links[i].type == LINK_NVL && from->links[i].remNode == to)
+      if (from->links[i].type == type && from->links[i].remNode == to)
         return &from->links[i];
     }
     return nullptr;
+  }
+
+  static struct ncclTopoLink* findLink(struct ncclTopoNode* from,
+                                       struct ncclTopoNode* to) {
+    return findLinkOfType(from, to, LINK_NVL);
   }
 
   static struct ncclTopoLink* findSysLink(struct ncclTopoNode* from, struct ncclTopoNode* to) {
@@ -742,6 +805,401 @@ TEST_F(TopoTest, GetSystemFromXml_CpxEightMlopartsUnderPhysicalPci) {
   ncclTopoFree(built);
 }
 
+// Two CPX partitions of one physical device are XGMI peers: sysfs reports the link between their
+// PCI functions and ncclTopoAddXGMI() wires it onto their DEV nodes. ncclTopoAddGpuSub() used to
+// also connect the siblings with LINK_LOC, and since PATH_LOC outranks PATH_NVL in the path search
+// that shadowed the real XGMI links, hiding the peer from everything keyed on PATH_NVL (P2P channel
+// counts, XGMI classification) and leaving it with the PCIe fallbacks.
+//
+// The hop is rated at MLOPART_LOC_BW, not at the width sysfs reports: the report carries an
+// inter-device XGMI width, while the partitions actually reach each other over the much wider
+// on-package fabric, and ncclTopoSearch's followPath() spends link bw as a budget. The report here
+// names four widths so the test can tell the two apart -- a sibling link left at 4 * the XGMI
+// width would pass any assertion that only pinned it to one.
+TEST_F(TopoTest, MloPartSiblingPath_IsNvlAtOnPackageBw) {
+  const uint64_t host = 0xc1;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  // A partition is addressed by its PCI function nibble, so partition 1 is function 1.
+  addGpuLink(gpu0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0000:0c:00.0", 4, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  struct ncclTopoLink* l01 = findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1);
+  struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
+  ASSERT_NE(l01, nullptr);
+  ASSERT_NE(l10, nullptr);
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
+  // The XGMI link is the only one between the siblings: a LINK_LOC entry alongside it is what
+  // used to shadow it in the path search.
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes, LINK_LOC), nullptr);
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  EXPECT_EQ(p01->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(p01->bw, MLOPART_LOC_BW);
+
+  ncclTopoFree(built);
+}
+
+// A platform that reports no XGMI between the partitions of one device must not leave them
+// unreachable: ncclTopoConnectMloPartSiblings() links whatever the XGMI pass left unconnected.
+TEST_F(TopoTest, MloPartSiblings_LinkedWhenXgmiUnreported) {
+  const uint64_t host = 0xc2;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  // No addGpuLink() calls: the partitions have no XGMI entries in the XML.
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  struct ncclTopoLink* l01 = findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1);
+  struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
+  ASSERT_NE(l01, nullptr);
+  ASSERT_NE(l10, nullptr);
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1, LINK_LOC), nullptr);
+  EXPECT_EQ(findLinkOfType(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes, LINK_LOC), nullptr);
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  EXPECT_EQ(p01->type, PATH_NVL);
+
+  ncclTopoFree(built);
+}
+
+// A one-sided XGMI report (partition 0 names partition 1, not the reverse) leaves the pair with a
+// link in one direction only, since ncclTopoAddXGMI() connects just the reporting DEV for a GPU
+// target. Both directions must end at MLOPART_LOC_BW regardless. The reported one must be re-rated
+// rather than topped up: ncclTopoConnectNodes() accumulates, so adding to it would leave 0->1
+// above the on-package bw while 1->0 sat at it, and the two ranks of the pair would then read
+// different bandwidths off their directional paths.
+TEST_F(TopoTest, MloPartSiblings_OneSidedXgmiRatesBothDirectionsAtOnPackageBw) {
+  const uint64_t host = 0xc3;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  addGpuUnderPci(pci, "gfx942", 1, 1, /*mloPart=*/1);
+  // Only partition 0 reports the link; partition 1 gets no <xgmi> entry.
+  addGpuLink(gpu0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+
+  struct ncclTopoLink* l01 = findLink(built->nodes[DEV].nodes, built->nodes[DEV].nodes + 1);
+  struct ncclTopoLink* l10 = findLink(built->nodes[DEV].nodes + 1, built->nodes[DEV].nodes);
+  ASSERT_NE(l01, nullptr);
+  ASSERT_NE(l10, nullptr);
+  EXPECT_FLOAT_EQ(l01->bw, MLOPART_LOC_BW);
+  EXPECT_FLOAT_EQ(l10->bw, MLOPART_LOC_BW);
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* p01 = built->nodes[GPU].nodes[0].paths[GPU] + 1;
+  struct ncclTopoLinkList* p10 = built->nodes[GPU].nodes[1].paths[GPU];
+  EXPECT_EQ(p01->type, PATH_NVL);
+  EXPECT_EQ(p10->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(p01->bw, p10->bw);
+
+  ncclTopoFree(built);
+}
+
+// All eight CPX partitions of one physical device are XGMI peers, but a platform only has to
+// report the links it observes. An eight-partition device that reports a ring names 8 of the 56
+// ordered pairs and leaves the other 48 to ncclTopoConnectMloPartSiblings(), which is the only
+// case that exercises the N-way mesh it builds. Every pair must come out LINK_NVL at
+// MLOPART_LOC_BW, reported or not. A partitioned node is where rating these hops at an XGMI width
+// does real damage: ncclTopoSearch's followPath() spends link bw as a budget, and 56 hops of it
+// walk the balanced-tree search down the whole speed array.
+TEST_F(TopoTest, MloPartSiblings_EightPartitionsFormFullNvlMesh) {
+  const uint64_t host = 0xc4;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  // Only the ring is reported: partition p names its successor and nothing else.
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, nParts);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+
+  // Every ordered pair, so the assertion does not depend on which DEV node holds which partition.
+  for (int a = 0; a < nParts; a++) {
+    for (int b = 0; b < nParts; b++) {
+      if (a == b) continue;
+      struct ncclTopoLink* link = findLink(built->nodes[DEV].nodes + a, built->nodes[DEV].nodes + b);
+      ASSERT_NE(link, nullptr) << "no XGMI link from DEV " << a << " to DEV " << b;
+      EXPECT_FLOAT_EQ(link->bw, MLOPART_LOC_BW) << "DEV " << a << " to DEV " << b;
+    }
+  }
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  for (int a = 0; a < nParts; a++) {
+    for (int b = 0; b < nParts; b++) {
+      if (a == b) continue;
+      struct ncclTopoLinkList* path = built->nodes[GPU].nodes[a].paths[GPU] + b;
+      EXPECT_EQ(path->type, PATH_NVL) << "GPU " << a << " to GPU " << b;
+      EXPECT_FLOAT_EQ(path->bw, MLOPART_LOC_BW) << "GPU " << a << " to GPU " << b;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// parseRome4P2H() sets RCCL_TOPO_4P2H_ROME from romeTopo.nLinks as soon as a system has more than
+// four GPUs, whether or not one of its models matched, and ncclTopoCompute() then caps the ring at
+// 2 channels. The partitions of one physical device are not a hive: while they were PATH_LOC the
+// link count stayed 0 and the flag never armed, and retyping them must not change that. Eight
+// partitions is the shape that reaches it -- five to eight ranks on one device -- and the cost of
+// getting it wrong is a ring 64x narrower than the one the search would otherwise build.
+TEST_F(TopoTest, MloPartSiblings_DoNotCountAsRomeHiveLinks) {
+  const uint64_t host = 0xc6;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  ASSERT_FALSE(built->type & RCCL_TOPO_4P2H_ROME);
+
+  struct ncclTopoGraph graph;
+  memset(&graph, 0, sizeof(graph));
+  graph.pattern = NCCL_TOPO_PATTERN_RING;
+  graph.minChannels = 1;
+  graph.maxChannels = MAXCHANNELS / 2;
+  ASSERT_EQ(parseRome4P2H(built, &graph, nullptr), ncclSuccess);
+  EXPECT_FALSE(built->type & RCCL_TOPO_4P2H_ROME)
+    << "partitions of one device were taken for a Rome 4P2H hive, capping the ring at 2 channels";
+
+  ncclTopoFree(built);
+}
+
+// What the collective search makes of a node that is one device's partitions. Rating the
+// on-package hop at MLOPART_LOC_BW hands ncclTopoSearch a hop roughly 54 XGMI widths deep, and the
+// risk in that is the search spending it: followPath() charges every channel bwIntra against each
+// link it crosses, so a channel that claimed the hop's rating -- or anything near it -- would both
+// misdescribe what one channel can carry and let the count run on until the rating was used up,
+// which on this fixture is over a hundred channels before the hop pushes back at all. It must stay
+// bounded by the caller's cap instead, for the ring and the tree alike.
+TEST_F(TopoTest, MloPartSiblings_OneDeviceRingAndTreeStayWithinTheChannelCap) {
+  const uint64_t host = 0xc8;
+  const int nParts = NCCL_TOPO_MLOPART_DEV_MAX;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", 0, 0, /*mloPart=*/0);
+  struct ncclXmlNode* gpus[NCCL_TOPO_MLOPART_DEV_MAX] = {};
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpus[0]), ncclSuccess);
+  ASSERT_NE(gpus[0], nullptr);
+  for (int p = 1; p < nParts; p++) gpus[p] = addGpuUnderPci(pci, "gfx942", p, p, p);
+  for (int p = 0; p < nParts; p++) {
+    char tgt[32];
+    snprintf(tgt, sizeof(tgt), "0000:0c:00.%d", (p + 1) % nParts);
+    addGpuLink(gpus[p], tgt, 4, PCI_ACCELERATOR_CLASS);
+  }
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, nParts);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  built->nRanks = nParts;
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+
+  // Several caps rather than one, all well under the hundred-odd the rating alone would allow, so
+  // that what is pinned is the count tracking the cap rather than one number that a count coming
+  // from somewhere else could still happen to match.
+  const int caps[] = {4, 8, 16, 32};
+  const float xgmiWidth = ncclTopoXGMISpeed("gfx942");
+  ASSERT_GT(MLOPART_LOC_BW / xgmiWidth, (float)caps[sizeof(caps) / sizeof(caps[0]) - 1]);
+
+  const int patterns[] = {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE};
+  for (int pattern : patterns) {
+    for (int cap : caps) {
+      struct ncclTopoGraph graph;
+      memset(&graph, 0, sizeof(graph));
+      graph.pattern = pattern;
+      graph.minChannels = 1;
+      graph.maxChannels = cap;
+      ASSERT_EQ(ncclTopoCompute(built, &graph), ncclSuccess) << "pattern " << pattern << " cap " << cap;
+
+      EXPECT_EQ(graph.nChannels, cap)
+        << "pattern " << pattern << ": channel count did not follow the cap";
+      // Each of them worth one XGMI hop, not a share of the hop's rating. speedArrayIntra tops out
+      // at the width, so a channel rated above it did not come from that array; one rated below it
+      // means the search could not lay the channel at full width and settled for less.
+      EXPECT_FLOAT_EQ(graph.bwIntra, xgmiWidth) << "pattern " << pattern << " cap " << cap;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// ncclTopoConnectMloPartSiblings() walks every DEV node and rewrites the bw of the links it finds,
+// so it has to be selective about which ones: a node with more than one physical device carries
+// inter-device XGMI links on the same DEV nodes, and those must keep the width sysfs reported for
+// them. Two partitioned devices with a wider link between them than within them separate the two
+// ratings -- a pass that re-rated by DEV node rather than by sibling would pull the inter-device
+// link up to MLOPART_LOC_BW and hand the graph search a budget no XGMI link can deliver.
+TEST_F(TopoTest, MloPartSiblings_LeaveInterDeviceXgmiAtItsReportedWidth) {
+  const uint64_t host = 0xc5;
+  const int interDeviceCount = 8;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pciA = addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0, /*mloPart=*/0);
+  struct ncclXmlNode* gpuA0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pciA, "gpu", &gpuA0), ncclSuccess);
+  ASSERT_NE(gpuA0, nullptr);
+  struct ncclXmlNode* gpuA1 = addGpuUnderPci(pciA, "gfx942", /*rank=*/1, /*dev=*/1, /*mloPart=*/1);
+  struct ncclXmlNode* pciB = addGpuPci(cpu, "0000:22:00.0", "gfx942", /*rank=*/2, /*dev=*/2, /*mloPart=*/0);
+  struct ncclXmlNode* gpuB0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pciB, "gpu", &gpuB0), ncclSuccess);
+  ASSERT_NE(gpuB0, nullptr);
+  struct ncclXmlNode* gpuB1 = addGpuUnderPci(pciB, "gfx942", /*rank=*/3, /*dev=*/3, /*mloPart=*/1);
+
+  // Within each device, the partitions report each other at four widths.
+  addGpuLink(gpuA0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuA1, "0000:0c:00.0", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB0, "0000:22:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB1, "0000:22:00.0", 4, PCI_ACCELERATOR_CLASS);
+  // Between the devices, a wider link, so the two ratings cannot be confused.
+  addGpuLink(gpuA0, "0000:22:00.0", interDeviceCount, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpuB0, "0000:0c:00.0", interDeviceCount, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[DEV].count, 4);
+  ASSERT_EQ(built->nodes[GPU].count, 4);
+
+  // Address the partitions by rank rather than by node index, which the XML ordering does not pin.
+  struct ncclTopoNode* gpuOfRank[4] = {};
+  for (int i = 0; i < built->nodes[GPU].count; i++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + i;
+    ASSERT_GE(gpu->gpu.rank, 0);
+    ASSERT_LT(gpu->gpu.rank, 4);
+    gpuOfRank[gpu->gpu.rank] = gpu;
+  }
+  for (int r = 0; r < 4; r++) {
+    ASSERT_NE(gpuOfRank[r], nullptr) << "no GPU node for rank " << r;
+    ASSERT_NE(gpuOfRank[r]->gpu.parent, nullptr) << "rank " << r << " has no DEV node";
+  }
+
+  const float interDeviceBw = interDeviceCount * ncclTopoXGMISpeed("gfx942");
+  ASSERT_NE(interDeviceBw, MLOPART_LOC_BW);
+  // ranks 0,1 partition one device; ranks 2,3 the other.
+  const int siblingPairs[2][2] = {{0, 1}, {2, 3}};
+  for (auto& pair : siblingPairs) {
+    EXPECT_TRUE(ncclTopoIsMloPartSibling(gpuOfRank[pair[0]], gpuOfRank[pair[1]]));
+    for (int d = 0; d < 2; d++) {
+      struct ncclTopoNode* from = gpuOfRank[pair[d]]->gpu.parent;
+      struct ncclTopoNode* to = gpuOfRank[pair[1 - d]]->gpu.parent;
+      struct ncclTopoLink* link = findLink(from, to);
+      ASSERT_NE(link, nullptr) << "no sibling link for ranks " << pair[d] << " -> " << pair[1 - d];
+      EXPECT_FLOAT_EQ(link->bw, MLOPART_LOC_BW) << "ranks " << pair[d] << " -> " << pair[1 - d];
+    }
+  }
+
+  // The reported hop between the two devices keeps its own width in both directions.
+  EXPECT_FALSE(ncclTopoIsMloPartSibling(gpuOfRank[0], gpuOfRank[2]));
+  struct ncclTopoLink* lAB = findLink(gpuOfRank[0]->gpu.parent, gpuOfRank[2]->gpu.parent);
+  struct ncclTopoLink* lBA = findLink(gpuOfRank[2]->gpu.parent, gpuOfRank[0]->gpu.parent);
+  ASSERT_NE(lAB, nullptr);
+  ASSERT_NE(lBA, nullptr);
+  EXPECT_FLOAT_EQ(lAB->bw, interDeviceBw);
+  EXPECT_FLOAT_EQ(lBA->bw, interDeviceBw);
+
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+  struct ncclTopoLinkList* pSibling = gpuOfRank[0]->paths[GPU] + (gpuOfRank[1] - built->nodes[GPU].nodes);
+  struct ncclTopoLinkList* pInterDevice = gpuOfRank[0]->paths[GPU] + (gpuOfRank[2] - built->nodes[GPU].nodes);
+  EXPECT_EQ(pSibling->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(pSibling->bw, MLOPART_LOC_BW);
+  EXPECT_EQ(pInterDevice->type, PATH_NVL);
+  EXPECT_FLOAT_EQ(pInterDevice->bw, interDeviceBw);
+
+  ncclTopoFree(built);
+}
+
+// What a sibling peer resolves to in P2P channels per peer. ncclTopoGetNchannels() derives that
+// count for a real XGMI hop by dividing the path bw by one XGMI width, which an on-package hop has
+// no width to be read out of, so it states MLOPART_P2P_NCHANNELS instead. Without that branch the
+// division reads MLOPART_LOC_BW as a ~54-link stack and a sibling peer resolves to 4 * that, which
+// is what the width-derived figure below stands in for.
+TEST_F(TopoTest, MloPartSiblings_PerPeerChannelsComeFromTheMloPartCount) {
+  const uint64_t host = 0xc7;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pci = addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0, /*mloPart=*/0);
+  struct ncclXmlNode* gpu0 = nullptr;
+  ASSERT_EQ(xmlGetSub(pci, "gpu", &gpu0), ncclSuccess);
+  ASSERT_NE(gpu0, nullptr);
+  struct ncclXmlNode* gpu1 = addGpuUnderPci(pci, "gfx942", /*rank=*/1, /*dev=*/1, /*mloPart=*/1);
+  addGpuLink(gpu0, "0000:0c:00.1", 4, PCI_ACCELERATOR_CLASS);
+  addGpuLink(gpu1, "0000:0c:00.0", 4, PCI_ACCELERATOR_CLASS);
+
+  struct ncclTopoSystem* built = nullptr;
+  ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 2);
+  ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+  // ncclComm is several MB (channels[MAXCHANNELS] and the planner's wip plan), so heap-allocate
+  // it rather than put it on the test thread's stack. Same reason as P2pChannelsComm.
+  std::unique_ptr<struct ncclComm> comm(new ncclComm());
+  memset(comm.get(), 0, sizeof(*comm));
+  comm->topo = built;
+  comm->rank = 0;
+  comm->nRanks = 2;
+  comm->nNodes = 1;
+  comm->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+
+  ASSERT_EQ(ncclTopoComputeP2pChannelsPerPeer(comm.get()), ncclSuccess);
+  const int widthDerived = 4 * (int)(MLOPART_LOC_BW / ncclTopoXGMISpeed("gfx942"));
+  ASSERT_NE(widthDerived, MLOPART_P2P_NCHANNELS) << "the two ratings must be distinguishable";
+  EXPECT_EQ(comm->p2pnChannelsPerPeer, MLOPART_P2P_NCHANNELS);
+  EXPECT_EQ(comm->p2pMaxPeers, 2) << "an unset maxP2pPeers resolves to the rank count";
+
+  ncclTopoFree(built);
+}
+
 // GDR for an MLOPart partition is a property of the physical GPU: every CPX partition is a HIP
 // logical device behind one PCI function, so a NIC one switch away is PATH_PXB for all of them and
 // GDR must be enabled for all of them. Before the rework ncclTopoCheckGdr() refused GDR to any
@@ -820,6 +1278,74 @@ TEST_F(TopoTest, CheckGdr_NonMloPartGpuStillUsesOwnPath) {
   EXPECT_EQ(mode, ncclTopoGdrModeDisable);
 
   ncclTopoFree(built);
+}
+
+// DPX node of two rails: each GPU carries two partitions and has its own NIC, and the GPUs are XGMI
+// peers. A partition reaches the other rail's NIC through a partition of that rail (PXN), whose
+// buffers the NIC reads, so GDR is the relay's call. The PXN mark lives on the partition's own
+// GPU->NET entry while its parent DEV keeps the raw PHB distance; reading only the DEV refused GDR,
+// which diverted the relay through the CPU here and sent net.cc's shared p2p buffers to host memory
+// in the relay's process ("PXN should not use host buffers for data").
+TEST_F(TopoTest, CheckGdr_MloPartPxnRelayUsesRelayDistance) {
+  // NCCL_PXN_DISABLE gates the PXN rewrite and NCCL_PARAM caches it for the whole process.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckGdr_MloPartPxnRelayUsesRelayDistance",
+      [this]() {
+        const uint64_t host = 0xd3;
+        const int kParts = 2;
+        // Rails 0 and 2 keep the HIP dev indices 0-1 and 2-3 apart, as on the node that hit this.
+        const int rails[2] = {0, 2};
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* gpuPci[2];
+        char gpuBus[2][32];
+        for (int r = 0; r < 2; r++) {
+          gpuPci[r] = addRail(cpu, rails[r], kParts, /*partitioned=*/true);
+          railGpuBusId(rails[r], gpuBus[r], sizeof(gpuBus[r]));
+        }
+        // XGMI entries hang off each partition's <gpu>; a target function picks the peer partition.
+        for (int r = 0; r < 2; r++) {
+          for (int s = 0; s < gpuPci[r]->nSubs; s++) {
+            struct ncclXmlNode* gpu = gpuPci[r]->subs[s];
+            if (strcmp(gpu->name, "gpu") != 0) continue;
+            for (int p = 0; p < kParts; p++) {
+              char target[32];
+              strcpy(target, gpuBus[1 - r]);
+              target[strlen(target) - 1] = '0' + p;
+              addGpuLink(gpu, target, /*count=*/8, PCI_ACCELERATOR_CLASS);
+            }
+          }
+        }
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2 * kParts);
+        ASSERT_EQ(built->nodes[NET].count, 2);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+          ASSERT_NE(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+          ASSERT_NE(gpu->gpu.parent, nullptr);
+          for (int n = 0; n < built->nodes[NET].count; n++) {
+            struct ncclTopoNode* net = built->nodes[NET].nodes + n;
+            // addRail numbers a rail's NIC like its partition 0.
+            const bool ownRail = gpu->gpu.dev / kParts == net->net.dev / kParts;
+            SCOPED_TRACE(testing::Message() << "gpu dev " << gpu->gpu.dev << " net dev " << net->net.dev
+                                            << (ownRail ? " (own rail)" : " (other rail)"));
+            if (ownRail) {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXB);
+            } else {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXN);
+              EXPECT_EQ(gpu->gpu.parent->paths[NET][n].type, PATH_PHB);
+            }
+            enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+            ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, net->id, /*read=*/1, &mode), ncclSuccess);
+            EXPECT_NE(mode, ncclTopoGdrModeDisable);
+          }
+        }
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_PXN_DISABLE", "0"}});
 }
 
 // rcclRewriteSameDomainNetPaths() reclassifies a GPU/NIC pair sharing a PCI domain from PHB to PXB
@@ -1169,6 +1695,154 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
+TEST_F(TopoTest, CheckP2p_LevelXgmiRejectsPhbPeer) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckP2p_LevelXgmiRejectsPhbPeer",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        const uint64_t host = 0xe6;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+        addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_PHB);
+
+        int p2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_LEVEL", "XGMI"}});
+}
+
+TEST_F(TopoTest, ComputePaths_CpxPeersUseXgmiPath) {
+  RUN_ISOLATED_TEST(
+      "ComputePaths_CpxPeersUseXgmiPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        ::unsetenv("NCCL_TOPO_SPLIT_MLOPART");
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Split CPX partitions get their own DEV nodes, linked over XGMI.
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_NVL);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_NVL);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      });
+}
+
+TEST_F(TopoTest, ComputePaths_UnsplitCpxPeersUseLocalPath) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_UnsplitCpxPeersUseLocalPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        const uint64_t host = 0xe8;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Unsplit partitions share one DEV node, so distinct ranks are
+        // PATH_LOC apart, the same value as the NCCL_P2P_DISABLE level.
+        ASSERT_EQ(built->nodes[GPU].nodes[0].gpu.parent,
+                  built->nodes[GPU].nodes[1].gpu.parent);
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_TOPO_SPLIT_MLOPART", "0"}});
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsUnsplitCpxPeers) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_P2pDisableDivertsUnsplitCpxPeers",
+      [this]() {
+        const uint64_t host = 0xe8;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].gpu.parent,
+                  built->nodes[GPU].nodes[1].gpu.parent);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(peerP2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_TOPO_SPLIT_MLOPART", "0"}, {"NCCL_P2P_DISABLE", "1"}});
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath) {
+  // NCCL_P2P_DISABLE is cached process-wide. Isolate the test so it is the
+  // first P2P policy lookup and cannot affect other topology tests.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath",
+      [this]() {
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Disabling P2P must not replace a GPU's zero-hop self path with a
+        // route through the CPU.
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        int selfP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 0, &selfP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(selfP2p, 1);
+
+        // NCCL_P2P_DISABLE must divert the local CPX peer path through the CPU.
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(peerP2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_DISABLE", "1"}});
+}
+
 // Path link lists are sized to the hops they hold, not to NCCL_TOPO_MAX_HOPS (AICOMRCCL-2016).
 TEST_F(TopoTest, ComputePaths_SizesLinkListsToHopCount) {
   const uint64_t host = 0x2016;
@@ -1352,6 +2026,305 @@ TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
       EXPECT_EQ(again[i].hops, first[i].hops) << "entry " << i;
     }
   }
+
+  ncclTopoFree(built);
+}
+
+// UALoE fabric peers across MNNVL hosts share one NVS, so every cross-host GPU pair is PATH_NVL.
+TEST_F(TopoTest, UaloeFabric_MultiHostCliqueSharesOneSwitch) {
+  const uint64_t hostA = 0x1250a, hostB = 0x1250b;
+  struct ncclTopoSystem* built = buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/1);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  ASSERT_EQ(built->nodes[GPU].count, 2 * kFabricGpusPerHost);
+  ASSERT_EQ(built->nodes[DEV].count, 2 * kFabricGpusPerHost);
+  ASSERT_EQ(built->nodes[NVS].count, 1) << "every fused host must hang off the same switch";
+  struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+
+  // Each fabric peer entry adds one link width, which is what a hand-written topo file states as
+  // count="3" on the GPU's NVS link.
+  const float fabricBw = (kFabricGpusPerHost - 1) * ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    struct ncclTopoLink* up = findLink(dev, nvs);
+    struct ncclTopoLink* down = findLink(nvs, dev);
+    ASSERT_NE(up, nullptr) << "DEV " << d;
+    ASSERT_NE(down, nullptr) << "DEV " << d;
+    EXPECT_FLOAT_EQ(up->bw, fabricBw) << "DEV " << d;
+    EXPECT_FLOAT_EQ(down->bw, fabricBw) << "DEV " << d;
+    for (int l = 0; l < dev->nlinks; l++) {
+      EXPECT_NE(dev->links[l].remNode->type, DEV) << "DEV " << d << " kept a direct peer link";
+    }
+  }
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p == g) continue;
+      struct ncclTopoLinkList* path = gpu->paths[GPU] + p;
+      SCOPED_TRACE(testing::Message() << "GPU " << g << " -> GPU " << p);
+      EXPECT_EQ(path->type, PATH_NVL);
+      bool viaNvs = false;
+      for (int h = 0; h < path->count; h++) viaNvs |= path->list[h]->remNode == nvs;
+      EXPECT_TRUE(viaNvs);
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// The same clique with a ring to search, as on a two-clique (cross-rack) job: the ring has to run
+// over the fabric across both hosts instead of falling back to simple order.
+TEST_F(TopoTest, UaloeFabric_MultiHostRingDoesNotFallBackToSimpleOrder) {
+  const uint64_t hostA = 0x1250c, hostB = 0x1250d;
+  struct ncclTopoSystem* built = buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/1);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[NET].count, 2 * kFabricGpusPerHost);
+
+  // Two cliques of this size, which is what makes the search look for net legs at all.
+  built->nRanks = 2 * built->nodes[GPU].count;
+  built->inter = 1;
+
+  struct ncclTopoGraph ring;
+  memset(&ring, 0, sizeof(ring));
+  ring.id = 0;
+  ring.pattern = NCCL_TOPO_PATTERN_RING;
+  ring.minChannels = 1;
+  ring.maxChannels = MAXCHANNELS / 2;
+
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+  ASSERT_EQ(ncclTopoCompute(built, &ring), ncclSuccess);
+  // The fallback is the only way to a bwIntra of 0.1 with typeIntra PATH_SYS.
+  EXPECT_GT(ring.bwIntra, 0.1f);
+  EXPECT_EQ(ring.typeIntra, PATH_NVL);
+  EXPECT_GE(ring.nChannels, 1);
+
+  ncclTopoFree(built);
+}
+
+// Without fabric_supported the entries are host-local XGMI: direct peer links, no switch.
+TEST_F(TopoTest, UaloeFabric_XgmiEntriesKeepDirectPeerLinks) {
+  const uint64_t hostA = 0x12510, hostB = 0x12511;
+  struct ncclTopoSystem* built = buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/0);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoNode* peer = built->nodes[DEV].nodes + p;
+      struct ncclTopoLink* link = findLink(dev, peer);
+      if (NCCL_TOPO_ID_SYSTEM_ID(dev->id) == NCCL_TOPO_ID_SYSTEM_ID(peer->id)) {
+        ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+        EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+      } else {
+        EXPECT_EQ(link, nullptr) << "DEV " << d << " -> DEV " << p << " links across hosts";
+      }
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// A comm inside one clique gets no switch even on fabric hosts: each host keeps its direct peer
+// links and nothing links across hosts.
+TEST_F(TopoTest, UaloeFabric_IntraCliqueCommKeepsDirectPeerLinks) {
+  const uint64_t hostA = 0x1251b, hostB = 0x1251c;
+  struct ncclTopoSystem* built =
+      buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/1, /*crossClique=*/0);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 2);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoNode* peer = built->nodes[DEV].nodes + p;
+      struct ncclTopoLink* link = findLink(dev, peer);
+      if (NCCL_TOPO_ID_SYSTEM_ID(dev->id) == NCCL_TOPO_ID_SYSTEM_ID(peer->id)) {
+        ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+        EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+      } else {
+        EXPECT_EQ(link, nullptr) << "DEV " << d << " -> DEV " << p << " links across hosts";
+      }
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// A single host keeps direct peer links even when amd-smi reports UALoE: there is no other host to
+// reach, and a switch node would raise the search's starting bw to the sum of the fabric links.
+TEST_F(TopoTest, UaloeFabric_SingleHostKeepsDirectPeerLinks) {
+  const uint64_t host = 0x12512;
+  setCrossClique(1);
+  addFabricHost(host, /*baseRank=*/0, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 1);
+  EXPECT_EQ(built->nodes[NVS].count, 0);
+
+  const float linkBw = ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    for (int p = 0; p < built->nodes[DEV].count; p++) {
+      if (p == d) continue;
+      struct ncclTopoLink* link = findLink(built->nodes[DEV].nodes + d, built->nodes[DEV].nodes + p);
+      ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+      EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// The tree runs over the same fabric as the ring, so a cross-clique tree search must not fall
+// back to simple order either.
+TEST_F(TopoTest, UaloeFabric_MultiHostTreeDoesNotFallBackToSimpleOrder) {
+  const uint64_t hostA = 0x12513, hostB = 0x12514;
+  struct ncclTopoSystem* built = buildTwoFabricHosts(hostA, hostB, /*fabricSupported=*/1);
+  ASSERT_NE(built, nullptr);
+
+  built->nRanks = 2 * built->nodes[GPU].count;
+  built->inter = 1;
+
+  struct ncclTopoGraph tree;
+  memset(&tree, 0, sizeof(tree));
+  tree.id = 1;
+  tree.pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
+  tree.minChannels = 1;
+  tree.maxChannels = MAXCHANNELS / 2;
+
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+  ASSERT_EQ(ncclTopoCompute(built, &tree), ncclSuccess);
+  EXPECT_GT(tree.bwIntra, 0.1f);
+  EXPECT_EQ(tree.typeIntra, PATH_NVL);
+  EXPECT_GE(tree.nChannels, 1);
+
+  ncclTopoFree(built);
+}
+
+// More hosts bring more GPUs to the one switch, not more bw: each GPU's link to it still sums only
+// the fabric entries of its own host, and ring and tree both find the fabric.
+TEST_F(TopoTest, UaloeFabric_ThreeHostCliqueSharesOneSwitch) {
+  const uint64_t hosts[] = {0x12515, 0x12516, 0x12517};
+  const int nHosts = sizeof(hosts) / sizeof(hosts[0]);
+  setCrossClique(1);
+  for (int h = 0; h < nHosts; h++) {
+    addFabricHost(hosts[h], /*baseRank=*/h * kFabricGpusPerHost, /*fabricSupported=*/1);
+  }
+  struct ncclTopoSystem* built = buildSystemWithPaths(hosts[0]);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, nHosts);
+  ASSERT_EQ(built->nodes[GPU].count, nHosts * kFabricGpusPerHost);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+  struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+
+  const float fabricBw = (kFabricGpusPerHost - 1) * ncclTopoXGMISpeed("gfx1250");
+  for (int d = 0; d < built->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+    struct ncclTopoLink* up = findLink(dev, nvs);
+    struct ncclTopoLink* down = findLink(nvs, dev);
+    ASSERT_NE(up, nullptr) << "DEV " << d;
+    ASSERT_NE(down, nullptr) << "DEV " << d;
+    EXPECT_FLOAT_EQ(up->bw, fabricBw) << "DEV " << d;
+    EXPECT_FLOAT_EQ(down->bw, fabricBw) << "DEV " << d;
+  }
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p == g) continue;
+      EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][p].type, PATH_NVL) << "GPU " << g << " -> GPU " << p;
+    }
+  }
+
+  built->nRanks = 2 * built->nodes[GPU].count;
+  built->inter = 1;
+  ASSERT_EQ(ncclTopoSearchInit(built), ncclSuccess);
+  const int patterns[] = {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE};
+  for (int pattern : patterns) {
+    struct ncclTopoGraph graph;
+    memset(&graph, 0, sizeof(graph));
+    graph.pattern = pattern;
+    graph.minChannels = 1;
+    graph.maxChannels = MAXCHANNELS / 2;
+    ASSERT_EQ(ncclTopoCompute(built, &graph), ncclSuccess) << "pattern " << pattern;
+    EXPECT_GT(graph.bwIntra, 0.1f) << "pattern " << pattern;
+    EXPECT_EQ(graph.typeIntra, PATH_NVL) << "pattern " << pattern;
+  }
+
+  ncclTopoFree(built);
+}
+
+// A host whose entries lack fabric_supported keeps its direct links and stays off the switch. Its
+// GPUs stay unreachable from the fabric hosts (PATH_DIS), as every cross-host pair was before the
+// switch, while the fabric hosts still reach each other through it.
+TEST_F(TopoTest, UaloeFabric_NonFabricHostStaysOffTheSwitch) {
+  const uint64_t hostA = 0x12518, hostB = 0x12519, hostC = 0x1251a;
+  setCrossClique(1);
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1);
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
+  addFabricHost(hostC, /*baseRank=*/2 * kFabricGpusPerHost, /*fabricSupported=*/0);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, 3);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+  struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+
+  // Ranks below this are on the fabric hosts.
+  const int firstNonFabricRank = 2 * kFabricGpusPerHost;
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+    bool gFabric = gpu->gpu.rank < firstNonFabricRank;
+    EXPECT_EQ(findLink(gpu->gpu.parent, nvs) != nullptr, gFabric) << "rank " << gpu->gpu.rank;
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p == g) continue;
+      struct ncclTopoNode* peer = built->nodes[GPU].nodes + p;
+      bool pFabric = peer->gpu.rank < firstNonFabricRank;
+      struct ncclTopoLinkList* path = gpu->paths[GPU] + p;
+      SCOPED_TRACE(testing::Message() << "rank " << gpu->gpu.rank << " -> rank " << peer->gpu.rank);
+      bool viaNvs = false;
+      for (int h = 0; h < path->count; h++) viaNvs |= path->list[h]->remNode == nvs;
+      if (gFabric && pFabric) {
+        EXPECT_EQ(path->type, PATH_NVL);
+        EXPECT_TRUE(viaNvs);
+      } else if (!gFabric && !pFabric) {
+        EXPECT_EQ(path->type, PATH_NVL);
+        EXPECT_FALSE(viaNvs);
+      } else {
+        EXPECT_EQ(path->type, PATH_DIS);
+      }
+    }
+  }
+
+  ncclTopoFree(built);
+}
+
+// A full clique puts every DEV on the shared NVS, so one BFS level from a GPU holds the other 143
+// DEVs plus the CPU and NIC behind its PCI switch, more than NCCL_TOPO_MAX_NODES entries.
+TEST_F(TopoTest, UaloeFabric_FullCliqueFitsPathFrontier) {
+  const int nHosts = NCCL_TOPO_MAX_NODES / kFabricGpusPerHost;
+  ASSERT_NO_FATAL_FAILURE(resetXml(1 /* <system> */ + nHosts * kFabricHostXmlNodes));
+  setCrossClique(1);
+  for (int h = 0; h < nHosts; h++) {
+    addFabricHost(0x12600 + h, /*baseRank=*/h * kFabricGpusPerHost, /*fabricSupported=*/1);
+  }
+  struct ncclTopoSystem* built = buildSystemWithPaths(0x12600);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nHosts, nHosts);
+  ASSERT_EQ(built->nodes[DEV].count, NCCL_TOPO_MAX_NODES);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+
+  int nonNvlPairs = 0;
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    for (int p = 0; p < built->nodes[GPU].count; p++) {
+      if (p != g && built->nodes[GPU].nodes[g].paths[GPU][p].type != PATH_NVL) nonNvlPairs++;
+    }
+  }
+  EXPECT_EQ(nonNvlPairs, 0);
 
   ncclTopoFree(built);
 }
