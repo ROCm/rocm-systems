@@ -613,7 +613,7 @@ class CheckRunPaginationTests(unittest.TestCase):
                     ],
                 )
 
-    def test_empty_page_stops_pagination(self) -> None:
+    def test_incomplete_check_run_listing_fails_closed(self) -> None:
         with mock.patch.object(
             pc,
             "gh_get",
@@ -622,10 +622,8 @@ class CheckRunPaginationTests(unittest.TestCase):
                 {"total_count": 2, "check_runs": []},
             ],
         ) as get:
-            self.assertEqual(
-                pc.get_check_runs("owner", "repo", "sha", "token"),
-                [make_check_run("success")],
-            )
+            with self.assertRaisesRegex(RuntimeError, "Incomplete check-runs listing"):
+                pc.get_check_runs("owner", "repo", "sha", "token")
         self.assertEqual(get.call_count, 2)
 
     def test_error_on_later_page_does_not_return_partial_success(self) -> None:
@@ -790,6 +788,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
         changed_files: Optional[int] = None,
         workflow_snapshots: Optional[List[List[Dict[str, Any]]]] = None,
         global_snapshots: Optional[List[List[Dict[str, Any]]]] = None,
+        incomplete_global_page: bool = False,
     ) -> tuple[int, int, int]:
         remaining = iter(snapshots)
         workflows = iter(workflow_snapshots) if workflow_snapshots is not None else None
@@ -838,7 +837,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
             if parsed.path.endswith("/actions/workflows/scoped-formatting.yml/runs"):
                 self.assertEqual(token, "actions-token")
                 self.assertEqual(query["head_sha"], ["sha"])
-                self.assertEqual(query["event"], ["pull_request"])
+                self.assertNotIn("event", query)
                 page = int(query["page"][0])
                 if page == 1:
                     # These independent project jobs have already completed.
@@ -875,7 +874,7 @@ class RequiredCheckPollingTests(unittest.TestCase):
             if parsed.path.endswith("/commits/sha/check-runs"):
                 page = int(query["page"][0])
                 return {
-                    "total_count": len(active_global),
+                    "total_count": len(active_global) + int(incomplete_global_page),
                     "check_runs": active_global[(page - 1) * 100 : page * 100],
                 }
             self.fail(f"Unexpected GitHub API request: {url}")
@@ -907,6 +906,22 @@ class RequiredCheckPollingTests(unittest.TestCase):
             result = pc.main([])
         self.posted_comments = [call.args[2]["body"] for call in post.call_args_list]
         return result, polls, sleep.call_count
+
+    def test_incomplete_listing_cannot_approve_visible_successes(self) -> None:
+        passed = [
+            make_check_run("success", name)
+            for name in ("pre-commit", "pre-commit / runtimes")
+        ]
+        visible = [
+            {**make_check_run("success", check.name), "check_suite": {"id": 9000}}
+            for check in pc.load_policy(THIS_DIR / "policy.yml").required_checks
+        ]
+        visible += [
+            make_check_run("success", f"other-{index}")
+            for index in range(100 - len(visible))
+        ]
+        with self.assertRaisesRegex(RuntimeError, "Incomplete check-runs listing"):
+            self._run([passed], global_snapshots=[visible], incomplete_global_page=True)
 
     def test_reported_legacy_failure_and_pending_remain_required(self) -> None:
         passed = [
@@ -944,16 +959,24 @@ class RequiredCheckPollingTests(unittest.TestCase):
             make_check_run("success", name)
             for name in ("pre-commit", "pre-commit / runtimes")
         ]
-        old = make_workflow_run(id=99, display_title="PR #7: develop@older-base")
-        stale_failure = {**make_check_run("failure"), "check_suite": {"id": 990}}
-        self.assertEqual(
-            self._run(
-                [passed],
-                workflow_snapshots=[[old, make_workflow_run()]],
-                global_snapshots=[[stale_failure]],
-            ),
-            (0, 1, 0),
-        )
+        for event, title in (
+            ("pull_request", "PR #7: develop@older-base"),
+            ("push", "Push sha"),
+        ):
+            with self.subTest(event=event):
+                old = make_workflow_run(id=99, event=event, display_title=title)
+                stale_failure = {
+                    **make_check_run("failure"),
+                    "check_suite": {"id": 990},
+                }
+                self.assertEqual(
+                    self._run(
+                        [passed],
+                        workflow_snapshots=[[old, make_workflow_run()]],
+                        global_snapshots=[[stale_failure]],
+                    ),
+                    (0, 1, 0),
+                )
 
     def test_retarget_waits_for_new_comparison_before_accepting_or_failing(
         self,

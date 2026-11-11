@@ -409,7 +409,11 @@ def get_check_runs(
         ):
             raise RuntimeError("Unexpected check-runs payload")
         runs.extend(batch)
-        if not batch or len(runs) >= total_count:
+        if not batch and len(runs) < total_count:
+            raise RuntimeError(
+                f"Incomplete check-runs listing: {len(runs)} of {total_count}"
+            )
+        if len(runs) >= total_count:
             return runs
         page += 1
 
@@ -492,9 +496,10 @@ def get_required_check_runs(
         if workflow is None:
             continue
         endpoint = f"https://api.github.com/repos/{owner}/{repo}/actions"
-        query = urllib.parse.urlencode(
-            {"event": "pull_request", "head_sha": context.head_sha}
-        )
+        # Discover every event's owned suites; only pull_request runs may
+        # satisfy the exact comparison below. Push jobs must not re-enter as
+        # apparently independent same-name producers through the global list.
+        query = urllib.parse.urlencode({"head_sha": context.head_sha})
         candidates = []
         for run in iter_workflow_runs(
             f"{endpoint}/workflows/{workflow}/runs?{query}",
