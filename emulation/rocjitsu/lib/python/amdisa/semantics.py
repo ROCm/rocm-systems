@@ -702,6 +702,10 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP2 (Scalar ALU Two-operand) instruction."""
     if name == 'S_CBRANCH_G_FORK':
         return InstructionSemantics(name, 'cbranch_fork', operation='indirect')
+    # The legacy trap return. The MR ISA gives it no pseudocode; the generator
+    # emits the S_RFE_B64 body for it (see _TRAP_RETURN_NAMES).
+    if name == 'S_RFE_RESTORE_B64':
+        return InstructionSemantics(name, 'true_nop')
 
     # CSELECT
     if name.startswith('S_CSELECT_'):
@@ -765,7 +769,7 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
-    # Unrecognized SOP2 instructions (S_RFE_RESTORE, …)
+    # Unrecognized SOP2 instructions
     return InstructionSemantics(name, 'nop')
 
 
