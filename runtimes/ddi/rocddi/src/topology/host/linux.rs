@@ -7,7 +7,7 @@
 
 use super::{
     CpuApicId, CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain,
-    HostTopologySnapshot,
+    HostTopologyGraphSnapshot,
 };
 use crate::topology::{CacheAssociations, CacheInfo};
 use std::path::{Path, PathBuf};
@@ -198,13 +198,13 @@ fn discover_caches(root: &Path) -> HostCaches {
     HostCaches { records, complete }
 }
 
-fn snapshot_from(
+fn graph_snapshot_from(
     meminfo: &Path,
     cpuinfo: &Path,
     online: &Path,
     cpu_root: &Path,
     node_root: &Path,
-) -> HostTopologySnapshot {
+) -> HostTopologyGraphSnapshot {
     let memory_bytes = std::fs::read_to_string(meminfo)
         .ok()
         .and_then(|contents| parse_memory_bytes(&contents))
@@ -252,7 +252,7 @@ fn snapshot_from(
             caches: node_caches,
         });
     }
-    HostTopologySnapshot {
+    HostTopologyGraphSnapshot {
         memory_bytes,
         cpu,
         cpu_apic_ids,
@@ -265,8 +265,8 @@ fn snapshot_from(
 
 /// Reads Linux host facts without requiring KFD or an activated device.
 #[must_use]
-pub(super) fn snapshot() -> HostTopologySnapshot {
-    snapshot_from(
+pub(super) fn graph_snapshot() -> HostTopologyGraphSnapshot {
+    graph_snapshot_from(
         Path::new("/proc/meminfo"),
         Path::new("/proc/cpuinfo"),
         Path::new("/sys/devices/system/cpu/online"),
@@ -333,8 +333,8 @@ mod tests {
             self.write(&format!("{path}/size"), "48K\n");
         }
 
-        fn snapshot(&self) -> HostTopologySnapshot {
-            snapshot_from(
+        fn graph_snapshot(&self) -> HostTopologyGraphSnapshot {
+            graph_snapshot_from(
                 &self.0.join("meminfo"),
                 &self.0.join("cpuinfo"),
                 &self.0.join("online"),
@@ -390,7 +390,7 @@ mod tests {
         );
         fixture.write("node/node0/cpulist", "0\n");
         fixture.write("node/node1/cpulist", "1\n");
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert_eq!(snapshot.logical_cpu_for_apic_id(2), Some(1));
         assert_eq!(
             snapshot
@@ -408,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_partitions_complete_cache_scan_by_numa_domain() {
+    fn graph_snapshot_partitions_complete_cache_scan_by_numa_domain() {
         let fixture = Fixture::new();
         fixture.write("meminfo", "MemTotal: 1024 kB\n");
         fixture.write(
@@ -421,7 +421,7 @@ mod tests {
         fixture.cache("cpu", 4, 0, "4-5\n", "Data\n", 1);
         fixture.write("node/node0/cpulist", "0-1\n");
         fixture.write("node/node2/cpulist", "4-5\n");
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert_eq!(snapshot.memory_bytes, Some(1024 * 1024));
         assert_eq!(snapshot.cpu.as_ref().unwrap().compute_units, 2);
         assert_eq!(snapshot.domains.len(), 2);
@@ -458,7 +458,7 @@ mod tests {
         fixture.write("node/node0/cpulist", "0\n");
         fixture.write("node/node2/cpulist", "\n");
 
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(snapshot.domains_complete);
         let node = snapshot.domain(2).unwrap();
         assert_eq!(node.cpus.as_ref().unwrap().first(), None);
@@ -467,12 +467,12 @@ mod tests {
         assert!(node.caches.records.is_empty());
 
         fixture.write("node/node2/cpulist", "invalid\n");
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.domains_complete);
         assert_eq!(snapshot.domain(2).unwrap().cpus, None);
 
         std::fs::remove_file(fixture.0.join("node/node2/cpulist")).unwrap();
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.domains_complete);
         assert_eq!(snapshot.domain(2).unwrap().cpus, None);
     }
@@ -496,7 +496,7 @@ mod tests {
         fixture.write("node/node0/cpulist", "0\n");
         fixture.cache("node/node0", 0, 0, "0\n", "Data\n", 1);
 
-        let snapshot = fixture.snapshot();
+        let snapshot = fixture.graph_snapshot();
         assert!(!snapshot.caches.complete);
         assert!(snapshot.domain(0).unwrap().caches.complete);
         assert_eq!(snapshot.domain(0).unwrap().caches.records.len(), 1);

@@ -675,12 +675,12 @@ impl Driver for LinuxKfdDriver {
             visitor,
         )
     }
-    fn contribute_topology(
+    fn contribute_topology_graph(
         &self,
-        snapshot: &mut crate::topology::TopologySnapshot,
+        snapshot: &mut crate::topology::TopologyGraphSnapshot,
     ) -> Result<(), Error> {
         self.ensure_open()?;
-        sysfs::contribute_topology(
+        sysfs::contribute_topology_graph(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
             self.driver_instance,
