@@ -15,6 +15,8 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/scripts/collect_rocjitsu_afl_results.py"
       - ".github/scripts/rocjitsu_fuzz_report.js"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
       - ".github/scripts/run_rocjitsu_afl_campaign.py"
       - ".github/scripts/tests/test_collect_rocjitsu_afl_results.py"
       - ".github/scripts/tests/test_rocjitsu_fuzz_report.js"
