@@ -325,6 +325,20 @@ enter the race plugin. Core register findings precede either notification, so th
 reporter includes the current consumer when extending its trace. Memory issue
 capacity handling remains in the synchronous before-execute hook.
 
+### Workgroup lifetime
+
+Participating waves share ownership of their workgroup's LDS detector. Each
+wave's plugin state holds an aliasing pointer to its detector-owned history.
+Halting or cancelling a wave releases that pointer and its instruction trace,
+but surviving peers keep all histories, including those of ended waves.
+Ending a wave does not establish LDS ordering with its peers.
+
+The last wave to halt or be cancelled releases the detector. Cleanup does not
+depend on successful workgroup completion, so setup rollback and dispatch
+cancellation release it as well. Destroying resident wave slots also releases
+their ownership. Kernel names and recorded report summaries have a separate
+plugin lifetime and remain available after a detector is released.
+
 ### LDS events and completion
 
 The plugin records an event for each observed memory issue with counter

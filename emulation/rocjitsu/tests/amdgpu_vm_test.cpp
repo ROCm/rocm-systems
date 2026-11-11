@@ -10742,6 +10742,7 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
+  using namespace rocjitsu::plugins::race_detector;
   struct InstructionCase {
     std::span<const uint32_t> words;
     std::string_view detail;
@@ -10766,6 +10767,16 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
         auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
         auto probe = std::make_unique<CancellationLifecyclePlugin>();
         auto *observations = probe.get();
+        auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+        const auto *race = race_plugin.get();
+        std::vector<std::weak_ptr<WaveRaceState>> detectors;
+        observations->on_launch = [&](amdgpu::Wavefront &wave) {
+          const auto *state =
+              static_cast<RaceWavefrontState *>(wave.plugin_state(race->slot_index()));
+          ASSERT_NE(state, nullptr);
+          detectors.emplace_back(state->race_state);
+        };
+        ASSERT_TRUE(group->add(std::move(race_plugin)));
         ASSERT_TRUE(group->add(std::move(probe)));
         f.soc_ptr->set_plugin_group(group);
         const uint64_t kernel =
@@ -10804,6 +10815,9 @@ TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
         EXPECT_EQ(observations->halts, 0u);
         EXPECT_EQ(observations->completed_workgroups, 0u);
         EXPECT_EQ(observations->completed_dispatches, 0u);
+        ASSERT_EQ(detectors.size(), observations->launches);
+        for (const auto &detector : detectors)
+          EXPECT_TRUE(detector.expired());
         for (uint32_t cu = 0; cu < 2; ++cu) {
           EXPECT_TRUE(f.cu(cu)->is_idle());
           EXPECT_TRUE(f.cu(cu)->can_accept_workgroup(10, 60 * 1024));
@@ -12013,6 +12027,7 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
 }
 
 TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
+  using namespace rocjitsu::plugins::race_detector;
   for (std::string_view arch : {"cdna4", "rdna1", "cdna5"}) {
     SCOPED_TRACE(arch);
     const bool wgp = arch == "rdna1";
@@ -12022,7 +12037,16 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
     ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 2, 10, /*lds_size_kb=*/60, 128));
     auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
     auto *observed = lifecycle.get();
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    const auto *race = race_plugin.get();
+    std::vector<std::weak_ptr<WaveRaceState>> detectors;
+    observed->on_launch = [&](amdgpu::Wavefront &wave) {
+      const auto *state = static_cast<RaceWavefrontState *>(wave.plugin_state(race->slot_index()));
+      ASSERT_NE(state, nullptr);
+      detectors.emplace_back(state->race_state);
+    };
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(race_plugin)));
     ASSERT_TRUE(group->add(std::move(lifecycle)));
     f.soc_ptr->set_plugin_group(group);
     const uint32_t code[] = {SOPP_S_NOP, clustered ? 0xBFB00000u : SOPP_S_ENDPGM};
@@ -12060,6 +12084,9 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
     EXPECT_EQ(observed->completed_workgroups, 0u);
     EXPECT_EQ(observed->completed_dispatches, 0u);
     EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 1);
+    ASSERT_EQ(detectors.size(), observed->launches);
+    for (const auto &detector : detectors)
+      EXPECT_TRUE(detector.expired());
     EXPECT_TRUE(f.cu(0)->is_idle());
     EXPECT_TRUE(f.cu(1)->is_idle());
     EXPECT_TRUE(f.cp()->cluster_lds_targets(1, 0, 3).empty());
@@ -12079,6 +12106,9 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
     EXPECT_EQ(observed->completed_workgroups, 2u);
     EXPECT_EQ(observed->completed_dispatches, 1u);
     EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
+    ASSERT_EQ(detectors.size(), observed->launches);
+    for (const auto &detector : detectors)
+      EXPECT_TRUE(detector.expired());
   }
 }
 
@@ -12132,6 +12162,7 @@ TEST(ClusterDispatchTest, RollbackCancellationWaitsForRuntimeWaveStateSnapshot) 
 
 TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) {
   using namespace rocjitsu::amdhsa;
+  using namespace rocjitsu::plugins::race_detector;
   for (uint32_t dispatch_threads : {1u, 2u}) {
     SCOPED_TRACE(dispatch_threads);
     VmFixture f;
@@ -12144,8 +12175,16 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
     ASSERT_TRUE(address_space);
     auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
     auto *observed = lifecycle.get();
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    const auto *race = race_plugin.get();
+    std::vector<std::weak_ptr<WaveRaceState>> detectors;
     uint32_t invalidations = 0;
     observed->on_launch = [&](amdgpu::Wavefront &wave) {
+      const auto *state = static_cast<RaceWavefrontState *>(wave.plugin_state(race->slot_index()));
+      ASSERT_NE(state, nullptr);
+      if (observed->launches == 2)
+        EXPECT_TRUE(detectors.front().expired());
+      detectors.emplace_back(state->race_state);
       EXPECT_EQ(wave.debug_read_sgpr(0), 0x12345678u);
       if (invalidations == 0) {
         ASSERT_TRUE(f.soc_ptr->gpu_vm().invalidate(address_space));
@@ -12153,6 +12192,7 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
       }
     };
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(race_plugin)));
     ASSERT_TRUE(group->add(std::move(lifecycle)));
     f.soc_ptr->set_plugin_group(group);
     const uint32_t end = 0xBFB00000u;
@@ -12183,6 +12223,8 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
     queue.submit(packet);
     ASSERT_TRUE(f.engine->step());
     EXPECT_EQ(observed->cancellations, 1u);
+    ASSERT_EQ(detectors.size(), 1u);
+    EXPECT_TRUE(detectors.front().expired());
     // Retrying cleanup of the already-rolled-back workgroup cannot notify twice.
     for (uint32_t repeat = 0; repeat < 2; ++repeat)
       for (uint32_t cu = 0; cu < 2; ++cu)
@@ -12196,6 +12238,9 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
     EXPECT_EQ(observed->halts, 2u);
     EXPECT_EQ(observed->completed_workgroups, 2u);
     EXPECT_EQ(observed->completed_dispatches, 1u);
+    ASSERT_EQ(detectors.size(), 3u);
+    for (const auto &detector : detectors)
+      EXPECT_TRUE(detector.expired());
     EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 0);
     EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, process_id));
     EXPECT_TRUE(f.cu(0)->is_idle());

@@ -304,11 +304,6 @@ void RaceDetectorPlugin::emit_report(uint32_t dispatch, const ReportLocation &lo
   ++reported_races_;
 }
 
-size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
-  std::lock_guard<std::mutex> lock(dispatch_mutex_);
-  return detectors_.size();
-}
-
 bool RaceDetectorPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
   return wf != nullptr && wf->has_plugin_state(slot_index());
 }
@@ -401,8 +396,6 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                                                      uint32_t /*physical_sgpr_count*/,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
-  WorkgroupKey key{dispatch_id, wg_id};
-
   std::vector<amdgpu::Wavefront *> wf_ptrs(wavefronts.begin(), wavefronts.end());
   auto handler = [this, wf_ptrs, dispatch_id](RaceViolation v) {
     assert(v.wave >= 0 && static_cast<size_t>(v.wave) < wf_ptrs.size() &&
@@ -460,26 +453,17 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
   };
 
-  // Multi-XCD: workgroups from the same dispatch can arrive on different
-  // partition threads, so the detector map needs protection.
-  std::lock_guard<std::mutex> lock(dispatch_mutex_);
-  detectors_[key] = std::make_unique<RaceDetector>(
+  auto detector = std::make_shared<RaceDetector>(
       static_cast<int>(num_waves), Dim3d(static_cast<int>(wg_id)), std::move(handler),
       counterCapacitiesForArch(wavefronts.front()->cu().arch()),
       wavefronts.front()->lds().size_bytes());
 
-  auto &det = *detectors_[key];
   for (uint32_t w = 0; w < num_waves; ++w) {
     auto state = std::make_unique<RaceWavefrontState>();
-    state->race_state = &det.getWaveRaceState(static_cast<int>(w));
+    state->race_state =
+        std::shared_ptr<WaveRaceState>(detector, &detector->getWaveRaceState(static_cast<int>(w)));
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
-}
-
-void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
-  // Each wave released its pointer into this detector when it halted.
-  std::lock_guard<std::mutex> lock(dispatch_mutex_);
-  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
 }
 
 void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
@@ -509,7 +493,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                                                     amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
-  auto *rs = s->race_state;
+  auto *rs = s->race_state.get();
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
   const InstructionSnapshot *current = current_instruction(*s, wf);
@@ -750,7 +734,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   if (!current)
     return;
   const InstructionSnapshot &instruction = *current;
-  auto *rs = s->race_state;
+  auto *rs = s->race_state.get();
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
   // Tensor transfers from one wave complete on TENSORCNT in issue order (CDNA5
