@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 
 #include <concepts>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -277,10 +278,9 @@ private:
     }
 
     /**
-     * @brief Create a metrics struct pre-populated with zero entries for each
-     * monitored CPU. This ensures that even a default/pause sample serializes
-     * per-CPU entries, so Perfetto tracks drop to zero instead of retaining
-     * their last value.
+     * @brief Create a metrics struct with one entry per monitored CPU whose values are
+     * NaN (no value) until a read fills them, so a failed core read is not reported
+     * as 0.
      */
     metrics make_empty_metrics() const
     {
@@ -288,10 +288,16 @@ private:
         result.cpu_data.reserve(m_monitored_cpus.size());
         for(auto const cpu_id : m_monitored_cpus)
         {
-            result.cpu_data.push_back(
-                { .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
+            result.cpu_data.push_back(make_empty_entry(cpu_id));
         }
         return result;
+    }
+
+    static per_cpu_metrics make_empty_entry(size_t cpu_id)
+    {
+        return { .cpu_id    = cpu_id,
+                 .frequency = std::numeric_limits<float>::quiet_NaN(),
+                 .load      = std::numeric_limits<double>::quiet_NaN() };
     }
 
     per_cpu_metrics* find_or_create_cpu_entry(metrics& result, size_t cpu_id)
@@ -303,7 +309,7 @@ private:
                 return &entry;
             }
         }
-        result.cpu_data.push_back({ .cpu_id = cpu_id, .frequency = 0.0f, .load = 0.0 });
+        result.cpu_data.push_back(make_empty_entry(cpu_id));
         return &result.cpu_data.back();
     }
 
