@@ -95,6 +95,8 @@ inline NodeModelDesc model_descs[] = {
   // GFX 950
   {"topo_8p_950.xml",                    " 8gfx950 1H7XGMI  8NIC 2AMD   A"},
   {"topo_8p_950_pcie.xml",               " 8gfx950 PCIe     0NIC 2AMD   A"},
+  // GFX 1170
+  {"topo_1p_1170.xml",                   " 1gfx1170 PCIe    1NIC 1AMD   A"},
 };
 
 inline const int num_models = sizeof(model_descs) / sizeof(*model_descs);

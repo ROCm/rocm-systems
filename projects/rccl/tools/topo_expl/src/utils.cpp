@@ -113,7 +113,7 @@ void print_help() {
     printf("Usage: ./topo_expl [-m|--model model_id] [-n|--nodes numNodes=1] [-a|--arch gpu_arch] [-t] [-h]\n");
     printf("  -m, --model id    : Model ID (required to run a model)\n");
     printf("  -n, --nodes N     : Number of nodes (default: 1)\n");
-    printf("  -a, --arch arch   : Show available models by GPU architecture (e.g., gfx906, gfx908, gfx910, gfx942, gfx950)\n");
+    printf("  -a, --arch arch   : Show available models by GPU architecture (e.g., gfx906, gfx908, gfx910, gfx942, gfx950, gfx1170)\n");
     printf("  -t, --test        : Run test suite (all models with 1,2,4,8,16 nodes by default)\n");
     printf("  -h, --help        : Display this help message and all available models\n");
     printf("\n");
@@ -165,7 +165,7 @@ void print_available_models(const std::string& gpuArch) {
     
     if (!foundAny && !gpuArch.empty()) {
         printf("\nNo models found for GPU architecture '%s'\n", gpuArch.c_str());
-        printf("Available GPU architectures: gfx906, gfx908, gfx910, gfx942, gfx950\n");
+        printf("Available GPU architectures: gfx906, gfx908, gfx910, gfx942, gfx950, gfx1170\n");
     } else if (gpuArch.empty()) {
         printf("\nTo view available models by GPU architecture, use: ./topo_expl -a <gpu_arch> or --arch <gpu_arch>\n");
         printf("Example: ./topo_expl -a gfx942\n");

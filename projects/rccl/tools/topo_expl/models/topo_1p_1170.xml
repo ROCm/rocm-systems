@@ -1,0 +1,20 @@
+<!--
+ - Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -
+ - 1x gfx1170 integrated GPU (APU, PCI device 0x1903) on a single-socket AMD
+ - host. Dumped with NCCL_TOPO_DUMP_FILE from the measured node; host_hash
+ - removed. sm="4" is what HIP reports as multiProcessorCount on this part.
+ - The only NIC is a 1 GbE USB adapter used through NET/Socket, so RCCL
+ - attaches it to the CPU.
+ -->
+<system version="2">
+  <cpu numaid="0" affinity="fffff" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="129">
+    <pci busid="0000:82:00.0" class="0x038000" vendor="0x1002" device="0x1903" subsystem_vendor="0x1002" subsystem_device="0x1903" link_speed="16.0 GT/s PCIe" link_width="16">
+      <gpu dev="0" sm="4" gcn="gfx1170" arch="38911" rank="0" gdr="0" mlopart="-1"/>
+    </pci>
+    <nic>
+      <net name="enx24f5a2f18f44" dev="0" latency="0" speed="1000" port="0" guid="0x0" rail="65536" plane="65536" maxconn="65536" gdr="0" net="1"/>
+    </nic>
+  </cpu>
+</system>
