@@ -168,7 +168,7 @@ When the conflict belongs to another wave, the reporting wave's trace starts at
 its own latest execution of the same instruction. Waves usually run the same
 code, so this shows the path from that instruction to the racing access, where
 synchronization is missing. If the reporting wave never ran that instruction,
-the report shows its last 16 instructions.
+the report shows up to its last 16 instructions, limited by `trace_context`.
 
 The instruction table follows the reporting wave's execution order. An event
 from another wave, or one older than the trace window, is shown separately.

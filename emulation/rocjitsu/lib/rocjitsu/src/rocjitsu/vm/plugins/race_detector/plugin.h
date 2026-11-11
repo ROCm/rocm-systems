@@ -3,9 +3,13 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
+#include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
+#include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
 #include <cstddef>
@@ -16,9 +20,11 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -50,42 +56,43 @@ private:
   size_t head_ = 0;
 };
 
-/// Return the memory instruction recorded as the exact conflict.
-/// Returns failure if the detector no longer holds the conflicting event.
+/// @brief Return the memory instruction recorded as the exact conflict.
+/// @brief Returns failure if the detector no longer holds the conflicting event.
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
-inline constexpr size_t kTraceHistoryRows = 256;
+inline constexpr size_t kTraceHistorySize = 256;
 /// Default instruction context before formatTrace elides the middle of a report.
-inline constexpr size_t kTraceContextRows = 128;
+inline constexpr size_t kDefaultTraceContext = 128;
 
-/// Trace rows printed for another wave's conflict when the reporting wave never
+/// Instruction context for another wave's conflict when the reporting wave never
 /// ran the conflicting instruction.
-inline constexpr size_t kOtherWaveContextRows = 16;
+inline constexpr size_t kOtherWaveTraceContext = 16;
 
-/// Format the reporting wave's trace, marking the first matching same-wave
-/// conflict and the last matching current access by PC and encoding. Identical
+/// @brief Format the reporting wave's trace in execution order.
+/// @details Mark the first matching same-wave conflict and the last matching
+/// current access by PC and encoding. Identical
 /// producer executions are not distinguished. A conflict from another wave, or
 /// one no longer retained, is printed separately before the trace. For another
 /// wave's conflict, the trace starts at the reporting wave's latest execution of
-/// the same instruction, or shows the last min(kOtherWaveContextRows, context_rows)
-/// instructions when it has none. A span longer than context_rows keeps its
-/// first and last rows, synchronization and control-flow rows. Context counts executed instructions
-/// before consecutive identical unmarked s_nops are compacted for display.
+/// the same instruction, or shows the last min(kOtherWaveTraceContext, context_instructions)
+/// instructions when it has none. Longer spans keep their beginning and end,
+/// plus synchronization and control-flow instructions. Context counts executed
+/// instructions before consecutive identical unmarked s_nops are compacted.
 /// Disassemble only printed rows. Returns failure when `disassemble` fails.
 /// The callback must not throw.
-/// A same-wave conflict must not follow the current access in the trace.
-/// context_rows must be between 2 and kTraceHistoryRows, inclusive.
-util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistoryRows> &trace,
+/// @pre A same-wave conflict must not follow the current access in the trace.
+/// @pre context_instructions is between 2 and kTraceHistorySize, inclusive.
+util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
                         const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction read,
-                        size_t context_rows = kTraceContextRows);
+                        std::optional<MarkedInstruction> conflict, MarkedInstruction access,
+                        size_t context_instructions = kDefaultTraceContext);
 
-/// Describe a violation: the hazard direction, the current access at
+/// @brief Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and
 /// synchronization state, with counter names for `arch`.
-/// Throws std::out_of_range if `events` no longer holds the conflicting event,
-/// std::invalid_argument for an architecture without a wait-counter model, and
-/// std::logic_error if the event is already retired.
+/// @throws std::out_of_range if `events` no longer holds the conflicting event.
+/// @throws std::invalid_argument for an architecture without a wait-counter model.
+/// @throws std::logic_error if the event is already retired.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
                                   uint64_t access_pc, rj_code_arch_t arch);
 
@@ -93,7 +100,7 @@ struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
-  RingBuffer<InstructionSnapshot, kTraceHistoryRows> trace;
+  RingBuffer<InstructionSnapshot, kTraceHistorySize> trace;
   WaveRaceState *race_state = nullptr;
   struct LdsOperandRead {
     uint32_t address;
@@ -108,7 +115,7 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
   /// @param config_json Plugin JSON with an optional integer trace_context in
-  ///        [2, kTraceHistoryRows]. Null or empty uses the default context.
+  ///        [2, kTraceHistorySize]. Null or empty uses the default context.
   /// @throws std::invalid_argument for malformed configuration.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
@@ -173,7 +180,7 @@ public:
   size_t retainedWorkgroupCount() const;
 
 private:
-  size_t trace_context_ = kTraceContextRows;
+  size_t trace_context_ = kDefaultTraceContext;
 
   struct WorkgroupKey {
     uint32_t dispatch_id;

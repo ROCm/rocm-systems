@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -48,6 +49,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -4950,7 +4952,7 @@ TEST(FormatTraceTest, ResolvesOnlyPrintedInstructions) {
   const auto report =
       formatTrace(trace, resolve, MarkedInstruction{trace[2], 0, -1}, {trace[255], 0, 0});
   ASSERT_TRUE(report.succeeded());
-  ASSERT_EQ(requested.size(), kTraceContextRows);
+  ASSERT_EQ(requested.size(), kDefaultTraceContext);
   EXPECT_EQ(requested.front(), 0x108u);
   EXPECT_EQ(requested.back(), 0x4fcu);
   EXPECT_NE(report.value().find("instructions elided"), std::string::npos);
@@ -5162,19 +5164,19 @@ TEST(RaceDetectorPluginOutputTest, TraceRowsFollowExecutedBranches) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1));
   PluginSinkConfig sink_config;
-  auto &sink = sink_config.emplace<StringSink>();
+  StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
   ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
   const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
-  const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+  const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = vgpr_src(8), .vdst = 9});
   const auto forward = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 2});
   const auto backward =
       cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = static_cast<uint16_t>(-3)});
   const std::array code{S_NOP, load[0], load[1], forward[0], read[0], S_ENDPGM, backward[0]};
   f.run_kernel(code.data(), code.size());
-  const auto report = sink.str();
+  const std::string report = sink.str();
   EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
   EXPECT_NE(report.find("       0x104c  s_branch 2\n"
                         "       0x1058  s_branch 65533\n"
@@ -5186,30 +5188,35 @@ TEST(RaceDetectorPluginOutputTest, TraceRowsFollowExecutedBranches) {
 
 TEST(RaceDetectorPluginOutputTest, ConfiguredContextAndNopCompactionReachRealReports) {
   for (const auto &[config, omitted, nops] :
-       {std::tuple{"{}", 24, 63}, std::tuple{R"({"trace_context":8})", 144, 3},
+       {std::tuple{"{}", 24, 63}, std::tuple{R"({"trace_context":2})", 150, 0},
+        std::tuple{R"({"trace_context":8})", 144, 3},
         std::tuple{R"({"trace_context":256})", 0, 150}}) {
     SCOPED_TRACE(config);
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(1));
     PluginSinkConfig sinks;
-    auto &sink = sinks.emplace<StringSink>();
+    StringSink &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
     ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config)));
     f.soc->set_plugin_group(f.plugin_group_);
     f.plugin_group_->onInit();
     const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
-    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = vgpr_src(8), .vdst = 9});
     std::vector<uint32_t> code{S_NOP, load[0], load[1]};
     code.insert(code.end(), 150, S_NOP);
     code.push_back(read[0]);
     code.push_back(S_ENDPGM);
     f.run_kernel(code.data(), code.size());
-    const auto report = sink.str();
+    const std::string report = sink.str();
     EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
     EXPECT_NE(report.find("  ==>  0x12a4  v_mov_b32_e32 v9, v8"), std::string::npos) << report;
-    EXPECT_NE(report.find(std::format("s_nop 0  ; {} executions, through PC", nops)),
-              std::string::npos)
-        << report;
+    if (nops) {
+      EXPECT_NE(report.find(std::format("s_nop 0  ; {} executions, through PC", nops)),
+                std::string::npos)
+          << report;
+    } else {
+      EXPECT_EQ(report.find("s_nop"), std::string::npos) << report;
+    }
     if (omitted) {
       EXPECT_NE(report.find(std::format("... {} instructions elided ...", omitted)),
                 std::string::npos)
@@ -5226,15 +5233,15 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     PluginFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(2));
     PluginSinkConfig config;
-    auto &sink = config.emplace<StringSink>();
+    StringSink &sink = config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
     auto race = std::make_unique<RaceDetectorPlugin>();
-    auto *plugin = race.get();
+    RaceDetectorPlugin *plugin = race.get();
     ASSERT_TRUE(f.plugin_group_->add(std::move(race)));
     f.soc->set_plugin_group(f.plugin_group_);
     f.plugin_group_->onInit();
-    auto *reader = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
-    auto *writer = f.cu()->dispatch_wf(1, 0x1000, 104, 256);
+    Wavefront *reader = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    Wavefront *writer = f.cu()->dispatch_wf(1, 0x1000, 104, 256);
     ASSERT_NE(reader, nullptr);
     ASSERT_NE(writer, nullptr);
     reader->set_exec(1);
@@ -5256,7 +5263,7 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(writer->pc, *write.value(), *writer);
     ASSERT_TRUE(f.cu()->execute_instruction(write.value().get(), *writer).succeeded());
     f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *write.value(), *writer);
-    const auto report = sink.str();
+    const std::string report = sink.str();
     EXPECT_NE(report.find("type=LDS access=write reg=0 wave=1 lane=0"), std::string::npos)
         << report;
     EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
@@ -5289,11 +5296,11 @@ TEST(RaceDetectorPluginOutputTest, CountsReportsInsteadOfTheirTwoPcsAndCountsSup
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
   auto plugin = std::make_unique<RaceDetectorPlugin>();
-  auto *reporter = plugin.get();
+  RaceDetectorPlugin *reporter = plugin.get();
   ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
-  auto *wave = f.cu()->dispatch_wf(0, 0x200, 104, 256);
+  Wavefront *wave = f.cu()->dispatch_wf(0, 0x200, 104, 256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(1);
   std::array waves{wave};
@@ -5313,26 +5320,26 @@ TEST(RaceDetectorPluginOutputTest, CountsReportsInsteadOfTheirTwoPcsAndCountsSup
     state->race_state->checkVgprReadLanes(2, 1, 0xf);
   EXPECT_NE(reporter->getSummary().find("1 race report(s) emitted; 4 observation(s) suppressed"),
             std::string::npos);
-  const auto report = sink.str();
+  const std::string report = sink.str();
   EXPECT_NE(report.find("read-after-write (RAW)"), std::string::npos);
   EXPECT_NE(report.find("pending counters: vmcnt."), std::string::npos);
   EXPECT_NE(report.find("RACE kernel=? symbol=? dispatch=1 type=VGPR access=read reg=2"),
             std::string::npos);
-  const auto first = report.find("END_RACE\n");
+  const size_t first = report.find("END_RACE\n");
   ASSERT_NE(first, std::string::npos);
   EXPECT_EQ(report.find("END_RACE\n", first + 1), std::string::npos);
 }
 
-TEST(RaceDetectorPluginOutputTest, PreservesWaitsBarriersAndControlFlowDuringElision) {
+TEST(RaceDetectorPluginOutputTest, CapturesWaitBarrierControlFlowAndNopMetadata) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 104));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<RaceDetectorPlugin>();
-  auto *reporter = plugin.get();
+  RaceDetectorPlugin *reporter = plugin.get();
   ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
-  auto *wave = f.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
+  Wavefront *wave = f.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
   ASSERT_NE(wave, nullptr);
   std::array waves{wave};
   f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
@@ -5365,13 +5372,13 @@ TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsSta
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
   auto plugin = std::make_unique<RaceDetectorPlugin>();
-  auto *reporter = plugin.get();
+  RaceDetectorPlugin *reporter = plugin.get();
   ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
   std::array<RaceWavefrontState *, 4> states{};
   for (unsigned i = 0; i < states.size(); ++i) {
-    auto *wave = f.cu(i)->dispatch_wf(i, 0x2000 + 0x100 * i, 104, 256);
+    Wavefront *wave = f.cu(i)->dispatch_wf(i, 0x2000 + 0x100 * i, 104, 256);
     ASSERT_NE(wave, nullptr);
     wave->set_exec(1);
     std::array waves{wave};
@@ -5394,13 +5401,13 @@ TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsSta
     worker.join();
   EXPECT_NE(reporter->getSummary().find("4 race report(s) emitted; 196 observation(s) suppressed"),
             std::string::npos);
-  const auto report = sink.str();
+  const std::string report = sink.str();
   size_t begin = 0;
   unsigned count = 0;
   while ((begin = report.find("RACE kernel=", begin)) != std::string::npos) {
-    const auto end = report.find("END_RACE\n", begin);
+    const size_t end = report.find("END_RACE\n", begin);
     ASSERT_NE(end, std::string::npos);
-    const auto next = report.find("RACE kernel=", begin + 1);
+    const size_t next = report.find("RACE kernel=", begin + 1);
     EXPECT_TRUE(next == std::string::npos || next > end);
     begin = end + 9;
     ++count;
