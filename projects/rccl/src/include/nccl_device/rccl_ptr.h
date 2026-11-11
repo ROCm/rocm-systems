@@ -74,6 +74,34 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
 
+// System-scope 128-bit global load/store for the device-API headers below.
+// __builtin_amdgcn_global_{load,store}_b128 lower to llvm.amdgcn.global.{load,store}.b128, which exist only in
+// AMD's LLVM. Upstream LLVM has the same operation as llvm.amdgcn.av.{load,store}.b128, from
+// __builtin_amdgcn_av_{load,store}_b128 (llvm/llvm-project#199176). Device code built from these headers is also
+// compiled by upstream-LLVM consumers -- Triton kernels that link RCCL's GIN device API -- which abort on the AMD-only
+// intrinsics ("Unknown type!"). So prefer the av builtins where the compiler has them; on gfx942/gfx950 both lower to
+// the same global_store_dwordx4 / global_load_dwordx4 ... sc0 sc1.
+#ifdef __HIP_DEVICE_COMPILE__
+#if (defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && \
+  __has_builtin(__builtin_amdgcn_av_load_b128) && __has_builtin(__builtin_amdgcn_av_store_b128) && \
+  !defined(DWORDX4_INTRINSICS_FORCE_OFF)
+#define RCCL_HAVE_AV_B128_BUILTINS 1
+#else
+#define RCCL_HAVE_AV_B128_BUILTINS 0
+#endif
+#else
+#define RCCL_HAVE_AV_B128_BUILTINS 0
+#endif
+
+#define RCCL_HAVE_SYS_B128 (RCCL_HAVE_AV_B128_BUILTINS || RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS)
+#if RCCL_HAVE_AV_B128_BUILTINS
+#define RCCL_STORE_B128_SYS(ptr, vec) __builtin_amdgcn_av_store_b128((v4u_gptr)(ptr), (vec), __MEMORY_SCOPE_SYSTEM)
+#define RCCL_LOAD_B128_SYS(ptr) __builtin_amdgcn_av_load_b128((v4u_gptr)(ptr), __MEMORY_SCOPE_SYSTEM)
+#elif RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#define RCCL_STORE_B128_SYS(ptr, vec) __builtin_amdgcn_global_store_b128((v4u_gptr)(ptr), (vec), RCCL_SYSTEM_SYNCSCOPE)
+#define RCCL_LOAD_B128_SYS(ptr) __builtin_amdgcn_global_load_b128((v4u_gptr)(ptr), RCCL_SYSTEM_SYNCSCOPE)
+#endif
+
 // Observed on gfx1250: sibling DPX P2P into a cacheable comm FIFO is not
 // coherent under plain/nontemporal load or store. Default hipMalloc and
 // cuMem/VMM hung; uncached (hipDeviceMallocUncached) did not. System-scope

@@ -130,13 +130,13 @@ NCCL_DEVICE_INLINE void postGfd(Coop coop, ncclGinProxyGpuCtx_t* proxyCtx, ncclG
     NVCC_PRAGMA_UNROLL_AUTO
     for (uint8_t i = 0; i < sizeof(ncclGinProxyGfd_t) / sizeof(uint4); i++) {
 #if defined(__HIP_PLATFORM_AMD__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
       union {
         v4u vec;
         uint4 u;
       } pkt;
       pkt.u = ((uint4*)gfd)[i];
-      __builtin_amdgcn_global_store_b128((v4u_gptr)((uint4*)&q[gfdIdx] + i), pkt.vec, RCCL_SYSTEM_SYNCSCOPE);
+      RCCL_STORE_B128_SYS((uint4*)&q[gfdIdx] + i, pkt.vec);
 #else
       uint64_t* p64 = reinterpret_cast<uint64_t*>((uint4*)&q[gfdIdx] + i);
       const uint64_t* g64 = reinterpret_cast<const uint64_t*>((uint4*)gfd + i);
