@@ -89,6 +89,9 @@ HSAKMT_STATUS BaseQueue::Create(unsigned int NodeId, unsigned int size, HSAuint6
                              &m_Resources);
 
     if (status != HSAKMT_STATUS_SUCCESS) {
+        /* No queue exists: PlacePacket() and Destroy() rely on a NULL m_QueueBuf */
+        delete m_QueueBuf;
+        m_QueueBuf = NULL;
         return status;
     }
 
@@ -149,6 +152,7 @@ void BaseQueue::PlaceAndSubmitPacket(const BasePacket &packet) {
 
 void BaseQueue::Wait4PacketConsumption(HsaEvent *event, unsigned int timeOut) {
     ASSERT_TRUE(!event) << "Not supported!" << std::endl;
+    ASSERT_NOTNULL(m_QueueBuf);
 
     const unsigned int expectedRptr = RptrWhenConsumed();
     ASSERT_TRUE(WaitOnValue(m_Resources.Queue_read_ptr, expectedRptr, timeOut))

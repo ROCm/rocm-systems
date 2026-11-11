@@ -16,6 +16,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/sim/message.h"
 #include "simdojo/sim/simulation.h"
 #include "util/bit.h"
@@ -35,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <string>
 #include <sys/mman.h>
+#include <system_error>
 #include <thread>
 
 namespace rocjitsu {
@@ -519,8 +521,18 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint32_t idx = 0;
     if (RJ_AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
       if (pkt.queue_ptr != 0) {
-        for (uint32_t word = 0; word < 4; ++word)
-          cu->write_sgpr(sbase + idx + word, launch_metadata->scratch_resource_descriptor[word]);
+        for (uint32_t word = 0; word < 4; ++word) {
+          uint32_t value = launch_metadata->scratch_resource_descriptor[word];
+          if (word == 3 &&
+              (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA2)) {
+            // ROCr leaves INDEX_STRIDE for the CP to fill from this kernel's
+            // wave size. Buffer spills must use the same lane interleave as FLAT.
+            // This covers the compiler buffer-spill path. Explicit private V#
+            // requests on GFX11+ remain outside this qualification.
+            value = (value & ~(3u << 21)) | ((wf->wf_size() == 32 ? 2u : 3u) << 21);
+          }
+          cu->write_sgpr(sbase + idx + word, value);
+        }
       }
       idx += 4;
     }
@@ -599,30 +611,37 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   uint32_t wg_id_x =
       (pkt.pm4_abi || pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? grid_wg_id_x : global_wg_id;
 
-  // System SGPRs: workgroup_id_{x,y,z} placed sequentially after user SGPRs.
-  // Only the IDs whose enable bits are set in compute_pgm_rsrc2 are written.
-  // When kernel_code_properties is 0 (internal test dispatches), always write
-  // workgroup_id_x as a fallback since internal kernels expect it.
+  // Descriptor ID bits govern AQL and PM4. Internal dispatches that need
+  // the legacy X SGPR request it explicitly through DispatchEntry.
   uint32_t sys_idx = pkt.num_user_sgprs;
-  const auto properties = isa_properties(cu->arch());
-  const bool pm4_ttmp_ids = pkt.pm4_abi && properties.uses_ttmp_workgroup_ids;
+  const rj_code_arch_t arch = cu->arch();
+  const auto properties = isa_properties(arch);
   {
-    bool kcp_zero = (pkt.kernel_code_properties == 0) && !pkt.pm4_abi;
-    if (!pm4_ttmp_ids && (pkt.enable_wg_id_x || kcp_zero))
-      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
-    if (!pm4_ttmp_ids && pkt.enable_wg_id_y)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
-    if (!pm4_ttmp_ids && pkt.enable_wg_id_z)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+    if (!properties.uses_ttmp_workgroup_ids) {
+      if (pkt.enable_wg_id_x)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_x);
+      if (pkt.enable_wg_id_y)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_y);
+      if (pkt.enable_wg_id_z)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+    }
     if (pkt.enable_wg_info) {
-      // RDNA CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
-      // With ordered append disabled, the term is the wave index. RDNA1–3.5
-      // also have first-wave [31]; RDNA2–3.5 add wave ID [24:20]. RDNA4
-      // supplies the wave ID in TTMP8 and leaves those SGPR bits clear.
-      uint32_t info = pkt.wfs_per_workgroup | (wf_index_in_wg << 6);
-      if (!pm4_ttmp_ids) {
+      // CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
+      // With ordered append disabled, the term is the wave index. CDNA3/4
+      // reserve that field as zero. CDNA1-4 and RDNA1-3.5 have first-wave
+      // [31]; CDNA3/4 and RDNA2-3.5 also carry wave ID [24:20]. The CDNA3/4
+      // manuals list a 34-bit concatenation: [24:20] assumes their 14-bit
+      // zero field is the 12-bit ordered-append slot, matching RDNA2/3.
+      // That position is not hardware-qualified on gfx942/gfx950. RDNA4
+      // supplies its wave ID in TTMP8 and leaves those SGPR bits clear.
+      uint32_t info = pkt.wfs_per_workgroup;
+      if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+        info |= wf_index_in_wg << 6;
+      if (!properties.uses_ttmp_workgroup_ids) {
         info |= wf_index_in_wg == 0 ? 1u << 31 : 0;
-        if (cu->arch() != ROCJITSU_CODE_ARCH_RDNA1)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA3_5)
           info |= wf_index_in_wg << 20;
       }
       cu->write_sgpr(sbase + sys_idx++, info);
@@ -824,9 +843,21 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                         scratch_outcome == VmAccessOutcome::Complete);
     });
 
+    // Absolute flat-scratch targets receive the queue base and a separate
+    // per-wave byte offset. The prologue adds that offset to both FLAT_SCRATCH
+    // and the private buffer V#, so supplying zero aliases every wave's spills.
+    const bool wave_offset_sgpr =
+        pkt.enable_private_segment && arch_appends_private_segment_wave_offset_sgpr(arch);
+    if (wave_offset_sgpr) {
+      const uint64_t offset = wave_scratch - scratch_pool;
+      if (offset > std::numeric_limits<uint32_t>::max())
+        return VmAccessOutcome::Malformed;
+      cu->write_sgpr(sbase + sys_idx, static_cast<uint32_t>(offset));
+    }
     if (flat_scratch_init_sgpr >= 0) {
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(wave_scratch));
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(wave_scratch >> 32));
+      const uint64_t initial_base = wave_offset_sgpr ? scratch_pool : wave_scratch;
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(initial_base));
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(initial_base >> 32));
     }
   }
   return VmAccessOutcome::Complete;
@@ -1198,134 +1229,149 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
       publish_async_scratch_capability(queue) != VmAccessOutcome::Complete) {
     return 0;
   }
-  class PeerRegistrationRollback {
-  public:
-    PeerRegistrationRollback(const std::vector<CommandProcessor *> &peers,
-                             const std::vector<uint32_t> &registered_ranks, uint32_t queue_id,
-                             uint32_t process_id)
-        : peers_(peers), registered_ranks_(registered_ranks), queue_id_(queue_id),
-          process_id_(process_id) {}
-    PeerRegistrationRollback(const PeerRegistrationRollback &) = delete;
-    PeerRegistrationRollback &operator=(const PeerRegistrationRollback &) = delete;
-    ~PeerRegistrationRollback() {
-      if (committed_)
-        return;
-      for (const uint32_t rank : registered_ranks_)
-        peers_[rank]->unregister_queue(queue_id_, process_id_);
-    }
-
-    void commit() { committed_ = true; }
-
-  private:
-    const std::vector<CommandProcessor *> &peers_;
-    const std::vector<uint32_t> &registered_ranks_;
-    uint32_t queue_id_ = 0;
-    uint32_t process_id_ = 0;
-    bool committed_ = false;
-  };
-
-  class OwnerRegistrationRollback {
-  public:
-    explicit OwnerRegistrationRollback(std::vector<ComputeQueueRecord> &queues)
-        : queues_(queues), initial_queue_count_(queues.size()) {}
-    OwnerRegistrationRollback(const OwnerRegistrationRollback &) = delete;
-    OwnerRegistrationRollback &operator=(const OwnerRegistrationRollback &) = delete;
-    ~OwnerRegistrationRollback() {
-      if (committed_)
-        return;
-      while (queues_.size() > initial_queue_count_)
-        queues_.pop_back();
-    }
-
-    void commit() { committed_ = true; }
-
-  private:
-    std::vector<ComputeQueueRecord> &queues_;
-    std::size_t initial_queue_count_ = 0;
-    bool committed_ = false;
-  };
-
-  util::Logger::cp([&](auto &os) {
-    os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
-                      "doorbell_off={} db_base={}",
-                      name(), queue.queue_id, queue.process_id, queue.ring_base_va, queue.ring_size,
-                      queue.read_ptr_va, queue.write_ptr_va, queue.doorbell_offset,
-                      reinterpret_cast<uintptr_t>(queue.doorbell_base));
-  });
-  // A replica exists only to receive dispatch shards from the XCD that owns the
-  // queue. It must never read the ring or poll the doorbell, or the same packets
-  // would be dispatched once per XCD.
+  // Replicas receive dispatch shards but must never read the ring or poll it.
   const bool start_poll =
       queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
-  // Replicate onto the peer XCDs without holding this CP's lock:
-  // accept_fanout_shard() and the peers' register_queue() take their own locks.
-  // A shard can arrive only after this function returns, so the owner may be
-  // committed last without exposing an incomplete topology.
-  {
-    // Checked before replicating, so a rejection cannot leave replicas behind on
-    // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
-    // silently deliver every shard to whichever slot matched first -- a wrong-answer
-    // bug rather than a crash, which is precisely what an assert compiled out of a
-    // release build would let through. Enforced in every build for that reason.
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
-      return 0;
-    queue.registration_id = next_queue_registration_id_++;
-    if (next_queue_registration_id_ == 0)
-      next_queue_registration_id_ = 1;
-  }
-  const uint64_t registration_id = queue.registration_id;
-  const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
-  bool replicate = queue.xcd_fanout && num_xcds > 1;
-  std::vector<uint32_t> registered_peer_ranks;
-  PeerRegistrationRollback peer_rollback(xcd_peers_, registered_peer_ranks, queue.queue_id,
-                                         queue.process_id);
-  if (replicate) {
-    registered_peer_ranks.reserve(num_xcds - 1);
-    for (uint32_t rank = 0; rank < num_xcds; ++rank) {
-      if (rank == xcd_rank_)
-        continue;
-      ComputeQueueConfig replica = queue;
-      replica.xcd_fanout = false;
-      if (xcd_peers_[rank]->register_queue(std::move(replica), true) == 0)
+  // Publish only through internal storage and peer registration.
+  // Foreign VM access above can still fail through its own boundary contract;
+  // Standard-library failures inside the publication lambda must be fatal.
+  const uint64_t registration_id = [&]() noexcept -> uint64_t {
+    class PeerRegistrationRollback {
+    public:
+      PeerRegistrationRollback(const std::vector<CommandProcessor *> &peers,
+                               const std::vector<uint32_t> &registered_ranks, uint32_t queue_id,
+                               uint32_t process_id)
+          : peers_(peers), registered_ranks_(registered_ranks), queue_id_(queue_id),
+            process_id_(process_id) {}
+      PeerRegistrationRollback(const PeerRegistrationRollback &) = delete;
+      PeerRegistrationRollback &operator=(const PeerRegistrationRollback &) = delete;
+      ~PeerRegistrationRollback() {
+        if (committed_)
+          return;
+        for (const uint32_t rank : registered_ranks_)
+          peers_[rank]->unregister_queue(queue_id_, process_id_);
+      }
+
+      void commit() { committed_ = true; }
+
+    private:
+      const std::vector<CommandProcessor *> &peers_;
+      const std::vector<uint32_t> &registered_ranks_;
+      uint32_t queue_id_ = 0;
+      uint32_t process_id_ = 0;
+      bool committed_ = false;
+    };
+
+    class OwnerRegistrationRollback {
+    public:
+      explicit OwnerRegistrationRollback(std::vector<ComputeQueueRecord> &queues)
+          : queues_(queues), initial_queue_count_(queues.size()) {}
+      OwnerRegistrationRollback(const OwnerRegistrationRollback &) = delete;
+      OwnerRegistrationRollback &operator=(const OwnerRegistrationRollback &) = delete;
+      ~OwnerRegistrationRollback() {
+        if (committed_)
+          return;
+        while (queues_.size() > initial_queue_count_)
+          queues_.pop_back();
+      }
+
+      void commit() { committed_ = true; }
+
+    private:
+      std::vector<ComputeQueueRecord> &queues_;
+      std::size_t initial_queue_count_ = 0;
+      bool committed_ = false;
+    };
+
+    util::Logger::cp([&](auto &os) {
+      os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
+                        "doorbell_off={} db_base={}",
+                        name(), queue.queue_id, queue.process_id, queue.ring_base_va,
+                        queue.ring_size, queue.read_ptr_va, queue.write_ptr_va,
+                        queue.doorbell_offset, reinterpret_cast<uintptr_t>(queue.doorbell_base));
+    });
+    // Replicate onto the peer XCDs without holding this CP's lock:
+    // accept_fanout_shard() and the peers' register_queue() take their own locks.
+    // A shard can arrive only after this function returns, so the owner may be
+    // committed last without exposing an incomplete topology.
+    {
+      // Checked before replicating, so a rejection cannot leave replicas behind on
+      // the peers. Shard routing keys on (queue_id, process_id), so a duplicate would
+      // silently deliver every shard to whichever slot matched first -- a wrong-answer
+      // bug rather than a crash, which is precisely what an assert compiled out of a
+      // release build would let through. Enforced in every build for that reason.
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
         return 0;
-      registered_peer_ranks.push_back(rank);
+      queue.registration_id = next_queue_registration_id_++;
+      if (next_queue_registration_id_ == 0)
+        next_queue_registration_id_ = 1;
     }
-  }
-  {
-    std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
-      return 0;
-    OwnerRegistrationRollback owner_rollback(compute_queues_);
-    compute_queues_.push_back(std::move(queue));
-    // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
-    // queues (no host-accessible queue anywhere on this CP) need the CP to own the
-    // primary lifecycle. Gate on the same aggregate predicate as the teardown
-    // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
-    // new queue — so a CP can never register a primary it will never release.
-    if (!is_primary_ && engine() && !has_kfd_queues()) {
-      engine()->register_as_primary();
-      is_primary_ = true;
-    } else if (is_primary_ && engine() && has_kfd_queues()) {
-      // A KFD queue joined a CP that had registered a test-owned primary; the
-      // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
-      // primary to keep register/release symmetric (the teardown path only
-      // releases when !has_kfd_queues()).
-      engine()->primary_release();
-      is_primary_ = false;
+    const uint64_t registration_id = queue.registration_id;
+    const auto num_xcds = static_cast<uint32_t>(xcd_peers_.size());
+    bool replicate = queue.xcd_fanout && num_xcds > 1;
+    std::vector<uint32_t> registered_peer_ranks;
+    PeerRegistrationRollback peer_rollback(xcd_peers_, registered_peer_ranks, queue.queue_id,
+                                           queue.process_id);
+    if (replicate) {
+      registered_peer_ranks.reserve(num_xcds - 1);
+      for (uint32_t rank = 0; rank < num_xcds; ++rank) {
+        if (rank == xcd_rank_)
+          continue;
+        ComputeQueueConfig replica = queue;
+        replica.xcd_fanout = false;
+        if (xcd_peers_[rank]->register_queue(std::move(replica), true) == 0)
+          return 0;
+        registered_peer_ranks.push_back(rank);
+      }
     }
-    owner_rollback.commit();
+    {
+      std::unique_lock<std::shared_mutex> structure_lock(queue_structure_mutex_);
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      if (find_compute_queue(queue.queue_id, queue.process_id) != nullptr)
+        return 0;
+      OwnerRegistrationRollback owner_rollback(compute_queues_);
+      compute_queues_.push_back(std::move(queue));
+      // KFD queues rely on the VM-level primary (rj_vm.cpp); only internal test
+      // queues (no host-accessible queue anywhere on this CP) need the CP to own the
+      // primary lifecycle. Gate on the same aggregate predicate as the teardown
+      // release (!has_kfd_queues()) — checked AFTER the push_back so it reflects the
+      // new queue — so a CP can never register a primary it will never release.
+      if (!is_primary_ && engine() && !has_kfd_queues()) {
+        engine()->register_as_primary();
+        is_primary_ = true;
+      } else if (is_primary_ && engine() && has_kfd_queues()) {
+        // A KFD queue joined a CP that had registered a test-owned primary; the
+        // VM-level primary now anchors this CP's lifecycle, so drop the CP-owned
+        // primary to keep register/release symmetric (the teardown path only
+        // releases when !has_kfd_queues()).
+        engine()->primary_release();
+        is_primary_ = false;
+      }
+      owner_rollback.commit();
+    }
+    peer_rollback.commit();
+    return registration_id;
+  }();
+  if (registration_id == 0)
+    return 0;
+  try {
+    // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
+    // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
+    // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
+    // path avoids joining a monitor while holding the queue mutex it needs to finish
+    // a scan. Internal test queues inject doorbell events directly via
+    // schedule_event_now() and need no monitor.
+    if (start_poll)
+      ensure_doorbell_monitor();
+  } catch (const std::system_error &) {
+    // The owner cascades teardown to its replicas before releasing its VM lease.
+    (void)unregister_queue_registration(registration_id);
+    throw;
+  } catch (...) {
+    // Allocation failures remain fatal even though thread-creation errors recover.
+    std::terminate();
   }
-  peer_rollback.commit();
-  // Start (or restart) the doorbell poll thread for KFD (host-accessible) queues
-  // AFTER releasing hw_queue_mutex_. ensure_doorbell_monitor() serializes on its
-  // own doorbell_thread_mutex_. Keeping that lock order consistent with the stop
-  // path avoids joining a monitor while holding the queue mutex it needs to finish
-  // a scan. Internal test queues inject doorbell events directly via
-  // schedule_event_now() and need no monitor.
-  if (start_poll)
-    ensure_doorbell_monitor();
   return registration_id;
 }
 
@@ -1746,6 +1792,8 @@ void CommandProcessor::ensure_doorbell_monitor() {
   // no-oping forever. We still hold doorbell_thread_mutex_, so teardown cannot
   // observe the new handle until both it and the running flag are published.
   assert(!doorbell_thread_.joinable());
+  if (std::exchange(fail_next_doorbell_monitor_start_for_testing_, false))
+    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   doorbell_thread_ = std::jthread([this](std::stop_token stop) { doorbell_poll_loop(stop); });
   doorbell_running_ = true;
 }
@@ -2069,7 +2117,7 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
     if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
   }
 }
 
@@ -2251,7 +2299,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
     if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
   }
 
   release_cluster_lds_pins(unpin);
@@ -2454,6 +2502,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       // Live PM4 applications share the host monotonic clock with DRM query
       // timestamps. Internal simulation workloads retain the modeled clock.
       wf->set_system_clock(entry.pm4_abi);
+      wf->set_drm_shader_addresses(entry.drm_shader_addresses);
       wf->set_pm4_failure(entry.pm4_failure);
       wf->set_mode_raw(entry.initial_mode_raw);
       wf->set_queue_id(entry.queue_id);
@@ -2758,6 +2807,12 @@ void CommandProcessor::notify_dispatch_failure(uint32_t queue_id, uint32_t proce
           {.queue_id = queue_id, .process_id = process_id, .dispatch_id = dispatch_id});
     }
   }
+  // The local fault path can run from a CU-idle callback after removing the
+  // dispatch that kept this internal queue primary alive. Re-enter the ordinary
+  // doorbell teardown path so it observes the now-empty queue and releases the
+  // primary instead of leaving a finite run stopped as an active-primary stall.
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
 }
 
 // INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is
@@ -3212,6 +3267,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
+    dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
     const auto properties = isa_properties(arch);
     const uint32_t wave_bytes = ((regs[kPm4ComputeTmpringSize] >> 12) &
@@ -3234,6 +3290,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   if (dp.num_user_sgprs > dp.user_sgprs.size())
     return emit_error.emit() << "PM4 launch exceeds compute user-data registers";
   dp.pm4_abi = true;
+  dp.drm_shader_addresses = queue.submission_queue;
   dp.pm4_failure = queue.commands.submissions.front().failure;
   std::ranges::copy_n(regs.begin() + kPm4ComputeUserData0, dp.num_user_sgprs,
                       dp.user_sgprs.begin());
@@ -4190,6 +4247,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
   dp.enable_wg_id_z =
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
+  dp.enable_wg_info =
+      RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO);
+  dp.enable_private_segment =
+      RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT);
   dp.enable_vgpr_workitem_id = static_cast<uint8_t>(
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID));
   dp.workgroup_size_x = pkt.workgroup_size_x;
