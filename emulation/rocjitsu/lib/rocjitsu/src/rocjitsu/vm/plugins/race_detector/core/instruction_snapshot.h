@@ -45,10 +45,10 @@ public:
   constexpr bool preserve_in_trace() const { return preserve_in_trace_; }
   constexpr bool is_nop() const { return is_nop_; }
 
-  /// Equal when the PCs and encodings are equal; unused words are always zero,
-  /// and the reporting metadata is derived from the encoding.
-  friend constexpr bool operator==(const InstructionSnapshot &,
-                                   const InstructionSnapshot &) = default;
+  /// Equal when the PCs and encodings are equal, regardless of reporting metadata.
+  friend constexpr bool operator==(const InstructionSnapshot &lhs, const InstructionSnapshot &rhs) {
+    return lhs.pc_ == rhs.pc_ && std::ranges::equal(lhs.encoding(), rhs.encoding());
+  }
 
 private:
   uint64_t pc_;

@@ -119,6 +119,13 @@ TEST(InstructionSnapshotTest, EqualityComparesPcAndEncoding) {
   EXPECT_NE(one_word, InstructionSnapshot(0x10, std::array{0xbf800007u}));
   // A trailing zero word is part of the encoding, not unused storage.
   EXPECT_NE(one_word, InstructionSnapshot(0x10, words));
+  for (const bool preserve_in_trace : {false, true})
+    for (const bool is_nop : {false, true}) {
+      const InstructionSnapshot with_metadata(0x10, std::span(words).first(1), preserve_in_trace,
+                                              is_nop);
+      EXPECT_EQ(one_word, with_metadata);
+      EXPECT_EQ(with_metadata, one_word);
+    }
 }
 
 class RaceEventRegistrationTest : public ::testing::Test {
