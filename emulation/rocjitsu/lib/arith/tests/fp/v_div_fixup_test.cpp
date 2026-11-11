@@ -192,8 +192,8 @@ TEST(FpDivFixupGfx11, UnsupportedStatusBeforeOperandAccess) {
   }
 }
 
-// Active RDNA3 FP16 OMOD has no empirical qualification. Rejection is transactional,
-// including empty EXEC; Compatibility and fallback-allowed semantics keep the loose result.
+// Active RDNA3 FP16 OMOD resolves Compatibility to loose; strict rejection is transactional,
+// including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
 TEST(FpDivFixupF16, Rdna3OmodQualification) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -229,7 +229,7 @@ TEST(FpDivFixupF16, Rdna3OmodQualification) {
                                                           r.v + 3, r.v, r.v + 1, r.v + 2, &status),
                       RJ_ARITH_ERROR_INVALID_FLAGS);
           }
-          EXPECT_EQ(r.v[3][0], expected || !exec_mask ? 0x1234u : 0x7e01u);
+          EXPECT_EQ(r.v[3][0], expected || !exec_mask ? 0x1234u : 0x7c01u);
           EXPECT_EQ(status, 0x40u);
         }
       }
@@ -284,6 +284,63 @@ TEST(FpDivFixupF16Gfx12, OmodOverflowRounding) {
           for (int lane = 0; lane < (wide ? 64 : 32); ++lane) {
             EXPECT_EQ(r.v[3][lane] & 0xffffU, sample.expected) << wide << '/' << lane;
           }
+        }
+      }
+    }
+  }
+}
+
+// gfx1100 IEEE=0 capture (hw1100-noieee) lanes at their MODE. FP16_OVFL saturates the
+// recovered overflow before OMOD; OMOD scales the flushed result and then flushes to signed
+// zero; IEEE clear keeps a selected sNaN under OMOD.
+TEST(FpDivFixupF16Gfx11, CapturedOverflowOmodAndNan) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    uint32_t guest_mode, p, b, c;
+    uint64_t omod;
+    uint32_t expected;
+  } cases[] = {
+      {0x800030, 0x7c00, 0x0400, 0x0400, 0, 0x7bff},
+      {0x8000f0, 0x7c00, 0x0001, 0x0001, 0, 0x7bff},
+      {0x80003a, 0x7c00, 0xbc00, 0x0400, 0, 0xfbff},
+      {0x800000, 0x7c00, 0x0400, 0x0400, RJ_ARITH_ALU_OMOD_2, 0x7bff},
+      {0x800000, 0x7c00, 0x0400, 0x0400, RJ_ARITH_ALU_OMOD_HALF, 0x77ff},
+      {0x000000, 0x83ff, 0x0400, 0x0400, RJ_ARITH_ALU_OMOD_2, 0x0000},
+      {0x000000, 0x83ff, 0x0400, 0x0400, RJ_ARITH_ALU_OMOD_4, 0x0000},
+      {0x000000, 0x0400, 0xbc00, 0x0400, RJ_ARITH_ALU_OMOD_HALF, 0x8000},
+      {0x000050, 0x0001, 0x83ff, 0x0001, RJ_ARITH_ALU_OMOD_2, 0x0000},
+      {0x000050, 0x0400, 0x83ff, 0x0001, RJ_ARITH_ALU_OMOD_HALF, 0x8000},
+      {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_2, 0x7c01},
+      {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_4, 0x7c01},
+      {0x000000, 0x0000, 0x7c01, 0x0000, RJ_ARITH_ALU_OMOD_HALF, 0x7c01},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      for (bool wide : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << std::hex << cpu << '/' << sample.guest_mode << '/'
+                                          << sample.p << '/' << sample.omod << '/' << wide);
+        Registers<4, 64> r;
+        for (int lane = 0; lane < 64; ++lane) {
+          r.v[0][lane] = 0xdc3a0000 | sample.p;
+          r.v[1][lane] = 0x6a9e0000 | sample.b;
+          r.v[2][lane] = 0x96e90000 | sample.c;
+          r.v[3][lane] = 0xa5a5a5a5;
+        }
+        // Translate the F16 MODE fields; the capture leaves DX10_CLAMP and IEEE clear.
+        const uint32_t m = sample.guest_mode;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_DX10_CLAMP_OFF |
+                               (uint64_t((m >> 2) & 3) << 24) |
+                               (m & 0x40 ? 0 : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) |
+                               (m & 0x80 ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) |
+                               (m & 0x800000 ? RJ_ARITH_FP16_OVFL : 0);
+        ASSERT_EQ(wide ? rj_arith_v_div_fixup_f16_w64(flags, ~0ULL, sample.omod, r.v + 3, r.v,
+                                                      r.v + 1, r.v + 2, nullptr)
+                       : rj_arith_v_div_fixup_f16_w32(flags, ~0U, sample.omod, r.v + 3, r.v,
+                                                      r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < 64; ++lane) {
+          EXPECT_EQ(r.v[3][lane], wide || lane < 32 ? 0xa5a50000 | sample.expected : 0xa5a5a5a5)
+              << lane;
         }
       }
     }

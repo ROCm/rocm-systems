@@ -151,11 +151,8 @@ int rj_arith_v_div_scale_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // D[0] before D[1], so D[1] wins if both destination pointers alias.
 // Supports all source ABS/NEG, OMOD and CLAMP. Nonzero OMOD flushes subnormals
 // before scaling, maps existing zeros to +0 and preserves signed underflow zero.
-// RDNA4 FP16_OVFL saturates provisional-quotient overflow before OMOD and finite
+// FP16_OVFL saturates provisional-quotient overflow before OMOD and finite
 // scaling overflow; exceptional B/C cases retain their infinity/NaN behavior.
-// RDNA3 FP16 preserves nearest-rounded provisional infinities, scales in the promoted domain,
-// then narrows and saturates finite overflow; active OMOD flushes rounded
-// subnormals and signed zeros to +0. Subnormal inputs can scale to normal results.
 // All formats accept RJ_ARITH_FP_ROUND_MASK for overflow recovery; FP16 output
 // narrowing remains nearest-even. Nearest-even retains SIMD; directed rounding
 // uses integer scalar recovery and scaling. Denormals are preserved by default.
@@ -173,7 +170,7 @@ int rj_arith_v_div_scale_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // that domain with UNSUPPORTED_FP_STATUS. DX10_CLAMP set suppresses those causes.
 // RDNA3 preserves selected signaling NaNs with IEEE clear; IEEE set quiets them.
 // FP16 with active RDNA3 OMOD rejects strict numeric semantics; Compatibility
-// and mode 1 use the inherited Loose promoted-half behavior. FP32/FP64 Compatibility still reports
+// and mode 1 resolve to Loose. FP32/FP64 Compatibility still reports
 // INVALID.
 // Wave64 retains each format's operand layout, modifiers and exact exception
 // accumulation. FP16 supports four independent DPP rows.
