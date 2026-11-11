@@ -478,9 +478,9 @@ TEST_CASE("Unit_HRR_CaptureClosesArchiveDirs_Direct", "[.][hrr-direct]") {
  *     owner's write bit off every file and directory created under it, when
  *     the process can still write in a directory created under that umask.
  *   - Every directory in the archive is 0700 and every regular file 0600: the
- *     archive holds host buffers, kernel arguments and code objects. The parent
- *     the capture had to create is not part of the archive and gets the
- *     default mode.
+ *     archive holds host buffers, kernel arguments and code objects. Its root
+ *     holds NOTICE.txt. The parent the capture had to create is not part of
+ *     the archive and gets the default mode.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 #ifdef _WIN32
@@ -513,6 +513,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 
   CHECK(perms_of(parent) == fs::perms::all);
   CHECK(perms_of(base) == fs::perms::owner_all);
+  CHECK(perms_of(base / "NOTICE.txt") == (fs::perms::owner_read | fs::perms::owner_write));
   size_t files = 0;
   for (const auto& ent : fs::recursive_directory_iterator(base)) {
     INFO("Path: " << ent.path().string());
