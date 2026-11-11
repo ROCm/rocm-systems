@@ -922,6 +922,14 @@ namespace RcclUnitTesting
     });
   }
 
+  TEST(AllReduce, NullCommBroadcastReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduce_NullCommBroadcastReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclBroadcast(nullptr, nullptr, 16, ncclFloat32, 0, nullptr, nullptr));
+    });
+  }
+
   TEST(AllGather, NullCommReturnsInvalidArgument)
   {
     RUN_ISOLATED_TEST("AllGather_NullCommReturnsInvalidArgument", []()

@@ -169,6 +169,7 @@ ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* task, in
   return g_getRegBuff(comm, task, out);
 }
 
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm*, const char*) { return ncclSuccess; }
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) { return g_enqueueCheck(info); }
 void rcclLogCollInfo(const struct ncclInfo& info) { g_rcclLogCollInfo(info); }
 ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, hipStream_t stream, struct rcclAddonLaunchState* state) {

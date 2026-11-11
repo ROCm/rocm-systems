@@ -925,6 +925,8 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
   NVTX3_FUNC_WITH_PARAMS(Broadcast, NcclNvtxParamsBroadcast,
                          NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), root, datatype));
 
+  NCCLCHECK(ncclEnqueueCommCheck(comm, "Broadcast"));
+
   struct ncclInfo info = {ncclFuncBroadcast,
                           "Broadcast",
                           sendbuff,

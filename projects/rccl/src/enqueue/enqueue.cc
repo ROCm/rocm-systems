@@ -5104,15 +5104,24 @@ void rcclLogCollInfo(const struct ncclInfo& info) {
        info.comm->localRankToRank[info.comm->localRank]);
 }
 
-// Early-out on an invalid or revoked comm. Call it before any comm read that precedes ncclEnqueueCheck.
+// Early-out on an invalid, revoked or not-yet-ready comm. Call it before any comm read that precedes ncclEnqueueCheck.
 ncclResult_t ncclEnqueueCommCheck(struct ncclComm* comm, const char* opName) {
   ncclResult_t ret = CommCheck(comm, opName, "comm");
   if (ret != ncclSuccess) {
     return ncclGroupErrCheck(ret);
   }
-  if (comm->revokedFlag) {
+  if (COMPILER_ATOMIC_LOAD(&comm->revokedFlag, std::memory_order_acquire) != 0) {
     WARN("%s: communicator was revoked", opName);
     return ncclGroupErrCheck(ncclInvalidUsage);
+  }
+  // A comm whose init or grow job has not finished passes CommCheck while the job still writes the fields callers
+  // read next. initState also covers a comm used in the same group as its own init, where asyncResult is still zero.
+  // Read the atomics directly: ncclCommGetAsyncError also reads proxyState and ginState and records to the Recorder.
+  if (COMPILER_ATOMIC_LOAD(&comm->initState, std::memory_order_acquire) == ncclInProgress ||
+      COMPILER_ATOMIC_LOAD(&comm->asyncResult, std::memory_order_acquire) == ncclInProgress) {
+    WARN("%s: communicator %p is not ready; wait until ncclCommGetAsyncError no longer returns ncclInProgress",
+         opName, comm);
+    return ncclGroupErrCheck(ncclInvalidArgument);
   }
   return ncclSuccess;
 }
