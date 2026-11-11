@@ -685,7 +685,7 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
       {{{0xD0430000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
        "image_atomic_add_uint v0, s[0:7] th:TH_ATOMIC_NT_RETURN scope:SCOPE_SYS"},
       {{{0xE446C000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_sample v0, s[0:7], s[0:3] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
+       "image_sample v0, v0, s[0:7], s[0:3] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
@@ -1403,6 +1403,34 @@ TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
   }
 }
 
+TEST(RdnaMimgDecodeTest, Gfx10NsaDecodesCompleteAndRejectsTruncatedWindows) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    EXPECT_EQ(decoder->max_instruction_words(), 5u);
+    for (const uint8_t nsa : std::array<uint8_t, 2>{2, 3}) {
+      SCOPED_TRACE(testing::Message() << arch << ':' << nsa);
+      const std::array<uint32_t, 2> base =
+          arch == ROCJITSU_CODE_ARCH_RDNA1
+              ? rdna1::build_mimg(rdna1::kImageSampleDMimg, {.nsa = nsa, .dmask = 1})
+              : rdna2::build_mimg(rdna2::kImageSampleDMimg, {.nsa = nsa, .dmask = 1});
+      const std::array<uint32_t, 5> words{base[0], base[1], 0x04030201, 0x08070605, 0x0c0b0a09};
+      const auto encoding = std::span(words).first(2 + nsa);
+      DecodeResult decoded = decoder->decode_window(encoding);
+      ASSERT_TRUE(decoded.succeeded());
+      ASSERT_EQ(decoded.value()->size(), encoding.size_bytes());
+      EXPECT_EQ(decoded.value()->mnemonic(), "image_sample_d");
+      EXPECT_TRUE(std::ranges::equal(encoding,
+                                     std::span(decoded.value()->raw_encoding(), encoding.size())));
+      // Allocate exactly the short window so ASan also detects reads beyond it.
+      for (size_t length = 1; length < encoding.size(); ++length) {
+        const std::vector<uint32_t> truncated(encoding.begin(), encoding.begin() + length);
+        EXPECT_TRUE(decoder->decode_window(truncated).failed()) << length;
+      }
+    }
+  }
+}
+
 TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
   for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     SCOPED_TRACE(static_cast<unsigned>(arch));
@@ -1844,8 +1872,8 @@ TEST(WaveMaskOperandDecodeTest, Gfx1250Vop3CompareDestinationIsWaveMask) {
 }
 
 // The gfx1250 VOPD3 decoder declares a v_dual_cndmask_b32 selector, in either
-// slot, as a 64-bit SGPR operand. Only that selector is marked, not the other
-// slot's src2.
+// slot, as one SGPR, the Wave32 lane-mask width. Only that selector is marked,
+// not the other slot's src2.
 TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
   constexpr uint32_t kCndmask = 9;
   constexpr uint32_t kFmac = 0;
@@ -1870,8 +1898,7 @@ TEST(WaveMaskOperandDecodeTest, Gfx1250VopdCndmaskSelectorIsWaveMask) {
       ++marked;
       const std::optional<RegisterRef> ref = op->to_register_ref();
       ASSERT_TRUE(ref.has_value());
-      EXPECT_EQ(ref->cls, RegClass::SGPR);
-      EXPECT_EQ(ref->index, 8u);
+      EXPECT_EQ(*ref, (RegisterRef{RegClass::SGPR, 8, 1}));
     }
     EXPECT_EQ(marked, 1);
   }

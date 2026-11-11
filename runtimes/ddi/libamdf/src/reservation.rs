@@ -73,7 +73,7 @@ pub(crate) unsafe extern "C" fn host_capabilities(
     boundary(|| unsafe {
         let instance = object(pointer.cast::<Instance>())?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES)?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         let page = host::host_page_size().map_err(|error| native(&error))?;
@@ -102,7 +102,7 @@ pub(crate) unsafe extern "C" fn create(
     boundary(|| unsafe {
         output_pointer(out)?;
         let instance = object(pointer.cast::<Instance>())?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         let info = input(info, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO)?;
@@ -190,6 +190,7 @@ pub(crate) unsafe extern "C" fn map(
     boundary(|| unsafe {
         output_pointer(out)?;
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         let map = input(info, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO)?;
         if ordinal != 0 {
             return Err(RANGE);
@@ -246,6 +247,7 @@ pub(crate) unsafe extern "C" fn update(
 ) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if ordinal != 0 {
             return Err(RANGE);
         }
@@ -297,6 +299,7 @@ pub(crate) unsafe extern "C" fn detach(
 ) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if ordinal != 0 {
             return Err(RANGE);
         }
@@ -318,6 +321,7 @@ pub(crate) unsafe extern "C" fn detach(
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if reservation.children.load(Ordering::Acquire) != 0 {
             return Err(BUSY);
         }

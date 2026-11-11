@@ -119,7 +119,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
                                                        HSAuint32 NumEvents,
                                                        bool WaitOnAll,
                                                        HSAuint32 Milliseconds,
-                                                       uint64_t *event_age) {
+                                                       uint64_t *EventAges) {
   CHECK_DXG_OPEN();
   if (Events == nullptr) {
     return HSAKMT_STATUS_SUCCESS;
@@ -129,8 +129,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
     std::this_thread::sleep_for(std::chrono::microseconds(20));
     return HSAKMT_STATUS_SUCCESS;
   }
-  return wsl::thunk::WDDMDevice::WaitOnMultipleEvents(
-      Events, NumEvents, WaitOnAll, Milliseconds);
+  return wsl::thunk::WDDMDevice::WaitOnMultipleEvents(Events, EventAges, NumEvents, WaitOnAll, Milliseconds);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMI(HSAuint32 NodeId, int *fd) {

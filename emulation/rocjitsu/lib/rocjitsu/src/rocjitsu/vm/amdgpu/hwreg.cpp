@@ -35,6 +35,8 @@ enum class HwregState : uint8_t {
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
+  FlatScratchLo,
+  FlatScratchHi,
   IbStsGfx1250,
   IbSts2Gfx1250,
   WgpIdGfx1250,
@@ -248,8 +250,8 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     {17, "SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {19, "SHADER_TMA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {20, "SHADER_FLAT_SCRATCH_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {21, "SHADER_FLAT_SCRATCH_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {20, "SHADER_FLAT_SCRATCH_LO", HwregState::FlatScratchLo, HwregWritePolicy::UserWritable},
+    {21, "SHADER_FLAT_SCRATCH_HI", HwregState::FlatScratchHi, HwregWritePolicy::UserWritable},
     {22, "SHADER_XNACK_MASK", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {23, "HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {24, "HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -278,8 +280,8 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     {17, "SHADER_TBA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {18, "SHADER_TMA_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {19, "SHADER_TMA_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {20, "SHADER_FLAT_SCRATCH_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {21, "SHADER_FLAT_SCRATCH_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {20, "SHADER_FLAT_SCRATCH_LO", HwregState::FlatScratchLo, HwregWritePolicy::UserWritable},
+    {21, "SHADER_FLAT_SCRATCH_HI", HwregState::FlatScratchHi, HwregWritePolicy::UserWritable},
     {23, "HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {24, "HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {25, "POPS_PACKER", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -468,6 +470,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::XnackMaskGfx1250:
     raw_value = wf.gfx1250_xnack_mask_raw();
     return HwregAccessResult::Success;
+  case HwregState::FlatScratchLo:
+    raw_value = static_cast<uint32_t>(wf.scratch_base());
+    return HwregAccessResult::Success;
+  case HwregState::FlatScratchHi:
+    raw_value = static_cast<uint32_t>(wf.scratch_base() >> 32);
+    return HwregAccessResult::Success;
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
     return HwregAccessResult::Success;
@@ -520,6 +528,12 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     return HwregAccessResult::Success;
   case HwregState::WaveSchedMode:
     wf.set_wave_sched_mode_raw(raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::FlatScratchLo:
+    wf.set_scratch_base((wf.scratch_base() & 0xffffffff00000000ULL) | raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::FlatScratchHi:
+    wf.set_scratch_base((wf.scratch_base() & 0xffffffffULL) | (uint64_t{raw_value} << 32));
     return HwregAccessResult::Success;
   case HwregState::Trapsts:
     // The trap handler clears the excp bit it just serviced before s_rfe, so

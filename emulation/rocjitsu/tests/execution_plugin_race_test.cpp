@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -27,7 +28,19 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <iterator>
 #include <map>
+#include <memory>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -70,6 +83,7 @@ uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
   return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
 }
 
+/// Applies the race detector's register checks to the VGPR reads and writes of one wave.
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
   MfmaRacePlugin() : ExecutionPlugin("mfma_race_probe") {}
@@ -95,10 +109,24 @@ public:
     state_->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask, uint8_t byte_mask) override {
+    if (wf != wf_ || !state_)
+      return;
+    uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+    state_->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+  }
+
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
     state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
                           {logical_reg}, exec_mask, byte_mask);
+  }
+
+  [[nodiscard]] bool raced_on(uint32_t logical_reg) const {
+    return std::ranges::any_of(violations, [&](const RaceViolation &v) {
+      return v.space == RaceViolation::Space::VGPR && v.index == static_cast<int>(logical_reg);
+    });
   }
 
   std::vector<RaceViolation> violations;
@@ -261,12 +289,12 @@ TEST_F(FormattedLoadRaceTest, RejectsInvalidEncodingAtCapture) {
       size_ = size;
     }
   };
-  const uint32_t word = S_NOP;
+  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> encoding{S_NOP};
   for (const auto &[words, size] : {std::pair<const uint32_t *, int>{nullptr, 4},
-                                    {&word, 0},
-                                    {&word, -4},
-                                    {&word, 2},
-                                    {&word, 20}}) {
+                                    {encoding.data(), 0},
+                                    {encoding.data(), -4},
+                                    {encoding.data(), 2},
+                                    {encoding.data(), static_cast<int>(sizeof(encoding))}}) {
     SCOPED_TRACE(size);
     InvalidInstruction instruction(words, size);
     EXPECT_THROW(
@@ -586,7 +614,7 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
 
-  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
+  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup); }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
   /// still reading. Returns the race report.
@@ -823,6 +851,124 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   tensor_store(0, {});
   wait_tensorcnt(0, 2);
   EXPECT_TRUE(ds_read(0, 4));
+}
+
+// Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
+// bytes. The fixture's DS helpers are not specific to tensor DMA.
+class ExitedWaveRaceTest : public TensorDmaRaceTest {
+protected:
+  void write_and_exit(bool wait) {
+    EXPECT_FALSE(ds_write(1, 64));
+    if (wait)
+      wait_dscnt(1);
+    fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  }
+
+  void barrier_without_wave_1(BarrierKind kind) {
+    std::array<Wavefront *, 1> remaining{waves[0]};
+    fixture.plugin_group_->onAmdgpuBarrierResolved(remaining, kind);
+  }
+};
+
+// A workgroup barrier among the remaining waves cannot resolve until wave 1
+// has ended, so it orders the write completed by its explicit or implicit wait.
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresCompletedWrite) {
+  write_and_exit(/*wait=*/true);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresImplicitlyWaitedWrite) {
+  write_and_exit(/*wait=*/false);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitAloneDoesNotOrderTheWritersLdsAccess) {
+  write_and_exit(/*wait=*/false);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitWaitAlsoCompletesTensorDmaBeforeTheWorkgroupBarrier) {
+  EXPECT_FALSE(tensor_load(1, {{.address = 64, .bytes = 16}}));
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, NamedBarrierDoesNotRetireAnUnjoinedLiveWave) {
+  EXPECT_FALSE(ds_write(1, 64));
+  wait_dscnt(1);
+  barrier_without_wave_1(BarrierKind::Named);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Named and cluster barriers do not wait for every wave of the workgroup, so
+// they could have resolved before wave 1 ended.
+TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
+  write_and_exit(/*wait=*/false);
+  barrier_without_wave_1(BarrierKind::Named);
+  barrier_without_wave_1(BarrierKind::Cluster);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Run a two-wave CDNA4 kernel: wave 1 writes LDS, optionally waits for the
+// write, and ends; wave 0 passes s_barrier and reads the same bytes. Returns
+// the race report.
+std::string run_exited_writer_kernel(bool wait) {
+  PluginFixture f;
+  EXPECT_NO_FATAL_FAILURE(f.initialize());
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint16_t kVgprBase = 256;
+  constexpr uint16_t kInline2 = 130;
+  constexpr uint8_t kInline64 = 192;
+  const auto first_id =
+      cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = kVgprBase + 0, .vdst = 4});
+  const auto address =
+      cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 0, .vdst = 1});
+  const auto is_wave_0 = cdna4::build_sopc(cdna4::kSCmpLtU32Sopc, {.ssrc0 = 4, .ssrc1 = kInline64});
+  const auto to_reader = cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 4});
+  const auto write = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 1, .data0 = 0});
+  // offset1 is the high byte of the 16-bit offset, so the read is at v1 + 256.
+  const auto read = cdna4::build_ds(cdna4::kDsReadB32Ds, {.offset1 = 1, .addr = 1, .vdst = 2});
+  const uint32_t lgkm_wait = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0);
+  const uint32_t code[] = {
+      first_id[0],
+      address[0],
+      is_wave_0[0],
+      to_reader[0], // Waves with work-item IDs below 64 read.
+      write[0],
+      write[1], // Wave 1 writes bytes [256, 512).
+      wait ? lgkm_wait : S_NOP,
+      S_ENDPGM,
+      S_BARRIER,
+      read[0],
+      read[1], // Wave 0 reads bytes [256, 512).
+      lgkm_wait,
+      S_ENDPGM,
+  };
+  const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code), /*sgprs=*/12,
+                                         /*group_segment_fixed_size=*/512);
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(kernel, /*grid=*/128, /*workgroup=*/128);
+  f.run_until_idle();
+  return sink.str();
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsWaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/true);
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsImplicitlyWaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/false);
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
 }
 
 /// Executes decoded tensor DMA instructions, so the emulator itself reports
@@ -1874,7 +2020,10 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       wait.updates.clear();
       wait.add(WaitCounterType::DSCNT, 0);
       race.dispatch(wait);
-      EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+      // A single-wave workgroup retires a completed event with LDS bytes at once;
+      // one without LDS bytes stays wave-complete until the registry trims it.
+      EXPECT_EQ(events.status(event),
+                test.has_lds ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     }
   }
 }
@@ -2960,6 +3109,108 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
   }
 }
 
+namespace mfma_race {
+
+constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
+using Run = std::function<void(ComputeUnitCore &, uint32_t vb, uint32_t acc)>;
+
+/// Runs @p run after an outstanding load to one lane of @p reg and reports whether the race
+/// detector flagged that register.
+bool races_on(const Run &run, uint32_t reg, uint32_t lane, uint32_t acc, bool force_scalar) {
+  PluginFixture f;
+  f.initialize(/*num_wf_slots=*/1);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<MfmaRacePlugin>();
+  auto *race_plugin = plugin.get();
+  f.plugin_group_->add(std::move(plugin));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  EXPECT_NE(wf, nullptr);
+  if (!wf)
+    return false;
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104, waves);
+  race_plugin->registerOutstandingLoad(reg, /*exec_mask=*/uint64_t{1} << lane);
+  util::set_force_scalar_for_testing(force_scalar);
+  run(*f.cu(), wf->vgpr_alloc().base, acc);
+  util::set_force_scalar_for_testing(false);
+  return race_plugin->raced_on(reg);
+}
+
+} // namespace mfma_race
+
+// Each operand range is observed through its last register and lane, so a pending load into
+// A, B or a VGPR accumulator, or under the destination, is a race on both MFMA paths.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnEveryOperandRegister) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  struct Case {
+    const char *name;
+    uint32_t a_regs, b_regs, d_regs;
+    mfma_race::Run run;
+  };
+  const Case cases[] = {
+      {"f64 16x16x4", 2, 2, 8,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f64(cu, 16, 16, 4, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"i8 16x16x64", 4, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_i32_i8(cu, 16, 16, 64, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"fp8 x fp4 16x16x128", 8, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         dispatch_matrix_fmt_pair(0, 4, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+           exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
+                                          eb, acc);
+         });
+       }},
+      {"f32 4x4x1x16", 1, 1, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
+                               acc);
+       }},
+  };
+  for (const Case &test : cases)
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(testing::Message() << test.name << " force_scalar=" << force_scalar);
+      const auto races = [&](uint32_t reg, uint32_t acc = ACC_FROM_VGPR) {
+        return races_on(test.run, reg, /*lane=*/63, acc, force_scalar);
+      };
+      EXPECT_TRUE(races(A + test.a_regs - 1)) << "A";
+      EXPECT_TRUE(races(B + test.b_regs - 1)) << "B";
+      EXPECT_TRUE(races(C + test.d_regs - 1)) << "accumulator";
+      EXPECT_FALSE(races(C + test.d_regs - 1, /*acc=*/0u)) << "constant accumulator";
+      EXPECT_TRUE(races(D + test.d_regs - 1)) << "destination";
+      EXPECT_FALSE(races(A + test.a_regs)) << "register after A";
+    }
+}
+
+// cbsz/abid and blgp broadcast part of a register; only the lanes they select are read.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  // cbsz=2 broadcasts A's 16-lane block abid=1 (lanes 16-31); blgp=4 broadcasts B lanes 0-15.
+  const mfma_race::Run run = [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+    exec_i32_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc, /*cbsz=*/2, /*abid=*/1,
+                /*blgp=*/4);
+  };
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
+    EXPECT_TRUE(races_on(run, A, /*lane=*/16, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, A, /*lane=*/0, ACC_FROM_VGPR, force_scalar));
+    EXPECT_TRUE(races_on(run, B, /*lane=*/15, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, B, /*lane=*/63, ACC_FROM_VGPR, force_scalar));
+  }
+}
+
 // -- Ordering tests ----------------------------------------------------------
 //
 // These tests use functional mode (the PluginFixture default). Tests that
@@ -3173,28 +3424,6 @@ TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
   EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
-}
-
-TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
-  RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
-                        /*ldsSizeBytes=*/64 * 1024);
-  EventId first = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/10),
-                                           MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
-  EventId second = detector.allocateEventId(WaveId{0}, testInstruction(/*pc=*/20),
-                                            MemoryEventType::GLOBAL_TO_VGPR, {2}, /*execMask=*/1);
-  ASSERT_NE(first, second);
-
-  RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), second};
-  std::vector<std::string> source_lines(64, "instruction");
-  std::string report = detector.decorateException(
-      violation, /*wavePc=*/30, static_cast<int>(source_lines.size()),
-      [&](int line) -> std::string_view { return source_lines.at(static_cast<size_t>(line)); });
-
-  EXPECT_NE(report.find("20 --> |"), std::string::npos);
-  EXPECT_NE(report.find("30 --> |"), std::string::npos);
-  EXPECT_EQ(report.find("10 --> |"), std::string::npos);
 }
 
 auto make_trace(std::initializer_list<uint64_t> pcs) {
@@ -3749,7 +3978,7 @@ public:
                  legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
   }
 
-  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_); }
+  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_, BarrierKind::Workgroup); }
 
 private:
   void execute(Wavefront &wave, std::array<uint32_t, 2> words) {

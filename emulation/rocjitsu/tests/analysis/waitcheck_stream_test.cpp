@@ -779,8 +779,9 @@ TEST(WaitcheckStream, ControlFlowStopsBeforeAFallthroughWait) {
 
 TEST(WaitcheckStream, PcDestinationsStopBeforeAFallthroughWait) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    for (uint32_t transfer : {0xbe801f00u, 0xbe802e00u, 0x94800200u}) {
-      // s_rfe_b64, s_cbranch_join, s_cbranch_g_fork have explicit PC destinations.
+    for (uint32_t transfer : {0xbe801f00u, 0x95800000u, 0xbe802e00u, 0x94800200u}) {
+      // s_rfe_b64, s_rfe_restore_b64, s_cbranch_join, s_cbranch_g_fork have
+      // explicit PC destinations.
       Program program{0xe0501000u, 0x80000008u, transfer, 0xbf8c0f70u, v_mov(1, 0)};
       const auto report = analyze(program, arch);
       ASSERT_TRUE(report.incomplete);

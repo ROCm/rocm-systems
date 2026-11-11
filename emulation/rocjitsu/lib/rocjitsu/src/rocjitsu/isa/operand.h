@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_ISA_OPERAND_H_
 #define ROCJITSU_ISA_OPERAND_H_
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
@@ -350,6 +351,12 @@ private:
 
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
+  // The concrete operand must implement each accessor used by its execution
+  // backend. Descriptor-only operands do not support value access, and staged
+  // source delegates do not support writes. Calling an unimplemented base
+  // accessor is a programmer error, not a rejected guest operand encoding.
+  // Missing concrete backends retain a wavefront execution error. Any returned
+  // scalar zero is a placeholder; direct callers must stop on that error.
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
@@ -405,6 +412,15 @@ public:
   /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
 
+  /// @brief Whether this operand and its read delegate support value access.
+  /// @details Generated execution callbacks check this when delegates are active,
+  /// before reading any values. Decoded operands otherwise retain the backend
+  /// captured alongside their instruction callback and must not be replaced.
+  /// Model-only operands remain usable for decoding and analysis. The base
+  /// descriptor has no value access; subclasses with value storage or callbacks
+  /// must opt in and check their delegate chain.
+  [[nodiscard]] virtual bool execution_backend_available() const { return false; }
+
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
   /// SIMD-friendly results for this operand.
   ///
@@ -458,6 +474,9 @@ public:
   uint8_t register_byte_mask_ = 0xf;
 
 protected:
+  /// @brief Record MissingExecutionBackend on the wavefront without throwing.
+  static void report_missing_execution_backend(const amdgpu::Wavefront &wf);
+
   enum class EncodingError : uint8_t {
     None,
     InvalidSelector,
@@ -750,6 +769,9 @@ private:
 ///
 /// Restores the previous delegate on scope exit, including exception and early
 /// return paths. A null delegate leaves the operand unchanged.
+/// @details Delegates may be installed before a decoded execution callback or
+/// temporarily inside execute_impl. Bindings and execution must stay on the same
+/// thread; the decoded instruction must not be used concurrently while bound.
 class ScopedOperandDelegate {
 public:
   ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
@@ -758,9 +780,13 @@ public:
     operand_ = &operand;
     previous_ = operand.delegate();
     operand.set_delegate(delegate);
+    ++active_count();
   }
 
   ~ScopedOperandDelegate() noexcept { restore(); }
+
+  /// @brief Whether this thread has bindings requiring execution preflight.
+  [[nodiscard]] static bool active() noexcept { return active_count() != 0; }
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
@@ -772,9 +798,12 @@ private:
     if (!operand_)
       return;
     operand_->set_delegate(previous_);
+    --active_count();
     operand_ = nullptr;
   }
 
+  // One exported accessor keeps module-local inline bindings visible to preflight.
+  RJ_API_EXPORT static size_t &active_count() noexcept;
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };

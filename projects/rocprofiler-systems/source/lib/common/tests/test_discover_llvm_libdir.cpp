@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/defines.h"
 #include "common/environment.hpp"
 
 #include <filesystem>
@@ -212,8 +213,10 @@ TEST_F(DiscoverLlvmLibdirTest, NoLibomptargetFound_InCustomPath)
     // fallback paths if ROCm is installed on the system
     if(!result.empty())
     {
-        const bool is_default_path =
-            (result == "/opt/rocm/llvm/lib" || result == "/opt/rocm/lib/llvm/lib");
+        const std::string host_triple{ ROCPROFSYS_ROCM_LLVM_HOST_TRIPLE };
+        const bool        is_default_path =
+            result == "/opt/rocm/llvm/lib" || result == "/opt/rocm/lib/llvm/lib" ||
+            (!host_triple.empty() && result == "/opt/rocm/lib/llvm/lib/" + host_triple);
         EXPECT_TRUE(is_default_path)
             << "Expected empty or default ROCm path, got: " << result;
     }
