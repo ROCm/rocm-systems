@@ -1386,8 +1386,10 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
     create_info.size = dxg_runtime->page_size;
     create_info.domain = Wkmi::kSystem;
     // Queue-object allocation so wkmi sets AllocRequest3Flags.AmdQueueT; without that flag
-    // the KMD rejects the SDMA-AQL HwQueue with "AmdQueueT flag not set".
-    create_info.mem_flags = Wkmi::kQueueObject;
+    // the KMD rejects the SDMA-AQL HwQueue with "AmdQueueT flag not set". kAmdQueueT is
+    // required on top of kQueueObject because ROCR_USE_PM4=1 clears hwsMask.aql_queue, which
+    // otherwise gates the flag off and makes CreateHwQueue fail with STATUS_UNSUCCESSFUL.
+    create_info.mem_flags = Wkmi::kQueueObject | Wkmi::kAmdQueueT;
     GpuMemory* gpu_mem = nullptr;
     auto code = device->CreateGpuMemory(create_info, &gpu_mem);
     if (code != ErrorCode::Success) {
