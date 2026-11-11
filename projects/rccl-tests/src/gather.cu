@@ -201,6 +201,7 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   const char* src = (const char*)ncclGetLocalPointer(sendwin, sendoffset);
   const size_t dstOff = gin_sdma_allgather::allGatherRecvSliceOffset(rank, chunkBytes);
   char* dst = (char*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
+  if (src == dst) return;
   if ((((uintptr_t)src | (uintptr_t)dst | chunkBytes) & 15) == 0) {
     const uint4* s = (const uint4*)src;
     uint4* d = (uint4*)dst;
@@ -218,6 +219,8 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
 //     put, so root's signal[root % gridDim.x] advances by nRanks and only that
 //     CTA on root waits. The exit barrier holds every rank until that wait
 //     completes, which is what makes back-to-back launches safe.
+//     In-place, root's chunk already sits in its recv slice, so root skips its
+//     own put and waits for nRanks - 1.
 __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t chunkBytes, int root, size_t sdmaThreshold, const struct ncclDevComm& devComm) {
   if (gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold)) {
     ncclTeam lsa = ncclTeamLsa(devComm);
@@ -239,10 +242,13 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
+  const bool isRoot = devComm.rank == root;
+  const bool rootInPlace = isRoot && sendwin == recvwin &&
+      sendoffset == recvoffset + gin_sdma_allgather::allGatherRecvSliceOffset(root, chunkBytes);
   const int peerStride = gridDim.x;
   for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < devComm.nRanks;
        r += peerStride * (int)blockDim.x) {
-    if (r != root) continue;
+    if (r != root || rootInPlace) continue;
     gin.put(ncclTeamWorld(devComm), root,
         recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
         sendwin, sendoffset,
@@ -250,8 +256,8 @@ __device__ void ginGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindo
   }
   __syncthreads();
 
-  if (devComm.rank == root && blockIdx.x == (root % peerStride))
-    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  if (isRoot && blockIdx.x == (root % peerStride))
+    gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks - (rootInPlace ? 1 : 0));
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
