@@ -1,8 +1,17 @@
-#include <gtest/gtest.h>
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Host-only microtests for src/devcomm/devcomm_v23000.cc.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
 
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <memory>
+
+#include <gtest/gtest.h>
 
 #include "comm.h"
 #include "dev_runtime.h"
@@ -165,9 +174,11 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_CopiesEveryFieldAndPreservesNewOnlyF
   source.ginConnectionsRailed = false;
   source.ginContextsRailed = true;
   ncclDevComm destination{};
+  std::memset(&destination, 0x5a, sizeof(destination));
   destination.backendIndex = 3;
-  destination.cftRank = 23;
-  destination.ginConnectionStride_rcp32 = 0xabcdef;
+  constexpr size_t tailOffset = offsetof(ncclDevComm, ginConnectionStride_rcp32);
+  std::array<unsigned char, sizeof(ncclDevComm) - tailOffset> savedTail{};
+  std::memcpy(savedTail.data(), reinterpret_cast<const unsigned char*>(&destination) + tailOffset, savedTail.size());
 
   ASSERT_EQ(ncclSuccess, ncclDevCommCompat_v23000.devCommCopyOldToNew(comm_.get(), &destination, &source));
 
@@ -177,8 +188,8 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_CopiesEveryFieldAndPreservesNewOnlyF
   EXPECT_EQ(1, destination.ginConnectionStride);
   EXPECT_EQ(8, destination.ginContextStride);
   EXPECT_EQ(3, destination.backendIndex);
-  EXPECT_EQ(23, destination.cftRank);
-  EXPECT_EQ(0xabcdefu, destination.ginConnectionStride_rcp32);
+  EXPECT_EQ(0, std::memcmp(savedTail.data(), reinterpret_cast<const unsigned char*>(&destination) + tailOffset,
+                           savedTail.size()));
 }
 
 TEST_F(DevcommV23000Microtest, CopyNewToOld_StridesIndependentlyControlRailedFlags) {
@@ -214,4 +225,4 @@ TEST_F(DevcommV23000Microtest, CopyOldToNew_RailedFlagsIndependentlySelectLsaSiz
   }
 }
 
-}
+}  // namespace

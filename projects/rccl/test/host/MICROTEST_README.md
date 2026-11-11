@@ -59,11 +59,6 @@ directory, which `run_host_tests.sh` runs, and `lib/test_executor.py` passes eve
 Units sharing a binary must be `#include`d from *different* test TUs and must not
 export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
-- **`rccl-UnitTestsMicroDevcommV23000`**: `src/devcomm/devcomm_v23000.cc`
-  (via `DEVCOMM_V23000_CC_PATH`, suites `DevcommV23000*`), covering requirement
-  filtering and both ABI-copy directions. Its own binary avoids the compatibility
-  table stub in `dev_runtime_micro_fakes.cc`. See `test_categories_micro_devcomm_v23000.yaml`.
-
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
@@ -257,6 +252,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
     selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
     driven through the heap half of `fakes/libc_seam.h`.
+- **`rccl-UnitTestsMicroDevcommV23000`**: `src/devcomm/devcomm_v23000.cc`
+  (via `DEVCOMM_V23000_CC_PATH`, suites `DevcommV23000*`), covering requirement
+  filtering and both ABI-copy directions. Its own binary avoids the compatibility
+  table stub in `dev_runtime_micro_fakes.cc`. See `test_categories_micro_devcomm_v23000.yaml`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
   in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
