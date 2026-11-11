@@ -186,7 +186,7 @@ def main() -> None:
         # Analyze mode needs a higher Python floor and external dependencies
         check_analyze_python_version()
         verify_deps()
-        if rocprof_compute.get_args().verify_deps:
+        if rocprof_compute.get_args().debug_verify_deps:
             console_log("All analyze dependencies are installed.")
             sys.exit(0)
         rocprof_compute.run_analysis()

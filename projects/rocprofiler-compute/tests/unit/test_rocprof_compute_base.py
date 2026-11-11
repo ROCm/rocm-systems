@@ -86,3 +86,16 @@ def test_handle_analyze_args_operator_flags_require_stdout(
         assert "only supported with --output-format stdout" in error.call_args.args[1]
     else:
         instance.handle_analyze_args()
+
+
+def test_validate_list_option_exclusions_gfx_id_requires_list_metrics(monkeypatch):
+    """--debug-list-metrics-gfx-id is rejected without --list-metrics."""
+    error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
+    args = argparse.Namespace(
+        mode=None, debug_list_metrics_gfx_id="gfx90a", list_metrics=None
+    )
+    with pytest.raises(SystemExit):
+        rocprof_compute_with_args(args)._validate_list_option_exclusions()
+    assert "with --list-metrics" in error.call_args.args[0]

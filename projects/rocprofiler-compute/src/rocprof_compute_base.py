@@ -257,9 +257,10 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # Detect if --experimental flag is present (for help text control)
+        # Detect --experimental and --debug, which control the help text
         prelim_parser = argparse.ArgumentParser(add_help=False)
         prelim_parser.add_argument("--experimental", action="store_true", default=False)
+        prelim_parser.add_argument("--debug", action="store_true", default=False)
 
         # Parse only known args (respects -- separator)
         prelim_args, _ = prelim_parser.parse_known_args()
@@ -282,12 +283,10 @@ class RocProfCompute:
             self.__supported_archs,
             self.__version,
             experimental_requested,
+            prelim_args.debug,
         )
         self.__args = self.__parser.parse_args()
         warn_deprecated_options(self.__args)
-        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
-        if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
-            self.__args.list_metrics = []
 
         if self.__args.mode == "profile":
             self.handle_profile_args()
@@ -335,7 +334,7 @@ class RocProfCompute:
             print(generate_machine_specs(self.__args))
             sys.exit(0)
         elif self.__args.list_metrics is not None and self.__mode != "analyze":
-            arch = self.__args.list_metrics_gfx_id
+            arch = self.__args.debug_list_metrics_gfx_id
             if arch is None:
                 self.generate_machine_specs()
                 arch = self.__mspec.gpu_arch
@@ -638,10 +637,10 @@ class RocProfCompute:
     def _validate_list_option_exclusions(self) -> None:
         """Check which options the list options can be combined with."""
         args = self.__args
-        if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
+        if args.debug_list_metrics_gfx_id is not None and args.list_metrics is None:
             console_error(
-                "--list-metrics-gfx-id can't be used in analyze mode, which "
-                "lists the metrics of the -p workload's GPU."
+                "Use --debug-list-metrics-gfx-id with --list-metrics, for example "
+                "--list-metrics sol --debug-list-metrics-gfx-id gfx90a."
             )
 
         block_active = bool(
