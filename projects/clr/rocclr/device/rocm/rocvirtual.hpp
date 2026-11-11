@@ -299,6 +299,10 @@ class VirtualGPU : public device::VirtualDevice {
     //! The HW queue changed, so AQL slots of earlier uses no longer prove anything
     virtual void NoteQueueChange() {}
 
+    //! True if the next use should keep its barrier bit, so that its completion can retire pins
+    //! that no other proof reaches
+    virtual bool NeedsFence() const { return false; }
+
     //! The HW queue is idle and about to be released: every AQL packet on it has launched
     virtual void NoteQueueDrained() {}
 
@@ -427,7 +431,14 @@ class VirtualGPU : public device::VirtualDevice {
 
     void ResetCurrentSignal() override;
 
+    //! Pins of AQL waiters wait for a fence use. The AQL barrier optimization may clear the
+    //! barrier bit of every use when other streams on the HW queue publish barrier packets after
+    //! them, which would keep the pins forever, so past kMaxUnfencedPins the next use keeps it.
+    bool NeedsFence() const override { return unfenced_pins_.size() >= kMaxUnfencedPins; }
+
    private:
+    static constexpr size_t kMaxUnfencedPins = 64;
+
     void AcquireSlot() override;
     void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
                    bool barrier_bit, bool blocking_callback) override;
