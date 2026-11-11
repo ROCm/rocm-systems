@@ -133,11 +133,12 @@ and other source operands are read before this inference is available.
 
 ## VMEM completion and EXP source protection
 
-The dynamic race detector treats each `MemoryIssueInfo` counter obligation as
-a completion requirement. `EventRegistry::allWaitCountersSatisfied` requires
-every obligation attached to an event before that event can complete and
-release its destination-register or memory dependency. These obligations do
-not express a separate source-register lifetime.
+The race plugin's LDS analysis treats each `MemoryIssueInfo` counter obligation
+as a completion requirement. `EventRegistry::allWaitCountersSatisfied` requires
+every attached obligation before an event becomes wave-complete. This governs
+LDS evidence, not register readiness: the core tracks register effects separately,
+including independent lane groups for mixed FLAT. These obligations do not
+express a separate replay-source lifetime.
 
 The obligations also drive emulated counters and plugin-visible metadata.
 `MemoryPipeline::issue_counters` turns each obligation into wave counter tokens,
@@ -157,15 +158,12 @@ wait for LGKM and the target's VMEM/store counters before a workgroup barrier,
 making the write visible to other waves without an EXP wait. The counter waits
 alone do not replace that barrier.
 
-Removing EXP can also change the whole-event ordering class. On gfx942, gfx950
-and gfx1151, `memoryOrderForObligations` now gives returning GLOBAL atomics the
-`VMEM` class. Combining VMEM with the former EXP/`UNORDERED` obligation made the
-whole event unordered. `WaveRaceState::checkVgprWrite` accepts overlapping destinations for
-producers in the same ordered class, independently of completion waits. A
-returning GLOBAL atomic followed by a GLOBAL load into the same VGPR can
-therefore use a final `vmcnt(0)` without a WAW report. A VALU overwrite before
-that wait still reports a VGPR write race. This ordering rule does not make an
-atomic's returned value ready for a read before its completion wait.
+Register-write ordering is checked separately by the core. On gfx942, gfx950
+and gfx1151, a returning GLOBAL atomic and a later GLOBAL load share the VMEM
+writeback class. They can use the same destination with a final `vmcnt(0)`
+without a WAW report. A VALU overwrite before that wait still reports a VGPR
+write race. Ordered overwrite does not make the atomic's returned value ready
+for a read before its completion wait.
 
 LLVM's
 [`vmemWriteNeedsExpWaitcnt`](https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/GCNSubtarget.h#L431)

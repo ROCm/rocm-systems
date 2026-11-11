@@ -2351,12 +2351,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             standalone_plugin_abi_test $<TARGET_FILE:rocjitsu_plugin_race_so>
             race
     )
-    add_test(
-        NAME ExecutionPluginAbi.StandaloneRaceCoreRegisterModeLoads
-        COMMAND
-            standalone_plugin_abi_test $<TARGET_FILE:rocjitsu_plugin_race_so>
-            race [=[{"register_checker":"core"}]=]
-    )
 
     # Keep inline register accessors in a separate DSO without linking core
     # objects into it, so missing exports cannot be hidden by static linkage.

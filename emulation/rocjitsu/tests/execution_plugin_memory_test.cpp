@@ -1138,7 +1138,6 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   ASSERT_NE(race_state, nullptr);
   const auto &events = race_state->race_state->getDetector()->events();
   ASSERT_EQ(events.totalAllocated(), 1);
-  EXPECT_EQ(events.execMask(EventId{0}), 0xfu);
   EXPECT_EQ(events.ldsIntervals(EventId{0}).getTotalBytes(), 12);
   EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(own_base + 0x40));
   EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(own_base + 0x47));

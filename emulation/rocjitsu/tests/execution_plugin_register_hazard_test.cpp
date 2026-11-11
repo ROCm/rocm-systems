@@ -97,18 +97,17 @@ struct DiagnosticHarness {
   RaceDetectorPlugin *race = nullptr;
   HazardProbe *probe = nullptr;
 
-  void initialize(bool core, bool warnings = false, bool probe_first = false,
-                  std::string_view arch = "cdna4", bool observe_hazards = true) {
+  void initialize(bool warnings = false, bool probe_first = false, std::string_view arch = "cdna4",
+                  bool observe_hazards = true) {
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, arch, arch == "cdna4" ? 64 : 32,
                                                arch == "cdna4" ? 104 : 128, 256, 1, 0,
                                                warnings ? "warn" : "off"));
     PluginSinkConfig sinks;
     sink = &sinks.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
-    auto checker = std::make_unique<RaceDetectorPlugin>(core ? R"({"register_checker":"core"})"
-                                                             : R"({"register_checker":"plugin"})");
+    auto checker = std::make_unique<RaceDetectorPlugin>();
     race = checker.get();
-    auto observer = std::make_unique<HazardProbe>(core && observe_hazards);
+    auto observer = std::make_unique<HazardProbe>(observe_hazards);
     probe = observer.get();
     if (probe_first)
       ASSERT_TRUE(fixture.plugin_group_->add(std::move(observer)));
@@ -161,30 +160,58 @@ struct Program {
   void end() { emit(cdna4::build_sopp(cdna4::kSEndpgmSopp)); }
 };
 
-TEST(RegisterHazardPluginTest, ConfigurationSelectsOneRegisterChecker) {
-  for (const char *config :
-       std::array<const char *, 4>{nullptr, "", "{}", R"({"register_checker":"plugin"})"}) {
+TEST(RegisterHazardPluginTest, RegisterCheckingUsesOnlyCoreFindings) {
+  for (const char *config : std::array<const char *, 3>{nullptr, "", "{}"}) {
     RaceDetectorPlugin plugin(config);
-    EXPECT_FALSE(plugin.observes_register_hazards());
-    EXPECT_TRUE(plugin.observes_vgpr_reads());
-    EXPECT_TRUE(plugin.observes_vgpr_writes());
-    EXPECT_TRUE(plugin.observes_sgpr_reads());
-    EXPECT_TRUE(plugin.observes_scalar_register_writes());
+    EXPECT_TRUE(plugin.observes_register_hazards());
+    EXPECT_FALSE(plugin.observes_vgpr_reads());
+    EXPECT_FALSE(plugin.observes_vgpr_writes());
+    EXPECT_FALSE(plugin.observes_sgpr_reads());
+    EXPECT_FALSE(plugin.observes_scalar_register_writes());
+    EXPECT_TRUE(plugin.observes_memory_routing());
+    EXPECT_TRUE(plugin.observes_tensor_dma_issue());
   }
-  RaceDetectorPlugin core(R"({"register_checker":"core"})");
-  EXPECT_TRUE(core.observes_register_hazards());
-  EXPECT_FALSE(core.observes_vgpr_reads());
-  EXPECT_FALSE(core.observes_vgpr_writes());
-  EXPECT_FALSE(core.observes_sgpr_reads());
-  EXPECT_FALSE(core.observes_scalar_register_writes());
-  EXPECT_TRUE(core.observes_memory_routing());
-  EXPECT_TRUE(core.observes_tensor_dma_issue());
-  for (const char *config :
-       {"bad json", "[]", R"({"register_checker":true})", R"({"register_checker":"unknown"})"})
-    EXPECT_THROW(RaceDetectorPlugin plugin(config), std::invalid_argument);
 }
 
-TEST(RegisterHazardPluginTest, IssuerReportsMatchLegacyFieldsAndWaitControls) {
+TEST(RegisterHazardPluginTest, Cdna2TrapEntryDrainsObserverStateIndependentOfCoreWarnings) {
+  for (const bool warnings : {false, true}) {
+    for (const bool handler_installed : {false, true}) {
+      SCOPED_TRACE(std::format("warnings={} handler={}", warnings, handler_installed));
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(
+          fixture.initialize(1, "cdna2", 64, 102, 32, 1, 0, warnings ? "warn" : "off"));
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<HazardProbe>(true)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      auto *cu = fixture.cu();
+      if (handler_installed)
+        cu->set_trap_handler_resolver(
+            [](const Wavefront &) { return ComputeUnitCore::TrapHandlerConfig{0x2000, 0, false}; });
+      auto *wave = cu->dispatch_wf(0, 0x1000, 32, 8);
+      ASSERT_NE(wave, nullptr);
+      auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+      constexpr RegisterRef result{RegClass::SGPR, 2, 1};
+      scoreboard.add({scoreboard.issue(WaitCounterKind::Ds), 0x1000, UINT64_MAX, result,
+                      WaitCounterKind::Ds, 0xf});
+      ASSERT_TRUE(wave->memory_wait_shadow().pending(result));
+
+      // A completed memory exception enters between instructions, without S_TRAP's wait path.
+      fixture.mem->write32(0x1000, S_NOP);
+      wave->set_mode_raw(wave->mode_raw() | (1u << 20));
+      wave->complete_flat_memory_violation();
+      ASSERT_TRUE(wave->memory_trap_pending());
+      cu->step();
+
+      EXPECT_EQ(wave->in_trap_handler(), handler_installed);
+      EXPECT_FALSE(wave->memory_trap_pending());
+      EXPECT_EQ(wave->memory_wait_shadow().pending(result), !handler_installed);
+      EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::Ds), handler_installed ? 0u : 1u);
+      wave->halt();
+    }
+  }
+}
+
+TEST(RegisterHazardPluginTest, IssuerReportsExactFieldsAndWaitControls) {
   enum class Producer { Global, Lds, Sgpr, Ttmp };
   for (const auto producer : {Producer::Global, Producer::Lds, Producer::Sgpr, Producer::Ttmp})
     for (bool write : {false, true})
@@ -213,53 +240,129 @@ TEST(RegisterHazardPluginTest, IssuerReportsMatchLegacyFieldsAndWaitControls) {
                          cdna4::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(write ? 128 : scalar),
                                                .sdst = static_cast<uint8_t>(write ? scalar : 8)}));
         program.end();
-        std::array<std::vector<Report>, 2> output;
-        for (bool core : {false, true}) {
-          DiagnosticHarness h;
-          ASSERT_NO_FATAL_FAILURE(h.initialize(core));
-          ASSERT_NO_FATAL_FAILURE(h.run(program.words));
-          EXPECT_EQ(h.fixture.cu()->memory_wait_diagnostic_count(), 0u);
-          output[core] = reports(h.sink->str());
-          ASSERT_EQ(output[core].size(), waited ? 0u : 1u) << h.sink->str();
-          if (waited) {
-            EXPECT_TRUE(h.probe->hazards.empty());
-            continue;
-          }
-          const auto &report = output[core].front();
-          EXPECT_EQ(report.fields.at("producer_pc"), std::format("{:#x}", producer_pc));
-          EXPECT_EQ(report.fields.at("consumer_pc"), std::format("{:#x}", consumer_pc));
-          EXPECT_EQ(report.fields.at("access"), write ? "write" : "read");
-          EXPECT_EQ(report.fields.at("type"), vector                       ? "VGPR"
-                                              : producer == Producer::Ttmp ? "TTMP"
-                                                                           : "SGPR");
-          EXPECT_EQ(report.fields.at("lane"), vector ? "2" : "-1");
-          EXPECT_NE(report.trace.find(std::format("==>  {:#x}", producer_pc)), std::string::npos);
-          EXPECT_NE(report.trace.find(std::format("==>  {:#x}", consumer_pc)), std::string::npos);
-          EXPECT_NE(report.trace.find(vector ? "v_mov_b32" : "s_mov_b32"), std::string::npos);
-          EXPECT_NE(h.race->getSummary().find("  1 race(s) detected"), std::string::npos);
-          if (core) {
-            ASSERT_EQ(h.probe->hazards.size(), 1u);
-            EXPECT_EQ(report.fields.at("counter"),
-                      producer == Producer::Global ? "vmcnt" : "lgkmcnt");
-            EXPECT_EQ(report.fields.at("required_wait"), "0");
-            EXPECT_EQ(report.fields.at("width"), "1");
-            EXPECT_EQ(report.fields.at("bytes"), "0xf");
-            EXPECT_EQ(report.fields.at("lanes"), vector ? "0x4" : "0xffffffffffffffff");
-            const auto first = std::ranges::find(h.probe->phases, consumer_pc,
-                                                 &std::pair<uint64_t, std::string>::first);
-            ASSERT_NE(first, h.probe->phases.end());
-            EXPECT_EQ(first->second, "hazard");
-            ASSERT_NE(first + 1, h.probe->phases.end());
-            EXPECT_EQ((first + 1)->second, "before");
-          }
+        DiagnosticHarness h;
+        ASSERT_NO_FATAL_FAILURE(h.initialize());
+        if (producer == Producer::Ttmp)
+          h.probe->dispatch = [](std::span<Wavefront *> waves) {
+            // The load must be permitted to write TTMP before it can create a dependency.
+            for (auto *wave : waves)
+              wave->set_in_trap_handler(true);
+          };
+        ASSERT_NO_FATAL_FAILURE(h.run(program.words));
+        EXPECT_EQ(h.fixture.cu()->memory_wait_diagnostic_count(), 0u);
+        const auto output = reports(h.sink->str());
+        ASSERT_EQ(output.size(), waited ? 0u : 1u) << h.sink->str();
+        if (waited) {
+          EXPECT_TRUE(h.probe->hazards.empty());
+          continue;
         }
-        if (!waited) {
-          for (const char *field : {"kernel", "symbol", "dispatch", "type", "access", "reg", "wave",
-                                    "lane", "wg", "producer_pc", "consumer_pc"})
-            EXPECT_EQ(output[0][0].fields.at(field), output[1][0].fields.at(field)) << field;
-          EXPECT_EQ(output[0][0].trace, output[1][0].trace);
-        }
+        const auto &report = output.front();
+        EXPECT_EQ(report.fields.at("producer_pc"), std::format("{:#x}", producer_pc));
+        EXPECT_EQ(report.fields.at("consumer_pc"), std::format("{:#x}", consumer_pc));
+        EXPECT_EQ(report.fields.at("access"), write ? "write" : "read");
+        EXPECT_EQ(report.fields.at("type"), vector                       ? "VGPR"
+                                            : producer == Producer::Ttmp ? "TTMP"
+                                                                         : "SGPR");
+        EXPECT_EQ(report.fields.at("lane"), vector ? "2" : "-1");
+        EXPECT_EQ(report.fields.at("reg"), producer == Producer::Ttmp ? "0" : "4");
+        EXPECT_EQ(report.fields.at("wave"), "0");
+        EXPECT_EQ(report.fields.at("wg"), "0,0,0");
+        EXPECT_EQ(report.fields.at("checker"), "core");
+        EXPECT_NE(report.trace.find(std::format("==>  {:#x}", producer_pc)), std::string::npos);
+        EXPECT_NE(report.trace.find(std::format("==>  {:#x}", consumer_pc)), std::string::npos);
+        EXPECT_NE(report.trace.find(vector ? "v_mov_b32" : "s_mov_b32"), std::string::npos);
+        EXPECT_NE(h.race->getSummary().find("  1 race(s) detected"), std::string::npos);
+        ASSERT_EQ(h.probe->hazards.size(), 1u);
+        EXPECT_EQ(report.fields.at("counter"), producer == Producer::Global ? "vmcnt" : "lgkmcnt");
+        EXPECT_EQ(report.fields.at("required_wait"), "0");
+        EXPECT_EQ(report.fields.at("width"), "1");
+        EXPECT_EQ(report.fields.at("bytes"), "0xf");
+        EXPECT_EQ(report.fields.at("lanes"), vector ? "0x4" : "0xffffffffffffffff");
+        const auto first = std::ranges::find(h.probe->phases, consumer_pc,
+                                             &std::pair<uint64_t, std::string>::first);
+        ASSERT_NE(first, h.probe->phases.end());
+        EXPECT_EQ(first->second, "hazard");
+        ASSERT_NE(first + 1, h.probe->phases.end());
+        EXPECT_EQ((first + 1)->second, "before");
       }
+}
+
+TEST(RegisterHazardPluginTest, DebuggerReadsDoNotReportOrRetirePendingLoads) {
+  for (bool scalar : {false, true}) {
+    SCOPED_TRACE(scalar);
+    Program program;
+    program.setup();
+    const auto producer = scalar ? program.emit(cdna4::build_smem(
+                                       cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = 4, .imm = 1}))
+                                 : program.global_load();
+    const auto inspect = program.emit(cdna4::build_sopp(cdna4::kSNopSopp));
+    const auto consumer =
+        scalar ? program.emit(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 8}))
+               : program.vector_read();
+    program.end();
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize());
+    const uint32_t value = 42;
+    h.fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&value), sizeof(value), 0x2000);
+    Wavefront *wave = nullptr;
+    h.probe->dispatch = [&](std::span<Wavefront *> waves) {
+      ASSERT_EQ(waves.size(), 1u);
+      wave = waves.front();
+    };
+    bool inspected = false;
+    h.probe->before = [&](uint64_t pc) {
+      if (pc != inspect)
+        return;
+      ASSERT_NE(wave, nullptr);
+      auto &state = wave->ensure_memory_wait_scoreboard();
+      ASSERT_EQ(state.events().size(), 1u);
+      EXPECT_TRUE(h.probe->hazards.empty());
+      const auto saved_pc = wave->pc;
+      for (uint64_t inspection_pc : {producer, inspect}) {
+        wave->pc = inspection_pc;
+        EXPECT_EQ(scalar ? wave->debug_read_sgpr(4) : wave->debug_read_vgpr(4, 2), value);
+        EXPECT_TRUE(h.probe->hazards.empty());
+        EXPECT_EQ(state.events().size(), 1u);
+        EXPECT_EQ(state.outstanding(scalar ? WaitCounterKind::Ds : WaitCounterKind::Load), 1u);
+      }
+      wave->pc = saved_pc;
+      inspected = true;
+    };
+    ASSERT_NO_FATAL_FAILURE(h.run(program.words));
+    EXPECT_TRUE(inspected);
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), 1u) << h.sink->str();
+    EXPECT_EQ(output.front().fields.at("producer_pc"), std::format("{:#x}", producer));
+    EXPECT_EQ(output.front().fields.at("consumer_pc"), std::format("{:#x}", consumer));
+  }
+}
+
+TEST(RegisterHazardPluginTest, ReadModifyWriteAndLaterUseDoNotRetireTheProducer) {
+  for (bool waited : {false, true}) {
+    Program program;
+    program.setup();
+    const auto producer = program.global_load();
+    const auto rmw = program.vector_read(4);
+    if (waited)
+      program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0x0f70}));
+    const auto later = program.vector_read();
+    program.end();
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize());
+    ASSERT_NO_FATAL_FAILURE(h.run(program.words));
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), waited ? 2u : 3u) << h.sink->str();
+    for (const auto &report : output)
+      EXPECT_EQ(report.fields.at("producer_pc"), std::format("{:#x}", producer));
+    EXPECT_EQ(output[0].fields.at("consumer_pc"), std::format("{:#x}", rmw));
+    EXPECT_EQ(output[1].fields.at("consumer_pc"), std::format("{:#x}", rmw));
+    EXPECT_EQ(output[0].fields.at("access"), "read");
+    EXPECT_EQ(output[1].fields.at("access"), "write");
+    if (!waited) {
+      EXPECT_EQ(output[2].fields.at("consumer_pc"), std::format("{:#x}", later));
+      EXPECT_EQ(output[2].fields.at("access"), "read");
+    }
+  }
 }
 
 TEST(RegisterHazardPluginTest, DistinctConsumersSurviveSiteSuppressionAndWarningBudget) {
@@ -272,7 +375,7 @@ TEST(RegisterHazardPluginTest, DistinctConsumersSurviveSiteSuppressionAndWarning
       consumers.push_back(program.vector_read());
     program.end();
     DiagnosticHarness h;
-    ASSERT_NO_FATAL_FAILURE(h.initialize(true, warnings));
+    ASSERT_NO_FATAL_FAILURE(h.initialize(warnings));
     testing::internal::CaptureStderr();
     h.run(program.words);
     const auto stderr_output = testing::internal::GetCapturedStderr();
@@ -305,14 +408,14 @@ TEST(RegisterHazardPluginTest, RepeatedSiteIsSuppressedWithoutRetiringTheProduce
   const auto second = program.vector_read(9);
   program.end();
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(true));
+  ASSERT_NO_FATAL_FAILURE(h.initialize());
   ASSERT_NO_FATAL_FAILURE(h.run(program.words));
   const auto output = reports(h.sink->str());
   ASSERT_EQ(output.size(), 2u) << h.sink->str();
   EXPECT_EQ(output[0].fields.at("consumer_pc"), std::format("{:#x}", first));
   EXPECT_EQ(output[1].fields.at("consumer_pc"), std::format("{:#x}", second));
   EXPECT_EQ(h.probe->hazards.size(), 3u);
-  EXPECT_NE(h.race->getSummary().find("1 repeated core register finding(s) suppressed"),
+  EXPECT_NE(h.race->getSummary().find("1 repeated register finding(s) suppressed"),
             std::string::npos);
 }
 
@@ -327,7 +430,7 @@ TEST(RegisterHazardPluginTest, DistinctProducersAtOneConsumerAreNotSuppressed) {
   const auto consumer = program.vector_read();
   program.end();
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(true));
+  ASSERT_NO_FATAL_FAILURE(h.initialize());
   ASSERT_NO_FATAL_FAILURE(h.run(program.words));
   const auto output = reports(h.sink->str());
   ASSERT_EQ(output.size(), 2u) << h.sink->str();
@@ -348,7 +451,7 @@ TEST(RegisterHazardPluginTest, ObserverOrderDoesNotChangeFindings) {
   std::array<std::vector<Report>, 2> output;
   for (bool probe_first : {false, true}) {
     DiagnosticHarness h;
-    ASSERT_NO_FATAL_FAILURE(h.initialize(true, false, probe_first));
+    ASSERT_NO_FATAL_FAILURE(h.initialize(false, probe_first));
     ASSERT_NO_FATAL_FAILURE(h.run(program.words));
     output[probe_first] = reports(h.sink->str());
   }
@@ -365,7 +468,7 @@ TEST(RegisterHazardPluginTest, RaceAloneEnablesCoreCheckingWithWarningsOff) {
   program.vector_read();
   program.end();
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(true, false, false, "cdna4", false));
+  ASSERT_NO_FATAL_FAILURE(h.initialize(false, false, "cdna4", false));
   EXPECT_FALSE(h.probe->observes_register_hazards());
   ASSERT_NO_FATAL_FAILURE(h.run(program.words));
   EXPECT_EQ(reports(h.sink->str()).size(), 1u);
@@ -431,7 +534,7 @@ TEST(RegisterHazardPluginTest, TraceEvictionAndCodeMutationPreserveOwnedProducer
   const auto consumer = program.vector_read();
   program.end();
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(true));
+  ASSERT_NO_FATAL_FAILURE(h.initialize());
   h.probe->before = [&](uint64_t pc) {
     if (pc == rewrite_at) {
       const auto replacement = cdna4::build_sopp(cdna4::kSNopSopp, {.simm16 = 7});
@@ -459,185 +562,170 @@ TEST(RegisterHazardPluginTest, TraceEvictionAndCodeMutationPreserveOwnedProducer
   EXPECT_EQ(decoded.value()->mnemonic(), "global_load_dword");
 }
 
-TEST(RegisterHazardPluginTest, MixedFlatReadyLanesAreAnIntentionalDifference) {
+TEST(RegisterHazardPluginTest, MixedFlatWaitCompletesOnlyItsRoutedLanes) {
   for (bool local : {false, true})
-    for (bool waited : {false, true})
-      for (bool core : {false, true}) {
-        SCOPED_TRACE(std::format("local={} waited={} core={}", local, waited, core));
-        Program program;
-        // Work-item IDs start in v0. Lanes 0 and 1 use global and shared apertures.
-        program.emit(
-            cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = 144, .vsrc1 = 0, .vdst = 1}));
-        program.emit(cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 255, .vdst = 0}));
-        program.emit(std::array{0x2000u});
-        program.exec(3);
-        program.emit(
-            cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0, .saddr = 0x7f, .vdst = 4}));
-        if (waited)
-          program.emit(cdna4::build_sopp(
-              cdna4::kSWaitcntSopp, {.simm16 = static_cast<uint16_t>(local ? 0xc07f : 0x0f70)}));
-        program.exec(local ? 2 : 1);
-        program.vector_read();
-        program.end();
-        DiagnosticHarness h;
-        ASSERT_NO_FATAL_FAILURE(h.initialize(core));
-        h.fixture.cu()->set_apertures(uint64_t{1} << 48, (uint64_t{1} << 48) + UINT32_MAX, 0, 0);
-        ASSERT_NO_FATAL_FAILURE(h.run(program.words, 64, 64, 16384));
-        const auto output = reports(h.sink->str());
-        // The default checker retains both counter obligations for all lanes.
-        ASSERT_EQ(output.size(), !waited || !core ? 1u : 0u) << h.sink->str();
-        if (core && !waited) {
-          EXPECT_EQ(output[0].fields.at("lanes"), local ? "0x2" : "0x1");
-          EXPECT_EQ(output[0].fields.at("counter"), local ? "lgkmcnt" : "vmcnt");
-        }
-      }
-}
-
-TEST(RegisterHazardPluginTest, SpecialRegisterCoverageIsAnIntentionalDifference) {
-  for (bool waited : {false, true})
-    for (bool core : {false, true}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(std::format("local={} waited={}", local, waited));
       Program program;
+      // Work-item IDs start in v0. Lanes 0 and 1 use global and shared apertures.
       program.emit(
-          cdna5::build_sop1(cdna5::kSSendmsgRtnB32Sop1, {.ssrc0 = 128, .sdst = kModernM0Selector}));
+          cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = 144, .vsrc1 = 0, .vdst = 1}));
+      program.emit(cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 255, .vdst = 0}));
+      program.emit(std::array{0x2000u});
+      program.exec(3);
+      program.emit(
+          cdna4::build_flat(cdna4::kFlatLoadDwordFlat, {.addr = 0, .saddr = 0x7f, .vdst = 4}));
       if (waited)
-        program.emit(cdna5::build_sopp(cdna5::kSWaitKmcntSopp, {.simm16 = 0}));
-      program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kModernM0Selector, .sdst = 8}));
-      program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
-      DiagnosticHarness h;
-      ASSERT_NO_FATAL_FAILURE(h.initialize(core, false, false, "cdna5"));
-      ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
-      const auto output = reports(h.sink->str());
-      ASSERT_EQ(output.size(), core && !waited ? 1u : 0u) << h.sink->str();
-      if (core && !waited) {
-        EXPECT_EQ(output[0].fields.at("type"), "M0");
-        EXPECT_EQ(output[0].fields.at("lane"), "-1");
-        EXPECT_EQ(output[0].fields.at("counter"), "kmcnt");
-      }
-    }
-}
-
-TEST(RegisterHazardPluginTest, EmbeddedWaitIsAppliedBeforeCoreConsumerChecking) {
-  for (bool waited : {false, true})
-    for (bool core : {false, true}) {
-      DiagnosticHarness h;
-      ASSERT_NO_FATAL_FAILURE(h.initialize(core, false, false, "rdna3"));
-      h.probe->dispatch = [&](std::span<Wavefront *> waves) {
-        ASSERT_EQ(waves.size(), 1u);
-        auto &wave = *waves.front();
-        // Inject the same EXPCNT dependency to isolate embedded-wait handling
-        // from the default plugin's lack of inline LDS producer coverage.
-        const auto words = rdna3::build_ldsdir(rdna3::kLdsDirectLoadLdsdir, {.vdst = 4});
-        const InstructionSnapshot producer(0x800, words);
-        auto &scoreboard = wave.ensure_memory_wait_scoreboard();
-        MemoryWaitScoreboard::Event event{scoreboard.issue(WaitCounterKind::Exp),
-                                          0x800,
-                                          0xffffffff,
-                                          {RegClass::VGPR, 4, 1},
-                                          WaitCounterKind::Exp,
-                                          0xf};
-        event.instruction = producer;
-        scoreboard.add(event);
-        auto *state = static_cast<RaceWavefrontState *>(wave.plugin_state(h.race->slot_index()));
-        const std::array obligations{
-            MemoryCounterObligation{WaitCounterType::EXPCNT, MemoryCompletionClass::UNORDERED}};
-        state->race_state->registerEvent(producer, MemoryEventType::GLOBAL_TO_VGPR, {4}, 0xffffffff,
-                                         0xf, obligations, MemoryOrderClass::UNORDERED);
-      };
-      Program program;
-      program.emit(rdna3::build_vinterp(rdna3::kVInterpP10F32Vinterp,
-                                        {.vdst = 8,
-                                         .wait_exp = static_cast<uint8_t>(waited ? 0 : 7),
-                                         .src0 = 260,
-                                         .src1 = 261,
-                                         .src2 = 262}));
-      program.emit(rdna3::build_sopp(rdna3::kSEndpgmSopp));
-      ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
-      const auto output = reports(h.sink->str());
-      ASSERT_EQ(output.size(), core && waited ? 0u : 1u) << h.sink->str();
-      if (core && !waited)
-        EXPECT_EQ(output[0].fields.at("counter"), "expcnt");
-    }
-}
-
-TEST(RegisterHazardPluginTest, CoreModeKeepsCrossWaveLdsChecksAndBarrierControls) {
-  for (bool barrier : {false, true}) {
-    std::array<std::vector<Report>, 2> output;
-    for (bool core : {false, true}) {
-      Program program;
-      program.setup();
-      program.emit(cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1}));
-      program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f}));
-      if (barrier)
-        program.emit(cdna4::build_sopp(cdna4::kSBarrierSopp));
-      program.emit(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 4}));
-      program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f}));
+        program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp,
+                                       {.simm16 = static_cast<uint16_t>(local ? 0xc07f : 0x0f70)}));
+      program.exec(local ? 2 : 1);
+      program.vector_read();
       program.end();
       DiagnosticHarness h;
-      ASSERT_NO_FATAL_FAILURE(h.initialize(core));
-      ASSERT_NO_FATAL_FAILURE(h.run(program.words, 128, 128, 16384));
-      output[core] = reports(h.sink->str());
-      ASSERT_EQ(output[core].size(), barrier ? 0u : 1u) << h.sink->str();
-      if (!barrier) {
-        EXPECT_EQ(output[core][0].fields.at("type"), "LDS");
-        EXPECT_EQ(output[core][0].fields.at("checker"), "plugin");
+      ASSERT_NO_FATAL_FAILURE(h.initialize());
+      h.fixture.cu()->set_apertures(uint64_t{1} << 48, (uint64_t{1} << 48) + UINT32_MAX, 0, 0);
+      ASSERT_NO_FATAL_FAILURE(h.run(program.words, 64, 64, 16384));
+      const auto output = reports(h.sink->str());
+      ASSERT_EQ(output.size(), !waited ? 1u : 0u) << h.sink->str();
+      if (!waited) {
+        EXPECT_EQ(output[0].fields.at("lanes"), local ? "0x2" : "0x1");
+        EXPECT_EQ(output[0].fields.at("counter"), local ? "lgkmcnt" : "vmcnt");
       }
     }
-    if (!barrier) {
-      EXPECT_EQ(output[0][0].fields, output[1][0].fields);
-      EXPECT_EQ(output[0][0].trace, output[1][0].trace);
+}
+
+TEST(RegisterHazardPluginTest, SpecialRegisterResultsRequireTheirWait) {
+  for (bool waited : {false, true}) {
+    Program program;
+    program.emit(
+        cdna5::build_sop1(cdna5::kSSendmsgRtnB32Sop1, {.ssrc0 = 128, .sdst = kModernM0Selector}));
+    if (waited)
+      program.emit(cdna5::build_sopp(cdna5::kSWaitKmcntSopp, {.simm16 = 0}));
+    program.emit(cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kModernM0Selector, .sdst = 8}));
+    program.emit(cdna5::build_sopp(cdna5::kSEndpgmSopp));
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize(false, false, "cdna5"));
+    ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), !waited ? 1u : 0u) << h.sink->str();
+    if (!waited) {
+      EXPECT_EQ(output[0].fields.at("type"), "M0");
+      EXPECT_EQ(output[0].fields.at("lane"), "-1");
+      EXPECT_EQ(output[0].fields.at("counter"), "kmcnt");
     }
   }
 }
 
-TEST(RegisterHazardPluginTest, RegisterlessPluginEventsStillCountForLdsPartialWaits) {
-  for (bool core : {false, true})
-    for (bool waited : {false, true}) {
-      DiagnosticHarness h;
-      ASSERT_NO_FATAL_FAILURE(h.initialize(core));
-      auto *wave = h.fixture.cu()->dispatch_wf(0, 0x100, 104, 256);
-      ASSERT_NE(wave, nullptr);
-      wave->set_exec(1);
-      std::array<Wavefront *, 1> waves{wave};
-      h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
-      for (bool lds : {true, false}) {
-        auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
-        state->is_load = true;
-        state->lds_dst = lds;
-        state->lds_base = 0x80;
-        state->num_elems = 1;
-        state->elem_size = 4;
-        state->exec_mask = state->lane_mask = 1;
-        state->wf_size = 64;
-        state->dst_reg_base = wave->vgpr_alloc().base + 4;
-        state->wait_counter_type = WaitCounterType::VMCNT;
-        TestMemoryInstruction instruction(std::move(state));
-        h.fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, instruction, *wave);
-        h.fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave);
-        wave->pc += 4;
-      }
-      auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(h.race->slot_index()));
-      auto &race = *state->race_state;
-      const auto &events = race.getWaveMemoryEvents();
-      ASSERT_EQ(events.size(), 2u);
-      EXPECT_EQ(race.getDetector()->events().registers(events.back()).empty(), core);
-      if (waited) {
-        PendingWaitCount wait;
-        wait.add(WaitCounterType::VMCNT, 1);
-        race.dispatch(wait);
-      }
-      race.getDetector()->validateRead(0x80, race.getWaveId(), 0, 4, MemoryOrderClass::UNORDERED);
-      const auto output = reports(h.sink->str());
-      ASSERT_EQ(output.size(), waited ? 0u : 1u) << h.sink->str();
-      if (!waited)
-        EXPECT_EQ(output.front().fields.at("type"), "LDS");
+TEST(RegisterHazardPluginTest, EmbeddedWaitIsAppliedBeforeCoreConsumerChecking) {
+  for (bool waited : {false, true}) {
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize(false, false, "rdna3"));
+    h.probe->dispatch = [&](std::span<Wavefront *> waves) {
+      ASSERT_EQ(waves.size(), 1u);
+      auto &wave = *waves.front();
+      // Seed an inline producer to isolate embedded-wait handling.
+      const auto words = rdna3::build_ldsdir(rdna3::kLdsDirectLoadLdsdir, {.vdst = 4});
+      const InstructionSnapshot producer(0x800, words);
+      auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+      MemoryWaitScoreboard::Event event{scoreboard.issue(WaitCounterKind::Exp),
+                                        0x800,
+                                        0xffffffff,
+                                        {RegClass::VGPR, 4, 1},
+                                        WaitCounterKind::Exp,
+                                        0xf};
+      event.instruction = producer;
+      scoreboard.add(event);
+    };
+    Program program;
+    program.emit(rdna3::build_vinterp(rdna3::kVInterpP10F32Vinterp,
+                                      {.vdst = 8,
+                                       .wait_exp = static_cast<uint8_t>(waited ? 0 : 7),
+                                       .src0 = 260,
+                                       .src1 = 261,
+                                       .src2 = 262}));
+    program.emit(rdna3::build_sopp(rdna3::kSEndpgmSopp));
+    ASSERT_NO_FATAL_FAILURE(h.run(program.words, 32, 32));
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), waited ? 0u : 1u) << h.sink->str();
+    if (!waited)
+      EXPECT_EQ(output[0].fields.at("counter"), "expcnt");
+  }
+}
+
+TEST(RegisterHazardPluginTest, CrossWaveLdsChecksRequireTheBarrier) {
+  for (bool barrier : {false, true}) {
+    Program program;
+    program.setup();
+    program.emit(cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1}));
+    program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f}));
+    if (barrier)
+      program.emit(cdna4::build_sopp(cdna4::kSBarrierSopp));
+    program.emit(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 4}));
+    program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f}));
+    program.end();
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize());
+    ASSERT_NO_FATAL_FAILURE(h.run(program.words, 128, 128, 16384));
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), barrier ? 0u : 1u) << h.sink->str();
+    if (!barrier) {
+      EXPECT_EQ(output[0].fields.at("type"), "LDS");
+      EXPECT_EQ(output[0].fields.at("checker"), "plugin");
+      EXPECT_NE(output[0].trace.find("ds_write_b32"), std::string::npos);
+      EXPECT_NE(output[0].trace.find("ds_read_b32"), std::string::npos);
     }
+  }
+}
+
+TEST(RegisterHazardPluginTest, CounterOnlyIssuesParticipateInLdsPartialWaits) {
+  for (bool waited : {false, true}) {
+    DiagnosticHarness h;
+    ASSERT_NO_FATAL_FAILURE(h.initialize());
+    auto *wave = h.fixture.cu()->dispatch_wf(0, 0x100, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    h.fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    for (bool lds : {true, false}) {
+      auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+      state->is_load = true;
+      state->lds_dst = lds;
+      state->lds_base = 0x80;
+      state->num_elems = 1;
+      state->elem_size = 4;
+      state->exec_mask = state->lane_mask = 1;
+      state->wf_size = 64;
+      state->dst_reg_base = wave->vgpr_alloc().base + 4;
+      state->wait_counter_type = WaitCounterType::VMCNT;
+      TestMemoryInstruction instruction(std::move(state));
+      h.fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, instruction, *wave);
+      h.fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave);
+      wave->pc += 4;
+    }
+    auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(h.race->slot_index()));
+    auto &race = *state->race_state;
+    const auto &events = race.getWaveMemoryEvents();
+    ASSERT_EQ(events.size(), 2u);
+    EXPECT_EQ(race.getDetector()->events().access(events.back()), LdsAccess::None);
+    EXPECT_TRUE(race.getDetector()->events().ldsIntervals(events.back()).empty());
+    if (waited) {
+      PendingWaitCount wait;
+      wait.add(WaitCounterType::VMCNT, 1);
+      race.dispatch(wait);
+    }
+    race.getDetector()->validateRead(0x80, race.getWaveId(), 0, 4, MemoryOrderClass::UNORDERED);
+    const auto output = reports(h.sink->str());
+    ASSERT_EQ(output.size(), waited ? 0u : 1u) << h.sink->str();
+    if (!waited)
+      EXPECT_EQ(output.front().fields.at("type"), "LDS");
+  }
 }
 
 TEST(RegisterHazardPluginTest, ReplayFindingsRespectTheExplicitXcntSetting) {
   for (bool enabled : {false, true})
     for (bool waited : {false, true}) {
       DiagnosticHarness h;
-      ASSERT_NO_FATAL_FAILURE(h.initialize(true, false, false, "cdna5"));
+      ASSERT_NO_FATAL_FAILURE(h.initialize(false, false, "cdna5"));
       h.fixture.cu()->restore_wait_diagnostics(MemoryWaitDiagnostics::Off,
                                                enabled ? MemoryWaitDiagnostics::Warn
                                                        : MemoryWaitDiagnostics::Off);
@@ -664,7 +752,7 @@ TEST(RegisterHazardPluginTest, ReplayFindingsRespectTheExplicitXcntSetting) {
 
 TEST(RegisterHazardPluginTest, MissingEvidenceKeepsFindingAndLogicalWaveContext) {
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(true));
+  ASSERT_NO_FATAL_FAILURE(h.initialize());
   auto *cu = h.fixture.cu();
   ASSERT_NE(cu->dispatch_wf(0, 0, 104, 256), nullptr);
   auto *wave = cu->dispatch_wf(5, 0, 104, 256);
@@ -699,7 +787,7 @@ TEST(RegisterHazardPluginTest, MissingEvidenceKeepsFindingAndLogicalWaveContext)
 
 TEST(RegisterHazardPluginTest, GroupHonorsHazardInterestAndWaveSubscription) {
   DiagnosticHarness h;
-  ASSERT_NO_FATAL_FAILURE(h.initialize(false));
+  ASSERT_NO_FATAL_FAILURE(h.initialize());
   auto *wave = h.fixture.cu()->dispatch_wf(0, 0, 104, 256);
   ASSERT_NE(wave, nullptr);
   ExecutionPluginGroup group(PluginSinkConfig{});

@@ -310,10 +310,9 @@ TEST_F(PluginLoaderTest, RejectedFileOnlyCandidateDiscardsSimulationSummary) {
   EXPECT_EQ(diagnostic.find("No races detected."), std::string::npos);
 }
 
-TEST_F(PluginLoaderTest, RaceModuleSelectsCoreRegisterChecking) {
+TEST_F(PluginLoaderTest, RaceModuleUsesCoreRegisterChecking) {
   auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"require_all_plugins":true,"plugins":{"race":{"register_checker":"core"}}})",
-      PLUGIN_LOADER_RACE_DIR);
+      R"({"require_all_plugins":true,"plugins":{"race":{}}})", PLUGIN_LOADER_RACE_DIR);
   ASSERT_TRUE(group.succeeded());
   EXPECT_TRUE(group.value()->observes_register_hazards());
   EXPECT_FALSE(group.value()->observes_vgpr_reads());
@@ -324,12 +323,6 @@ TEST_F(PluginLoaderTest, RaceModuleSelectsCoreRegisterChecking) {
   EXPECT_TRUE(group.value()->observes_tensor_dma_issue());
 }
 
-TEST_F(PluginLoaderTest, RaceModuleRejectsAnUnknownRegisterChecker) {
-  EXPECT_TRUE(rocjitsu::PluginLoader::configure_plugin_group(
-                  R"({"require_all_plugins":true,"plugins":{"race":{"register_checker":"typo"}}})",
-                  PLUGIN_LOADER_RACE_DIR)
-                  .failed());
-}
 
 TEST_F(PluginLoaderTest, CApiEmptyInputRemovesInstalledPlugins) {
   rocjitsu::SoC soc("plugin_loader_test");

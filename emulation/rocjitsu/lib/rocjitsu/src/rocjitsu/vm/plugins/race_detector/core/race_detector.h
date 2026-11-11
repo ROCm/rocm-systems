@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
@@ -41,24 +40,14 @@ class RaceDetector {
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
-  RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler, CounterCapacities,
-               size_t ldsSizeBytes);
-
-  /// Allocate an event using the counter and ordering implied by its type.
-  EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
-                          std::vector<uint32_t> registers, uint64_t execMask) {
-    return allocateEventId(wave, instruction, type, std::move(registers), execMask, 0xF, {},
-                           CounterObligations(type), defaultMemoryOrder(type));
-  }
+  RaceDetector(int nWaves, Dim3d workgroupId, std::function<void(RaceViolation)> raceHandler,
+               CounterCapacities, size_t ldsSizeBytes);
 
   /// Allocate a workgroup-global event ID and record its metadata.
-  EventId allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
-                          std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+  EventId allocateEventId(WaveId, InstructionSnapshot instruction, LdsAccess,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                          LdsAccess ldsAccess = {});
+                          MemoryOrderClass memoryOrder, uint8_t alignedAtomicBytes = 0);
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -115,9 +104,6 @@ public:
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
   const std::vector<EventId> &getLdsReadEvents() const { return ldsReadEvents; }
 
-  Dim3d getWorkgroupId() const { return workgroupId; }
-  const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
-
   WaveRaceState &getWaveRaceState(int waveIndex);
 
   /// Whether the workgroup has a single wave, so that no other wave can race
@@ -147,10 +133,10 @@ private:
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
 
-  /// Active LDS write events (for scanning during read validation).
+  /// Retained LDS writes, including wave-complete accesses visible to peers.
   std::vector<EventId> ldsWriteEvents;
 
-  /// Active LDS read events (for scanning during write validation).
+  /// Retained LDS reads, including wave-complete accesses visible to peers.
   std::vector<EventId> ldsReadEvents;
 
   /// Outstanding write/read counts at chunk granularity for fast-path

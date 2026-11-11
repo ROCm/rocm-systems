@@ -8,14 +8,22 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Checks register and LDS dependencies, with an opt-in core-backed register checker. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `RaceDetectorPlugin` | `race_detector/` | Reports core register findings and checks LDS ordering. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
 | `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
-The race detector plugin contains both the core detection algorithm
-(`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
+The race plugin owns LDS analysis (`race_detector/core/`) and report presentation
+(`race_detector/plugin.h`). Register readiness belongs to the emulator's core
+scoreboard; the plugin observes its findings rather than register accesses.
+
+Race detection is opt-in through `plugins.race`. Without that plugin, no
+workgroup race detector, per-wave race state, or LDS byte history is allocated.
+Core register-wait diagnostics are separate and default to warnings. For
+uninstrumented emulation, omit the plugins and set `wait_checking` to `off` to
+disable those diagnostics too. A register-finding observer such as `race`
+still requests core dependency tracking even when the warnings are disabled.
 
 ### Throughput Plugin
 
@@ -389,13 +397,12 @@ and byte masks for masked, sub-dword, and multi-register operands. Internal
 storage operations used to preserve unaffected register state do not produce
 additional architectural callbacks.
 
-Asynchronous memory operations are modeled separately. The race detector
-records their register dependencies when they are issued. A later completion
-updates storage without emitting the same instruction-level write again.
-Synchronization retires the corresponding outstanding operations using the
-counter family captured at issue. This distinguishes legacy combined
-`vmcnt`/`lgkmcnt` waits from split `loadcnt`, `storecnt`, `dscnt`, and `kmcnt`
-waits on newer targets.
+Asynchronous memory operations are modeled separately. The core scoreboard
+records their register dependencies at issue. A later completion updates storage
+without emitting the same instruction-level write again. Architectural waits and
+ordering guarantees release dependencies; eager storage writeback is not proof
+of readiness. Plugins needing register hazards should consume the structured
+findings below rather than reconstructing this analysis from access hooks.
 
 ### Scalar register identity
 
