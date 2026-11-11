@@ -383,12 +383,12 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
       << access_pc << std::dec << ".\n";
   oss << "  Conflict: ";
-  if (v.space == RaceViolation::Space::VGPR) {
-    // A FLAT event can combine lanes from different memory spaces; its type
-    // does not identify the source of the reported register lane.
-    oss << "load into VGPRs";
+  const Transfer transfer = event_transfer(type);
+  if (v.space != RaceViolation::Space::LDS) {
+    // Register-load events identify the destination, but not the source memory
+    // space: FLAT can combine lanes from different spaces and SMEM includes scratch.
+    oss << "load into " << transfer.destination;
   } else {
-    const Transfer transfer = event_transfer(type);
     oss << "transfer from " << transfer.source << " into " << transfer.destination;
   }
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner

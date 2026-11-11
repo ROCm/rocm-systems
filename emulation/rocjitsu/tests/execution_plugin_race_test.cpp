@@ -3494,6 +3494,53 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 
   static_cast<void>(RegisterAccess(*wf).read_scalar(*load->dst_operand(0)));
   EXPECT_NE(sink.str().find("type=TTMP"), std::string::npos);
+  EXPECT_NE(sink.str().find("  Conflict: load into TTMPs at PC 0x0, wave 0.\n"), std::string::npos)
+      << sink.str();
+}
+
+TEST(RaceDetectorPluginTest, ScalarLoadsDoNotInferTheirSourceMemorySpace) {
+  for (uint16_t opcode : {cdna4::kSLoadDwordSmem, cdna4::kSScratchLoadDwordSmem}) {
+    SCOPED_TRACE(opcode);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1));
+    PluginSinkConfig sink_config;
+    StringSink &sink = sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array waves{wave};
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0x1000);
+    fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(decoder, nullptr);
+    const std::array<uint32_t, 2> words =
+        cdna4::build_smem(opcode, {.sbase = 0, .sdata = 8, .imm = 1});
+    DecodeResult load = decoder->decode_window(words);
+    ASSERT_TRUE(load.succeeded());
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
+    ASSERT_TRUE(fixture.cu()->execute_instruction(load.value().get(), *wave).succeeded());
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load.value(), *wave);
+    wave->pc = 0x200;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    static_cast<void>(RegisterAccess(*wave).read_sgpr(wave->sgpr_alloc().base + 8));
+    EXPECT_NE(sink.str().find("type=SGPR"), std::string::npos) << sink.str();
+    EXPECT_NE(sink.str().find("  Conflict: load into SGPRs at PC 0x100, wave 0.\n"),
+              std::string::npos)
+        << sink.str();
+    EXPECT_NE(sink.str().find("pending counters: lgkmcnt."), std::string::npos) << sink.str();
+    EXPECT_NE(sink.str().find(load.value()->disassemble()), std::string::npos) << sink.str();
+    execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(wave->cu().arch(), 63, 0));
+    wave->pc = 0x204;
+    record_register_probe(*fixture.plugin_group_, *wave);
+    const std::string completed = sink.str();
+    static_cast<void>(RegisterAccess(*wave).read_sgpr(wave->sgpr_alloc().base + 8));
+    EXPECT_EQ(sink.str(), completed);
+  }
 }
 
 TEST(RaceDetectorPluginTest, DebuggerReadsIgnorePendingLoads) {

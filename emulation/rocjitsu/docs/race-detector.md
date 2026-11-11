@@ -153,10 +153,10 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 The human-readable heading names the affected register or LDS byte and identifies
 read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
 next lines identify the current access and the conflicting memory event by
-where its data moves, such as from VGPRs into LDS. A conflict on a VGPR is
-described as a load into VGPRs without naming the source memory space: a FLAT
-instruction can load from different spaces in different lanes, and the event
-does not retain each lane's source.
+where its data moves, such as from VGPRs into LDS. Register-load conflicts name
+the destination (VGPRs, SGPRs, or TTMPs) without guessing the source memory space.
+A FLAT instruction can load from different spaces in different lanes, and
+scalar memory loads can read scratch. The event does not retain that source.
 
 For a pending event, the report lists the completion counters that remain unsatisfied, using
 the architectural wait names for the target. Internal GFX11 subsets are
