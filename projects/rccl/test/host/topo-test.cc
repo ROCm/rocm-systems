@@ -79,6 +79,105 @@ class TopoMicrotest : public ::testing::Test {
   }
 };
 
+TEST_F(TopoMicrotest, IdToIndex_UsesNodeTypeAndFullIdAndClearsMisses) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 2;
+  system->nodes[GPU].nodes[0].id = NCCL_TOPO_ID(3, 17);
+  system->nodes[GPU].nodes[1].id = NCCL_TOPO_ID(4, 17);
+  system->nodes[NET].count = 1;
+  system->nodes[NET].nodes[0].id = NCCL_TOPO_ID(4, 17);
+  int index = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToIndex(system.get(), GPU, NCCL_TOPO_ID(4, 17), &index));
+  EXPECT_EQ(1, index);
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToIndex(system.get(), NET, NCCL_TOPO_ID(4, 17), &index));
+  EXPECT_EQ(0, index);
+  EXPECT_EQ(ncclInternalError, ncclTopoIdToIndex(system.get(), GPU, NCCL_TOPO_ID(4, 18), &index));
+  EXPECT_EQ(-1, index);
+}
+
+TEST_F(TopoMicrotest, RankToIndex_FindsLastPopulatedGpuAndIgnoresUnusedSlots) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 2;
+  system->nodes[GPU].nodes[0].gpu.rank = 8;
+  system->nodes[GPU].nodes[1].gpu.rank = 3;
+  system->nodes[GPU].nodes[2].gpu.rank = 5;
+  int index = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoRankToIndex(system.get(), 3, &index, false));
+  EXPECT_EQ(1, index);
+  for (bool warn : {false, true}) {
+    SCOPED_TRACE(warn);
+    index = 99;
+    EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 5, &index, warn));
+    EXPECT_EQ(-1, index);
+  }
+}
+
+TEST_F(TopoMicrotest, DevToRank_SameDeviceOnDifferentHostsReturnsMatchingHostRank) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[GPU].count = 3;
+  for (int index = 0; index < 3; index++) {
+    system->nodes[GPU].nodes[index].id = NCCL_TOPO_ID((index + 2), 0x1000);
+    system->nodes[GPU].nodes[index].gpu.dev = 7;
+    system->nodes[GPU].nodes[index].gpu.rank = 13 - index;
+  }
+  int rank = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoDevToRank(system.get(), 4, 7, true, &rank));
+  EXPECT_EQ(11, rank);
+  EXPECT_EQ(ncclInternalError, ncclTopoDevToRank(system.get(), 4, 8, true, &rank));
+  EXPECT_EQ(-1, rank);
+  rank = 99;
+  EXPECT_EQ(ncclInternalError, ncclTopoDevToRank(system.get(), 5, 7, false, &rank));
+  EXPECT_EQ(-1, rank);
+}
+
+TEST_F(TopoMicrotest, IdToNetDev_ReturnsDeviceRatherThanArrayIndex) {
+  auto system = std::make_unique<ncclTopoSystem>();
+  system->nodes[NET].count = 2;
+  system->nodes[NET].nodes[0].id = NCCL_TOPO_ID(1, 0x23);
+  system->nodes[NET].nodes[0].net.dev = 9;
+  system->nodes[NET].nodes[1].id = NCCL_TOPO_ID(2, 0x23);
+  system->nodes[NET].nodes[1].net.dev = 6;
+  int device = 99;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToNetDev(system.get(), NCCL_TOPO_ID(2, 0x23), &device));
+  EXPECT_EQ(6, device);
+  EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), NCCL_TOPO_ID(3, 0x23), &device));
+  EXPECT_EQ(-1, device);
+}
+
+TEST_F(TopoMicrotest, NVLinkBw_GenerationBoundariesAndRubinExceptions) {
+  struct Sample { int capability; float bandwidth; };
+  const Sample samples[] = {
+      {59, SM80_NVLINK_BW}, {60, SM60_NVLINK_BW}, {69, SM60_NVLINK_BW},
+      {70, SM70_NVLINK_BW}, {79, SM70_NVLINK_BW}, {80, SM80_NVLINK_BW},
+      {85, SM80_NVLINK_BW}, {86, SM86_NVLINK_BW}, {87, SM80_NVLINK_BW},
+      {89, SM80_NVLINK_BW}, {90, SM90_NVLINK_BW}, {99, SM90_NVLINK_BW},
+      {100, SM100_NVLINK_BW}, {106, SM100_NVLINK_BW}, {107, RUBIN_NVLINK_BW},
+      {109, RUBIN_NVLINK_BW}, {110, SM100_NVLINK_BW}, {111, RUBIN_NVLINK_BW},
+      {119, RUBIN_NVLINK_BW}, {120, SM100_NVLINK_BW}, {121, SM100_NVLINK_BW},
+      {122, RUBIN_NVLINK_BW}};
+  for (const auto& sample : samples) {
+    SCOPED_TRACE(sample.capability);
+    EXPECT_FLOAT_EQ(sample.bandwidth, ncclTopoNVLinkBw(sample.capability));
+  }
+}
+
+TEST_F(TopoMicrotest, MirrorBits_ReversesEveryThreeBitRailIndex) {
+  const int expected[] = {0, 4, 2, 6, 1, 5, 3, 7};
+  for (int rank = 0; rank < 8; rank++) {
+    SCOPED_TRACE(rank);
+    EXPECT_EQ(expected[rank], mirrorBits(rank, 8));
+  }
+  EXPECT_EQ(0, mirrorBits(0, 1));
+  EXPECT_TRUE(isPow2(1));
+  EXPECT_TRUE(isPow2(8));
+  EXPECT_FALSE(isPow2(7));
+  EXPECT_FALSE(isPow2(9));
+}
+
 // --- Building the system from XML
 
 TEST_F(TopoMicrotest, GetSystemFromXml_XgmiGpusHangOffTheirDevNodes) {
