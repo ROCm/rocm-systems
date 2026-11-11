@@ -14,13 +14,9 @@ predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
 This document describes the DBI subsystem as implemented. The instrumentor can
 insert an inline nop or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement,
-callable `AfterInst`, and callable kernel entry/exit observations are supported.
-`AfterInst` requires a callable probe and rejects anchors that change VGPR bank
-selection, may enable GPR indexing or VSKIP, change the VGPR allocation, deallocate VGPRs and scratch,
-or belong to matrix/transcendental families whose scheduling is not supported. The
-pre-anchor addressing proof does not establish the post-anchor state, and the
-callback envelope requires allocated VGPRs and scratch. Block boundaries remain
-reserved. Existing scratch spills coexist with an
+callable `AfterInst`, and callable kernel entry/exit observations are supported,
+subject to the [admission contract](#key-design-constraint). Block boundaries
+remain reserved. Existing scratch spills coexist with an
 explicit register-growth policy that uses disjoint register backups. The shared
 code-object layer updates the resource note and descriptor together. General HWREG/MODE preservation, scratch enablement
 from zero, arbitrary composed instrumentation, and streaming transport remain
@@ -100,7 +96,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; its admission rules below require proven VGPR addressing, allocated storage, and supported register-result scheduling. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
@@ -113,62 +109,31 @@ current limits.
 ### Key design constraint
 
 Callable `AfterInst` requires an ordinary relocatable anchor and a supported
-post-anchor state. The anchor must preserve VGPR bank selection. CDNA5's
-existing bank analysis proves the state before the anchor; a bank-changing
-instruction can redirect an encoded VGPR in the envelope to a different bank,
-so that proof cannot justify a callback after the instruction.
+post-anchor state. Pre-anchor liveness alone cannot justify a callback after
+the instruction; addressing and storage must be valid at the observation point.
 
-AfterInst requires GPR indexing and VSKIP to be proven disabled at the
-observation point; ordinary callable sites also reject known-enabled states. Validation follows each CFG predecessor back to its last
-MODE write, including loop backedges; an explicit disabling write cuts off that
-path. Unknown writes, unmodelled call effects, and non-kernel roots fail closed.
-Resolved straight-line callees are proven preserving only if they leave MODE and
-the return-link pair untouched. AfterInst rejects incomplete control flow; a
-validated callee return is distinguished from an unresolved indirect transfer.
-`KernelEntry` instead uses dispatch-entry state: its descriptor stub runs once,
-and guest backedges to the original entry do not execute that callback again.
+| Requirement | Current admission boundary |
+|---|---|
+| Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
+| Allocated storage | Required VGPRs and scratch must remain available. Unproven `s_alloc_vgpr` or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet. |
+| Register hazards | MFMA/SMFMAC anchors are rejected. On CDNA5, WMMA/SWMMAC and transcendental families are also conservatively excluded until the envelope can provide the required VALU spacing. |
 
-Callable instruction and exit observations also require storage to remain
-available along every incoming path. Any preceding `s_alloc_vgpr` or recognized
-VGPR/scratch deallocation, including a loop backedge or an unproven call effect,
-fails this check. The anchor itself participates for `AfterInst`. There is no
-sufficient-allocation proof yet, so a later allocation does not clear the unsafe
-state, whether its count is immediate or SGPR-supplied. Static descriptor counts
-describe the initial allocation and do not prove storage after these operations.
-Dispatch-only `KernelEntry` observations use the initial allocation instead.
-When the CFG omits a rewritten return edge, storage can also be proven invariant
-over text containing no storage mutations and only transfers proven to remain
-inside that text. This proof accepts intact return links and contiguous
-negative low-add/high-add-with-carry adjustments of a saved link or freshly read
-PC back to a descriptor entry. Hidden transfers into other helpers are rejected
-because they do not establish those helpers' return-link contexts;
-unknown targets, broken carry chains, and earlier link clobbers remain rejected.
+Storage availability also constrains callable instruction and exit observations.
+Descriptors describe the initial allocation, not storage after guest allocation
+changes. `KernelEntry` uses dispatch-entry state: guest backedges to the original
+entry do not execute its descriptor stub again.
 
-`AfterInst` rejects MFMA and SMFMAC anchors, and on CDNA5 it also rejects the
-WMMA/SWMMAC and transcendental families, until the Instrumentor can provide
-required VALU spacing before argument copies, spills, or temporary-register
-writes. The envelope's scalar waits and moves do not establish that spacing;
-see the [CDNA5 ISA](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf),
-sections 5.7.2 and 7.12.1. This is a conservative whole-family exclusion on both
-gfx1250 and gfx1251, using `MATRIX_REGISTER_ACCESSES` and `is_transcendental()`
-as family classifiers, not latency classes. It also excludes small-data WMMA
-without claiming those instructions have the same XDL hazard. F64
-transcendentals remain excluded even though their `S_DELAY_ALU` classification
-is ordinary VALU. BeforeInst placement remains supported under its existing
-rules. These anchor checks do not prove readiness at arbitrary later sites
-inside a guest's hazard-spacing window.
+Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
+the envelope uses vector instructions for restoration, even with `force_full_exec`.
+These checks do not provide general hazard scheduling or prove readiness at
+arbitrary later observation points.
 
-Copied probe bodies reject instructions that may enable VSKIP on CDNA1–4,
-including unknown MODE bit 28 writes. The epilogue uses vector instructions to
-restore spilled scalar registers, even with `force_full_exec`. This body-wide
-check is conservative: enabling and later clearing VSKIP is also rejected;
-proven clear-only writes remain supported. It does not preserve general MODE.
-
-Both `s_sendmsg` and `s_sendmsghalt` are checked for `MSG_DEALLOC_VGPRS`.
-The checked-in XML gives MSG widths of 9/4/7/7 bits for RDNA3/RDNA3.5/RDNA4/CDNA5,
-while [LLVM's GFX11+ message-ID mask](https://github.com/llvm/llvm-project/blob/release/20.x/llvm/lib/Target/AMDGPU/SIDefines.h#L440)
-uses the low byte. Validation rejects deallocation
-under either interpretation, so the ambiguous RDNA3 encoding `0x103` is rejected.
+ISA-specific recognition and control-flow proof details belong to the
+[Instrumentor implementation](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.cpp)
+and its [admission tests](../tests/patch/instrumentor_test.cpp).
+For CDNA5 spacing requirements, see the
+[ISA reference](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf),
+sections 5.7.2 and 7.12.1.
 
 The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPatcher do not. Milestone-scoped restrictions live at the orchestrator boundary: reserved-field rejections in `validate_anchor()`, the `validate_inline_nop_plan()` shape check on the inline-nop path, the arch/scratch spill gating on the probe-call path (`max_scratch_offset_bytes` + the fail-closed `plan_*_spills` helpers, plus the single-kernel and nonzero-scratch checks), the mixed-wave-size refusal of probe calls, the probe live-in gate in `resolve_points()`, and the multi-text rejection at the top of `patch()`. The builder accepts any well-formed plan and the patcher accepts any well-formed mutation request.
 
@@ -571,9 +536,16 @@ shared DBI envelope; it does not require an analysis-specific lowering path.
 
 ### Mask policy
 
-The saved mask comes from the selected observation point: before the anchor for
-`BeforeInst`, and from the post-instruction `EXEC` mask for `AfterInst`.
-By default the probe runs under the guest EXEC mask observed at envelope entry: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at that observation point is inactive inside the probe. When `probe_after_original && emit_original` is true, the relocated instruction executes first; if it changes EXEC, the probe sees the new mask. With the original omitted, the saved mask is the guest mask at trampoline entry regardless of the placement flag. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The observed guest mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
+By default the probe runs under EXEC at the selected observation point: before
+the anchor for `BeforeInst`, and after it for `AfterInst`. The envelope saves
+that mask at entry and restores `<exec_temp>` before the `s_swappc` to the probe.
+With the original omitted, the observed mask is the guest mask at trampoline
+entry regardless of the placement flag.
+
+`InstrumentationPoint::force_full_exec` keeps the full-mask window used for
+spills and argument writes open across the call, so the probe body runs with
+every lane enabled. The observed guest mask is restored afterwards before the
+guest resumes.
 
 This permits uniform bookkeeping and probes that consume an explicitly saved guest mask as data. A probe relying on execution under the original mask uses the default; per-lane operands passed under full EXEC must be interpreted using the saved mask.
 
