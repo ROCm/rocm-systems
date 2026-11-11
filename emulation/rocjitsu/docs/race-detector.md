@@ -225,12 +225,14 @@ races. Some examples:
   are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
   its LDS address. Any wave, including the issuing one, that reads a load's
   destination or overwrites a store's source before `s_wait_asynccnt` is
-  reported; other waves also need an `s_barrier`. Async copies may access LDS
-  out of order with each other (CDNA5 ISA 10.8), so a store is also reported
-  when it reads bytes of the same wave's pending async load, and an async load
-  when it overwrites the source of the same wave's pending async store. The ISA
-  does not establish the LDS access order of an async copy relative to DS
-  instructions or tensor DMA, so as a conservative rule the detector also
+  reported; other waves also need an `s_barrier`. Synchronizing other waves
+  through an LDS barrier cell instead is not modeled (see False positives with
+  LDS barrier synchronization). Async copies may access LDS out of order with
+  each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
+  of the same wave's pending async load, and an async load when it overwrites
+  the source of the same wave's pending async store. The ISA does not
+  establish the LDS access order of an async copy relative to DS instructions
+  or tensor DMA, so as a conservative rule the detector also
   reports a store that reads bytes of the same wave's pending DS write or tensor
   load, until a DS or tensor wait completes it. Compilers can emit such a pair
   without a DS wait (on gfx1250, Clang places no `s_wait_dscnt` between the
@@ -570,15 +572,19 @@ this source tree. The original
   async copies follow that rule, so neither the emulator nor the detector
   applies it to them.
 
-- **False positives with LDS barrier synchronization**: a tensor load can
-  request an arrival on an LDS barrier cell when it completes, and a consumer
-  wave can wait for that barrier's phase and then read the tile, without the
-  producer waiting on `s_wait_tensorcnt` or the workgroup passing `s_barrier`.
+- **False positives with LDS barrier synchronization**: a producer can hand
+  LDS data to another wave through an LDS barrier cell instead of a wait and
+  `s_barrier`. A tensor load can request an arrival on a barrier cell when it
+  completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
+  after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
+  consumer wave can then wait for the barrier's phase and read the tile, or
+  copy it out with an async store, without the producer waiting on
+  `s_wait_tensorcnt` or `s_wait_asynccnt` or the workgroup passing `s_barrier`.
   The detector does not observe this synchronization: it retires a transfer
   only through wait-counter instructions and `s_barrier`. A consumer that is
   correctly synchronized through the barrier cell is therefore reported as
-  racing with the tensor load. These reports are false positives, not missing
-  coverage.
+  racing with the tensor or async load. These reports are false positives, not
+  missing coverage.
 
 - **NULL tensor descriptors**: like the emulator, the detector counts a NULL
   descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
