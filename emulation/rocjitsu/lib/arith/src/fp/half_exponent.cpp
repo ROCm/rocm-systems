@@ -6,12 +6,12 @@
 
 #include "fp/half_exponent.h"
 #include "common/alu.h"
-#include "common/float_formats.h"
-#include "common/internal.h"
+#include "common/float_encoding.h"
 #include "common/math.h"
+#include "common/validation.h"
 #include "fp/half_fma_scalar.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 

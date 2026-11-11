@@ -544,9 +544,7 @@ public:
     // Keep generated topology and proc snapshots independent of limits lowered
     // by application code before its first GPU call. Inherited hard limits on
     // GPU backing are handled by the keeper's shared-RAM fallback.
-    const int warmup = rocjitsu::create_memory_backing(1);
-    if (warmup >= 0)
-      real().close(warmup);
+    rocjitsu::prepare_memory_keeper();
   }
 
   /// @brief Conservatively detect real GPU descriptors inherited outside this backend.
@@ -2314,8 +2312,11 @@ public:
   }
 
   bool create_local_vm(const std::string &config_path) {
+    util::FailureOr<std::string> config_json = read_file_passthrough(config_path.c_str());
+    if (config_json.failed())
+      return false;
     rj_vm_t *created_vm = nullptr;
-    if (rj_vm_create(config_path.c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
+    if (rj_vm_create_from_string(config_json.value().c_str(), RJ_VM_MODE_LOCAL, &created_vm) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to create VM from ", config_path);
       return false;
@@ -2358,8 +2359,7 @@ public:
       return false;
     }
 
-    std::string config_json = read_file_passthrough(config_path.c_str());
-    if (rj_vm_load_plugins(local_vm_.get(), config_json.c_str(), nullptr) !=
+    if (rj_vm_load_plugins(local_vm_.get(), config_json.value().c_str(), nullptr) !=
         ROCJITSU_STATUS_SUCCESS) {
       util::Logger::debug_print("rocjitsu: failed to configure execution plugins");
       local_vm_.reset();
@@ -3626,16 +3626,21 @@ public:
   /// close), retrying on EINTR.
   /// @details Used during driver construction where re-entering our interposed
   /// I/O path could recurse. Read errors (other than EINTR) are reported and
-  /// yield an empty string, distinct from a successfully read empty file.
-  static std::string read_file_passthrough(const char *path) {
-    if (!real().ready())
-      return {};
+  /// return failure, distinct from a successfully read empty file.
+  static util::FailureOr<std::string> read_file_passthrough(const char *path) {
+    if (!real().ready()) {
+      util::Logger::warn("rocjitsu: cannot read VM configuration: libc passthrough is unavailable");
+      return util::Result::failure();
+    }
     int fd;
     do {
       fd = real().openat(AT_FDCWD, path, O_RDONLY, 0);
     } while (fd < 0 && errno == EINTR);
-    if (fd < 0)
-      return {};
+    if (fd < 0) {
+      util::Logger::warn("rocjitsu: cannot open plugin configuration '", path,
+                         "': ", std::strerror(errno));
+      return util::Result::failure();
+    }
     std::string out;
     char buf[4096] = {};
     for (;;) {
@@ -3645,7 +3650,7 @@ public:
           continue;
         util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
         real().close(fd);
-        return {};
+        return util::Result::failure();
       }
       if (n == 0)
         break; // EOF.
@@ -5014,9 +5019,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
             info->return_size >= sizeof(uint32_t)) {
           *static_cast<uint32_t *>(out) =
-              major == 11
-                  ? rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3)
-                  : rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+              rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
         }
         return 0;
       }

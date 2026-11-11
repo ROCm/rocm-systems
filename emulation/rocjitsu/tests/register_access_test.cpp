@@ -6,20 +6,42 @@
 ///
 /// @details These tests enforce the boundary beneath generated instructions:
 /// observed read masks constrain returned data and observed write masks
-/// constrain modified storage. End-to-end decoded instruction callbacks live
-/// in execution_plugin_test.cpp; the decoded SGPR storage-boundary regression
-/// lives below.
+/// constrain modified storage. They also cover decoded execution-callback
+/// backend preflight and the decoded SGPR storage boundary. End-to-end callback
+/// observation lives in execution_plugin_test.cpp.
 
 #include "decode_test_util.h"
+#ifdef __linux__
+#include <dlfcn.h>
+#include <filesystem>
+#endif
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -28,6 +50,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -36,12 +59,15 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -162,7 +188,9 @@ struct Fixture {
     cfg.sgprs_per_wf = kSgprsPerWave;
     cfg.vgprs_per_wf = vgprs_per_wave;
     cfg.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("register_access_cu", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "register_access_cu", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
 
     plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();
@@ -177,7 +205,220 @@ struct Fixture {
   uint32_t vgpr_base() const { return wf->vgpr_alloc().base; }
 };
 
+template <typename OperandT>
+void check_derived_operand_rejections(Fixture &fx, const IsaExecutionBackend &backend) {
+  using Kind = decltype(std::declval<OperandT>().opr_type_);
+  ASSERT_TRUE(OperandT::full_execution_backend_complete());
+  RegisterAccess registers(*fx.wf);
+  const uint32_t sentinel = 0xA5A5A5A5u;
+  fx.cu->write_vgpr(fx.vgpr_base(), 0, sentinel);
+  fx.cu->write_vgpr(fx.vgpr_base(), 1, sentinel);
+  fx.cu->write_sgpr(fx.sgpr_base(), sentinel);
+  auto check_failure = [&](auto action, InstructionExecutionError expected) {
+    fx.wf->clear_instruction_execution_error();
+    const std::size_t reads_before = fx.plugin->reads.size();
+    const std::size_t scalar_reads_before = fx.plugin->scalar_reads.size();
+    action();
+    EXPECT_EQ(fx.wf->instruction_execution_error(), expected);
+    EXPECT_EQ(fx.plugin->reads.size(), reads_before);
+    EXPECT_EQ(fx.plugin->scalar_reads.size(), scalar_reads_before);
+    EXPECT_TRUE(fx.plugin->writes.empty());
+    EXPECT_TRUE(fx.plugin->scalar_writes.empty());
+    // Readback is observed too, so check access events before verifying storage.
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), sentinel);
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 1), sentinel);
+    EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base()), sentinel);
+  };
+  {
+    ScopedIsaExecutionBackend model_scope(nullptr);
+    OperandT op(32, Kind::OPR_VGPR, 0);
+    EXPECT_FALSE(op.execution_backend_available());
+    EXPECT_FALSE(op.simd_capable());
+    uint32_t out[] = {sentinel, sentinel};
+    const uint32_t values[] = {1, 2};
+    const auto missing = InstructionExecutionError::MissingExecutionBackend;
+    check_failure([&] { (void)registers.read_scalar(op); }, missing);
+    check_failure([&] { (void)registers.read_scalar64(op); }, missing);
+    check_failure([&] { (void)registers.read_lane(op, 0); }, missing);
+    check_failure([&] { (void)registers.read_lane64(op, 0); }, missing);
+    check_failure([&] { registers.read_chunk(op, 0, 2, out); }, missing);
+    EXPECT_EQ(out[0], sentinel);
+    EXPECT_EQ(out[1], sentinel);
+    check_failure([&] { registers.write_scalar(op, 1); }, missing);
+    check_failure([&] { registers.write_scalar64(op, 1); }, missing);
+    check_failure([&] { registers.write_lane(op, 0, 1); }, missing);
+    check_failure([&] { registers.write_lane64(op, 0, 1); }, missing);
+    check_failure([&] { registers.write_chunk(op, 0, 2, values, 3); }, missing);
+  }
+  {
+    ScopedIsaExecutionBackend execution_scope(&backend);
+    OperandT op(32, Kind::OPR_SIMM32, 0);
+    ASSERT_TRUE(op.is_writable());
+    const auto unsupported = InstructionExecutionError::UnsupportedOperandValue;
+    const uint32_t values[] = {1, 2};
+    check_failure([&] { registers.write_lane(op, 0, 1); }, unsupported);
+    check_failure([&] { registers.write_lane64(op, 0, 1); }, unsupported);
+    check_failure([&] { registers.write_chunk(op, 0, 2, values, 3); }, unsupported);
+  }
+  fx.wf->clear_instruction_execution_error();
+}
+
+TEST(RegisterAccessTest, DerivedOperandRejectionsRetainFailureWithoutAccessOrObservation) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  {
+    SCOPED_TRACE("cdna1");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna1::Operand>(fx, cdna1::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna2");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna2::Operand>(fx, cdna2::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna3");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna3::Operand>(fx, cdna3::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna4");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna4::Operand>(fx, cdna4::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna5");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna5::Operand>(fx, cdna5::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna1");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna1::Operand>(fx, rdna1::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna2");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna2::Operand>(fx, rdna2::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna3");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna3::Operand>(fx, rdna3::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna3_5");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna3_5::Operand>(fx, rdna3_5::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna4");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna4::Operand>(fx, rdna4::execution_backend()));
+  }
+}
+
+TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBeforeEffects) {
+  for (bool descriptor_only : {false, true}) {
+    for (bool destination : {false, true}) {
+      SCOPED_TRACE(destination ? "destination" : "source");
+      SCOPED_TRACE(descriptor_only ? "descriptor-only" : "missing backend");
+      Fixture fx;
+      ASSERT_NE(fx.wf, nullptr);
+      constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
+      DecodeResult result = cdna4::Decoder::decode(&word, {});
+      ASSERT_TRUE(result.succeeded());
+      std::unique_ptr<Instruction> instruction = std::move(result).value();
+      ASSERT_NE(instruction->execute, nullptr);
+      auto *operand = const_cast<Operand *>(destination ? instruction->dst_operand(0)
+                                                        : instruction->src_operand(0));
+      ASSERT_NE(operand, nullptr);
+      std::optional<cdna4::Operand> missing;
+      {
+        ScopedIsaExecutionBackend model_scope(nullptr);
+        missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
+      }
+      Operand descriptor(32, 1);
+      Operand *delegate = descriptor_only ? &descriptor : &*missing;
+      cdna4::Operand intermediate(32, cdna4::OperandType::OPR_VGPR, 1);
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+      {
+        ScopedOperandDelegate inner(intermediate, delegate);
+        ScopedOperandDelegate outer(*operand, &intermediate);
+        EXPECT_NO_THROW(instruction->execute(*instruction, fx.wf));
+        EXPECT_EQ(fx.wf->instruction_execution_error(),
+                  InstructionExecutionError::MissingExecutionBackend);
+        EXPECT_TRUE(fx.plugin->reads.empty());
+        EXPECT_TRUE(fx.plugin->writes.empty());
+        for (uint32_t lane = 0; lane < 64; ++lane)
+          EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+      }
+      EXPECT_EQ(operand->delegate(), nullptr);
+      EXPECT_EQ(intermediate.delegate(), nullptr);
+      EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
+      EXPECT_FALSE(ScopedOperandDelegate::active());
+      fx.wf->clear_instruction_execution_error();
+      fx.cu->write_vgpr(fx.vgpr_base() + 1, 0, 0x12345678u);
+      instruction->execute(*instruction, fx.wf);
+      EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+      EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0x12345678u);
+      EXPECT_FALSE(fx.plugin->reads.empty());
+      EXPECT_FALSE(fx.plugin->writes.empty());
+    }
+  }
+}
+
+#ifdef __linux__
+TEST(RegisterAccessTest, ModuleBindingRejectsMissingBackendBeforeEffects) {
+  std::error_code error;
+  const std::filesystem::path executable = std::filesystem::read_symlink("/proc/self/exe", error);
+  ASSERT_FALSE(error) << error.message();
+  const std::filesystem::path module_path =
+      executable.parent_path() / RJ_OPERAND_DELEGATE_PROBE_MODULE;
+  void *module = dlopen(module_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  ASSERT_NE(module, nullptr) << dlerror();
+  using Probe = void (*)(Operand *, Operand *, void *, void (*)(void *, bool));
+  auto probe = reinterpret_cast<Probe>(dlsym(module, "rj_probe_operand_delegate"));
+  ASSERT_NE(probe, nullptr) << dlerror();
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
+  DecodeResult result = cdna4::Decoder::decode(&word, {});
+  ASSERT_TRUE(result.succeeded());
+  std::unique_ptr<Instruction> instruction = std::move(result).value();
+  std::optional<cdna4::Operand> missing;
+  {
+    ScopedIsaExecutionBackend model_scope(nullptr);
+    missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
+  }
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+  struct Context {
+    Instruction *instruction;
+    Wavefront *wave;
+  } context{instruction.get(), fx.wf};
+  probe(const_cast<Operand *>(instruction->src_operand(0)), &*missing, &context,
+        [](void *opaque, bool module_active) {
+          EXPECT_TRUE(module_active);
+          EXPECT_TRUE(ScopedOperandDelegate::active());
+          auto &context = *static_cast<Context *>(opaque);
+          EXPECT_NO_THROW(context.instruction->execute(*context.instruction, context.wave));
+        });
+  EXPECT_EQ(fx.wf->instruction_execution_error(),
+            InstructionExecutionError::MissingExecutionBackend);
+  EXPECT_TRUE(fx.plugin->reads.empty());
+  EXPECT_TRUE(fx.plugin->writes.empty());
+  for (uint32_t lane = 0; lane < 64; ++lane)
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+  EXPECT_EQ(instruction->src_operand(0)->delegate(), nullptr);
+  EXPECT_FALSE(ScopedOperandDelegate::active());
+  EXPECT_EQ(dlclose(module), 0);
+}
+#endif
+
 TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
+  EXPECT_FALSE(ScopedOperandDelegate::active());
   Operand source(32, 1);
   Operand previous(32, 2);
   Operand staged(32, 3);
@@ -185,6 +426,11 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
   {
     ScopedOperandDelegate previous_binding(source, &previous);
     EXPECT_EQ(source.delegate(), &previous);
+    EXPECT_TRUE(ScopedOperandDelegate::active());
+    bool helper_has_binding = true;
+    std::thread helper([&] { helper_has_binding = ScopedOperandDelegate::active(); });
+    helper.join();
+    EXPECT_FALSE(helper_has_binding);
 
     EXPECT_THROW(
         {
@@ -194,12 +440,15 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
         },
         std::runtime_error);
     EXPECT_EQ(source.delegate(), &previous);
+    EXPECT_TRUE(ScopedOperandDelegate::active());
   }
   EXPECT_EQ(source.delegate(), nullptr);
+  EXPECT_FALSE(ScopedOperandDelegate::active());
 
   {
     ScopedOperandDelegate no_binding(source, nullptr);
     EXPECT_EQ(source.delegate(), nullptr);
+    EXPECT_FALSE(ScopedOperandDelegate::active());
   }
 }
 
@@ -221,6 +470,7 @@ TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
                      /*absolute=*/false, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
 
   ASSERT_TRUE(storage.has_value());
+  EXPECT_TRUE(storage->execution_backend_available());
   ASSERT_EQ(fx.plugin->reads.size(), 1u);
   EXPECT_EQ(fx.plugin->reads[0].physical_reg, physical_vgpr);
   EXPECT_EQ(fx.plugin->reads[0].lane_mask, 0b0101u);
@@ -997,6 +1247,22 @@ TEST(RegisterAccessTest, Scalar64OperandAndExplicitMaskWritesAreAtomic) {
   EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
 }
 
+TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
+  // CLR's gfx1030 pitched-copy kernel uses V_MAD_U64_U32 with SDST=NULL.
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec_raw(0x123456789abcdef0ull);
+    fx.wf->set_vcc_raw(0x13579bdf2468ace0ull);
+    resolve_dst_write(*fx.wf, kGfx10NullSelector, ~uint32_t{0}, 124);
+    resolve_dst_write64(*fx.wf, kGfx10NullSelector, ~uint64_t{0});
+    EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+    EXPECT_EQ(fx.wf->exec_raw(), 0x123456789abcdef0ull);
+    EXPECT_EQ(fx.wf->vcc(), 0x13579bdf2468ace0ull);
+    EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+  }
+}
+
 TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -1054,6 +1320,51 @@ TEST(RegisterAccessTest, Vgpr64AccessRequiresOneOwnerForCompleteRange) {
   EXPECT_TRUE(fx.plugin->reads.empty());
 }
 
+TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
+  constexpr uint32_t vgprs = 32;
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, vgprs);
+  ASSERT_NE(fx.wf, nullptr);
+  auto *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, vgprs);
+  ASSERT_NE(neighbor, nullptr);
+  ASSERT_EQ(neighbor->vgpr_alloc().base, fx.vgpr_base() + vgprs);
+  fx.wf->set_exec(1);
+  constexpr uint8_t format = 46;                   // 8_8_8_8_UINT.
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 4u << 16); // Four-byte stride.
+  fx.cu->write_sgpr(fx.sgpr_base() + 6, 1);        // One record.
+  fx.cu->write_sgpr(fx.sgpr_base() + 7, format << 12);
+  fx.cu->write_vgpr(fx.vgpr_base() + 30, 0, 0x00220011);
+  fx.cu->write_vgpr(fx.vgpr_base() + 31, 0, 0x00440033);
+  fx.cu->write_vgpr(neighbor->vgpr_alloc().base, 0, 0x00660055);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto store = [&](uint8_t vdata, std::array<uint8_t, 3> xyz) {
+    const auto words = rdna4::build_vbuffer(
+        rdna4::kTbufferStoreD16FormatXyzVbuffer,
+        {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = vdata, .rsrc = 4, .format = format});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    const auto *state = inst->data_as<VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    ASSERT_EQ(state->lane_mask, 1u);
+    ASSERT_GE(state->store_data.size(), xyz.size());
+    for (size_t i = 0; i < xyz.size(); ++i)
+      EXPECT_EQ(state->store_data[i], xyz[i]);
+  };
+
+  store(30, {0x11, 0x22, 0x33});
+  ASSERT_EQ(fx.plugin->reads.size(), 2u);
+  EXPECT_EQ(fx.plugin->reads[0].physical_reg, fx.vgpr_base() + 30);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+  EXPECT_EQ(fx.plugin->reads[1].physical_reg, fx.vgpr_base() + 31);
+  EXPECT_EQ(fx.plugin->reads[1].byte_mask, ExecutionPlugin::kLowHalfByteMask);
+
+  fx.plugin->reads.clear();
+  store(31, {0, 0, 0});
+  EXPECT_TRUE(fx.plugin->reads.empty());
+}
+
 TEST(RegisterAccessTest, DeniedMultiRegisterReadRegionReturnsBoundedZeros) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
   ASSERT_NE(fx.wf, nullptr);
@@ -1079,6 +1390,25 @@ TEST(RegisterAccessTest, DeniedMultiRegisterReadRegionReturnsBoundedZeros) {
                   })
                   .succeeded());
   EXPECT_EQ(visited, 2u);
+}
+
+// Empty arithmetic inputs must not materialize uniform sources as a side effect.
+TEST(RegisterAccessTest, ArithmeticInputsWithNoLanesDoNotReadScalarSources) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  RegisterAccess registers(*fx.wf);
+  cdna4::Operand source(32, cdna4::OperandType::OPR_SRC, 8);
+  fx.cu->write_sgpr(fx.sgpr_base() + 8, 0x12345678u);
+  fx.cu->write_sgpr(fx.sgpr_base() + 9, 0xabcdef01u);
+  arith::VectorInput32 narrow(registers, *fx.wf, source, 0);
+  source.size_bits_ = 64;
+  arith::VectorInput64 wide(registers, *fx.wf, source, 0);
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+    EXPECT_EQ(narrow.data[lane], 0u);
+    EXPECT_EQ(wide.data[0][lane], 0u);
+    EXPECT_EQ(wide.data[1][lane], 0u);
+  }
 }
 
 TEST(RegisterAccessTest, ZeroLaneMaskDoesNotMeanOwnershipDenial) {
@@ -1881,6 +2211,62 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
   EXPECT_FALSE(visited);
   expect_failure([&] { return region.copy_to(std::span(words).first(fx.wf->wf_size())); });
   expect_failure([&] { return region.copy_dwords_lane_major(bytes, 1); });
+}
+
+TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/64);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 64u);
+  for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+    fx.cu->write_vgpr(fx.vgpr_base(), lane, 0x12340000u + lane);
+  auto region = RegisterAccess(*fx.wf).read_vgpr_region(
+      fx.vgpr_base(), /*reg_count=*/1, /*lane_mask=*/~uint64_t{0}, ExecutionPlugin::kFullByteMask);
+  ASSERT_TRUE(region.valid());
+  std::array<uint32_t, 65> words;
+  words.fill(0xAABBCCDDu);
+  const auto original_words = words;
+
+  fx.wf->clear_instruction_execution_error();
+  ASSERT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  ASSERT_EQ(fx.wf->instruction_execution_error_detail(), nullptr);
+  EXPECT_TRUE(region.copy_to(words).failed());
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::InvalidRegisterAccess);
+  EXPECT_STREQ(fx.wf->instruction_execution_error_detail(), "destination exceeds read region");
+  EXPECT_EQ(words, original_words);
+}
+
+TEST(RegisterAccessTest, TypedScalarAccessPreservesObservationAndReadDelegates) {
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, 1, /*vgprs_per_wave=*/4);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_exec(1);
+  fx.cu->write_sgpr(fx.sgpr_base(), 41);
+  fx.plugin->sgpr_reads.clear();
+  fx.plugin->sgpr_writes.clear();
+  fx.plugin->reads.clear();
+  cdna4::Operand src(32, cdna4::OperandType::OPR_SSRC, 0);
+  cdna4::Operand dst(32, cdna4::OperandType::OPR_SDST, 1);
+  cdna4::Operand vector(32, cdna4::OperandType::OPR_VGPR, 127);
+  ASSERT_FALSE(src.is_vgpr());
+  ASSERT_FALSE(dst.is_vgpr());
+  RegisterAccess registers(*fx.wf);
+  EXPECT_EQ(registers.read_scalar(src), 41u);
+  registers.write_scalar(dst, 42);
+  EXPECT_EQ(fx.cu->read_sgpr_storage(fx.sgpr_base() + 1), 42u);
+  EXPECT_EQ(fx.plugin->sgpr_reads, std::vector<uint32_t>{fx.sgpr_base()});
+  EXPECT_EQ(fx.plugin->sgpr_writes, std::vector<uint32_t>{fx.sgpr_base() + 1});
+  {
+    ScopedOperandDelegate delegate(src, &dst);
+    EXPECT_EQ(registers.read_scalar(src), 42u);
+  }
+  const auto scalar_reads = fx.plugin->sgpr_reads.size();
+  {
+    // Reject unowned VGPR backing before interpreting the delegated scalar selector.
+    ScopedOperandDelegate delegate(src, &vector);
+    EXPECT_EQ(registers.read_scalar(src), 0u);
+  }
+  EXPECT_EQ(fx.plugin->sgpr_reads.size(), scalar_reads);
+  EXPECT_TRUE(fx.plugin->reads.empty());
 }
 
 TEST(RegisterAccessTest, ScalarBackedPartialByteStoresRejectBeforeObservation) {

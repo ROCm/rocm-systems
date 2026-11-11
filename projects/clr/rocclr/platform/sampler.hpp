@@ -37,6 +37,10 @@ class Sampler : public RuntimeObject {
   float maxLod_;                   //!< max level of detail
   DeviceSamplers deviceSamplers_;  //!< Container for the device samplers
   uint addressMode_[3];            //!< address modes in X, Y and Z
+  //! Maximum anisotropy ratio. 0 and 1 both mean isotropic filtering. Kept as a
+  //! separate member rather than packed into state_, because state_'s bit layout
+  //! is contractual with the compiler (see the note above the State enum).
+  uint32_t maxAnisotropy_;
 
  public:
   Sampler(Context& context,    //!< context for OCL
@@ -45,12 +49,14 @@ class Sampler : public RuntimeObject {
           uint filterMode,     //!< filter mode
           uint mipFilterMode,  //!< mip filter mode
           float minLod,        //!< min level of detail
-          float maxLod         //!< max level of detail
+          float maxLod,        //!< max level of detail
+          uint32_t maxAnisotropy = 0  //!< max anisotropy ratio, 0/1 = isotropic
           )
       : context_(context),
         mipFilter_(mipFilterMode),
         minLod_(minLod),
-        maxLod_(maxLod) {  // Packs the sampler state into uint32_t for kernel execution
+        maxLod_(maxLod),
+        maxAnisotropy_(maxAnisotropy) {  // Packs the sampler state into uint32_t for kernel execution
     state_ = 0;
     for (int i = 0; i < 3; i++) addressMode_[i] = addrMode;
 
@@ -75,9 +81,11 @@ class Sampler : public RuntimeObject {
           uint filterMode,         //!< filter mode
           uint mipFilterMode,      //!< mip filter mode
           float minLod,            //!< min level of detail
-          float maxLod             //!< max level of detail
+          float maxLod,            //!< max level of detail
+          uint32_t maxAnisotropy = 0  //!< max anisotropy ratio, 0/1 = isotropic
           )
-      : Sampler(context, normCoords, addrMode[0], filterMode, mipFilterMode, minLod, maxLod) {
+      : Sampler(context, normCoords, addrMode[0], filterMode, mipFilterMode, minLod, maxLod,
+                maxAnisotropy) {
     addressMode_[1] = addrMode[1];
     addressMode_[2] = addrMode[2];
   }
@@ -116,6 +124,7 @@ class Sampler : public RuntimeObject {
   uint mipFilter() const { return mipFilter_; }
   float minLod() const { return minLod_; }
   float maxLod() const { return maxLod_; }
+  uint32_t maxAnisotropy() const { return maxAnisotropy_; }
   const uint* addessMode() const { return addressMode_; }
   bool normalizedCoords() const { return (state_ & StateNormalizedCoordsTrue) ? true : false; }
 

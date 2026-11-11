@@ -14,12 +14,13 @@
 //   RoundTrip* - pack, store, poll and unpack return the source and write nothing past it
 //   WriterOn*NeverYieldsOldPayload - a writer on another CU or a peer GPU fills the slice while
 //                the receiver polls; no returned word may be older than its flags
+//   WriterOn*StagedNeverYieldsOldPayload - the same, the writer storing through the LDS window with async b128 stores
 //   AbortEndsPoll - a raised abort flag ends the poll
 //   WaitBatch* - the batched poll returns every valid entry's payload under the current flag, waits for a
 //                late entry, ignores an invalid entry that never gets the flag, and ends on abort
 //
-// Every test but CooperativeLoadOnGfx1250 and WaitBatch* has a *Batched twin, run with the batched
-// load and poll pair the AllGather LL128 kernel uses.
+// Every test but CooperativeLoadOnGfx1250, WaitBatch* and *Staged* has a *Batched twin, run with the batched
+// load and poll pair the AllGather LL128 kernel uses, and the AlltoAll one with the cooperative builtins.
 // The host raises the abort flag after kWatchdog, so a broken poll fails instead of hanging.
 
 #include <chrono>
@@ -47,6 +48,8 @@ using dda::common::kDdaLL128FlagElem;
 using dda::common::kDdaLL128LineElems;
 using dda::common::kDdaLL128Pairs;
 using dda::common::kDdaLL128Warp;
+using dda::common::kDdaLL128WireAsync;
+using dda::common::kDdaLL128WireBytesPerSlice;
 using dda::common::kDdaLL128WireWordsPerSlice;
 using dda::common::kDdaLL128WordsPerThread;
 
@@ -68,7 +71,8 @@ __host__ __device__ inline uint64_t roundFlag(uint32_t round) { return (uint64_t
 // This lane's first 16B chunk of the slice, as the production callers address it.
 __device__ inline uint64_t* laneSlot(uint64_t* wire, int lane) { return wire + 2 * lane; }
 
-// kBatched picks the batched load and poll the AllGather LL128 kernel uses over the plain pair.
+// kBatched picks the batched load and poll over the plain pair (AllGather LL128, and AlltoAll
+// LL128 with the cooperative builtins).
 template <bool kBatched>
 __device__ void loadRegs(uint64_t (&regs)[kDdaLL128WordsPerThread], const int8_t* src, int elt, int lane,
                          bool flagLane) {
@@ -96,6 +100,8 @@ struct LiveResult {
 };
 
 __global__ void cooperativeLoadEnabled(int* out) { *out = RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS; }
+
+__global__ void stagedWireEnabled(int* out) { *out = dda::common::ddaLL128Staged<kDdaLL128WireAsync>() ? 1 : 0; }
 
 // One 32-thread block per slice: pack, store, poll back, unpack.
 template <bool kBatched>
@@ -144,6 +150,46 @@ __device__ void writeRounds(uint64_t* slot, const uint32_t* ack, int lane, int r
   }
 }
 
+// writeRounds via ddaLL128StageFill and async b128 stores, one 512B row (four lines) per pause; wire is the slice base.
+__device__ void writeRoundsStaged(uint64_t* wire, const uint32_t* ack, int lane, int rounds, DdaKernelParams params) {
+#if ASYNC_COPY_SUPPORTED
+  constexpr size_t kRowBytes = kDdaLL128WireBytesPerSlice / kDdaLL128Pairs;
+  __shared__ __attribute__((aligned(128))) uint8_t lds[dda::common::ddaLL128StageBytes(kDdaLL128Warp)];
+  dda::common::DdaLL128Stage st = dda::common::ddaLL128StageInit(lds, 0);
+  const bool flagLane = ddaLL128IsFlagLane(lane);
+  for (uint32_t r = 0; r < (uint32_t)rounds; ++r) {
+    if (!waitAtLeast(ack, r, params)) {
+      break;
+    }
+    uint64_t regs[kDdaLL128WordsPerThread];
+    for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+      regs[u] = payloadWord(r, lane, u);
+    }
+    dda::common::ddaLL128StageFill<kDdaLL128WireAsync>(st, regs, roundFlag(r), flagLane, lane);
+    const uint8_t* window = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice;
+    const int first = r % kDdaLL128Pairs;
+    const bool reverse = ((r / kDdaLL128Pairs) & 1) != 0;
+    const int pause = r % 3;
+    for (int k = 0; k < kDdaLL128Pairs; ++k) {
+      const int g = reverse ? (first - k + kDdaLL128Pairs) % kDdaLL128Pairs : (first + k) % kDdaLL128Pairs;
+      asyncStoreFromLDS<SyncPolicy::Async, dda::common::kDdaLL128StagePolicy, true>(
+        window + g * kRowBytes, reinterpret_cast<uint8_t*>(wire) + g * kRowBytes, kRowBytes);
+      st.lastOps += asyncAlignedCopyOps<kRowBytes, kDdaLL128Warp>();
+      for (int p = 0; p < pause; ++p) {
+        __builtin_amdgcn_s_sleep(8);
+      }
+    }
+  }
+  dda::common::ddaLL128StageDrain<kDdaLL128WireAsync>();
+#else
+  (void)wire;
+  (void)ack;
+  (void)lane;
+  (void)rounds;
+  (void)params;
+#endif
+}
+
 // Waits until the writer has started round r. Returns 1 if the slice was half written, 0 if
 // complete, -1 on abort.
 __device__ int waitForFirstLine(const uint64_t* slot, uint32_t r, int lane, DdaKernelParams params) {
@@ -190,14 +236,24 @@ __device__ void readRounds(const uint64_t* slot, uint32_t* ack, int lane, int ro
   }
 }
 
+// Writes every round with writeRounds, or with writeRoundsStaged if kStaged.
+template <bool kStaged>
+__device__ void writeLive(uint64_t* wire, const uint32_t* ack, int lane, int rounds, DdaKernelParams params) {
+  if constexpr (kStaged) {
+    writeRoundsStaged(wire, ack, lane, rounds, params);
+  } else {
+    writeRounds(laneSlot(wire, lane), ack, lane, rounds, params);
+  }
+}
+
 // Block 0 receives, block 1 writes.
-template <bool kBatched>
+template <bool kBatched, bool kStaged>
 __global__ void liveSameGpu(uint64_t* wire, uint32_t* ack, int rounds, DdaKernelParams params, LiveResult* out) {
   const int lane = threadIdx.x;
   if (blockIdx.x == 0) {
     readRounds<kBatched>(laneSlot(wire, lane), ack, lane, rounds, params, out);
   } else {
-    writeRounds(laneSlot(wire, lane), ack, lane, rounds, params);
+    writeLive<kStaged>(wire, ack, lane, rounds, params);
   }
 }
 
@@ -207,9 +263,9 @@ __global__ void liveReader(uint64_t* wire, uint32_t* ack, int rounds, DdaKernelP
   readRounds<kBatched>(laneSlot(wire, lane), ack, lane, rounds, params, out);
 }
 
+template <bool kStaged>
 __global__ void liveWriter(uint64_t* wire, const uint32_t* ack, int rounds, DdaKernelParams params) {
-  const int lane = threadIdx.x;
-  writeRounds(laneSlot(wire, lane), ack, lane, rounds, params);
+  writeLive<kStaged>(wire, ack, threadIdx.x, rounds, params);
 }
 
 template <bool kBatched>
@@ -533,7 +589,16 @@ protected:
     }
   }
 
-  template <bool kBatched>
+  // Skips a *Staged test on a device pass without async LDS stores, where there is no staged writer.
+  bool stagedWireBuilt() {
+    DeviceBuffer<int> out(1);
+    out.upload(-1);
+    hipLaunchKernelGGL(stagedWireEnabled, dim3(1), dim3(1), 0, nullptr, out.ptr);
+    syncAndCheck();
+    return out.download() == 1;
+  }
+
+  template <bool kBatched, bool kStaged = false>
   void WriterOnAnotherCuNeverYieldsOldPayload() {
     auto wire = allocScratch(kDdaLL128WireWordsPerSlice * sizeof(uint64_t));
     auto ack = allocScratch(sizeof(uint32_t));
@@ -543,7 +608,7 @@ protected:
     auto stream = makeStream();
     auto drain = drainOnExit(abort, {{0, stream.get()}});
 
-    hipLaunchKernelGGL(liveSameGpu<kBatched>, dim3(2), dim3(kDdaLL128Warp), 0, stream.get(),
+    hipLaunchKernelGGL((liveSameGpu<kBatched, kStaged>), dim3(2), dim3(kDdaLL128Warp), 0, stream.get(),
                        static_cast<uint64_t*>(wire.get()), static_cast<uint32_t*>(ack.get()), kRounds, abort.params(),
                        result.ptr);
     HIP_CHECK(hipGetLastError());
@@ -551,7 +616,7 @@ protected:
     expectLiveResult(result.download(), timedOut);
   }
 
-  template <bool kBatched>
+  template <bool kBatched, bool kStaged = false>
   void WriterOnPeerGpuNeverYieldsOldPayload() {
     int n = 0;
     if (hipGetDeviceCount(&n) != hipSuccess || n < 2 || !isGfx1250(1) || !havePeerAccess(0, 1)) {
@@ -583,7 +648,7 @@ protected:
                        result.ptr);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipSetDevice(kWriter));
-    hipLaunchKernelGGL(liveWriter, dim3(1), dim3(kDdaLL128Warp), 0, writerStream.get(),
+    hipLaunchKernelGGL(liveWriter<kStaged>, dim3(1), dim3(kDdaLL128Warp), 0, writerStream.get(),
                        static_cast<uint64_t*>(wire.get()), static_cast<uint32_t*>(ack.get()), kRounds, abort.params());
     HIP_CHECK(hipGetLastError());
     const bool timedOut = waitOrAbort(streams, abort);
@@ -658,6 +723,21 @@ TEST_F(DdaLL128PollWire, WriterOnPeerGpuNeverYieldsOldPayload) {
 
 TEST_F(DdaLL128PollWire, WriterOnPeerGpuNeverYieldsOldPayloadBatched) {
   WriterOnPeerGpuNeverYieldsOldPayload<true>();
+}
+
+TEST_F(DdaLL128PollWire, WriterOnAnotherCuStagedNeverYieldsOldPayload) {
+  if (!stagedWireBuilt()) {
+    GTEST_SKIP() << "this device pass has no async LDS stores";
+  }
+  WriterOnAnotherCuNeverYieldsOldPayload<false, true>();
+}
+
+// Same bound as WriterOnPeerGpuNeverYieldsOldPayload: the abort flag, not process isolation.
+TEST_F(DdaLL128PollWire, WriterOnPeerGpuStagedNeverYieldsOldPayload) {
+  if (!stagedWireBuilt()) {
+    GTEST_SKIP() << "this device pass has no async LDS stores";
+  }
+  WriterOnPeerGpuNeverYieldsOldPayload<false, true>();
 }
 
 TEST_F(DdaLL128PollWire, AbortEndsPoll) {

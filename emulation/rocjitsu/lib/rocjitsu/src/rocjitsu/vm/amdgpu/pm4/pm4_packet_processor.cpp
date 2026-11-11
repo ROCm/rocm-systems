@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/circular_ring_reader.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -175,6 +176,28 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       const auto address = [&](size_t index) {
         return uint64_t{words[index]} | (uint64_t{words[index + 1]} << 32);
       };
+      const auto read_registers = [&](uint32_t dword_offset, std::span<uint32_t> registers) {
+        const uint64_t base = address(0);
+        uint64_t source = base + uint64_t{dword_offset} * sizeof(uint32_t);
+        auto bytes = std::as_writable_bytes(registers);
+        // Native rings use raw VAs. Indexed loads can also supply a full VA.
+        if (!queue.submission_queue || (base >> 48) != 0)
+          return access->read(source, bytes);
+
+        // DRM maps the two halves of a 48-bit packet address in separate VA ranges.
+        constexpr uint64_t high_half = uint64_t{1} << 47;
+        if (source + bytes.size() > 2 * high_half)
+          return VmAccessOutcome::Faulted;
+        if (source < high_half && bytes.size() > high_half - source) {
+          const size_t low_bytes = high_half - source;
+          const auto outcome = access->read(source, bytes.first(low_bytes));
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+          source = high_half;
+          bytes = bytes.subspan(low_bytes);
+        }
+        return access->read(addr_calc::buffer_virtual_address(source), bytes);
+      };
       const uint32_t opcode =
           type == 2 || header == 0xffff1000 ? uint32_t(Pm4Opcode::Nop) : (header >> 8) & 0xff;
       util::Logger::vm([&](auto &os) {
@@ -325,7 +348,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             T value;
             std::memcpy(&value, bytes.data(), sizeof(value));
             value = apply_int_atomic(atomic, value, static_cast<T>(address(3)),
-                                     static_cast<T>(address(5)));
+                                     static_cast<T>(address(5)))
+                        .value();
             std::memcpy(bytes.data(), &value, sizeof(value));
           });
         };
@@ -488,9 +512,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           const uint32_t first = words[i], count = words[i + 1];
           // Shadow storage is indexed by the register offset, not packed by
           // the order of the ranges in this packet.
-          if (access->read(address(0) + uint64_t{first} * 4,
-                           {reinterpret_cast<std::byte *>(registers.data() + first), count * 4}) !=
-              VmAccessOutcome::Complete)
+          if (read_registers(first, registers.subspan(first, count)) != VmAccessOutcome::Complete)
             return fail("PM4 shadow register load read failed");
         }
         break;
@@ -511,8 +533,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported register load range or mode");
         if (flush_caches().failed())
           return util::Result::failure();
-        if (access->read(address(0), {reinterpret_cast<std::byte *>(registers.data() + first),
-                                      count * 4}) != VmAccessOutcome::Complete)
+        if (read_registers(0, registers.subspan(first, count)) != VmAccessOutcome::Complete)
           return fail("PM4 register load read failed");
         break;
       }

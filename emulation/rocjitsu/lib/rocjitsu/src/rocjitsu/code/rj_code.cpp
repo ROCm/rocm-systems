@@ -150,7 +150,8 @@ rj_status_t rj_code_inst_list_create(rj_code_object_t *obj, rj_code_target_id_t 
       // at word zero for each section.
       std::size_t word_index = 0;
       while (word_index < inst_data_size) {
-        DecodeResult decoded = decoder->decode(&inst_data[word_index]);
+        DecodeResult decoded =
+            decoder->decode_window(std::span(inst_data + word_index, inst_data_size - word_index));
         if (decoded.failed())
           return ROCJITSU_STATUS_ERROR;
         std::unique_ptr<Instruction> inst = std::move(decoded).value();

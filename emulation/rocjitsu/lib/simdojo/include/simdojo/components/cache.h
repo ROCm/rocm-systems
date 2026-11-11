@@ -357,6 +357,23 @@ public:
     }
   }
 
+  /// @brief Invalidate clean cache lines, preserving unpublished dirty state.
+  /// @details The caller must exclude concurrent accesses during this traversal.
+  void invalidate_clean() {
+    for (uint32_t set = 0; set < NumSets; ++set) {
+      if (!touched_sets_[set])
+        continue;
+      for (uint32_t way = 0; way < Associativity; ++way) {
+        CacheTag &tag = tag_at(set, way);
+        if (tag.valid && !tag.dirty) {
+          tag.coherence_epoch = 0;
+          tag.valid = false;
+          tag.coherence = CoherenceState::INVALID;
+        }
+      }
+    }
+  }
+
   /// @brief Read from a cache line (must be a hit - caller ensures via lookup).
   /// @param addr The memory address identifying the cache line.
   /// @param dst Destination buffer for the read data.

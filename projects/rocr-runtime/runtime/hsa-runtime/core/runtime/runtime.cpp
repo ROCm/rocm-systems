@@ -123,6 +123,7 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -2817,6 +2818,7 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2851,6 +2853,7 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -5152,8 +5155,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;

@@ -67,8 +67,9 @@ RJ_NOINLINE void operator delete(void *memory, const std::nothrow_t &) noexcept 
 
 TEST(FileLoadingAllocationFailureTest, TranslatesImageAllocationFailure) {
   constexpr size_t kImageSize = 65536;
-  const rocjitsu::test::ScopedTempFile file("rocjitsu_allocation_");
-  file.write(std::string(kImageSize, '\0'));
+  rocjitsu::test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu_allocation_"));
+  ASSERT_TRUE(file.write(std::string(kImageSize, '\0')));
   char sentinel;
   auto *const original = reinterpret_cast<rj_code_executable_t *>(&sentinel);
   rj_code_executable_t *executable = original;

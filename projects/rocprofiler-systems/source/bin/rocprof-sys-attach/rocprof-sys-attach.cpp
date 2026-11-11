@@ -184,34 +184,34 @@ void
 parse_pid(attach_options& opts, const char* arg)
 {
     auto const pid = rocprofsys::utility::string::safe_stoi(arg);
-    if(!pid)
+    if(pid.is_error())
     {
-        LOG_ERROR("Invalid PID '{}'.", arg);
+        LOG_ERROR("Invalid PID '{}': {}.", arg, pid.error());
         std::exit(EXIT_FAILURE);
     }
-    if(*pid <= 0)
+    if(pid.value() <= 0)
     {
         LOG_ERROR("PID must be a positive integer.");
         std::exit(EXIT_FAILURE);
     }
-    opts.pid = *pid;
+    opts.pid = pid.value();
 }
 
 void
 parse_detach_after(attach_options& opts, const char* arg)
 {
     auto const detach_after = rocprofsys::utility::string::safe_stoi(arg);
-    if(!detach_after)
+    if(detach_after.is_error())
     {
-        LOG_ERROR("Invalid --detach-after value '{}'.", arg);
+        LOG_ERROR("Invalid --detach-after value '{}': {}.", arg, detach_after.error());
         std::exit(EXIT_FAILURE);
     }
-    if(*detach_after < 0)
+    if(detach_after.value() < 0)
     {
         LOG_ERROR("--detach-after must be non-negative.");
         std::exit(EXIT_FAILURE);
     }
-    opts.detach_after = *detach_after;
+    opts.detach_after = detach_after.value();
 }
 
 void

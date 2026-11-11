@@ -11,8 +11,10 @@
 /// sink, so construction order and lifetime are explicit in the type.
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
-/// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin. Every fanout in one group shares a sink mutex so
+/// combining configured sinks + an optional per-plugin FileSink, and
+/// assigns it to the plugin. Loader-created groups defer file opening until
+/// onInit(), after the outgoing group has shut down and been destroyed.
+/// Every fanout in one group shares a sink mutex so
 /// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
@@ -94,6 +96,20 @@ public:
 
   ~ExecutionPluginGroup() = default;
 
+  /// Defer file creation until plugin admission is complete. Call before add().
+  void defer_file_sinks() { file_sinks_deferred_ = !sink_dir_.empty(); }
+
+  /// Open deferred files after outgoing group destruction, before initialization.
+  void activate_file_sinks() {
+    if (!file_sinks_deferred_)
+      return;
+    file_sinks_deferred_ = false;
+    for (auto &entry : plugins_) {
+      entry.sink = build_sink_bundle(entry.plugin->name() + ".log");
+      entry.plugin->sink_ = entry.sink.get();
+    }
+  }
+
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
     if (!p)
@@ -112,6 +128,7 @@ public:
     const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
+    const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     observes_before_execute_instruction_ |= observes_before_execute_instruction;
     observes_after_execute_instruction_ |= observes_after_execute_instruction;
@@ -123,15 +140,17 @@ public:
     observes_scalar_register_writes_ |= observes_scalar_register_writes;
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
+    observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
     supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
-    plugins_.push_back(PluginEntry{
-        std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
-        observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
-        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
-        observes_memory_routing, observes_tensor_dma_memory_access, std::move(p)});
+    plugins_.push_back(
+        PluginEntry{std::move(sink), observes_before_execute_instruction,
+                    observes_after_execute_instruction, observes_async_instruction_issued,
+                    observes_memory_instruction_routing, observes_vgpr_reads, observes_vgpr_writes,
+                    observes_sgpr_reads, observes_scalar_register_writes, observes_memory_routing,
+                    observes_tensor_dma_memory_access, observes_tensor_dma_issue, std::move(p)});
     return true;
   }
 
@@ -166,6 +185,10 @@ public:
   /// @details False for an empty group, so the caller's guard covers both.
   bool observes_tensor_dma_memory_access() const { return observes_tensor_dma_memory_access_; }
 
+  /// @brief Whether any contained plugin consumes the tensor-DMA issue hook.
+  /// @details False for an empty group, so the caller's guard covers both.
+  bool observes_tensor_dma_issue() const { return observes_tensor_dma_issue_; }
+
   /// Whether any contained plugin observes SGPR reads. Plugin policy is
   /// sampled when each plugin is added so SGPR access stays O(1).
   bool observes_sgpr_reads() const { return observes_sgpr_reads_; }
@@ -175,6 +198,7 @@ public:
   // completes before callbacks start, and onShutdown() starts after they stop.
   // callback_mutex_ orders simulation callbacks, not lifecycle teardown.
   void onInit() {
+    activate_file_sinks();
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onInit();
@@ -308,6 +332,28 @@ public:
         if (entry.observes_tensor_dma_memory_access &&
             plugin_observes_hot_hooks(index, &wf, cached))
           entry.plugin->onAmdgpuTensorDmaMemoryAccess(access, wf);
+      }
+    });
+  }
+
+  /// Whether any tensor-DMA issue observer is subscribed to this wavefront.
+  bool observes_tensor_dma_issue(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
+  }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuTensorDmaIssued(issue, wf);
       }
     });
   }
@@ -454,10 +500,10 @@ public:
     });
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBarrierResolved(wavefronts);
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, kind);
     });
   }
 
@@ -596,6 +642,7 @@ private:
   bool observes_vgpr_writes_ = false;
   bool observes_memory_routing_ = false;
   bool observes_tensor_dma_memory_access_ = false;
+  bool observes_tensor_dma_issue_ = false;
   bool observes_sgpr_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool supports_async_instructions_ = true;
@@ -637,8 +684,8 @@ private:
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
   [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
-    bool has_file = !sink_dir_.empty() && !file_name.empty();
-    if (configured_sinks_.empty() && !has_file)
+    bool has_file = !file_sinks_deferred_ && !sink_dir_.empty() && !file_name.empty();
+    if (configured_sinks_.empty() && !has_file && !file_sinks_deferred_)
       return {};
 
     SinkBundle result;
@@ -668,6 +715,7 @@ private:
   std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
+  bool file_sinks_deferred_ = false;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {
@@ -682,6 +730,7 @@ private:
     bool observes_scalar_register_writes = true;
     bool observes_memory_routing = false;
     bool observes_tensor_dma_memory_access = false;
+    bool observes_tensor_dma_issue = false;
     OwnedPlugin plugin;
   };
 

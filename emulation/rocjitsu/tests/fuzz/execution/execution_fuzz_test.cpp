@@ -121,6 +121,20 @@ TEST(ExecutionFuzzTargetTest, RandomMixRunsGeneratedKernelsAcrossTargets) {
   }
 }
 
+TEST(ExecutionFuzzInputTest, TrailingLiteralLeavesEnoughBytesToFetchLastTerminator) {
+  for (const FuzzTarget target : {FuzzTarget::Gfx908, FuzzTarget::Gfx90a, FuzzTarget::Gfx942}) {
+    SCOPED_TRACE(target_name(target));
+    for (const uint8_t memory_mode : {uint8_t{0}, kCacheMemoryBit}) {
+      SCOPED_TRACE(memory_mode);
+      // s_mov_b32 s0, literal. It consumes the first appended terminator as its literal.
+      const std::array<uint8_t, 6> input = {
+          static_cast<uint8_t>(target), memory_mode, 0xff, 0x00, 0x80, 0xbe};
+      const RunStats stats = run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
+      EXPECT_EQ(stats.waves_halted, 1u);
+    }
+  }
+}
+
 TEST(ExecutionFuzzInputTest, GeneratedKernelBranchTargetsAndMemoryWaits) {
   for (uint8_t index = 0; index < static_cast<uint8_t>(FuzzTarget::Count); ++index) {
     const FuzzTarget target = *indexed_target(index);
@@ -362,8 +376,13 @@ TEST(ExecutionFuzzInputTest, WmmaPrefixStartsAtExactCapacity) {
           for (unsigned byte = 0; byte < sizeof(word); ++byte)
             expected.push_back(static_cast<uint8_t>(word >> (8 * byte)));
       };
-      append(first_wmma);
-      append(second_wmma);
+      auto first = first_wmma, second = second_wmma;
+      if (test_case.seed & 16) {
+        first[0] = (first[0] & 0xff00ffffU) | (cdna5::kVWmmaF3232x16x128F4Vop3p << 16);
+        second[0] = (second[0] & 0xff00ffffU) | (cdna5::kVWmmaF3232x16x128F4Vop3p << 16);
+      }
+      append(first);
+      append(second);
       ASSERT_EQ(expected.size(), input_size);
       EXPECT_EQ(random_input(test_case.seed, input_size, target), expected);
     }
@@ -446,10 +465,12 @@ TEST(ExecutionFuzzInputTest, GeneratedInputsSelectSyncAsyncAndConcurrentExecutio
     EXPECT_EQ(stats.async_enabled_inputs, async);
     EXPECT_EQ(stats.concurrent_inputs, concurrent);
     EXPECT_EQ(stats.issuer_executions, concurrent ? 2u : 1u);
-    if (async)
+    // Odd rounds use the FP4 prefix; even rounds keep migrated FP8 on the issuer.
+    if (async) {
       EXPECT_GT(stats.async_executed, 0u);
-    else
+    } else {
       EXPECT_EQ(stats.async_executed, 0u);
+    }
   }
 }
 
@@ -494,7 +515,7 @@ TEST(ExecutionFuzzInputTest, ExplicitModesOverrideInputSelection) {
   const RunStats asynchronous =
       run_input(synchronous_input, FuzzTarget::Gfx1250, resources, AsyncMode::Enabled, 1);
   EXPECT_EQ(asynchronous.async_enabled_inputs, 1u);
-  EXPECT_GT(asynchronous.async_executed, 0u);
+  EXPECT_EQ(asynchronous.async_executed, 0u);
   EXPECT_EQ(asynchronous.concurrent_inputs, 0u);
   EXPECT_EQ(asynchronous.issuer_executions, 1u);
 }
@@ -551,8 +572,12 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
     workers.emplace_back([&, worker] {
       for (uint64_t input = 0; input != kInputsPerThread; ++input) {
         const uint64_t seed = 1 + 16 * (worker + input * kThreads);
-        const RunStats stats =
-            run_input(random_input(seed, 24, FuzzTarget::Gfx1250), FuzzTarget::Gfx1250, resources);
+        const RunStats stats = run_input(random_input(seed, 24, FuzzTarget::Gfx1250),
+                                         FuzzTarget::Gfx1250, resources, AsyncMode::Enabled);
+        EXPECT_EQ(stats.async_enabled_inputs, 1u);
+        if (!(seed & 16)) {
+          EXPECT_EQ(stats.async_executed, 0u);
+        }
         results[worker].executed += stats.executed;
         results[worker].async_executed += stats.async_executed;
         results[worker].inputs += stats.inputs;

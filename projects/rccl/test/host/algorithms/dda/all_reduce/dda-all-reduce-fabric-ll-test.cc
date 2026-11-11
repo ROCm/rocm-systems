@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -78,12 +79,12 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     return fn(mock_.get(), sendbuff, recvbuff, count, datatype, op);
   }
 
-  ncclResult_t RunLL(size_t count, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllReduceDdaFabricLL(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t RunLL(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
+    return ncclAllReduceDdaFabricLL(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, cap);
   }
 
-  ncclResult_t RunLL128(size_t count, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t RunLL128(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
+    return ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, cap);
   }
 
   const DdaLaunch& Only() {
@@ -91,15 +92,15 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     return g_ddaLaunches.at(0);
   }
 
-  const DdaLaunch& RunOneLL(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOneLL(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(RunLL(count, datatype), ncclSuccess);
+    EXPECT_EQ(RunLL(count, datatype, cap), ncclSuccess);
     return Only();
   }
 
-  const DdaLaunch& RunOneLL128(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOneLL128(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(RunLL128(count, datatype), ncclSuccess);
+    EXPECT_EQ(RunLL128(count, datatype, cap), ncclSuccess);
     return Only();
   }
 
@@ -107,6 +108,31 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
   void OnlyTwoShot() {
     params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 512;
     params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 512;
+  }
+
+  // Whether `tier` is the one that launches `count` elements: one-shot first, else two-shot.
+  template <typename Tier>
+  bool TierRuns(const Tier& tier, size_t count, ncclDataType_t datatype) {
+    const bool oneShot = Eligible(tier.ll128 ? ddaLL128ArOneShotEligible : ddaLLArOneShotEligible, count, datatype);
+    const bool twoShot = Eligible(tier.ll128 ? ddaLL128ArTwoShotEligible : ddaLLArTwoShotEligible, count, datatype);
+    return tier.twoShot ? !oneShot && twoShot : oneShot;
+  }
+
+  // Launches `count` elements on `tier`'s path (LL or LL128) under `cap`.
+  template <typename Tier>
+  DdaLaunch RunTier(const Tier& tier, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap = {}) {
+    return tier.ll128 ? RunOneLL128(count, datatype, cap) : RunOneLL(count, datatype, cap);
+  }
+
+  // Calls fn(maxBlocks, tier, nRanks, type, bytes, count) for every sweep case a tier runs; 20+ cases per tier.
+  template <typename Fn>
+  void ForEachTierCase(Fn fn);
+
+  // Blocks `tier`'s path reports for `count` elements under `cap`.
+  template <typename Tier>
+  uint32_t ReportTier(const Tier& tier, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
+    return tier.ll128 ? ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, datatype, cap)
+                      : ncclAllReduceDdaFabricLLBlocks(mock_.get(), count, datatype, cap);
   }
 
   // Common to all four tiers: everything the shape checks look at but the size.
@@ -503,6 +529,120 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotGridFollowsShardSlices) {
   EXPECT_EQ(RunOneLL128(8 * 17 * kSliceData / 4).grid.x, 1u);
 }
 
+// Grid sweep inputs: every LL datatype, odd and even per-rank sizes (16B multiples), and 2 to 16 ranks.
+constexpr ncclDataType_t kLLTypes[] = {ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+constexpr size_t kShardBytes[] = {16, 48, 1040, 17 * kSliceData, 3 * 8192 + 16, 65536 + 112, 262144};
+constexpr int kSweepRanks[] = {2, 3, 4, 8, 16};
+
+// The fixed shape of each tier before caps existed: threads per block and threads per unit of work.
+struct FixedTier {
+  bool ll128;
+  bool twoShot;
+  unsigned threads;
+  unsigned unitThreads;
+};
+constexpr FixedTier kTiers[] = {
+    {false, false, 512, 1}, {false, true, 1024, 1}, {true, false, 512, 32}, {true, true, 512, 32}};
+
+// Units of work a tier covers: LL packets (8B) or LL128 slices, of the message (one-shot) or one shard (two-shot).
+size_t TierUnits(const FixedTier& tier, size_t bytes, int nRanks) {
+  const size_t span = tier.twoShot ? bytes / (size_t)nRanks : bytes;
+  return tier.ll128 ? dda::common::ddaLL128Slices(span) : span >> 3;
+}
+
+// Blocks of the fixed shape: ceil(units / units per block), at most ddaFabricMaxBlocks, at least one.
+unsigned FixedBlocks(size_t units, unsigned threads, unsigned unitThreads, int maxBlocks) {
+  const size_t perBlock = threads / unitThreads;
+  size_t blocks = (units + perBlock - 1) / perBlock;
+  blocks = std::min(blocks, (size_t)std::max(maxBlocks, 1));
+  return (unsigned)std::max<size_t>(blocks, 1);
+}
+
+template <typename Fn>
+void DdaAllReduceFabricLLMicrotest::ForEachTierCase(Fn fn) {
+  for (int maxBlocks : {256, 5}) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    for (const FixedTier& tier : kTiers) {
+      params_.clear();
+      if (tier.twoShot) {
+        OnlyTwoShot();
+      }
+      int cases = 0;
+      for (int nRanks : kSweepRanks) {
+        comm().nRanks = nRanks;
+        for (ncclDataType_t type : kLLTypes) {
+          for (size_t shard : kShardBytes) {
+            const size_t bytes = shard * (size_t)nRanks;
+            const size_t count = bytes / ncclTypeSize(type);
+            if (!TierRuns(tier, count, type)) {
+              continue;
+            }
+            ++cases;
+            SCOPED_TRACE(testing::Message() << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot
+                                            << " maxBlocks=" << maxBlocks << " nRanks=" << nRanks << " type=" << type
+                                            << " bytes=" << bytes);
+            fn(maxBlocks, tier, nRanks, type, bytes, count);
+          }
+        }
+      }
+      EXPECT_GE(cases, 20) << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot;
+    }
+  }
+}
+
+// Without a cap every tier launches its fixed shape, and its reporter reports the grid it launches.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    const DdaLaunch launch = RunTier(tier, count, type);
+    EXPECT_EQ(launch.block.x, tier.threads);
+    EXPECT_EQ(launch.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), tier.threads, tier.unitThreads, maxBlocks));
+    const DdaLaunch zero = RunTier(tier, count, type, {0, 0});
+    EXPECT_EQ(zero.grid.x, launch.grid.x);
+    EXPECT_EQ(zero.block.x, launch.block.x);
+    EXPECT_EQ(ReportTier(tier, count, type, {0, 0}), launch.grid.x * launch.grid.y);
+  });
+}
+
+// A capped launch stays within the cap's blocks and its threads (whole 64-thread granules, at least one) in every tier,
+// keeps its kernel, and its reporter reports the grid it launches; the next uncapped call is the fixed shape again.
+// Caps above and below ddaFabricMaxBlocks both stay within it.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryTier) {
+  const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256},   {3, 0},  {0, 192}, {17, 96}, {2, 1024},
+                                   {1, 0},  {0, 64},  {1000, 4096}, {0, 480}, {0, 992}, {1, 32},  {0, 1}};
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    const DdaLaunch fixed = RunTier(tier, count, type);
+    for (const rcclDdaLaunchCap& cap : caps) {
+      SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+      const DdaLaunch capped = RunTier(tier, count, type, cap);
+      EXPECT_EQ(capped.kernel, fixed.kernel);
+      EXPECT_GE(capped.grid.x, 1u);
+      EXPECT_LE(capped.grid.x, (unsigned)maxBlocks);
+      if (cap.blocks > 0) {
+        EXPECT_LE(capped.grid.x, cap.blocks);
+      }
+      EXPECT_LE(capped.block.x, tier.threads);
+      if (cap.threads >= 64) {
+        EXPECT_LE(capped.block.x, cap.threads);
+      }
+      EXPECT_EQ(capped.block.x % 64, 0u);
+      const unsigned threads = capped.block.x;
+      EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? std::max(cap.threads / 64 * 64, 64u)
+                                                                         : tier.threads);
+      const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
+      const size_t units = TierUnits(tier, bytes, nRanks);
+      EXPECT_EQ(capped.grid.x, FixedBlocks(units, threads, tier.unitThreads, blockBound))
+          << "the capped width sizes the grid";
+      EXPECT_EQ(ReportTier(tier, count, type, cap), capped.grid.x * capped.grid.y)
+          << "the reporter reports the capped grid";
+    }
+    const DdaLaunch next = RunTier(tier, count, type);
+    EXPECT_EQ(next.grid.x, fixed.grid.x);
+    EXPECT_EQ(next.block.x, fixed.block.x);
+  });
+}
+
 TEST_F(DdaAllReduceFabricLLMicrotest, Blocks_EmptyMessageStillReportsOneBlock) {
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 0, ncclFloat32), 1u);
   EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), 0, ncclFloat32), 1u);
@@ -516,6 +656,98 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
   EXPECT_EQ(RunLL(256), ncclUnhandledCudaError);
   EXPECT_EQ(RunLL128(256), ncclUnhandledCudaError);
   EXPECT_EQ(g_ddaLaunches.size(), 4u);
+}
+
+// ---- LDS-staged LL128 wire writer ----
+
+template <typename T, int N, int W>
+const void* LL128TwoShotW() {
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N, W>);
+}
+
+constexpr int kAsync = dda::common::kDdaLL128WireAsync;
+constexpr size_t kMiB = 1024 * 1024;
+
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 0: a gfx1250 wave32 comm keeps the cooperative writer and no LDS at every shard.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
+  comm().WarpSize = 32;
+  for (const bool unset : {true, false}) {
+    if (!unset) {
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+    }
+    for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {  // 8 ranks: 2 and 4 MiB shards, two-shot
+      const DdaLaunch& launch = RunOneLL128(count);
+      EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.sharedMemBytes, 0u) << "unset " << unset << " count " << count;
+    }
+  }
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+}
+
+// With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterFromTwoMegShardsOnTheSameGrid) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  const size_t big = 16 * kMiB / 4;  // 8 ranks: a 2 MiB shard, two-shot
+  const DdaLaunch coop = RunOneLL128(big);
+  EXPECT_EQ(coop.kernel, (LL128TwoShot<float, 8>())) << "WarpSize 0: the cooperative writer";
+  EXPECT_EQ(coop.sharedMemBytes, 0u);
+  comm().WarpSize = 32;
+  const DdaLaunch staged = RunOneLL128(big);
+  EXPECT_EQ(staged.kernel, (LL128TwoShotW<float, 8, kAsync>()));
+  EXPECT_EQ(staged.grid.x, coop.grid.x);
+  EXPECT_EQ(staged.block.x, coop.block.x);
+  EXPECT_EQ(staged.sharedMemBytes, staged.block.x / 32 * 2 * 2048);
+  EXPECT_EQ(staged.Arg<size_t>(3), coop.Arg<size_t>(3)) << "same shard bytes";
+  EXPECT_EQ(staged.Arg<size_t>(8), coop.Arg<size_t>(8)) << "same slices";
+
+  const DdaLaunch& below = RunOneLL128(16 * kMiB / 4 - 8 * 4);  // one 16 B chunk short of a 2 MiB shard
+  EXPECT_EQ(below.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(below.sharedMemBytes, 0u);
+  EXPECT_EQ(RunOneLL128(8 * kMiB / 4).kernel, (LL128TwoShot<float, 8>())) << "1 MiB shard";
+
+  comm().WarpSize = 64;
+  const DdaLaunch& wave64 = RunOneLL128(big);
+  EXPECT_EQ(wave64.kernel, (LL128TwoShot<float, 8>())) << "an LL128 warp must be one wave";
+  EXPECT_EQ(wave64.sharedMemBytes, 0u);
+
+  comm().WarpSize = 32;
+  comm().archName = const_cast<char*>("gfx1201");
+  const DdaLaunch& noAsync = RunOneLL128(big);
+  EXPECT_EQ(noAsync.kernel, (LL128TwoShot<float, 8>())) << "the async LDS stores are gfx1250 only";
+  EXPECT_EQ(noAsync.sharedMemBytes, 0u);
+}
+
+// The one-shot keeps the cooperative writer at every size: it sends the whole message to each peer.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotKeepsTheCooperativeWriter) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  comm().nRanks = 2;
+  const DdaLaunch& two = RunOneLL128(4 * kMiB / 4);
+  EXPECT_EQ(two.kernel, (LL128OneShot<float, 0>()));
+  EXPECT_EQ(two.sharedMemBytes, 0u);
+}
+
+// Every rank count and datatype gets its own staged instantiation.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatatype) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  const struct {
+    int nRanks;
+    const void* two;
+  } cases[] = {{4, LL128TwoShotW<float, 4, kAsync>()},
+               {8, LL128TwoShotW<float, 8, kAsync>()},
+               {16, LL128TwoShotW<float, 0, kAsync>()},
+               {32, LL128TwoShotW<float, 0, kAsync>()}};
+  for (const auto& c : cases) {
+    comm().nRanks = c.nRanks;
+    EXPECT_EQ(RunOneLL128(c.nRanks * 2 * kMiB / 4).kernel, c.two) << c.nRanks;
+  }
+  comm().nRanks = 8;
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclBfloat16).kernel, (LL128TwoShotW<bf16, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclFloat16).kernel, (LL128TwoShotW<half, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e4m3).kernel, (LL128TwoShotW<dda::common::fp8e4m3, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e5m2).kernel, (LL128TwoShotW<dda::common::fp8e5m2, 8, kAsync>()));
 }
 
 }  // namespace

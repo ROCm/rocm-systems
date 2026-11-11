@@ -17,8 +17,9 @@ bool secure_exec();
 // Collects best-effort capture environment metadata for the HRR manifest.
 // The collector is safe to call from hip_capture_init(): it reads HIP runtime
 // constants and initialized internal device state rather than calling public HIP
-// APIs that would re-enter hip::init().
-std::string collect_json();
+// APIs that would re-enter hip::init(). `consent` names where the user's consent
+// to capture came from: "HIP_HRR_CAPTURE_CONSENT" or "file".
+std::string collect_json(const std::string& consent);
 
 // Escapes `s` for use inside a JSON string literal (quotes not included):
 // backslash, double quote, the short control escapes and any other byte below
