@@ -21,11 +21,11 @@
       "files": {
         "0000_top_stats.yaml": "8ff5ddd12ffcd2015ab184bbeefef3a3",
         "0100_system_info.yaml": "690a3492daf91b89479a8929828f5061",
-        "0200_system_speed_of_light.yaml": "46e27d0cc2f0673b5ab8e2effd51b256",
+        "0200_system_speed_of_light.yaml": "4b30bf54407905f73c98d45ad4958956",
         "0300_memory_chart.yaml": "67944bf3b3d5997e3a9e6c928bceddc6",
         "0500_command_processor_cpc.yaml": "7a15bb04d12bfbc317b492e2ab28247c",
         "0600_workgroup_manager_spi.yaml": "30c969d2c948138e78cc73a694ce00ae",
-        "0700_workgroup_processor_wgp.yaml": "3e4efec04c65fe1003a0340d6aa49ad1",
+        "0700_workgroup_processor_wgp.yaml": "b987b4bc3866e24054d437411c68c14f",
         "0900_gl0_cache_and_lds.yaml": "d69355a35f6eb99f502b380cf5711653",
         "1100_gl1_cache.yaml": "f5bc28fdb8212c6877a647f37001cc60",
         "1300_gl2_cache.yaml": "8bbeff976e6809b27a810afad8573ebe",

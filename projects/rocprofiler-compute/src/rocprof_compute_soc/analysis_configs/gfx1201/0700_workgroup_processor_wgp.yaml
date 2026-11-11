@@ -368,7 +368,7 @@ Panel Config:
       Its conversion to instruction counts or FLOPs requires validation.
     SQ_WMMA_VALU_INSTS: >-
       Raw WMMA vector instruction count. The aggregate counter does not
-      distinguish FP16, BF16, or FP8, and its wave-size interpretation
+      distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation
       requires validation.
     Scratch Allocation: >-
       Bytes of scratch memory allocated per work-item, from dispatch metadata.

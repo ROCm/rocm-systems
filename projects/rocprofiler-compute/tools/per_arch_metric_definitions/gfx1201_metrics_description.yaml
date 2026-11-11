@@ -4,8 +4,8 @@ System Speed-of-Light:
     rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
     unit: GInstr/s
   WMMA FLOPs (F16->F32 16x16x16):
-    plain: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, or FP8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations.
-    rst: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, or FP8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations.
+    plain: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations.
+    rst: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations.
     unit: GFLOP/s
   FP64 VALU Issue Rate:
     plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
@@ -455,8 +455,8 @@ WGP WMMA Instruction FLOPs and IOPs Counting:
     rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
     unit: Cycles
   SQ_WMMA_VALU_INSTS:
-    plain: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, or FP8, and its wave-size interpretation requires validation.
-    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, or FP8, and its wave-size interpretation requires validation.
+    plain: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation requires validation.
+    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation requires validation.
     unit: Instructions
 WGP Utilization:
   WGP Utilization:

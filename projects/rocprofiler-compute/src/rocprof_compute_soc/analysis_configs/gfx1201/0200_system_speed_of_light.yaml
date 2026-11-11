@@ -126,7 +126,7 @@ Panel Config:
       accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per
       counter increment and peak of 1024 FLOPs/CU/cycle are provisional.
       The raw counter counts WMMA issues per vec32 and does not distinguish
-      FP16, BF16, or FP8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports
+      FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports
       overlap with the general VALU instruction counter for that instruction.
       Counted wave population, other shapes/types, wave64 interpretation, and
       the applicable peak still require validation.
