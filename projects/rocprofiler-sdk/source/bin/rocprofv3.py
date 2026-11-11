@@ -1804,15 +1804,6 @@ def run(app_args, args, **kwargs):
         f"{ROCM_DIR}/lib",
         append=True,
     )
-    # Search this prefix before the schema beside whichever
-    # librocprofiler-sdk-rocpd.so was loaded. A library already on
-    # LD_LIBRARY_PATH does not list schema versions this rocprofv3 writes.
-    # Keep a value the caller already set, such as a back-compat fixture.
-    if not app_env.get("ROCPD_SCHEMA_PATH"):
-        update_env(
-            "ROCPD_SCHEMA_PATH",
-            f"{ROCM_DIR}/share/rocprofiler-sdk-rocpd",
-        )
 
     # -o/-d stay None so a typed option stays distinguishable from an inherited
     # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
