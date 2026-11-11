@@ -3472,6 +3472,19 @@ TEST_F(InitMicrotest, InitTransportsRank_PeersFromSameGitRevision_ReportsNoFinge
   EXPECT_FALSE(LogHas(log, "fingerprint")) << "actual log:\n" << log;
 }
 
+// Only rank 0 reports, so a job with mismatched builds prints one line, not one per rank.
+TEST_F(InitMicrotest, InitTransportsRank_NonZeroRankSeesOtherGitRevision_ReportsNothing) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/1);
+  const ncclPeerInfo other = PeerInfoBuiltFrom(c, "develop:0badc0d");
+  std::vector<PeerSpec> specs(4);
+  specs[0].base = &other;  // rank 0 differs from this rank; only the rank-0 gate keeps it quiet
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "fingerprint")) << "actual log:\n" << log;
+}
+
 // --- The MNNVL scope test (init.cc:1500-1510) ---
 // mnnvlEnable==1 forces the check; ==0 forbids it; anything else (default 2) means "auto", which
 // needs (multi-node OR gfx1250) AND p2pLevel != 0. g_ncclMnnvlCheckCalls is the whole oracle --
