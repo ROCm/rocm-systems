@@ -2968,6 +2968,32 @@
         }
       ]
     },
+    "dda_alltoall_inplace_mpi_8rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "gfx1250 AlltoAll on the DDA fabric tiers at 4016 B, 64 KiB and 512 KiB per peer: in place at fp32 offsets 0, 4 and 16 bytes, bf16 +2 and fp8 +1, and out of place at 1- and 2-byte send and receive offsets. Every case checks that the call takes the tier the aligned buffer takes and that every received byte is exact; a size the arch table does not send to a DDA tier is passed over, and ranks skip off gfx1250. DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 column serves several peers.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "DdaAlltoAllInPlace_OffsetsStayOnDda_8rank",
+          "description": "AlltoAll at buffer offsets down to 1 byte, in and out of place, stays on DDA LL or LL128 with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllInPlaceMPI.OffsetsStayOnDda"
+        },
+        {
+          "name": "DdaAlltoAllPeerColumns_ColumnsServeSeveralPeers_8rank",
+          "description": "AlltoAll LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each block column serves several peers, with exact data (8 ranks)",
+          "test_filter": "DdaAlltoAllPeerColumnsMPI.ColumnsServeSeveralPeers"
+        }
+      ]
+    },
     "ubr_multi_node": {
       "extends": "default",
       "is_gtest": true,
@@ -5812,6 +5838,12 @@
       "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA AlltoAll In-Place - 8-Rank (gfx1250 buffer offsets)",
+      "description": "gfx1250 AlltoAll at any buffer offset, in place and out of place, stays on DDA LL or LL128 with exact data, also with several peers per LL128 column, single node",
+      "config": "dda_alltoall_inplace_mpi_8rank",
       "enabled": true
     },
     {
