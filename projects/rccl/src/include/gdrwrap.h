@@ -403,7 +403,13 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
     NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
 #else
-    CUDACHECK(hipHostMalloc((void **)ptr, nelem * sizeof(T)));
+    // Persistent RMA proxy descriptors are allocated while the user stream is
+    // capturing; hipHostMalloc is rejected there unless the thread is relaxed.
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    cudaError_t hostErr = hipHostMalloc((void **)ptr, nelem * sizeof(T));
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    CUDACHECK(hostErr);
 #endif
     memset((void *)*ptr, 0, nelem * sizeof(T));
     *devPtr = *ptr;
@@ -422,7 +428,11 @@ static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMem
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
     NCCLCHECK(ncclCuMemHostFree(ptr));
 #else
-    CUDACHECK(hipHostFree(ptr));
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    cudaError_t hostErr = hipHostFree(ptr);
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    CUDACHECK(hostErr);
 #endif
   }
   return ncclSuccess;
