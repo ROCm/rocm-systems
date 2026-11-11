@@ -10,9 +10,11 @@
 
 #include "hipIpcHandleHex.hh"
 
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <thread>
 
@@ -272,7 +274,9 @@ bool PollSlot(const uint32_t* buf, int slot, uint32_t expected, std::chrono::sec
       (void)hipGetLastError();
       return false;
     }
-    if (value == expected) return true;
+    if (value == expected) {
+      return true;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   } while (std::chrono::steady_clock::now() < deadline);
   return false;
@@ -340,7 +344,7 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Handshake) {
 
   ExtMallocGuard<uint32_t> alloc(kSlotCount * sizeof(uint32_t), allocFlags);
   if (alloc.ptr() == nullptr) {
-    WARN("Skipping section: this allocation flavour is not supported on this device.");
+    WARN("Skipping section: this allocation flavor is not supported on this device.");
     return;
   }
   uint32_t* const buf = alloc.ptr();
@@ -399,7 +403,18 @@ HIP_TEST_CASE(Unit_hipIpcOpenMemHandle_Multiproc_CoherentAlloc_Child) {
     HIP_SKIP_TEST("This test must be launched by parent multiprocess test.");
   }
 
-  HIP_CHECK(hipSetDevice(std::atoi(peerDevice)));
+  // Parsed strictly: a malformed ordinal must fail the test, not silently select device 0.
+  char* parse_end = nullptr;
+  errno = 0;
+  const long peer_ordinal = std::strtol(peerDevice, &parse_end, 10);
+  INFO(kPeerDeviceEnv << "=" << peerDevice);
+  REQUIRE(errno == 0);
+  REQUIRE(parse_end != peerDevice);
+  REQUIRE(*parse_end == '\0');
+  REQUIRE(peer_ordinal >= 0);
+  REQUIRE(peer_ordinal <= std::numeric_limits<int>::max());
+
+  HIP_CHECK(hipSetDevice(static_cast<int>(peer_ordinal)));
 
   hipIpcMemHandle_t handle = hexToIpcHandle<hipIpcMemHandle_t>(hex);
   IpcMappingGuard mapping(handle, hipIpcMemLazyEnablePeerAccess);

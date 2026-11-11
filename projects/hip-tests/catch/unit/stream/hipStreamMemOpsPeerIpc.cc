@@ -141,17 +141,25 @@ class ImportedWindowGuard {
 std::vector<int> GetMutuallyPeerAccessibleDevices(int count) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
-  if (device_count < count) return {};
+  if (device_count < count) {
+    return {};
+  }
 
   std::vector<int> devices;
-  for (int device = 0; device < count; ++device) devices.push_back(device);
+  for (int device = 0; device < count; ++device) {
+    devices.push_back(device);
+  }
 
   for (int lhs : devices) {
     for (int rhs : devices) {
-      if (lhs == rhs) continue;
+      if (lhs == rhs) {
+        continue;
+      }
       int can_access = 0;
       HIP_CHECK(hipDeviceCanAccessPeer(&can_access, lhs, rhs));
-      if (can_access == 0) return {};
+      if (can_access == 0) {
+        return {};
+      }
     }
   }
   return devices;
@@ -168,7 +176,9 @@ bool WaitForStreams(const std::vector<hipStream_t>& streams, std::chrono::second
         all_done = false;
       }
     }
-    if (all_done) return true;
+    if (all_done) {
+      return true;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   } while (std::chrono::steady_clock::now() < deadline);
   return false;
@@ -295,15 +305,21 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   std::vector<int> devices;
   for (int count = std::min(device_count, kMaxBarrierDevices); count >= 2; --count) {
     devices = GetMutuallyPeerAccessibleDevices(count);
-    if (!devices.empty()) break;
+    if (!devices.empty()) {
+      break;
+    }
   }
   if (devices.empty()) {
     HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   const int rank_count = static_cast<int>(devices.size());
-  for (int device : devices) CheckVmmSupported(device);
-  for (int device : devices) CheckStreamWaitValueSupported(device);
+  for (int device : devices) {
+    CheckVmmSupported(device);
+  }
+  for (int device : devices) {
+    CheckStreamWaitValueSupported(device);
+  }
 
   // Declared before the streams and the sentinels so that it is torn down after them.
   const ImportedWindowGuard window(devices[0], devices, rank_count * sizeof(uint32_t));
@@ -328,7 +344,9 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   // Raw handles, for the barrier issue path and for WaitForStreams.
   std::vector<hipStream_t> streams;
   streams.reserve(rank_count);
-  for (const StreamGuard& guard : stream_guards) streams.push_back(guard.stream());
+  for (const StreamGuard& guard : stream_guards) {
+    streams.push_back(guard.stream());
+  }
 
   // Each rank publishes its own slot, then waits on every rank's slot -- two batches per rank,
   // matching the order a communication library issues them in -- and finally writes a sentinel
@@ -358,7 +376,9 @@ HIP_TEST_CASE(Unit_hipStreamMemOps_PeerImport_BatchMemOpBarrierAcrossDevices) {
   };
 
   // Hold rank 0 back: every other rank must block, because each waits on rank 0's slot too.
-  for (int rank = 1; rank < rank_count; ++rank) issueRank(rank);
+  for (int rank = 1; rank < rank_count; ++rank) {
+    issueRank(rank);
+  }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   std::vector<int> gated_sentinels(rank_count, -1);
