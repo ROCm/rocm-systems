@@ -175,10 +175,10 @@ bool ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 // `count` is the FULL element count (== base*nRanks, aligned by
-// ReduceGetCollByteCount). Small/mid messages use a register-light grid-stride
-// loop with 2-way peer ILP; large messages use a warp-strided pack-unrolled loop
-// (U outstanding coalesced loads) with 2-way peer ILP and a source-0 prefetch of
-// the next tile. Both schedules fold sources in ascending rank order.
+// ReduceGetCollByteCount). A warp-strided pack-unrolled loop (U outstanding
+// coalesced loads per source) with 2-way peer ILP and a source-0 prefetch of the
+// next tile, folding sources in ascending rank order. Remote loads are latency
+// bound, so even small messages need U loads in flight per thread.
 template <typename T>
 __device__ __forceinline__ void ginReduceBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp) {
   const int nRanks = devComm.nRanks;
@@ -198,127 +198,94 @@ __device__ __forceinline__ void ginReduceBody(ncclWindow_t sendwin, size_t sendo
   const size_t nPacks = base / (size_t)VEC;                           // packs in this rank's slice
   const size_t myBaseP = ((size_t)devComm.rank * base) / (size_t)VEC; // pack index of my slice
 
-  constexpr size_t UNROLL_MIN_BYTES = (size_t)48 << 20;  // total message size
-  const size_t totalBytes = base * (size_t)nRanks * sizeof(T);
+  constexpr int U = (VEC <= 8) ? 4 : 2;
+  constexpr int WARP = 64;  // lanes per tile row (two waves on wave32 targets)
+  const int lane = tid & (WARP - 1);
+  const size_t warpId = (size_t)(tid / WARP);
+  const size_t nWarps = (size_t)(nthreads / WARP);
+  const size_t tile = (size_t)U * WARP;
+  const size_t gridStride = nWarps * tile;
 
-  if (totalBytes < UNROLL_MIN_BYTES) {
-    for (size_t pk = (size_t)tid; pk < nPacks; pk += (size_t)nthreads) {
-      Pack v0 = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, 0))[myBaseP + pk];
-      T acc[VEC];
-      #pragma unroll
-      for (int e = 0; e < VEC; e++) acc[e] = gin_sdma_reduce::preOp(redOp, v0.e[e], nRanks);
+  const Pack* src0Base = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, 0) + myBaseP;
+  size_t wbase = warpId * tile;
+  Pack seed[U];
+  if (wbase + tile <= nPacks) {
+    const Pack* sp = src0Base + wbase + (size_t)lane;
+    #pragma unroll
+    for (int u = 0; u < U; u++) seed[u] = sp[(size_t)u * WARP];
+  }
+  for (; wbase < nPacks; wbase += gridStride) {
+    if (wbase + tile <= nPacks) {
+      const size_t p0 = wbase + (size_t)lane;  // this lane's first pack (slice-local)
+      T acc[U][VEC];
+      #pragma unroll  // source 0 comes from the prefetched seed
+      for (int u = 0; u < U; u++)
+        #pragma unroll
+        for (int e = 0; e < VEC; e++) acc[u][e] = gin_sdma_reduce::preOp(redOp, seed[u].e[e], nRanks);
       int s = 1;
       for (; s + 1 < nRanks; s += 2) {
-        Pack a = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s))[myBaseP + pk];
-        Pack b = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s + 1))[myBaseP + pk];
+        const Pack* sa = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s)     + myBaseP + p0;
+        const Pack* sb = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s + 1) + myBaseP + p0;
+        Pack ta[U], tb[U];
         #pragma unroll
-        for (int e = 0; e < VEC; e++)
-          acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, a.e[e], nRanks));
+        for (int u = 0; u < U; u++) ta[u] = sa[(size_t)u * WARP];
         #pragma unroll
-        for (int e = 0; e < VEC; e++)
-          acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, b.e[e], nRanks));
-      }
-      for (; s < nRanks; s++) {
-        Pack vs = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s))[myBaseP + pk];
+        for (int u = 0; u < U; u++) tb[u] = sb[(size_t)u * WARP];
         #pragma unroll
-        for (int e = 0; e < VEC; e++)
-          acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, vs.e[e], nRanks));
-      }
-      Pack o;
-      #pragma unroll
-      for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
-      dstP[myBaseP + pk] = o;
-    }
-  } else {
-    constexpr int U = (VEC <= 8) ? 4 : 2;
-    constexpr int WARP = 64;  // CDNA wavefront
-    const int lane = tid & (WARP - 1);
-    const size_t warpId = (size_t)(tid / WARP);
-    const size_t nWarps = (size_t)(nthreads / WARP);
-    const size_t tile = (size_t)U * WARP;
-    const size_t gridStride = nWarps * tile;
-
-    const Pack* src0Base = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, 0) + myBaseP;
-    size_t wbase = warpId * tile;
-    Pack seed[U];
-    if (wbase + tile <= nPacks) {
-      const Pack* sp = src0Base + wbase + (size_t)lane;
-      #pragma unroll
-      for (int u = 0; u < U; u++) seed[u] = sp[(size_t)u * WARP];
-    }
-    for (; wbase < nPacks; wbase += gridStride) {
-      if (wbase + tile <= nPacks) {
-        const size_t p0 = wbase + (size_t)lane;  // this lane's first pack (slice-local)
-        T acc[U][VEC];
-        #pragma unroll  // source 0 comes from the prefetched seed
         for (int u = 0; u < U; u++)
           #pragma unroll
-          for (int e = 0; e < VEC; e++) acc[u][e] = gin_sdma_reduce::preOp(redOp, seed[u].e[e], nRanks);
-        int s = 1;
-        for (; s + 1 < nRanks; s += 2) {
-          const Pack* sa = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s)     + myBaseP + p0;
-          const Pack* sb = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s + 1) + myBaseP + p0;
-          Pack ta[U], tb[U];
-          #pragma unroll
-          for (int u = 0; u < U; u++) ta[u] = sa[(size_t)u * WARP];
-          #pragma unroll
-          for (int u = 0; u < U; u++) tb[u] = sb[(size_t)u * WARP];
-          #pragma unroll
-          for (int u = 0; u < U; u++)
-            #pragma unroll
-            for (int e = 0; e < VEC; e++)
-              acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, ta[u].e[e], nRanks));
-          #pragma unroll
-          for (int u = 0; u < U; u++)
-            #pragma unroll
-            for (int e = 0; e < VEC; e++)
-              acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, tb[u].e[e], nRanks));
-        }
-        for (; s < nRanks; s++) {
-          const Pack* sp = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s) + myBaseP + p0;
-          Pack t[U];
-          #pragma unroll
-          for (int u = 0; u < U; u++) t[u] = sp[(size_t)u * WARP];
-          #pragma unroll
-          for (int u = 0; u < U; u++)
-            #pragma unroll
-            for (int e = 0; e < VEC; e++)
-              acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, t[u].e[e], nRanks));
-        }
-        const size_t nb = wbase + gridStride;
-        if (nb + tile <= nPacks) {
-          const Pack* spn = src0Base + nb + (size_t)lane;
-          #pragma unroll
-          for (int u = 0; u < U; u++) seed[u] = spn[(size_t)u * WARP];
-        }
+          for (int e = 0; e < VEC; e++)
+            acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, ta[u].e[e], nRanks));
         #pragma unroll
-        for (int u = 0; u < U; u++) {
-          Pack o;
+        for (int u = 0; u < U; u++)
           #pragma unroll
-          for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[u][e], nRanks);
-          dstP[myBaseP + p0 + (size_t)u * WARP] = o;
-        }
-      } else {
-        // Partial warp tile: each lane covers packs wbase+u*WARP+lane.
+          for (int e = 0; e < VEC; e++)
+            acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, tb[u].e[e], nRanks));
+      }
+      for (; s < nRanks; s++) {
+        const Pack* sp = (const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s) + myBaseP + p0;
+        Pack t[U];
         #pragma unroll
-        for (int u = 0; u < U; u++) {
-          const size_t pk = wbase + (size_t)u * WARP + (size_t)lane;
-          if (pk >= nPacks) continue;
-          Pack v = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, 0))[myBaseP + pk];
-          T acc[VEC];
+        for (int u = 0; u < U; u++) t[u] = sp[(size_t)u * WARP];
+        #pragma unroll
+        for (int u = 0; u < U; u++)
           #pragma unroll
-          for (int e = 0; e < VEC; e++) acc[e] = gin_sdma_reduce::preOp(redOp, v.e[e], nRanks);
-          for (int s = 1; s < nRanks; s++) {
-            Pack vs = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s))[myBaseP + pk];
-            #pragma unroll
-            for (int e = 0; e < VEC; e++)
-              acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, vs.e[e], nRanks));
-          }
-          Pack o;
+          for (int e = 0; e < VEC; e++)
+            acc[u][e] = gin_sdma_reduce::combine(redOp, acc[u][e], gin_sdma_reduce::preOp(redOp, t[u].e[e], nRanks));
+      }
+      const size_t nb = wbase + gridStride;
+      if (nb + tile <= nPacks) {
+        const Pack* spn = src0Base + nb + (size_t)lane;
+        #pragma unroll
+        for (int u = 0; u < U; u++) seed[u] = spn[(size_t)u * WARP];
+      }
+      #pragma unroll
+      for (int u = 0; u < U; u++) {
+        Pack o;
+        #pragma unroll
+        for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[u][e], nRanks);
+        dstP[myBaseP + p0 + (size_t)u * WARP] = o;
+      }
+    } else {
+      // Partial warp tile: each lane covers packs wbase+u*WARP+lane.
+      #pragma unroll
+      for (int u = 0; u < U; u++) {
+        const size_t pk = wbase + (size_t)u * WARP + (size_t)lane;
+        if (pk >= nPacks) continue;
+        Pack v = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, 0))[myBaseP + pk];
+        T acc[VEC];
+        #pragma unroll
+        for (int e = 0; e < VEC; e++) acc[e] = gin_sdma_reduce::preOp(redOp, v.e[e], nRanks);
+        for (int s = 1; s < nRanks; s++) {
+          Pack vs = ((const Pack*)ncclGetLsaPointer(sendwin, sendoffset, s))[myBaseP + pk];
           #pragma unroll
-          for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
-          dstP[myBaseP + pk] = o;
+          for (int e = 0; e < VEC; e++)
+            acc[e] = gin_sdma_reduce::combine(redOp, acc[e], gin_sdma_reduce::preOp(redOp, vs.e[e], nRanks));
         }
+        Pack o;
+        #pragma unroll
+        for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
+        dstP[myBaseP + pk] = o;
       }
     }
   }
@@ -381,6 +348,19 @@ __device__ __forceinline__ void sdmaFoldPacks(const Pack* const* src, Pack* dst,
       dst[pk] = o;
     }
   }
+}
+
+// Waits until this wave's stores have reached L2, so a system-scope release by
+// one thread after a CTA barrier also covers the other waves' stores.
+// __syncthreads() alone does not wait for them on every target.
+__device__ __forceinline__ void waitWaveStores() {
+#if defined(__GFX12__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#elif defined(__GFX10__) || defined(__GFX11__)
+  asm volatile("s_waitcnt_vscnt null, 0x0" ::: "memory");
+#else
+  asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
 }
 
 // Per-chunk count of reducing CTAs that finished, in two sets alternated by
@@ -477,9 +457,8 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
     const size_t stride = (size_t)nReducers * blockDim.x;
     constexpr int NR8 = 8;
     const Pack* src8[NR8];
-    if (nRanks == NR8) {
-      #pragma unroll
-      for (int r = 0; r < NR8; r++)
+    if (nRanks <= NR8) {
+      for (int r = 0; r < nRanks; r++)
         src8[r] = (r == me) ? own : (const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes);
     }
     // Every reducing CTA takes a share of every chunk, so the chunk that lands
@@ -489,11 +468,22 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
       const size_t p1 = (size_t)(k + 1) * partPacks / dmaChunks;
       if (p1 == p0) continue;
       gin.waitSignal(ncclCoopCta(), sigBase + (unsigned int)k, (uint64_t)nOwners);
-      // The slots were written by a remote SDMA engine, not by a CU, so every
-      // thread needs system-scope acquire before loading them.
-      cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
-      if (nRanks == NR8) {
-        sdmaFoldPacks<T, NR8, 2>(src8, dst, p0 + first, p1, stride, redOp);
+      // The slots were written by a remote SDMA engine, not by a CU, so they
+      // need a system-scope acquire before any thread loads them. Every wave
+      // that runs the fence invalidates the whole L2, so only thread 0 runs it
+      // and the barrier extends it to the rest of the CTA.
+      if (threadIdx.x == 0) cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+      __syncthreads();
+      if (nRanks >= 2 && nRanks <= NR8) {
+        switch (nRanks) {
+          case 2: sdmaFoldPacks<T, 2, 4>(src8, dst, p0 + first, p1, stride, redOp); break;
+          case 3: sdmaFoldPacks<T, 3, 4>(src8, dst, p0 + first, p1, stride, redOp); break;
+          case 4: sdmaFoldPacks<T, 4, 4>(src8, dst, p0 + first, p1, stride, redOp); break;
+          case 5: sdmaFoldPacks<T, 5, 2>(src8, dst, p0 + first, p1, stride, redOp); break;
+          case 6: sdmaFoldPacks<T, 6, 2>(src8, dst, p0 + first, p1, stride, redOp); break;
+          case 7: sdmaFoldPacks<T, 7, 2>(src8, dst, p0 + first, p1, stride, redOp); break;
+          default: sdmaFoldPacks<T, NR8, 2>(src8, dst, p0 + first, p1, stride, redOp); break;
+        }
       } else {
         for (size_t pk = p0 + first; pk < p1; pk += stride) {
           T acc[VEC];
@@ -512,16 +502,23 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
         }
       }
       if (nIssue) {
-        // The SDMA engine reads the staged chunk from memory, not through L2.
-        cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+        // The SDMA engine reads the staged chunk from memory, not through L2,
+        // so the CTA's stores need a system-scope release (an L2 writeback).
+        // As above, one wave runs it after the barrier.
+        waitWaveStores();
         __syncthreads();
-        if (threadIdx.x == 0) __hip_atomic_fetch_add(&gSdmaReduceChunkDone[par][k], 1u, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+        if (threadIdx.x == 0) {
+          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          __hip_atomic_fetch_add(&gSdmaReduceChunkDone[par][k], 1u, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+        }
       }
     }
   }
   // Flush drains this rank's SDMA queues, so the owner-to-root puts have landed
-  // before the exit barrier releases the root.
-  gin.flush(ncclCoopCta());
+  // before the exit barrier releases the root. Every flushing CTA polls every
+  // busy queue, so with issuer CTAs only they flush: on the root, the idle
+  // CTAs would otherwise slow the issuers' puts.
+  if (nIssue == 0 || (int)blockIdx.x < nIssue) gin.flush(ncclCoopCta());
   lsaBar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
 }
 
@@ -531,10 +528,11 @@ __global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncc
 }
 
 // SDMA puts per partition for -D 4. More chunks overlap the copies with the
-// reduce and the owner-to-root copy, but each put waits for the previous one to
-// drain, so the default grows with sqrt(partBytes): about sqrt(partBytes/512KiB),
-// capped at 32. Partitions are only split when there are dedicated issuer CTAs
-// (ctas >= 2*nRanks). NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS overrides the default.
+// reduce and the owner-to-root copy, but each chunk adds a fixed 30-60 us (put
+// issue, queue drain, signal wait), so the default grows with sqrt(partBytes):
+// about sqrt(partBytes/2MiB), capped at 16. Partitions are only split when
+// there are dedicated issuer CTAs (ctas >= 2*nRanks).
+// NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS overrides the default.
 // Every rank must use the same value.
 static int sdmaReduceDmaChunks(size_t partBytes, int ctas, int nRanks) {
   static const long envChunks = [] {
@@ -546,8 +544,8 @@ static int sdmaReduceDmaChunks(size_t partBytes, int ctas, int nRanks) {
   }();
   long k = envChunks;
   if (k == 0 && ctas >= 2 * nRanks) {
-    const size_t units = partBytes >> 19;
-    while (k < 32 && (size_t)(k + 1) * (size_t)(k + 1) <= units) k++;
+    const size_t units = partBytes >> 21;
+    while (k < 16 && (size_t)(k + 1) * (size_t)(k + 1) <= units) k++;
   }
   return (int)std::max(1L, std::min(k, (long)ctas));
 }
