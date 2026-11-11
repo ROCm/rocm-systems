@@ -109,7 +109,8 @@ TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
        {"v_mfma_f32_16x16x32_f16", "v_mfma_f32_32x32x16_f16", "v_mfma_f32_16x16x32_fp8_fp8",
         "v_mfma_f32_32x32x16_bf8_fp8", "v_mfma_f32_16x16x128_f8f6f4", "v_mfma_f32_32x32x64_f8f6f4",
         "v_mfma_scale_f32_16x16x128_f8f6f4"}) {
-    EXPECT_TRUE(policy::candidate(name));
+    EXPECT_EQ(policy::candidate(name), !std::string_view(name).ends_with("f16") &&
+                                           !std::string_view(name).ends_with("bf16"));
   }
   EXPECT_FALSE(policy::candidate("v_mfma_f32_32x32x4_2b_f16"));
   EXPECT_FALSE(policy::candidate("v_mfma_i32_16x16x64_i8"));
@@ -119,7 +120,8 @@ TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
   for (auto name :
        {"v_wmma_f32_16x16x32_f16", "v_wmma_f32_16x16x32_bf16", "v_wmma_f32_16x16x64_fp8_fp8",
         "v_wmma_f32_16x16x128_fp8_fp8", "v_wmma_scale_f32_16x16x128_f8f6f4"}) {
-    EXPECT_TRUE(policy::candidate(name));
+    EXPECT_EQ(policy::candidate(name), !std::string_view(name).ends_with("f16") &&
+                                           !std::string_view(name).ends_with("bf16"));
   }
   EXPECT_FALSE(policy::candidate("v_wmma_f32_16x16x16_f16"));
 }
