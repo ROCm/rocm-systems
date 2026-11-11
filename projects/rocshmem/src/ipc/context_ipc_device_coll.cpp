@@ -241,7 +241,7 @@ __device__ void IPCContext::alltoallmem_wg(rocshmem_team_t team, void *dst,
 __device__ void IPCContext::internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
                                                     const void *src, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
@@ -406,7 +406,7 @@ __device__ int IPCContext::broadcastmem_wave(rocshmem_team_t team,
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
 
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
@@ -499,7 +499,7 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
   int pe_root_world = team_obj->get_pe_in_world(PE_root);
 
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
@@ -520,7 +520,7 @@ __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
 __device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
   #endif
@@ -643,7 +643,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
 __device__ void IPCContext::internal_fcollectmem_wave(rocshmem_team_t team, void *dst,
                                                       const void *src, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
@@ -688,7 +688,7 @@ __device__ void IPCContext::fcollectmem_linear_wave(rocshmem_team_t team, void *
 __device__ void IPCContext::internal_fcollectmem_wg(rocshmem_team_t team, void *dst,
                                                     const void *src, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
