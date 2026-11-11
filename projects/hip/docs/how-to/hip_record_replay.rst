@@ -15,8 +15,9 @@ failing workload to somebody else.
 
 HRR has two halves:
 
-* **Capture** is part of the HIP runtime library. It is off unless you ask for it,
-  and is turned on with a single environment variable.
+* **Capture** is part of the HIP runtime library. The runtime that ships with ROCm
+  is built without it. A runtime built with capture compiled in turns it on with a
+  single environment variable.
 * **Replay** is a separate developer tool, ``hrr-playback``, installed into the
   ROCm binary directory by a ROCm build that includes the HRR project.
 
@@ -61,6 +62,15 @@ sources reads archives recorded by the HIP runtime built from the same commit.
 
 Recording a workload
 =======================================================
+
+.. note::
+
+  The HIP runtime that ships with ROCm is built without HRR capture, so setting
+  ``HIP_HRR_CAPTURE_OUTPUT`` has no effect with it. To record a workload, build
+  ``amdhip64`` from the ROCm sources with ``-DHIP_HRR_CAPTURE_ENABLED`` added to
+  ``CMAKE_CXX_FLAGS``, and load that build ahead of the installed runtime. The
+  `HRR tests README <https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/tests/README.md>`_
+  shows the build commands.
 
 Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and run the
 application as usual:
