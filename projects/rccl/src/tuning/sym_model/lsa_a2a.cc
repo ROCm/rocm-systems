@@ -35,6 +35,7 @@ const struct ncclSymkLsaA2AParameters
       {true, 8.3313, 0.0561, 0.0, 50.83, 715.1451, {{1.0, 1.0}}, 0.0, true}, // AllGather_STMC
       {}, // AllGather_RailRing_LsaSTMC
       {}, // AllGather_HierLsaST
+      {}, // AllGather_HierLsaTmaST
       {}, // ReduceScatter_LL
       {}, // ReduceScatter_TmaLD
       {}, // ReduceScatter_LD
@@ -59,6 +60,7 @@ const struct ncclSymkLsaA2AParameters
       {true, 8.3313, 0.0561, 0.0, 50.83, 715.1451, {{1.0, 1.0}}, 0.0, true}, // AllGather_STMC
       {}, // AllGather_RailRing_LsaSTMC
       {}, // AllGather_HierLsaST
+      {}, // AllGather_HierLsaTmaST
       {}, // ReduceScatter_LL
       {}, // ReduceScatter_TmaLD
       {}, // ReduceScatter_LD

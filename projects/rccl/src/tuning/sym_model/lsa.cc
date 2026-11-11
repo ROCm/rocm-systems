@@ -28,6 +28,8 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
 #endif
   case ncclSymkKernelId_AllGather_HierLsaST:
     return ncclSymkAgHierMaxBlocks;
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    return ncclSymkAgHierTmaMaxBlocks;
   default:
     return ncclSymkMaxBlocks;
   }
@@ -124,6 +126,8 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
 
   // TDM throughput keeps scaling with resident blocks, so launch it at the widest allowed count.
   if (usesTdm(comm, kernelId)) *nBlocks = nMaxBlocks;
-  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST) *nBlocks = ncclSymkAgHierLaunchBlocks(comm, *nBlocks);
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
+    *nBlocks = ncclSymkAgHierLaunchBlocks(comm, *nBlocks);
+  }
   return ncclSuccess;
 }
