@@ -1162,16 +1162,74 @@ TEST(GpuVmPipeline, InfrastructureFailuresDoNotReachTheArchitecturalFaultOwner) 
       wf.set_debug_suspended(true);
       return true;
     });
+    std::vector<uint64_t> exceptions;
+    context.cu->set_queue_exception_handler(
+        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+          exceptions.push_back(status);
+          return true;
+        });
     if (missing_vm) {
       context.cu->set_gpu_vm(nullptr);
     } else {
       ASSERT_TRUE(context.sim.soc->gpu_vm().unregister_address_space(context.address_space));
     }
+    testing::internal::CaptureStderr();
     context.cu->step();
+    const std::string warnings = testing::internal::GetCapturedStderr();
     EXPECT_EQ(faults, 0u);
     EXPECT_TRUE(context.wf->is_halted());
     EXPECT_FALSE(context.wf->fatal_exception_pending());
+    // No VM fault reporter saw either failure, so cancelling the dispatch alone
+    // would leave its waiter hanging; the queue owner receives a wave abort.
+    EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
+    EXPECT_NE(warnings.find(missing_vm ? "translated wave has no GPU VM"
+                                       : "address space retired before fetch"),
+              std::string::npos)
+        << warnings;
   }
+}
+
+// A DDS lane is rejected before translation, so no VM fault event follows.
+// Offering it to the memory-violation owner made KFD publish a status ROCr
+// pairs with that event, and the host waited forever. The queue owner
+// receives a wave abort naming the failing instruction instead.
+TEST(GpuVmPipeline, DdsRejectionAbortsTheQueueWithoutAMemoryViolation) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t shared_base = uint64_t{1} << 48, pc = 0x1000;
+  context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+  context.wf->pc = pc;
+  context.wf->set_exec(1);
+  const auto words =
+      cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 16, .vaddr = 0});
+  context.external->store(pc, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+  const uint32_t vb = context.wf->vgpr_alloc().base;
+  const uint64_t dds_address = shared_base + 0xffffffc0;
+  context.cu->write_vgpr(vb, 0, static_cast<uint32_t>(dds_address));
+  context.cu->write_vgpr(vb + 1, 0, static_cast<uint32_t>(dds_address >> 32));
+  uint32_t faults = 0;
+  context.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t) {
+    ++faults;
+    return true;
+  });
+  std::vector<uint64_t> exceptions;
+  context.cu->set_queue_exception_handler(
+      [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+        exceptions.push_back(status);
+        return true;
+      });
+  testing::internal::CaptureStderr();
+  context.cu->step();
+  const std::string warnings = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(faults, 0u);
+  EXPECT_TRUE(context.wf->is_halted());
+  EXPECT_EQ(exceptions, std::vector<uint64_t>{amdgpu::kAqlQueueWaveAbort});
+  const std::string failure = "memory access failed: CDNA5 FLAT DDS backing is not implemented";
+  const auto reported = warnings.find(failure);
+  ASSERT_NE(reported, std::string::npos) << warnings;
+  // Name the failing instruction, not the advanced resume PC.
+  EXPECT_NE(warnings.find("pc=0x1000", reported), std::string::npos) << warnings;
 }
 
 TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
