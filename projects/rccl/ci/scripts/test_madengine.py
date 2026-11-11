@@ -85,7 +85,7 @@ MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, has MAD#279 and #280
+MAD_REF = "36339bd825f9c3772e35a54adfeba9635d6765da"  # mad-rccl, has MAD#279, #280 and #284
 MAD_BRANCH = "mad-rccl"
 
 # Primus is not vendored in MAD; tools/fetch_primus.sh checks it out into
@@ -121,6 +121,33 @@ WORKLOAD_CONFIGS = {
             "32N": 1485,
             "44N": 1432,
         },
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
+        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
+        "docker_run_options": "--privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK "
+            "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
+    },
+    # The same model and image with the parallel layout swapped from FSDP2 to
+    # TP1 x PP4 x DP4, so pipeline point-to-point traffic is what RCCL carries.
+    # Its own key because its numbers are a different baseline. Megatron
+    # rejects FSDP2 together with PP > 1, hence the three overrides together
+    # (ROCm/MAD#284).
+    "llama-3.1-70b-pp4-training": {
+        "type": "training",
+        "model_repo": "primus_pyt_megatron_lm_train_llama-3.1-70b",
+        "base_image": "rocm/primus:v26.4",
+        "gpu_target": "gfx950",
+        "metric_key": "tokens_per_second_per_gpu",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+        "precisions": ["BF16", "FP8"],
+        "env_vars": {
+            "PRIMUS_EXTRA_ARGS": "--pipeline_model_parallel_size 4 "
+                "--use_torch_fsdp2 false --use_distributed_optimizer true",
+        },
+        # PP4 on 16 GPUs is DP4; another scale is another layout.
+        "required_nodes": 2,
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
         "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
@@ -268,6 +295,75 @@ CLUSTER_CONFIGS = {
         "results_base": "/apps/rccl-ci/madengine/perf",
     },
 }
+
+
+def _shell_code(text: str) -> str:
+    """*text* without what bash does not expand: comments, '...' and \\-escapes.
+
+    A lexer, not a parser: heredoc bodies are read as code, and an unbalanced
+    quote in one hides the rest of the file, which fails loudly rather than
+    passing.
+    """
+    out: list[str] = []
+    quote = ""  # "", "'", '"' or "$'"
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                quote = ""
+        elif quote == "$'":
+            if c == "\\":
+                i += 1
+            elif c == "'":
+                quote = ""
+        elif c == "\\":
+            i += 1
+        elif quote == '"':
+            if c == '"':
+                quote = ""
+            out.append(c)
+        elif c == "'":
+            if out and out[-1] == "$":
+                out.pop()
+                quote = "$'"
+            else:
+                quote = "'"
+        elif c == "#" and (not out or out[-1] in " \t\n;&|()"):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            continue
+        else:
+            if c == '"':
+                quote = '"'
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
+    """Fail if the MAD pin's Megatron script never expands a PRIMUS_* knob we set.
+
+    An unknown knob is simply ignored there, and the run measures the shipped
+    config under this workload's name -- the PP=4 key would score FSDP.
+    Expanding it is necessary, not sufficient: ignored_mad_knobs() catches a
+    model whose launch path bypasses it.
+    """
+    if workload_config.get("family", "megatron") != "megatron":
+        return
+    knobs = [k for k in workload_config.get("env_vars", {}) if k.startswith("PRIMUS_")]
+    if not knobs:
+        return
+    script = (work_dir / "scripts" / "primus_megatron-lm"
+              / "primus_megatron-lm_benchmark_report.sh")
+    text = _shell_code(script.read_text(errors="replace")) if script.is_file() else ""
+    missing = [k for k in knobs
+               if not re.search(rf"\$\{{?{re.escape(k)}\b", text)]
+    if missing:
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} does not read {', '.join(missing)} "
+            f"({script}) -- the run would ignore it"
+        )
 
 
 def fetch_primus(mad_dir: Path) -> Path:
@@ -558,6 +654,21 @@ def squash_log_spam(run_dir: Path) -> int:
             log.warning("Could not squash %s: %s", path, exc)
             tmp.unlink(missing_ok=True)
     return saved
+
+
+# What MAD's Megatron script prints when the model launches primus-cli itself
+# and the PRIMUS_* knobs never reach it.
+_KNOBS_IGNORED_MARK = "rather than through run_primus()"
+
+
+def ignored_mad_knobs(work_dir: Path) -> list[str]:
+    """Node logs of one phase in which MAD reports the PRIMUS_* knobs ignored."""
+    log_dir = work_dir / "slurm_output"
+    return [
+        log_file.name
+        for log_file in (sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else [])
+        if _KNOBS_IGNORED_MARK in log_file.read_text(errors="replace")
+    ]
 
 
 def runtime_rccl_versions(work_dir: Path) -> list[str]:
@@ -1590,7 +1701,8 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 `madengine-results-*` artifact of the same CI run.
 
 1. Unpack this directory on storage that every compute node sees, `cd` into it,
-   and `source repro.env`.
+   and `source repro.env`. The artifact download drops execute bits, and the MAD
+   scripts run each other directly: `find scripts -name '*.sh' -exec chmod +x {{}} +`
 2. In a Python 3.10+ environment the nodes can also see (conda on shared storage):
    `pip install "git+$MADENGINE_REPO@$MADENGINE_REF"`
 3. `export MAD_DOCKER_BUILDS=<shared dir>` and `chmod 0777` it: node 0 saves the
@@ -2264,6 +2376,25 @@ def append_result(
     run_dir.mkdir(parents=True, exist_ok=True)
 
 
+def metrics_prove_completion(family: str, phase_results: dict) -> bool:
+    """Whether the phases' results show training that ran to completion.
+
+    madengine can report failure (exit code 3) when its perf collector can't
+    parse the output format, even though training ran to completion; passing
+    rows with metrics from every phase then outweigh its exit code. Not for
+    MaxText: its wrapper parses a crashed run's partial steps too and exits
+    with the training's own code, so metrics do not prove completion.
+    """
+    if family == "maxtext" or not phase_results:
+        return False
+    rows = [r for phase_rows in phase_results.values() for r in phase_rows]
+    return (
+        all(phase_results.values())
+        and all(r["status"] == "pass" for r in rows)
+        and all(r.get("metric_value") is not None for r in rows)
+    )
+
+
 def pair_by_precision(
     baseline_results: list[dict],
     candidate_results: list[dict],
@@ -2490,6 +2621,7 @@ def main() -> None:
     # Step 2: Install madengine
     family = workload_config.get("family", "megatron")
     install_madengine(work_dir, family=family)
+    check_mad_knobs(work_dir, workload_config)
 
     primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
@@ -2622,6 +2754,17 @@ def main() -> None:
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
+    # Step 5c: A run that ignored the knobs measured the shipped config.
+    knobs_ignored = False
+    if any(k.startswith("PRIMUS_") for k in workload_config.get("env_vars", {})):
+        for phase, run_dir in phases:
+            ignored = ignored_mad_knobs(run_dir)
+            if ignored:
+                log.error("%s: MAD ignored the PRIMUS_* knobs (%s)",
+                          phase, ", ".join(ignored))
+                knobs_ignored = True
+                exit_code = max(exit_code, 1)
+
     # Step 6: Parse each phase's results and save its artifacts
     metric_key = workload_config["metric_key"]
     phase_results = {}
@@ -2648,20 +2791,14 @@ def main() -> None:
 
     all_rows = [r for rows in phase_results.values() for r in rows]
 
-    # Override exit_code if training actually completed successfully.
-    # madengine can report failure (exit code 3) when its perf collector
-    # can't parse the output format, even though training ran to completion.
-    if exit_code != 0 and not rccl_verification_failed and all_rows:
-        every_phase_scored = all(phase_results.get(p) for p, _ in phases)
-        all_pass = all(r["status"] == "pass" for r in all_rows)
-        has_metric = all(r.get("metric_value") is not None for r in all_rows)
-        if every_phase_scored and all_pass and has_metric:
-            log.info(
-                "Overriding madengine exit code %d → 0: all %d run(s) across "
-                "both phases passed with metrics",
-                exit_code, len(all_rows),
-            )
-            exit_code = 0
+    if (exit_code != 0 and not rccl_verification_failed and not knobs_ignored
+            and metrics_prove_completion(family, phase_results)):
+        log.info(
+            "Overriding madengine exit code %d → 0: all %d run(s) across "
+            "both phases passed with metrics",
+            exit_code, len(all_rows),
+        )
+        exit_code = 0
 
     # Step 7: Score the candidate against the baseline, per precision
     comparisons = pair_by_precision(
