@@ -1126,10 +1126,6 @@ class MachineSpecsRDNA(MachineSpecs):
             self.num_memory_channels = self.total_l2_chan
 
 
-# Preserve the existing RDNA 3.5 import name for callers.
-MachineSpecsRDNA35 = MachineSpecsRDNA
-
-
 if __name__ == "__main__":
     specs = generate_machine_specs(None, None)
     if specs:
