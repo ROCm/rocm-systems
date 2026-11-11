@@ -6268,6 +6268,21 @@ TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_ReportsCostModelTimeOfTheChosenAl
       << "estimatedTime must be the cost-model time, not the tuner's 0";
 }
 
+TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_NullSimInfoSucceeds) {
+  // A real launch passes a null simulation. The tuner branch must not
+  // dereference it, and the 0 must still select TREE/LL.
+  AlgoInfoComm cc;
+  ncclTuner_t tuner{};
+  AttachZeroTuner(cc.get(), &tuner);
+  ScriptCellTime(NCCL_ALGO_TREE, NCCL_PROTO_LL, kChosenModelUs, kOtherModelUs);
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = 1024;
+
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+  EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_LL, task.protocol);
+}
+
 TEST_F(EnqueueMicrotest, GetAlgoInfo_TunerZero_KeepsZeroWhenCostModelHasNoPositiveTime) {
   AlgoInfoComm cc;
   ncclTuner_t tuner{};
