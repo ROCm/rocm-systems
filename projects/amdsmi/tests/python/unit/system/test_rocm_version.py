@@ -75,17 +75,40 @@ class TestAmdSmiGetRocmVersion(unittest.TestCase):
 
         self.assertEqual(result, (False, "libamd_smi.so failed to load"))
 
-    def test_attribute_error_reports_symbol_unavailable(self) -> None:
+    def test_attribute_error_falls_back_to_ctypes_and_succeeds(self) -> None:
         # Mirrors an older libamd_smi.so build that predates this C API: the
-        # wrapper module never binds the symbol at all.
+        # wrapper module never binds the symbol at all. The pre-C-API direct
+        # librocm-core.so load must still find a version in that case.
+        def _fake_get_rocm_core_version(major_ptr, minor_ptr, patch_ptr):
+            major_ptr._obj.value = 6
+            minor_ptr._obj.value = 4
+            patch_ptr._obj.value = 2
+            return 0
+
+        fake_librocm_core = mock.Mock(getROCmVersion=_fake_get_rocm_core_version)
+
         with mock.patch.object(
             amdsmi.amdsmi_wrapper,
             "amdsmi_get_rocm_version",
             side_effect=AttributeError("amdsmi_get_rocm_version"),
+        ), mock.patch.object(
+            amdsmi.amdsmi_interface.ctypes, "CDLL", return_value=fake_librocm_core
         ):
             result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
 
-        self.assertEqual(
-            result,
-            (False, "amdsmi_get_rocm_version is not available in this build of libamd_smi.so"),
-        )
+        self.assertEqual(result, (True, "6.4.2"))
+
+    def test_attribute_error_falls_back_to_ctypes_and_reports_missing(self) -> None:
+        # Same old-build scenario, but librocm-core.so isn't present anywhere
+        # the fallback looks either; it must report the same missing-library
+        # message the C API path uses, not raise.
+        with mock.patch.object(
+            amdsmi.amdsmi_wrapper,
+            "amdsmi_get_rocm_version",
+            side_effect=AttributeError("amdsmi_get_rocm_version"),
+        ), mock.patch.object(
+            amdsmi.amdsmi_interface.ctypes, "CDLL", side_effect=OSError("not found")
+        ):
+            result = amdsmi.amdsmi_interface.amdsmi_get_rocm_version()
+
+        self.assertEqual(result, (False, "Could not find librocm-core.so"))

@@ -7349,6 +7349,62 @@ def amdsmi_set_gpu_ptl_formats(
 ### Non-raising APIs (return Tuple[bool, str] instead of raising AmdSmiException) ###
 
 
+def _amdsmi_get_rocm_version_via_ctypes() -> Tuple[bool, str]:
+    """Pre-C-API fallback: dlopen librocm-core.so directly via ctypes.
+
+    Kept for libamd_smi.so builds that predate amdsmi_get_rocm_version, so a
+    library gap doesn't regress a version direct ctypes loading could always
+    find.
+    """
+    try:
+        possible_locations = list()
+        # 0. Relocatable tree: <root>/lib relative to this file.
+        here = Path(__file__).resolve()
+        if len(here.parents) > 3:
+            possible_locations.append(here.parents[3] / "lib/librocm-core.so.1")
+        # 1. ROCM_HOME / ROCM_PATH.
+        rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
+        if rocm_path:
+            possible_locations.append(os.path.join(rocm_path, "lib/librocm-core.so"))
+        # 2. Default /opt/rocm system install.
+        if os.path.exists("/opt/rocm/lib/librocm-core.so"):
+            possible_locations.append("/opt/rocm/lib/librocm-core.so")
+        # 3. Bare SONAME via the dynamic linker (LD_LIBRARY_PATH, ld.so.conf.d).
+        possible_locations.append("librocm-core.so")
+
+        for librocm_core_file_path in possible_locations:
+            try:
+                librocm_core = ctypes.CDLL(librocm_core_file_path)
+                get_rocm_core_version = librocm_core.getROCmVersion
+                get_rocm_core_version.restype = ctypes.c_uint32
+                get_rocm_core_version.argtypes = [
+                    POINTER(ctypes.c_uint32),
+                    POINTER(ctypes.c_uint32),
+                    POINTER(ctypes.c_uint32),
+                ]
+
+                major = ctypes.c_uint32()
+                minor = ctypes.c_uint32()
+                patch = ctypes.c_uint32()
+
+                if (
+                    get_rocm_core_version(
+                        ctypes.byref(major), ctypes.byref(minor), ctypes.byref(patch)
+                    )
+                    == 0
+                ):
+                    return True, f"{major.value}.{minor.value}.{patch.value}"
+                else:
+                    return False, "Failed to unpack ROCm version"
+            except OSError:
+                continue
+
+        # If we hit here, we were unable to find the librocm-core.so file
+        return False, "Could not find librocm-core.so"
+    except Exception as e:
+        return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
+
+
 def amdsmi_get_rocm_version() -> Tuple[bool, str]:
     """
     Get the ROCm version for the rocm-core library.
@@ -7374,8 +7430,10 @@ def amdsmi_get_rocm_version() -> Tuple[bool, str]:
         status = amdsmi_wrapper.amdsmi_get_rocm_version(ctypes.byref(version))
     except AttributeError:
         # This build's libamd_smi.so loaded fine but predates the C API; the
-        # wrapper module never bound the symbol at all.
-        return False, "amdsmi_get_rocm_version is not available in this build of libamd_smi.so"
+        # wrapper module never bound the symbol at all. Fall back to the
+        # pre-C-API direct librocm-core.so load so this doesn't regress a
+        # version that always used to be found.
+        return _amdsmi_get_rocm_version_via_ctypes()
     except OSError:
         # libamd_smi.so itself failed to load; amdsmi_wrapper installs a
         # sentinel for every symbol that raises OSError on any call.

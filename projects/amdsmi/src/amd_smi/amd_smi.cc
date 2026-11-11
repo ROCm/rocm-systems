@@ -5861,7 +5861,10 @@ std::vector<std::string> rocm_core_candidates() {
   // typically sits in the same lib/ directory as this library itself.
   Dl_info self_info{};
   if (dladdr(reinterpret_cast<void*>(&amdsmi_get_rocm_version), &self_info) != 0 &&
-      self_info.dli_fname != nullptr) {
+      self_info.dli_fname != nullptr && self_info.dli_fname[0] == '/') {
+    // dli_fname can come back relative (e.g. this library was dlopen()'d with a
+    // relative path); only an absolute path identifies a real directory here,
+    // so a relative one is dropped rather than resolved against cwd.
     std::string self_path(self_info.dli_fname);
     size_t slash = self_path.find_last_of('/');
     if (slash != std::string::npos) {
