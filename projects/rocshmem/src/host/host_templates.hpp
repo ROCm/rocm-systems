@@ -295,7 +295,7 @@ __host__ void HostInterface::amo_cas(void* dst, T value, T cond, int pe,
 template <typename T>
 __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
                                         WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   /*
    * Verbs host path (ROCSHMEM_HOST_TRANSPORT=verbs). 8-byte integral atomics
    * are served by WindowInfoVerbs via verbs_amo_fetch_add() (defined in
@@ -340,7 +340,7 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
 template <typename T>
 __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
                                         WindowInfo* window_info) {
-#ifdef USE_VERBS
+#ifdef USE_HOST_VERBS
   /* Verbs host path; see amo_fetch_add / host.cpp for the endianness TODO.
    * value is the swap operand, cond is the compare (MPI arg order). */
   if constexpr (std::is_integral_v<T> && sizeof(T) == 8) {
