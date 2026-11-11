@@ -137,8 +137,6 @@ private:
     void initialize_resources();
     /// Start with trace_resources_mut held and resources already initialized.
     signal_ptr_t start_thread_trace_locked();
-    /// Iterate with trace_resources_mut held.
-    void iterate_data_locked(aqlprofile_handle_t handle, rocprofiler_user_data_t data);
 
     /// Acquire a copy of the control packet, with optional increment to active_traces
     std::unique_ptr<hsa::TraceControlAQLPacket> get_control(bool bStart = false);
