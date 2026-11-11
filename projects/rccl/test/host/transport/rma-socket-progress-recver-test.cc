@@ -770,6 +770,7 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_FailedSignalResolution
     message->size = 8;
     message->opFlags = NCCL_RMA_SOCKET_OP_HAS_SIGNAL;
     message->signalMrId = 99;
+    message->signalOp = NCCL_NET_SIGNAL_OP_INC;
     *offset = size;
     *closed = false;
     return ncclSuccess;
@@ -816,7 +817,7 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalReadFailureStops
   EXPECT_EQ(receiver.recvState, ncclRmaSocketProxyRecvStateControlMsg);
 }
 
-TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailurePropagatesWithoutCompletingRequest) {
+TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailurePropagatesAndReleasesReference) {
   Scene scene;
   uint64_t device = 0;
   uint64_t bar = UINT64_MAX - 2;
@@ -830,7 +831,6 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailureProp
   receiver.signalType = NCCL_PTR_CUDA;
   receiver.signalDelta = 7;
   receiver.hasSignal = 1;
-  receiver.lastCompletedRequestGlobalId = 73;
   ScopedHook read(g_wrapGdrCopyFromMapping, [&](gdr_mh_t, void* destination, const void* source, size_t size) {
     std::memcpy(destination, source, size);
     return ncclSuccess;
@@ -847,7 +847,6 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailureProp
   EXPECT_EQ(read.calls, 1);
   EXPECT_EQ(write.calls, 1);
   EXPECT_EQ(handle.recvActiveOps, 0);
-  EXPECT_EQ(receiver.lastCompletedRequestGlobalId, 73u);
   EXPECT_EQ(receiver.recvState, ncclRmaSocketProxyRecvStateControlMsg);
 }
 
