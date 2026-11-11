@@ -24,9 +24,9 @@ An execution plugin can instead request structured register findings through
 available after a finding until a wait or another architectural guarantee releases
 them. A later consumer can therefore report the same producer. Observers receive
 findings before the stderr budget, and own their report selection and suppression.
-The [race plugin's opt-in core checker](race-detector.md#core-backed-register-reports)
-uses this path to add kernel context and owned instruction traces. It does not run
-a second register checker.
+The [race plugin](race-detector.md#core-backed-register-reports) uses this path
+to add kernel context and owned instruction traces. It does not run a second
+register checker.
 
 Registers in diagnostics use the scoreboard's physical numbering. On targets
 with an accumulator bank, `v256+n` names `aN` (for example, `v288` is `a32`).
@@ -46,9 +46,8 @@ gfx1250 XCNT. These modes override both per-CU settings on every GPU. Omitting t
 flag preserves JSON settings and defaults. See [configuration](configuration.md#memory-wait-diagnostics)
 for persistent global overrides and launch-mode restrictions.
 An explicitly configured register-finding observer still requests ordinary
-register checking when warnings are off. To disable that checking too, remove the
-observer or select the race plugin's default `register_checker: "plugin"` mode.
-The latter retains the plugin's own register checks.
+register checking when warnings are off. To disable that checking too, remove
+register-finding observers, including the race plugin.
 
 Without a global override, memory-result diagnostics default to
 `memory_wait_diagnostics=warn`. To disable them per CU, add this entry to each
@@ -158,8 +157,10 @@ hardware occupancy or select a latency at which memory becomes visible.
 
 These are known limits, not an exhaustive list. Investigate warnings against the
 target's ordering rules; use `--wait-checking=off` to suppress both warning classes
-when needed. Plugins may overlap with these checks and additionally validate
-hazards such as memory visibility and communication between waves.
+when needed. The race plugin reports these same register findings and separately
+checks LDS ordering and communication between waves. Its
+[LDS coverage limits](race-detector.md#limitations) are independent of register
+readiness.
 
 ## Access planning and cost
 
@@ -182,6 +183,11 @@ before being read for planning. Planning does not fire execution-plugin callback
 The checks and producer registration precede execution lane loops and async MMA
 publication. Only the issuing thread accesses the scoreboard: register accessors,
 MMA workers, observer snapshots and memory writeback do not check it.
+
+MFMA broadcast forms share execution's A/B lane-selection helpers, so pending
+results outside the selected source lanes do not report. Accumulators and
+destinations still use the whole wave. Fields with other meanings, such as
+F64 negation or mixed input formats, do not select broadcast lanes.
 
 Lane masks distinguish divergent consumers and pending results across waterfall
 iterations. Qualified sub-dword forms also distinguish consumed and written bytes,

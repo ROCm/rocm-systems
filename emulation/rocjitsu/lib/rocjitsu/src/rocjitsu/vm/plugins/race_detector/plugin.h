@@ -88,20 +88,18 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver {
 public:
-  /// register_checker selects "plugin" (default) or the core's register findings.
-  /// LDS checking is performed by this plugin in either mode.
+  /// Reports the core's register findings and checks LDS ordering.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
-  bool observes_vgpr_reads() const override { return !core_registers_; }
-  bool observes_vgpr_writes() const override { return !core_registers_; }
-  bool observes_sgpr_reads() const override { return !core_registers_; }
-  bool observes_scalar_register_writes() const override { return !core_registers_; }
-  bool observes_register_hazards() const override { return core_registers_; }
+  bool observes_vgpr_reads() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_sgpr_reads() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_register_hazards() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
-  /// Skip waves without race state, including slots between a halt and the
-  /// next workgroup dispatch, when other plugins may read their registers.
+  /// Skip slots without a live race-analysis state.
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
@@ -130,17 +128,6 @@ public:
   /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
   void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
                                const amdgpu::Wavefront &wf) override;
-
-  void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
-                             uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
-
-  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
-                              uint64_t lane_mask,
-                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
-
-  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
-
-  void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override;
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;
@@ -199,7 +186,6 @@ private:
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
-  const bool core_registers_;
   mutable std::mutex report_mutex_;
   std::set<std::pair<uint32_t, uint64_t>> observed_races_;
   using RegisterSite =

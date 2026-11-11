@@ -3739,7 +3739,7 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
         }
 }
 
-// Register observers, such as the race detector, must see the same (register, lane) reads and
+// Register observers must see the same (register, lane) reads and
 // writes from the snapshot path as from the per-element forced-scalar path, including when
 // cbsz/abid or blgp broadcast part of a register. The snapshot path writes each destination
 // register once.

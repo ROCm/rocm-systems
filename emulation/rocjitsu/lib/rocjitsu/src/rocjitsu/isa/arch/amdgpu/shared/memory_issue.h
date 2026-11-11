@@ -82,10 +82,10 @@ private:
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
 /// lists possible domains; address routing selects the domains actually used.
-/// The dynamic race detector requires every attached obligation for whole-event
-/// completion, including destination-register and memory dependencies. This API
-/// does not represent a separate source-register lifetime. The same obligations
-/// drive emulated counter increments and are exposed to execution plugins.
+/// The same obligations drive emulated counter increments and are exposed to
+/// execution plugins. The LDS race checker requires every attached obligation
+/// for whole-event completion; the core tracks register readiness separately.
+/// This descriptor does not express a separate replay-source lifetime.
 /// exec_masked distinguishes ordinary vector memory operations from scalar
 /// memory and the few vector operations that execute independently of EXEC.
 ///

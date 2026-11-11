@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "race_test_instruction.h"
-#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <array>
@@ -59,12 +58,10 @@ protected:
         event.bytes.set(byte);
     }
     intervals.finalize();
-    const auto type = !write                            ? MemoryEventType::LDS_TO_VGPR
-                      : order == MemoryOrderClass::VMEM ? MemoryEventType::GLOBAL_TO_LDS
-                                                        : MemoryEventType::VGPR_TO_LDS;
-    event.id = detector_.allocateEventId(
-        WaveId{wave}, testInstruction(/*pc=*/0), type, {}, /*execMask=*/1,
-        /*byteMask=*/0xF, std::move(intervals), CounterObligations{counter, order}, order);
+    const auto type = write ? LdsAccess::Write : LdsAccess::Read;
+    event.id =
+        detector_.allocateEventId(WaveId{wave}, testInstruction(/*pc=*/0), type,
+                                  std::move(intervals), CounterObligations{counter, order}, order);
     events_.push_back(event);
   }
 
@@ -116,13 +113,9 @@ protected:
 
   std::vector<Event> events_;
   std::vector<int> observed_;
-  RaceDetector detector_{kNumWaves,
-                         /*vgprCount=*/8,
-                         /*sgprCount=*/8,
-                         Dim3d(0),
+  RaceDetector detector_{kNumWaves, Dim3d(0),
                          [this](RaceViolation v) { observed_.push_back(v.conflictingEvent.value); },
-                         CounterCapacities{},
-                         /*ldsSizeBytes=*/64 * 1024};
+                         CounterCapacities{}, /*ldsSizeBytes=*/64 * 1024};
 };
 
 TEST_F(LdsHistoryTest, DeterministicSoak) {

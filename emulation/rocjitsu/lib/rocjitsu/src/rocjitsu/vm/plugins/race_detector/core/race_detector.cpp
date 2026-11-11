@@ -14,13 +14,13 @@
 
 namespace rocjitsu::plugins::race_detector {
 
-RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
+RaceDetector::RaceDetector(int nWaves, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler,
                            CounterCapacities counterCapacities, size_t ldsSizeBytes)
     : ldsSizeBytes_(ldsSizeBytes), workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
-    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
+    waveRaceStates.emplace_back(WaveId{i}, this, counterCapacities);
   }
 }
 
@@ -29,15 +29,14 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
   return waveRaceStates[waveIndex];
 }
 
-EventId RaceDetector::allocateEventId(
-    WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
-    std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask, LdsAccess ldsAccess) {
+EventId
+RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, LdsAccess access,
+                              IntervalSet ldsIntervals,
+                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                              MemoryOrderClass memoryOrder, uint8_t alignedAtomicBytes) {
   bool hasLds = !ldsIntervals.empty();
-  EventId eid = events_.add(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                            std::move(ldsIntervals), counterObligations, memoryOrder,
-                            lastRegisterByteMask, ldsAccess);
+  EventId eid = events_.add(waveId, instruction, access, std::move(ldsIntervals),
+                            counterObligations, memoryOrder, alignedAtomicBytes);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
     const WaveId orderedWave = memoryOrder == MemoryOrderClass::LDS ? waveId : WaveId{-1};
@@ -95,8 +94,7 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
     }
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler(
-          {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
+      raceHandler({*byte, wave.value, lane, false, workgroupId, eventId});
     }
   }
 }
@@ -115,9 +113,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     if (wave == events_.waveId(eventId)) {
       // The LDS bytes are safe only when the two operations share a proven
       // FIFO completion class, or an explicit wait completed the older event.
-      // The read's destination VGPR remains independently protected by its
-      // wait-counter obligations. This WAR check does not cover LDS
-      // write/write ordering, which is not currently checked.
+      // This WAR check does not cover LDS write/write ordering.
       const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
@@ -126,7 +122,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     }
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
+      raceHandler({*byte, wave.value, lane, true, workgroupId, eventId});
     }
   }
 }

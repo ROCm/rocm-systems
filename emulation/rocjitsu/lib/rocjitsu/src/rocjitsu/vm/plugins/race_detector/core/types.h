@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
@@ -11,6 +11,11 @@
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
+
+using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// Counter-only issues occupy queue positions but have no LDS effect.
+enum class LdsAccess : uint8_t { None, Read, Write, ReadWrite };
 
 /// Identifies a wave (SIMD execution unit) within a workgroup. Wave 0 runs
 /// lanes [0, waveSize), wave 1 runs [waveSize, 2*waveSize), and so on.
@@ -62,22 +67,14 @@ enum class EventStatus {
   RETIRED        // Fully retired; no longer referenced.
 };
 
-/// Describes a detected race condition. Used by the race detection layer
-/// to report violations without depending on any exception type.
+/// An LDS conflict reported without depending on the plugin's output format.
 struct RaceViolation {
-  enum class Space { VGPR, SGPR, TTMP, LDS };
-  Space space;
-  int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
+  int address;  ///< Byte address shared by the conflicting LDS accesses.
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for no lane (scalar or tensor DMA).
+  int lane;     ///< Lane within the wave, or -1 for a tensor DMA transfer.
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
-  EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
-
-  RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
-                EventId conflictingEvent)
-      : space(space), index(index), wave(wave), lane(lane), isWrite(isWrite),
-        workgroupId(workgroupId), conflictingEvent(conflictingEvent) {}
+  EventId conflictingEvent; ///< Exact retained event that caused the violation.
 };
 
 struct WaitCounterUpdate {

@@ -318,13 +318,12 @@ TEST_F(MemoryWaitScoreboardTest, PartialWaitReleasesOnlyTheOlderLoad) {
 }
 
 TEST_F(MemoryWaitScoreboardTest, WideAccessReportsThePendingRegisterIntersection) {
-  for (auto cls : {RegClass::VGPR, RegClass::SGPR})
+  for (auto cls : {RegClass::VGPR, RegClass::SGPR, RegClass::TTMP})
     for (bool write : {false, true})
       for (const auto &[producer, consumer, overlap] :
-           {std::tuple{RegisterRef{cls, 51, 1}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1}},
-            std::tuple{RegisterRef{cls, 48, 4}, RegisterRef{cls, 50, 4}, RegisterRef{cls, 50, 2}},
-            std::tuple{RegisterRef{cls, 50, 4}, RegisterRef{cls, 51, 1},
-                       RegisterRef{cls, 51, 1}}}) {
+           {std::tuple{RegisterRef{cls, 5, 1}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}},
+            std::tuple{RegisterRef{cls, 2, 4}, RegisterRef{cls, 4, 4}, RegisterRef{cls, 4, 2}},
+            std::tuple{RegisterRef{cls, 4, 4}, RegisterRef{cls, 5, 1}, RegisterRef{cls, 5, 1}}}) {
         SCOPED_TRACE(static_cast<unsigned>(cls));
         SCOPED_TRACE(write);
         SCOPED_TRACE(producer.index);
@@ -1412,6 +1411,77 @@ TEST(MemoryWaitExecutionTest, FormattedLoadsTrackRegisterLayoutInsteadOfMemoryFo
           }
         }
       }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, D16ResultDependenciesFollowTargetEccWriteback) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("d16_ecc_wait_memory");
+    L2Cache l2("d16_ecc_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "d16_ecc_wait_cu", config, &memory, &l2));
+    auto *wave = cu->dispatch_wf(0, 0x100, 128, 32, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    const bool ecc = arch != ROCJITSU_CODE_ARCH_RDNA4;
+    ASSERT_EQ(cu->sram_ecc(), ecc);
+    auto decoder = Decoder::create(arch);
+    auto &state = wave->ensure_memory_wait_scoreboard();
+    for (unsigned form = 0; form < 3; ++form) {
+      // CDNA5 has low/high D16 loads, but no packed formatted loads.
+      if (form == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5)
+        continue;
+      std::vector<uint32_t> words;
+      auto set_words = [&](auto encoded) { words.assign(encoded.begin(), encoded.end()); };
+      if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+        const uint16_t opcodes[] = {cdna4::kBufferLoadUbyteD16Mubuf,
+                                    cdna4::kBufferLoadUbyteD16HiMubuf,
+                                    cdna4::kBufferLoadFormatD16XyzMubuf};
+        set_words(cdna4::build_mubuf(opcodes[form], {.vdata = 4, .srsrc = 0, .soffset = 128}));
+      } else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+        set_words(cdna5::build_vbuffer(form == 0 ? cdna5::kBufferLoadD16U8Vbuffer
+                                                 : cdna5::kBufferLoadD16HiU8Vbuffer,
+                                       {.soffset = 124, .vdata = 4}));
+      } else {
+        const uint16_t opcodes[] = {rdna4::kBufferLoadD16U8Vbuffer,
+                                    rdna4::kBufferLoadD16HiU8Vbuffer,
+                                    rdna4::kBufferLoadD16FormatXyzVbuffer};
+        set_words(rdna4::build_vbuffer(opcodes[form], {.soffset = 124, .vdata = 4}));
+      }
+      util::StringDiagnostic error;
+      auto decoded = decoder->decode_window(words, wave->pc, error.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << error.message();
+      SCOPED_TRACE(decoded.value()->mnemonic());
+      const uint8_t first = ecc || form == 2 ? 0xf : form == 1 ? 0xc : 0x3;
+      const uint8_t second = form == 2 ? (ecc ? 0xf : 0x3) : 0;
+      const std::array<uint8_t, 3> expected{first, second, 0};
+      for (uint16_t offset = 0; offset < expected.size(); ++offset)
+        for (uint8_t bytes : {0x3, 0xc})
+          for (uint64_t lanes : {1, 2})
+            for (bool write : {false, true})
+              for (bool waited : {false, true}) {
+                state.clear();
+                cu->track_memory_wait(*decoded.value(), *wave);
+                unsigned reports = 0;
+                state.bind(0x200, &reports,
+                           [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+                if (waited)
+                  state.wait(WaitCounterKind::Load, 0);
+                state.access({RegClass::VGPR, static_cast<uint16_t>(4 + offset), 1}, lanes, bytes,
+                             write);
+                EXPECT_EQ(reports, !waited && lanes == 1 && (expected[offset] & bytes) ? 1u : 0u)
+                    << "offset=" << offset << " bytes=" << unsigned(bytes) << " lanes=" << lanes
+                    << " write=" << write << " waited=" << waited;
+              }
     }
   }
 }

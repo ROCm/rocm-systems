@@ -15,7 +15,6 @@ namespace {
 
 constexpr int kWave = 0;
 constexpr int kLane = 0;
-constexpr int kScalarRegisters = 8;
 constexpr int kDwordBytes = 4;
 
 // For CDNA1-CDNA4 combined counters, the all-ones no-wait encoding is also the
@@ -28,50 +27,32 @@ constexpr int kLgkmcntOverflow = 5;
 constexpr int kVmcntOverflow = 7;
 constexpr int kClearlyBelowCapacity = 10;
 
-RaceTestBuilder makeLgkmcntTest() {
-  return RaceTestBuilder(/*numWaves=*/1, /*vgprs=*/kLgkmcntCapacity + kLgkmcntOverflow,
-                         /*sgprs=*/kScalarRegisters);
-}
+RaceTestBuilder makeCounterTest() { return RaceTestBuilder(1); }
 
-RaceTestBuilder makeVmcntTest() {
-  return RaceTestBuilder(/*numWaves=*/1, /*vgprs=*/kVmcntCapacity + kVmcntOverflow,
-                         /*sgprs=*/kScalarRegisters);
-}
-
-void issueOrderedLdsReads(RaceTestBuilder &builder, int count, int firstVgpr = 0) {
+void issueOrderedLdsReads(RaceTestBuilder &builder, int count) {
   for (int offset = 0; offset < count; ++offset) {
-    const int vgpr = firstVgpr + offset;
-    builder.ldsRead(kWave, kLane, /*addr=*/vgpr * kDwordBytes, /*bytes=*/kDwordBytes,
-                    /*vgprDst=*/vgpr);
+    builder.ldsRead(kWave, kLane, /*addr=*/offset * kDwordBytes, /*bytes=*/kDwordBytes);
   }
 }
 
-void issueOrderedVmemLoads(RaceTestBuilder &builder, int count, int firstVgpr = 0) {
+void issueOrderedVmemEvents(RaceTestBuilder &builder, int count) {
   for (int offset = 0; offset < count; ++offset) {
-    builder.globalLoad(kWave, /*vgprBase=*/firstVgpr + offset, /*numRegs=*/1);
+    builder.counterIssue(kWave, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
   }
 }
 
-void issueUnorderedVmcntLoads(RaceTestBuilder &builder, int count, int firstVgpr = 0) {
+void issueUnorderedVmcntLoads(RaceTestBuilder &builder, int count) {
   for (int offset = 0; offset < count; ++offset) {
-    builder.globalLoad(kWave, /*vgprBase=*/firstVgpr + offset, /*numRegs=*/1, /*exec=*/0,
-                       /*byteMask=*/0xF, MemoryOrderClass::UNORDERED);
+    builder.counterIssue(kWave, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::UNORDERED);
   }
 }
 
-void issueOrderedVmemStores(RaceTestBuilder &builder, int count) {
-  for (int index = 0; index < count; ++index)
-    builder.globalStore(kWave);
+void expectComplete(RaceTestBuilder &builder, int event) {
+  EXPECT_NE(builder.events().status(EventId{event}), EventStatus::ACTIVE);
 }
 
-void expectVgprReady(RaceTestBuilder &builder, int vgpr) {
-  builder.checkVgprRead(kWave, vgpr, kLane);
-  EXPECT_FALSE(builder.hasVgprRace(vgpr));
-}
-
-void expectVgprPending(RaceTestBuilder &builder, int vgpr) {
-  builder.checkVgprRead(kWave, vgpr, kLane);
-  EXPECT_TRUE(builder.hasVgprRace(vgpr));
+void expectPending(RaceTestBuilder &builder, int event) {
+  EXPECT_EQ(builder.events().status(EventId{event}), EventStatus::ACTIVE);
 }
 
 void expectLdsReady(RaceTestBuilder &builder) {
@@ -89,26 +70,26 @@ void expectLdsPending(RaceTestBuilder &builder) {
 // ---- All-ones no-wait operands ----
 
 TEST(RaceDetector, CounterCapacity_LgkmcntAllOnesWaitIsNoOpBelowCapacity) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kClearlyBelowCapacity);
 
   builder.waitcnt(kWave, /*vmcnt=*/-1, /*lgkmcnt=*/kLgkmcntCapacity);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitIsNoOpBelowCapacity) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kClearlyBelowCapacity);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kClearlyBelowCapacity);
 
   builder.waitcnt(kWave, /*vmcnt=*/kVmcntCapacity, /*lgkmcnt=*/-1);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 // ---- Issue-time capacity backpressure ----
 
 TEST(RaceDetector, CounterCapacity_MissingConfiguredCapacityFailsLoudly) {
   RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/1, /*sgprCount=*/1, Dim3d(0), [](RaceViolation) {},
+                        1, Dim3d(0), [](RaceViolation) {},
                         CounterCapacities{.vmcnt = 0, .lgkmcnt = 0}, /*ldsSizeBytes=*/64 * 1024);
 
   EXPECT_TRUE(detector.getWaveRaceState(0)
@@ -118,11 +99,11 @@ TEST(RaceDetector, CounterCapacity_MissingConfiguredCapacityFailsLoudly) {
 }
 
 TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresOldestOrderedReads) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity + kLgkmcntOverflow);
 
-  expectVgprReady(builder, /*vgpr=*/kLgkmcntOverflow - 1);
-  expectVgprPending(builder, /*vgpr=*/kLgkmcntOverflow);
+  expectComplete(builder, /*event=*/kLgkmcntOverflow - 1);
+  expectPending(builder, /*event=*/kLgkmcntOverflow);
 }
 
 // Backpressure completes the oldest DS reads like a wait does, so a
@@ -131,8 +112,7 @@ TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresOldestOrderedReads) {
 TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresLdsEventsOnlyInASingleWaveWorkgroup) {
   for (const int numWaves : {1, 2}) {
     SCOPED_TRACE(numWaves);
-    RaceTestBuilder builder(numWaves, /*vgprs=*/kLgkmcntCapacity + kLgkmcntOverflow,
-                            /*sgprs=*/kScalarRegisters);
+    RaceTestBuilder builder(numWaves);
     issueOrderedLdsReads(builder, kLgkmcntCapacity + kLgkmcntOverflow);
 
     const auto completed = numWaves == 1 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE;
@@ -142,70 +122,70 @@ TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresLdsEventsOnlyInASingleW
 }
 
 TEST(RaceDetector, CounterCapacity_VmcntOverflowRetiresOldestOrderedLoads) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity + kVmcntOverflow);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity + kVmcntOverflow);
 
-  expectVgprReady(builder, /*vgpr=*/kVmcntOverflow - 1);
-  expectVgprPending(builder, /*vgpr=*/kVmcntOverflow);
+  expectComplete(builder, /*event=*/kVmcntOverflow - 1);
+  expectPending(builder, /*event=*/kVmcntOverflow);
 }
 
-TEST(RaceDetector, CounterCapacity_FullLgkmcntRetiresBeforeCurrentOperandRead) {
-  auto builder = makeLgkmcntTest();
+TEST(RaceDetector, CounterCapacity_FullLgkmcntRetiresBeforeCurrentIssue) {
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::LGKMCNT);
-  expectVgprReady(builder, /*vgpr=*/0);
+  expectComplete(builder, /*event=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_LgkmcntBelowCapacityKeepsCurrentOperandPending) {
-  auto builder = makeLgkmcntTest();
+TEST(RaceDetector, CounterCapacity_LgkmcntBelowCapacityLeavesOldestEventPending) {
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::LGKMCNT);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_FullVmcntRetiresBeforeCurrentOperandRead) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity);
+TEST(RaceDetector, CounterCapacity_FullVmcntRetiresBeforeCurrentIssue) {
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::VMCNT);
-  expectVgprReady(builder, /*vgpr=*/0);
+  expectComplete(builder, /*event=*/0);
 }
 
-TEST(RaceDetector, CounterCapacity_VmcntBelowCapacityKeepsCurrentOperandPending) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity - 1);
+TEST(RaceDetector, CounterCapacity_VmcntBelowCapacityLeavesOldestEventPending) {
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity - 1);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::VMCNT);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_LoadcntAliasUsesVmcntCapacity) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::LOADCNT);
-  expectVgprReady(builder, /*vgpr=*/0);
+  expectComplete(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_SplitLgkmAliasesUseCombinedCapacity) {
   for (const auto counter : {amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT}) {
     SCOPED_TRACE(static_cast<int>(counter));
-    auto builder = makeLgkmcntTest();
+    auto builder = makeCounterTest();
     issueOrderedLdsReads(builder, kLgkmcntCapacity);
 
     builder.prepareCounterIncrement(kWave, counter);
-    expectVgprReady(builder, /*vgpr=*/0);
+    expectComplete(builder, /*event=*/0);
   }
 }
 
 TEST(RaceDetector, CounterCapacity_StorecntDoesNotAdvanceVmcnt) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
   builder.prepareCounterIncrement(kWave, amdgpu::WaitCounterType::STORECNT);
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_GenericFlatAdvancesBothCounterDomains) {
@@ -216,186 +196,170 @@ TEST(RaceDetector, CounterCapacity_GenericFlatAdvancesBothCounterDomains) {
                                        amdgpu::MemoryCompletionClass::LDS};
   flatIssue.num_counter_obligations_ = 2;
 
-  auto vmemBuilder = makeVmcntTest();
-  issueOrderedVmemLoads(vmemBuilder, kVmcntCapacity);
+  auto vmemBuilder = makeCounterTest();
+  issueOrderedVmemEvents(vmemBuilder, kVmcntCapacity);
   vmemBuilder.prepareMemoryIssue(kWave, flatIssue);
-  expectVgprReady(vmemBuilder, /*vgpr=*/0);
+  expectComplete(vmemBuilder, /*event=*/0);
 
-  auto ldsBuilder = makeLgkmcntTest();
+  auto ldsBuilder = makeCounterTest();
   issueOrderedLdsReads(ldsBuilder, kLgkmcntCapacity);
   ldsBuilder.prepareMemoryIssue(kWave, flatIssue);
-  expectVgprReady(ldsBuilder, /*vgpr=*/0);
+  expectComplete(ldsBuilder, /*event=*/0);
 }
 
 // ---- Mixed completion-order classes ----
 
 TEST(RaceDetector, CounterCapacity_FullLgkmcntDoesNotProveScalarLoadComplete) {
-  auto builder = makeLgkmcntTest();
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/1);
+  auto builder = makeCounterTest();
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
   issueOrderedLdsReads(builder, kLgkmcntCapacity);
 
-  builder.checkSgprRead(kWave, /*reg=*/0);
-  EXPECT_TRUE(builder.hasSgprRace(0));
+  expectPending(builder, 0);
 }
 
 TEST(RaceDetector, CounterCapacity_ScalarIssueAdvancesFullOrderedLgkmcntClass) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity);
 
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/1);
-  expectVgprReady(builder, /*vgpr=*/0);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
+  expectComplete(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_WideScalarIssueContributesTwoLgkmcntTokens) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
 
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/2);
-  expectVgprReady(builder, /*vgpr=*/0);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED, 2);
+  expectComplete(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_MixedLgkmcntDoesNotGuessWhichEventCompleted) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/1);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
 
   // The next scalar load needs one slot, but the completed event could be the
   // first scalar load. It does not prove that the oldest LDS read completed.
-  builder.scalarLoad(kWave, /*sgprBase=*/1, /*numRegs=*/1);
-  expectVgprPending(builder, /*vgpr=*/0);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_InterleavedLgkmcntSoakRetiresOnlyProvableLdsPrefix) {
-  auto builder = makeLgkmcntTest();
-
-  // Build a deterministic, irregular stream of 49 LGKMCNT events: 15 ordered
-  // LDS reads interleaved with 34 unordered scalar stores. The detector's
-  // candidate set can exceed the physical capacity because it represents all
-  // events that might remain pending, not one concrete hardware state. Since
-  // it cannot identify which unordered events completed, all 15 LDS candidates
-  // remain until one more LGKMCNT operation issues.
+  auto builder = makeCounterTest();
+  // These candidates can outnumber hardware slots: no nonzero wait can
+  // identify which unordered events completed.
   constexpr std::array<int, kLgkmcntCapacity> unorderedBursts = {
       3, 0, 4, 1, 2, 5, 0, 3, 1, 4, 2, 0, 5, 1, 3,
   };
+  std::array<int, kLgkmcntCapacity> orderedEvents{};
   for (int ordered = 0; ordered < kLgkmcntCapacity; ++ordered) {
     for (int unordered = 0; unordered < unorderedBursts[ordered]; ++unordered)
-      builder.scalarStore(kWave);
-    builder.ldsRead(kWave, kLane, /*addr=*/ordered * kDwordBytes,
-                    /*bytes=*/kDwordBytes, /*vgprDst=*/ordered);
+      builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
+    orderedEvents[ordered] = builder.events().totalAllocated();
+    builder.ldsRead(kWave, kLane, ordered * kDwordBytes, kDwordBytes);
   }
 
-  // Before the decisive issue, even the oldest LDS result may still be
-  // pending. The next scalar store requires a free LGKMCNT slot. Since 15 LDS
-  // events may remain, LDS FIFO ordering proves exactly the oldest one (v0)
-  // complete, while the next one (v1) remains a possible hazard.
-  builder.checkVgprRead(kWave, /*reg=*/0, kLane);
-  ASSERT_EQ(builder.raceCount(), 1);
-
-  builder.scalarStore(kWave);
-  builder.checkVgprRead(kWave, /*reg=*/0, kLane);
-  EXPECT_EQ(builder.raceCount(), 1);
-
-  builder.checkVgprRead(kWave, /*reg=*/1, kLane);
-  EXPECT_EQ(builder.raceCount(), 2);
-  EXPECT_TRUE(builder.hasVgprRace(1));
+  expectPending(builder, orderedEvents[0]);
+  // Reserving the next token proves completion of exactly the oldest LDS event.
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
+  expectComplete(builder, orderedEvents[0]);
+  expectPending(builder, orderedEvents[1]);
 }
 
 TEST(RaceDetector, CounterCapacity_FullVmcntDoesNotProveUnorderedLoadComplete) {
-  auto builder = makeVmcntTest();
+  auto builder = makeCounterTest();
   issueUnorderedVmcntLoads(builder, /*count=*/1);
-  issueOrderedVmemLoads(builder, kVmcntCapacity, /*firstVgpr=*/1);
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_UnorderedLoadsDoNotAdvanceOrderedVmcntClass) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, /*count=*/1);
-  issueUnorderedVmcntLoads(builder, kVmcntCapacity, /*firstVgpr=*/1);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, /*count=*/1);
+  issueUnorderedVmcntLoads(builder, kVmcntCapacity);
 
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_UnorderedIssueAdvancesFullOrderedVmcntClass) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
-  issueUnorderedVmcntLoads(builder, /*count=*/1, /*firstVgpr=*/kVmcntCapacity);
-  expectVgprReady(builder, /*vgpr=*/0);
+  issueUnorderedVmcntLoads(builder, /*count=*/1);
+  expectComplete(builder, /*event=*/0);
 }
 
 // ---- Explicit partial waits after capacity backpressure ----
 
 TEST(RaceDetector, CounterCapacity_PartialLgkmcntKeepsUnorderedScalarLoadPending) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity);
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/1);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
 
   builder.waitcnt(kWave, /*vmcnt=*/-1, /*lgkmcnt=*/kLgkmcntCapacity - 1);
-  expectVgprReady(builder, /*vgpr=*/0);
-  builder.checkSgprRead(kWave, /*reg=*/0);
-  EXPECT_TRUE(builder.hasSgprRace(0));
+  expectComplete(builder, /*event=*/0);
+  expectPending(builder, builder.events().totalAllocated() - 1);
 }
 
 TEST(RaceDetector, CounterCapacity_PartialLgkmcntPreservesAmbiguousEventsWithinLimit) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity - 1);
-  builder.scalarLoad(kWave, /*sgprBase=*/0, /*numRegs=*/1);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
 
   builder.waitcnt(kWave, /*vmcnt=*/-1, /*lgkmcnt=*/kLgkmcntCapacity - 1);
-  expectVgprPending(builder, /*vgpr=*/0);
-  builder.checkSgprRead(kWave, /*reg=*/0);
-  EXPECT_TRUE(builder.hasSgprRace(0));
+  expectPending(builder, /*event=*/0);
+  expectPending(builder, builder.events().totalAllocated() - 1);
 }
 
 TEST(RaceDetector, CounterCapacity_PartialLgkmcntRetiresNextOrderedRead) {
-  auto builder = makeLgkmcntTest();
+  auto builder = makeCounterTest();
   issueOrderedLdsReads(builder, kLgkmcntCapacity + kLgkmcntOverflow);
 
   builder.waitcnt(kWave, /*vmcnt=*/-1, /*lgkmcnt=*/kLgkmcntCapacity - 1);
-  expectVgprReady(builder, /*vgpr=*/kLgkmcntOverflow);
-  expectVgprPending(builder, /*vgpr=*/kLgkmcntOverflow + 1);
+  expectComplete(builder, /*event=*/kLgkmcntOverflow);
+  expectPending(builder, /*event=*/kLgkmcntOverflow + 1);
 }
 
 TEST(RaceDetector, CounterCapacity_PartialVmcntRetiresNextOrderedLoad) {
-  auto builder = makeVmcntTest();
-  issueOrderedVmemLoads(builder, kVmcntCapacity + kVmcntOverflow);
+  auto builder = makeCounterTest();
+  issueOrderedVmemEvents(builder, kVmcntCapacity + kVmcntOverflow);
 
   builder.waitcnt(kWave, /*vmcnt=*/kVmcntCapacity - 1, /*lgkmcnt=*/-1);
-  expectVgprReady(builder, /*vgpr=*/kVmcntOverflow);
-  expectVgprPending(builder, /*vgpr=*/kVmcntOverflow + 1);
+  expectComplete(builder, /*event=*/kVmcntOverflow);
+  expectPending(builder, /*event=*/kVmcntOverflow + 1);
 }
 
 // ---- Other VMCNT producers ----
 
 TEST(RaceDetector, CounterCapacity_CombinedVmemStoresAdvanceVmcntCapacity) {
-  RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/kScalarRegisters);
-  builder.globalLoad(kWave, /*vgprBase=*/0, /*numRegs=*/1);
-  issueOrderedVmemStores(builder, kVmcntCapacity);
+  RaceTestBuilder builder(/*numWaves=*/1);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
-  expectVgprReady(builder, /*vgpr=*/0);
+  expectComplete(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_CombinedVmemLoadRemainsPendingBeforeStoreCapacity) {
-  RaceTestBuilder builder(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/kScalarRegisters);
-  builder.globalLoad(kWave, /*vgprBase=*/0, /*numRegs=*/1);
-  issueOrderedVmemStores(builder, kVmcntCapacity - 1);
+  RaceTestBuilder builder(/*numWaves=*/1);
+  builder.counterIssue(kWave, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+  issueOrderedVmemEvents(builder, kVmcntCapacity - 1);
 
-  expectVgprPending(builder, /*vgpr=*/0);
+  expectPending(builder, /*event=*/0);
 }
 
 TEST(RaceDetector, CounterCapacity_VmcntCompletesDirectToLdsForOwningWave) {
-  auto builder = makeVmcntTest();
+  auto builder = makeCounterTest();
   builder.globalToLds(kWave, /*ldsAddrs=*/{0}, /*bytesPerLane=*/kDwordBytes, /*exec=*/1);
-  issueOrderedVmemLoads(builder, kVmcntCapacity);
+  issueOrderedVmemEvents(builder, kVmcntCapacity);
 
   expectLdsReady(builder);
 }
 
 TEST(RaceDetector, CounterCapacity_DirectToLdsRemainsPendingBelowVmcntCapacity) {
-  auto builder = makeVmcntTest();
+  auto builder = makeCounterTest();
   builder.globalToLds(kWave, /*ldsAddrs=*/{0}, /*bytesPerLane=*/kDwordBytes, /*exec=*/1);
-  issueOrderedVmemLoads(builder, kVmcntCapacity - 1);
+  issueOrderedVmemEvents(builder, kVmcntCapacity - 1);
 
   expectLdsPending(builder);
 }
