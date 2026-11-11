@@ -67,16 +67,19 @@ path you want baked in. `git commit --no-verify` skips the hooks;
 
 Expect `--all-files` to report things. Most hooks here are advisory on purpose
 and say what they would change without changing it; the config explains why for
-each one. The baseline whitespace hooks are the exception: they block, and the
-tree was swept clean for them in one commit, which is listed in
-`.git-blame-ignore-revs` so it does not bury anyone in `git blame`.
+each one.
+
+The baseline whitespace hooks are the exception: they block, and they fix rather
+than report. A failure from one means it has already rewritten the file in your
+working tree, so there is nothing to go and edit by hand — `git diff` to see
+what it did, then `git add` the result and commit again.
 
 ## `ci-pre-commit.sh`
 
 The CI wrapper around the ordinary-stage hooks, used by the `pre-commit` job in
-`.github/workflows/rccl-format-and-lint.yml`. It runs them over the range a
-pull request changed and writes a summary to `$GITHUB_STEP_SUMMARY`. Most of
-those hooks are advisory and so always pass, which is the point of the summary:
+`.github/workflows/rccl-format-and-lint.yml`. It runs them over the range a pull
+request changed and writes a summary to `$GITHUB_STEP_SUMMARY`. Most of those
+hooks are advisory and so always pass, which is the point of the summary:
 otherwise their output only exists inside a collapsed log of a green step.
 
 ```sh
@@ -112,11 +115,11 @@ script configures a build and runs the hipify step if `--build-dir` has no
 compile database. That takes a few minutes, but needs no GPU and compiles
 nothing. Results land in `projects/rccl/build/clang-tidy/` by default:
 
-| File | Contents |
-| --- | --- |
-| `clang-tidy-all.txt` | every finding, RCCL-owned and NCCL-owned |
+| File                      | Contents                                         |
+|---------------------------|--------------------------------------------------|
+| `clang-tidy-all.txt`      | every finding, RCCL-owned and NCCL-owned         |
 | `clang-tidy-findings.txt` | the RCCL-owned subset, which is what is reported |
-| `clang-tidy-stderr.txt` | the driver's stderr, for when a run dies |
+| `clang-tidy-stderr.txt`   | the driver's stderr, for when a run dies         |
 
 Filtering out NCCL-owned files needs the `nccl` remote, and the script stops
 rather than silently widening its scope if that remote is missing:
