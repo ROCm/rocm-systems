@@ -3433,7 +3433,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
@@ -3454,7 +3455,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 8);
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
