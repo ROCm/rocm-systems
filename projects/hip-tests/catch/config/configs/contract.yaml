@@ -774,6 +774,30 @@ contract:
   Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsEdge:
     <<: *level_0
     tags: [graph_node_types, P0]
+  Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
+  Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId:
+    <<: *level_0
+    tags: [graph_id, P0]
   Contract_GraphChild_HipGraphAddChildGraphNode_Default_ExecutesEmbeddedMemcpy:
     <<: *level_0
     tags: [graph_child, P0]

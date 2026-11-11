@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 39
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 40
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1202,6 +1202,10 @@ typedef hipError_t (*t_hipKernelSetAttributeForDevice)(hipKernel_t kernel, hipFu
                                                         int value, int device);
 typedef hipError_t (*t_hipKernelSetCacheConfig)(hipKernel_t kernel, hipFuncCache_t config,
                                                 hipDevice_t dev);
+typedef hipError_t (*t_hipGraphNodeGetLocalId)(hipGraphNode_t node, unsigned int* nodeId);
+typedef hipError_t (*t_hipGraphNodeGetToolsId)(hipGraphNode_t node, unsigned long long* toolsId);
+typedef hipError_t (*t_hipGraphGetId)(hipGraph_t graph, unsigned int* graphId);
+typedef hipError_t (*t_hipGraphExecGetId)(hipGraphExec_t graphExec, unsigned int* graphId);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1874,8 +1878,14 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
   t_hipExtMemcpyBatchAsync hipExtMemcpyBatchAsync_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+  t_hipGraphNodeGetLocalId hipGraphNodeGetLocalId_fn;
+  t_hipGraphNodeGetToolsId hipGraphNodeGetToolsId_fn;
+  t_hipGraphGetId hipGraphGetId_fn;
+  t_hipGraphExecGetId hipGraphExecGetId_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
 
   // ******************************************************************************************* //
   //

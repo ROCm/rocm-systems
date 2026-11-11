@@ -326,7 +326,7 @@ tiers:
     # Coverage floor: what the breadth workloads reach today. The rest are
     # declared unreachable with the measurement that says why, so this floor
     # only moves when a workload stops reaching something it used to.
-    min_covered: 254
+    min_covered: 262
     gpus: 1
     workloads:
       - Unit_HRR_ApiMatrix_Breadth_Direct

@@ -872,6 +872,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphDestroy",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
     "hipGraphNodeGetType",
     "hipGraphNodeGetEnabled",
     "hipGraphKernelNodeGetParams",
@@ -2089,8 +2093,11 @@ _HEADER_PREAMBLE = """\
  * A v10 reader would decode those events as the wrong API.
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
+ * those events as the wrong API.
+ * v13: four graph ID queries were appended to HipDispatchTable,
+ * shifting the compiler API IDs up by four. A v12 reader would decode
  * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)12u)
+#define HRR_VERSION ((uint16_t)13u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)

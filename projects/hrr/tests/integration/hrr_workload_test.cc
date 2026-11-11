@@ -3240,6 +3240,10 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipMemsetAsync(d, 0, SZ, s));
   HRR_HIP_CHECK(hipStreamEndCapture(s, &capturedGraph));
 
+  // hipGraphGetId
+  { unsigned int graphId = 0;
+    (void)hipGraphGetId(capturedGraph, &graphId); }
+
   // hipGraphClone
   hipGraph_t clonedGraph = nullptr;
   (void)hipGraphClone(&clonedGraph, capturedGraph);
@@ -3259,6 +3263,10 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
   { unsigned long long execFlags = 0;
     (void)hipGraphExecGetFlags(exec, &execFlags); }
 
+  // hipGraphExecGetId
+  { unsigned int execId = 0;
+    (void)hipGraphExecGetId(exec, &execId); }
+
   // hipGraphGetNodes — query count then enumerate
   { size_t numNodes = 0;
     (void)hipGraphGetNodes(capturedGraph, nullptr, &numNodes);
@@ -3268,6 +3276,11 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
       // hipGraphNodeGetType
       hipGraphNodeType nodeType{};
       (void)hipGraphNodeGetType(nodes[0], &nodeType);
+      // hipGraphNodeGetLocalId / hipGraphNodeGetToolsId
+      unsigned int localId = 0;
+      unsigned long long toolsId = 0;
+      (void)hipGraphNodeGetLocalId(nodes[0], &localId);
+      (void)hipGraphNodeGetToolsId(nodes[0], &toolsId);
       // hipGraphNodeSetEnabled / hipGraphNodeGetEnabled
       unsigned int enabled = 1;
       (void)hipGraphNodeSetEnabled(exec, nodes[0], 1);

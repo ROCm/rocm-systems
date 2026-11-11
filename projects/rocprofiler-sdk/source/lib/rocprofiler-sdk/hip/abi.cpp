@@ -719,6 +719,12 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphNodeGetLocalId_fn, 550);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphNodeGetToolsId_fn, 551);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphGetId_fn, 552);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipGraphExecGetId_fn, 553);
+#endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 442)
@@ -800,6 +806,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 548)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 549)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 550)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 554)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

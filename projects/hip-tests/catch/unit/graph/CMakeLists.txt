@@ -185,6 +185,10 @@ set(TEST_SRC
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
   hipDrvGraphExecMemsetNodeSetParams.cc
+  hipGraphGetId.cc
+  hipGraphExecGetId.cc
+  hipGraphNodeGetLocalId.cc
+  hipGraphNodeGetToolsId.cc
   hipGraphMultiDevice.cc
 )
 
