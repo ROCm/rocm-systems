@@ -77,8 +77,6 @@ hardware blocks. Refer to the following top-level block diagram for each archite
 
       For more details on AMD RDNA4 architecture, see section 1.2 of the `RDNA4 instruction set architecture <https://gpuopen.com/download/rdna4-instruction-set-architecture.pdf#page=16>`__.
       GL1 is the write-combining cache between the WGPs and GL2.
-      The gfx1201 panel set also includes TXA, TXD, GLARB, Central Hub, and UTCL1.
-      Those five panels have no metrics.
 
 Hardware blocks
 ================
@@ -112,6 +110,5 @@ Each metric table has a tab for each generation.
 
    The System Speed-of-Light, Roofline, Memory Chart, and Efficiency Arbiter
    chapters include metric tables for gfx1201. SPI, WGP, GL0, GL2, CPC, and GRBM
-   also have metric descriptions in the analysis report. TXA, TXD, GLARB,
-   Central Hub, and UTCL1 panels are present and have no metrics.
+   also have metric descriptions in the analysis report.
    ROCm Compute Profiler currently has limited support for WMMA on gfx115x.
