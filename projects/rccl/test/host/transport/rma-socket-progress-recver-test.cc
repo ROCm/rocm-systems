@@ -752,4 +752,133 @@ TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_GetResponseControlRece
   EXPECT_EQ(scene.receivers[0].recvState, ncclRmaSocketProxyRecvStateControlMsg);
 }
 
+TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_FailedSignalResolutionReleasesDataReference) {
+  Scene scene;
+  std::array<char, 16> data{};
+  std::array<char, 16> staging{};
+  auto handle = Scene::MakeMr(data.data(), data.size(), NCCL_PTR_HOST, 47);
+  scene.comm.mrHead = &handle;
+  scene.receivers[1].buffer = staging.data();
+  ScopedHook progress(g_ncclSocketProgress, [&](int operation, ncclSocket* socket, void* buffer,
+                                               int size, int* offset, bool* closed) {
+    EXPECT_EQ(NCCL_SOCKET_RECV, operation);
+    EXPECT_EQ(&scene.receivers[1].sock, socket);
+    auto* message = static_cast<ncclRmaSocketProxyHeader*>(buffer);
+    message->type = ncclRmaSocketProxyMsgTypeIput;
+    message->status = ncclSuccess;
+    message->mrId = 47;
+    message->size = 8;
+    message->opFlags = NCCL_RMA_SOCKET_OP_HAS_SIGNAL;
+    message->signalMrId = 99;
+    *offset = size;
+    *closed = false;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclInvalidUsage, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
+  EXPECT_EQ(1, progress.calls);
+  EXPECT_EQ(0, handle.recvActiveOps);
+  EXPECT_EQ(nullptr, scene.receivers[1].dataHandle);
+  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, scene.receivers[1].recvState);
+  EXPECT_EQ(0, scene.receivers[1].controlMsgOffset);
+}
+
+TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalReadFailureStopsWriteAndReleasesBothReferences) {
+  Scene scene;
+  alignas(uint64_t) std::array<char, 16> device{};
+  alignas(uint64_t) std::array<char, 16> bar{};
+  auto handle = Scene::MakeGdrMappedMr(device.data(), device.size(), bar.data(), gdr_mh_t{51});
+  handle.recvActiveOps = 2;
+  auto& receiver = scene.receivers[1];
+  receiver.recvState = ncclRmaSocketProxyRecvStatePayload;
+  receiver.controlMsg.type = ncclRmaSocketProxyMsgTypeIput;
+  receiver.dataHandle = &handle;
+  receiver.signalHandle = &handle;
+  receiver.signalPtr = device.data() + 8;
+  receiver.signalType = NCCL_PTR_CUDA;
+  receiver.signalDelta = 7;
+  receiver.hasSignal = 1;
+  ScopedHook read(g_wrapGdrCopyFromMapping, [&](gdr_mh_t mapping, void*, const void* source, size_t size) {
+    EXPECT_EQ(51u, mapping.h);
+    EXPECT_EQ(bar.data() + 8, source);
+    EXPECT_EQ(sizeof(uint64_t), size);
+    return ncclSystemError;
+  });
+  ScopedHook write(g_wrapGdrCopyToMapping, [](gdr_mh_t, void*, const void*, size_t) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSystemError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
+  EXPECT_EQ(1, read.calls);
+  EXPECT_EQ(0, write.calls);
+  EXPECT_EQ(0, handle.recvActiveOps);
+  EXPECT_EQ(nullptr, receiver.dataHandle);
+  EXPECT_EQ(nullptr, receiver.signalHandle);
+  EXPECT_EQ(0, receiver.hasSignal);
+  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
+}
+
+TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SignalWriteFailurePropagatesWithoutCompletingRequest) {
+  Scene scene;
+  uint64_t device = 0;
+  uint64_t bar = UINT64_MAX - 2;
+  auto handle = Scene::MakeGdrMappedMr(&device, sizeof(device), &bar, gdr_mh_t{53});
+  handle.recvActiveOps = 1;
+  auto& receiver = scene.receivers[1];
+  receiver.recvState = ncclRmaSocketProxyRecvStatePayload;
+  receiver.controlMsg.type = ncclRmaSocketProxyMsgTypeIput;
+  receiver.signalHandle = &handle;
+  receiver.signalPtr = &device;
+  receiver.signalType = NCCL_PTR_CUDA;
+  receiver.signalDelta = 7;
+  receiver.hasSignal = 1;
+  receiver.lastCompletedRequestGlobalId = 73;
+  ScopedHook read(g_wrapGdrCopyFromMapping, [&](gdr_mh_t, void* destination, const void* source, size_t size) {
+    std::memcpy(destination, source, size);
+    return ncclSuccess;
+  });
+  ScopedHook write(g_wrapGdrCopyToMapping, [&](gdr_mh_t mapping, void* destination, const void* source, size_t size) {
+    EXPECT_EQ(53u, mapping.h);
+    EXPECT_EQ(&bar, destination);
+    EXPECT_EQ(sizeof(uint64_t), size);
+    EXPECT_EQ(4u, *static_cast<const uint64_t*>(source));
+    return ncclRemoteError;
+  });
+
+  EXPECT_EQ(ncclRemoteError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
+  EXPECT_EQ(1, read.calls);
+  EXPECT_EQ(1, write.calls);
+  EXPECT_EQ(0, handle.recvActiveOps);
+  EXPECT_EQ(73u, receiver.lastCompletedRequestGlobalId);
+  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
+}
+
+TEST_F(RmaSocketProgressRecverMicrotest, ProgressPeerRecv_SocketErrorResetsPayloadWithoutPublishingCompletion) {
+  Scene scene;
+  std::array<char, 8> data{};
+  std::array<char, 8> staging{};
+  auto handle = Scene::MakeMr(data.data(), data.size(), NCCL_PTR_HOST, 59);
+  handle.recvActiveOps = 1;
+  auto& receiver = scene.receivers[1];
+  receiver.recvState = ncclRmaSocketProxyRecvStatePayload;
+  receiver.controlMsg.type = ncclRmaSocketProxyMsgTypeRespondGetData;
+  receiver.controlMsg.size = data.size();
+  receiver.controlMsg.requestId = 83;
+  receiver.lastCompletedRequestGlobalId = 79;
+  receiver.dataHandle = &handle;
+  receiver.dataPtr = data.data();
+  receiver.dataType = NCCL_PTR_HOST;
+  receiver.buffer = staging.data();
+  ScopedHook progress(g_ncclSocketProgress, [](int, ncclSocket*, void*, int, int*, bool*) {
+    return ncclSystemError;
+  });
+
+  EXPECT_EQ(ncclSystemError, ncclRmaSocketProxyProgressPeerRecv(&scene.comm, 1));
+  EXPECT_EQ(1, progress.calls);
+  EXPECT_EQ(0, handle.recvActiveOps);
+  EXPECT_EQ(79u, receiver.lastCompletedRequestGlobalId);
+  EXPECT_EQ(ncclRmaSocketProxyRecvStateControlMsg, receiver.recvState);
+  EXPECT_EQ(0, receiver.recvChunkSize);
+  EXPECT_EQ(0, receiver.recvChunkOffset);
+  EXPECT_EQ(0u, receiver.recvPayloadOffset);
+}
+
 }  // namespace
