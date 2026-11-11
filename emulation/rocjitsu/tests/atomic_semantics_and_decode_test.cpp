@@ -54,6 +54,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 using namespace rocjitsu;
 namespace {
 constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
@@ -262,8 +263,17 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
       }
       return words;
     };
-    for (uint32_t word3 :
-         {0u, 1u << 28, 2u << 28, 3u << 28, (3u << 28) | (1u << 23), (3u << 28) | kRdnaFormat32}) {
+    // Each OOB_SELECT and ADD_TID pairs FORMAT 0 with a bound control, so the
+    // bounds check alone cannot account for an unbound result.
+    std::vector<uint32_t> word3s;
+    for (uint32_t oob = 0; oob < 4; ++oob)
+      for (uint32_t add_tid : {0u, 1u << 23})
+        for (uint32_t format : {0u, kRdnaFormat32})
+          word3s.push_back((oob << 28) | add_tid | format);
+    // Bit 18 is STRIDE_SCALE on RDNA4, not FORMAT.
+    if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+      word3s.push_back(0x30040000u);
+    for (uint32_t word3 : word3s) {
       SCOPED_TRACE(word3);
       const bool bound = word3 & kRdnaFormat32;
       for (Op op : {Op::Load, Op::Store, Op::AtomicAdd}) {
@@ -273,7 +283,7 @@ TEST(AtomicSemanticsAndDecode, RdnaInvalidFormatBufferAccessesTouchNoMemory) {
         machine.memory.write32(0x1000, 7);
         const uint32_t scalar = machine.wave->sgpr_alloc().base;
         machine.cu->write_sgpr(scalar + 4, 0x1000);
-        machine.cu->write_sgpr(scalar + 5, 0);
+        machine.cu->write_sgpr(scalar + 5, 4u << 16); // A zero stride fails OOB_SELECT 0 on RDNA3+.
         machine.cu->write_sgpr(scalar + 6, 4096);
         machine.cu->write_sgpr(scalar + 7, word3);
         machine.cu->write_vgpr(machine.base + 4, 0, 0);
