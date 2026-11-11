@@ -305,6 +305,25 @@
         }
       ]
     },
+    "gin_devmpi_mixed_2node": {
+      "extends": "default",
+      "description": "AICOMRCCL-3450: 2 hosts, NCCL_GIN_TYPE unset (not empty). Runs one case; the rest of GinMPIDeviceTests skips when the type is unset.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        { "name": "MixedBackends_TwoNodeUnsetType", "description": "Multi-host comm drops Anvil SDMA: PROXY is the default, an explicit Anvil DevComm is rejected; default and PROXY DevComms complete a cross-host put/signal (AICOMRCCL-3417)", "test_filter": "GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType" }
+      ]
+    },
 
     "gin_a2a_eligibility": {
       "extends": "default",
@@ -389,6 +408,12 @@
       "name": "GIN host microtests - GinFinalize (rocSHMEM GIN build)",
       "description": "GinFinalizeTest.* on host/rccl-UnitTestsMicro built with ENABLE_ROCSHMEM_GIN, covering SDMA>GDA>PROXY default order",
       "config": "gin_micro_finalize",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI Tests - mixed backends (2 nodes, type unset)",
+      "description": "NCCL_GIN_TYPE unset on a 2-host comm: Anvil SDMA is dropped and the proxy is the default",
+      "config": "gin_devmpi_mixed_2node",
       "enabled": true
     },
     {
