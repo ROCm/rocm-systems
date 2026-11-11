@@ -11,10 +11,14 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/decode_result.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
@@ -27,6 +31,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -49,6 +54,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -5373,6 +5379,65 @@ TEST(RaceDetectorPluginOutputTest, CapturesWaitBarrierControlFlowAndNopMetadata)
   f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *nop.value(), *wave);
   EXPECT_FALSE(state->trace[state->trace.size() - 1].preserve_in_trace());
   EXPECT_TRUE(state->trace[state->trace.size() - 1].is_nop());
+}
+
+TEST(RaceDetectorPluginOutputTest, KeepsDecodedBarrierOperationsInsideElidedSpan) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 104));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *reporter = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  Wavefront *wave = fixture.cu()->dispatch_wf(0, 0x100, 104, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  std::array waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(reporter->slot_index()));
+  ASSERT_NE(state, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint32_t, 1> signal_words = cdna5::build_sop1(
+      cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN});
+  const std::array<uint32_t, 1> isfirst_words = cdna5::build_sop1(
+      cdna5::kSBarrierSignalIsfirstSop1, {.ssrc0 = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN});
+  const std::array<uint32_t, 2> async_arrive_words =
+      cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds);
+  const std::array<uint32_t, 2> returning_arrive_words =
+      cdna5::build_vds(cdna5::kDsAtomicBarrierArriveRtnB64Vds);
+  const std::array<std::span<const uint32_t>, 4> barriers{
+      signal_words, isfirst_words, async_arrive_words, returning_arrive_words};
+  for (std::span<const uint32_t> barrier_words : barriers) {
+    DecodeResult barrier = decoder->decode_window(barrier_words);
+    ASSERT_TRUE(barrier.succeeded());
+    SCOPED_TRACE(barrier.value()->mnemonic());
+    state->trace = {};
+    const std::array<uint32_t, 1> nop_words = cdna5::build_sopp(cdna5::kSNopSopp);
+    uint64_t pc = 0x100;
+    for (size_t index = 0; index < 135; ++index) {
+      const std::span<const uint32_t> words = index == 67 ? barrier_words : nop_words;
+      DecodeResult decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(pc, *decoded.value(), *wave);
+      pc += decoded.value()->size();
+    }
+    const auto disassemble = [&decoder](const InstructionSnapshot &instruction) {
+      DecodeResult decoded = decoder->decode_window(instruction.encoding());
+      return decoded.value()->disassemble();
+    };
+    const MarkedInstruction producer{state->trace[0], 0, 0};
+    const MarkedInstruction access{state->trace[134], 0, 0};
+    for (size_t context : {size_t{2}, kDefaultTraceContext, kTraceHistorySize}) {
+      SCOPED_TRACE(context);
+      const std::string report = formatTrace(state->trace, disassemble, producer, access, context);
+      EXPECT_EQ(report.find("instructions elided") != std::string::npos,
+                context < state->trace.size())
+          << report;
+      EXPECT_NE(report.find(disassemble(state->trace[67])), std::string::npos) << report;
+    }
+    EXPECT_TRUE(state->trace[67].preserve_in_trace());
+  }
 }
 
 TEST(RaceDetectorPluginOutputTest, ConcurrentReportsStayWholeAndSummaryCountsStayConsistent) {
