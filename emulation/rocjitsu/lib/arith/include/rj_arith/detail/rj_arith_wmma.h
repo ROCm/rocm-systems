@@ -13,6 +13,13 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// gfx1250 byte WMMA: A/B/C/D each use eight Wave32 VGPRs. SIGNED_A/B select
+// signed factors; CLAMP saturates once after dot+C, otherwise addition wraps.
+// All semantics share exact integer arithmetic; guest FP flags are ignored.
+// All lanes participate regardless of EXEC; inputs may overlap D.
+int rj_arith_v_wmma_i32_16x16x64_iu8_w32(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
 
 // gfx1250 Wave32 16x16x32 half-input WMMA with FP32 C/D: eight VGPRs per operand.
 // Supports Loose, allow-Loose and Compatibility; strict exact modes are unsupported.

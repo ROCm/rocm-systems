@@ -18,6 +18,43 @@ constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
 constexpr uint64_t RJ_ARITH_MFMA_ABID_SHIFT = 3ULL;
 constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
+// FP64 MFMA: A/B use two VGPRs each, C/D eight (16x16) or two (4x4 batches).
+// controls bits 0/1/2 negate A/B/C (the FP64 BLGP interpretation). All lanes
+// participate regardless of EXEC; overlap is supported. Guest FP controls are
+// ignored, Compatibility is approximate, and strict exact modes are unsupported.
+int rj_arith_v_mfma_f64_16x16x4_f64_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_mfma_f64_4x4x4_4b_f64_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+
+// Signed-byte MFMA: A/B use M*K*batch/256 VGPRs, C/D use M*M*batch/64.
+// Accumulation wraps at 32 bits. CBSZ/ABID/BLGP use the floating MFMA lane controls.
+// All semantics share exact integer arithmetic; guest FP flags are ignored.
+// All 64 lanes participate, EXEC is ignored, and operands may overlap D.
+int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          const uint32_t *const *c);
+int rj_arith_v_mfma_i32_16x16x4_4b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          const uint32_t *const *c);
+int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c);
+int rj_arith_v_mfma_i32_32x32x16_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_mfma_i32_16x16x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_mfma_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
 // Compute D = A*B+C with FP32 accumulation on all 64 lanes, ignoring EXEC.
 // Shapes with a batch suffix compute that many independent matrices. A and B use
 // M*K*batch/128 VGPRs each, C and D use M*M*batch/64; each pointer addresses 64 words.
