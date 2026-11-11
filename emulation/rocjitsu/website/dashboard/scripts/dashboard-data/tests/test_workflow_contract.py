@@ -391,14 +391,14 @@ def test_tensile_revision_shell_consumes_declared_pin(tmp_path, matches):
 
 def test_benchmark_pin_and_unfiltered_execution():
     workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text())
-    assert workflow['env']['CORPUS_SHA'] == 'b95ea549e1f500ce4ce83ae511ae5e4434930374'
+    assert workflow['env']['CORPUS_SHA'] == '2b7f6ab86da41f22b21a1c46ec0e8dff5c8f3144'
     benchmark = workflow['jobs']['benchmark']
     command = next(
         s['run'] for s in benchmark['steps'] if s['name'] == 'Run performance suite'
     )
     assert command.count('-m benchmarks.runner') == 1
     assert (
-        workflow['env']['BENCHMARK_MANIFEST'] == 'benchmarks/suites/performance-v1.toml'
+        workflow['env']['BENCHMARK_MANIFEST'] == 'benchmarks/suites/performance-v2.toml'
     )
     assert '--manifest "${BENCHMARK_MANIFEST}"' in command
     generation = next(
@@ -411,10 +411,10 @@ def test_benchmark_pin_and_unfiltered_execution():
         in generation
     )
     workflow_text = (WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text()
-    assert workflow_text.count('benchmarks/suites/performance-v1.toml') == 1
+    assert workflow_text.count('benchmarks/suites/performance-v2.toml') == 1
     helper = WORKFLOWS.parents[1] / 'emulation/rocjitsu/scripts/prepare-benchmarks.py'
     assert 'benchmarks/suites/performance-v1.toml' not in helper.read_text()
-    assert command.count('--target-config ') == 2
+    assert command.count('--target-config ') == 4
     assert '--output "${ROCJITSU_RESULT_DIR}"' in command
     for selector in (
         '--thread-policy',

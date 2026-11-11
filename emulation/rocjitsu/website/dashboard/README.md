@@ -22,6 +22,7 @@ Open `http://localhost:4174`. This preview uses fictional test data, not product
 - [Build and test](docs/build-and-test.md): setup, commands, and test execution.
 - [Typography](docs/typography.md): shared font types, text sizes, and role selection.
 - [Website and publication](docs/architecture-and-publication.md): source map, deployment, data fetching, publishing workflows, and immutability.
+- [Benchmark recipes](docs/benchmark-recipes.md): v1/v2 workload coverage and per-target default/single enablement.
 - [Corpus run JSON](https://github.com/ROCm/rocjitsu-test-corpus/blob/develop/benchmarks/raw-run-schema.md): authoritative producer-owned format.
 - [Test fixtures](tests/fixtures/README.md): fictional datasets and test cases.
 - [Publishing setup](../handbook/README.md#verification-and-publishing): GitHub App credentials and Pages configuration.
