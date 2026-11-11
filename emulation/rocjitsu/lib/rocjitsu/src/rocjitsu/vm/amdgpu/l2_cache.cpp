@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -15,6 +17,12 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+
+std::optional<GpuVmAccess> L2Cache::snapshot_atomic_access(uint32_t vmid) const {
+  if (!backing_memory_ || vmid == 0 || !gpu_vm_)
+    return std::nullopt;
+  return gpu_vm_->snapshot_vmid(vmid);
+}
 
 L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::Component(std::move(name)), coherence_(std::move(coherence)) {

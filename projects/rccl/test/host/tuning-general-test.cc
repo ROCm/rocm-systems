@@ -16,6 +16,7 @@
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
+#include "graph/topo.h"
 #include "ScopedHook.h"
 
 #include TUNING_GENERAL_CC_PATH
@@ -23,12 +24,23 @@
 
 namespace {
 
+// nWarps counts 64-lane wavefronts on gfx950, and RCCL kernels are built for at most 256 threads per block.
+constexpr int kWavefrontSize = 64;
+constexpr int kSingleNodeWarps = RCCL_SINGLE_NODE_MAX_NTHREADS / kWavefrontSize;
+constexpr int kFullBlockWarps = RCCL_GFX950_MAX_NTHREADS / kWavefrontSize;
+constexpr int kMinimumWarps = 3;
+
 class TuningGeneralMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetNcclFakes();
     ResetEnvFakes();
     comm_ = std::make_unique<ncclComm>();
+    topo_ = std::make_unique<ncclTopoSystem>();
+    topo_->nodes[GPU].count = 1;
+    std::strcpy(topo_->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+    comm_->topo = topo_.get();
+    comm_->WarpSize = kWavefrontSize;
   }
 
   void TearDown() override {
@@ -37,6 +49,7 @@ class TuningGeneralMicrotest : public ::testing::Test {
   }
 
   void SetChannelDefaults(int channels = 8, int threads = 256, int threshold = 64) {
+    comm_->nNodes = 1;
     comm_->nChannels = channels;
     comm_->nvlsChannels = channels / 2;
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; ++a) {
@@ -47,9 +60,11 @@ class TuningGeneralMicrotest : public ::testing::Test {
     }
   }
 
-  ncclTuningResult_t GetChannels(int algo, int proto, size_t bytes, int maxChannels = -1) {
+  ncclTuningResult_t GetChannels(int algo, int proto, size_t bytes, int maxChannels = -1,
+                                 ncclFunc_t func = ncclFuncBroadcast) {
     ncclTuningInput_t input{};
     input.comm = comm_.get();
+    input.func = func;
     input.nBytes = bytes;
     ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
     result.algo = algo;
@@ -108,6 +123,7 @@ class TuningGeneralMicrotest : public ::testing::Test {
   }
 
   std::unique_ptr<ncclComm> comm_;
+  std::unique_ptr<ncclTopoSystem> topo_;
 };
 
 TEST_F(TuningGeneralMicrotest, StepCountsMatchCollectiveShape) {
@@ -519,21 +535,21 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionScalesRingAndHonorsCap) {
   SetChannelDefaults(8, threads, threshold);
   ncclTuningResult_t large = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1ull << 30);
   EXPECT_EQ(8, large.nChannels);
-  EXPECT_EQ(9, large.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, large.nWarps);
 
   ncclTuningResult_t small = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1);
   EXPECT_EQ(1, small.nChannels);
-  EXPECT_EQ(3, small.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, small.nWarps);
 
   const size_t oneHalvingBytes = static_cast<size_t>(threads / 2) * threshold + 1;
   ncclTuningResult_t halved = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, oneHalvingBytes);
   EXPECT_EQ(1, halved.nChannels);
-  EXPECT_EQ(4, halved.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, halved.nWarps);
 
   const size_t exactThresholdBytes = 2 * static_cast<size_t>(threads) * threshold;
   ncclTuningResult_t exactThreshold = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, exactThresholdBytes);
   EXPECT_EQ(2, exactThreshold.nChannels);
-  EXPECT_EQ(8, exactThreshold.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, exactThreshold.nWarps);
 
   ncclTuningResult_t capped = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, 1ull << 30, 3);
   EXPECT_EQ(3, capped.nChannels);
@@ -545,13 +561,60 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionScalesRingAndHonorsCap) {
 
   SetChannelDefaults(8, 64, 64);
   ncclTuningResult_t minimumWarps = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, 1ull << 30, 20);
-  EXPECT_EQ(3, minimumWarps.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, minimumWarps.nWarps);
   EXPECT_EQ(8, minimumWarps.maxChannels);
 
   SetChannelDefaults(8, 192, 64);
   ncclTuningResult_t nonDivisibleThreads = GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, 1);
   EXPECT_EQ(1, nonDivisibleThreads.nChannels);
-  EXPECT_EQ(6, nonDivisibleThreads.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, nonDivisibleThreads.nWarps);
+}
+
+TEST_F(TuningGeneralMicrotest, MultiNodeBlockSizingMatchesTheLegacyRcclPath) {
+  SetChannelDefaults(8, 256);
+  comm_->nNodes = 2;
+  EXPECT_EQ(kFullBlockWarps, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1ull << 30).nWarps);
+  EXPECT_EQ(kFullBlockWarps, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1).nWarps);
+
+  SetChannelDefaults(8, 192);
+  comm_->nNodes = 2;
+  EXPECT_EQ(192 / kWavefrontSize, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1ull << 30).nWarps);
+
+  SetChannelDefaults(8, 64);
+  comm_->nNodes = 2;
+  EXPECT_EQ(kMinimumWarps, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 1ull << 30).nWarps);
+  EXPECT_EQ(RCCL_LL_MAX_NTHREADS / kWavefrontSize, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_LL, 1ull << 30).nWarps);
+  EXPECT_EQ(kFullBlockWarps, GetChannels(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, 1ull << 30).nWarps);
+}
+
+// rcclOptThreadBlockSize gives a small multi-node ReduceScatter the LL block, which only the forwarded func selects.
+TEST_F(TuningGeneralMicrotest, SmallMultiNodeReduceScatterTakesTheLlBlock) {
+  constexpr size_t kSmallBytes = size_t{1} << 20;
+  SetChannelDefaults(8, kWavefrontSize);
+  comm_->nNodes = 2;
+  comm_->nRanks = 16;
+  EXPECT_EQ(RCCL_LL_MAX_NTHREADS / kWavefrontSize,
+            GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kSmallBytes, -1, ncclFuncReduceScatter).nWarps);
+  EXPECT_EQ(kMinimumWarps, GetChannels(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, kSmallBytes, -1, ncclFuncAllGather).nWarps);
+}
+
+TEST_F(TuningGeneralMicrotest, ChannelSelectionNeverSizesABlockPastTheKernelThreadLimit) {
+  for (int nNodes : {1, 2}) {
+    for (int algo : {NCCL_ALGO_RING, NCCL_ALGO_TREE, NCCL_ALGO_PAT, NCCL_ALGO_COLLNET_DIRECT}) {
+      for (int proto : {NCCL_PROTO_LL, NCCL_PROTO_LL128, NCCL_PROTO_SIMPLE}) {
+        for (size_t bytes : {size_t{16}, size_t{1} << 20, size_t{1} << 30}) {
+          SetChannelDefaults();
+          comm_->nNodes = nNodes;
+          comm_->isOneRPN = true;
+          ncclTuningResult_t result = GetChannels(algo, proto, bytes);
+          EXPECT_LE(result.nWarps * kWavefrontSize, RCCL_GFX950_MAX_NTHREADS)
+            << "nNodes " << nNodes << " algo " << algo << " proto " << proto << " bytes " << bytes;
+          EXPECT_GE(result.nWarps, kMinimumWarps)
+            << "nNodes " << nNodes << " algo " << algo << " proto " << proto << " bytes " << bytes;
+        }
+      }
+    }
+  }
 }
 
 TEST_F(TuningGeneralMicrotest, ChannelSelectionHandlesTreeNvlsPatAndCollnet) {
@@ -560,7 +623,7 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionHandlesTreeNvlsPatAndCollnet) {
   comm_->nvlsChannels = 12;
   ncclTuningResult_t tree = GetChannels(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, 1);
   EXPECT_EQ(1, tree.nChannels);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, tree.nWarps);
+  EXPECT_EQ(kFullBlockWarps, tree.nWarps);
 
   ncclTuningResult_t nvls = GetChannels(NCCL_ALGO_NVLS, NCCL_PROTO_SIMPLE, 1ull << 30);
   EXPECT_EQ(8, nvls.nChannels);
@@ -569,25 +632,25 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionHandlesTreeNvlsPatAndCollnet) {
   EXPECT_EQ(12, singleNodeNvls.nChannels);
   ncclTuningResult_t smallNvls = GetChannels(NCCL_ALGO_NVLS, NCCL_PROTO_SIMPLE, 1);
   EXPECT_EQ(12, smallNvls.nChannels);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, smallNvls.nWarps);
+  EXPECT_EQ(kSingleNodeWarps, smallNvls.nWarps);
   comm_->nNodes = 2;
   ncclTuningResult_t nvlsTree = GetChannels(NCCL_ALGO_NVLS_TREE, NCCL_PROTO_SIMPLE, 1ull << 30);
   EXPECT_EQ(12, nvlsTree.nChannels);
   ncclTuningResult_t smallNvlsTree = GetChannels(NCCL_ALGO_NVLS_TREE, NCCL_PROTO_SIMPLE, 1);
   EXPECT_EQ(12, smallNvlsTree.nChannels);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, smallNvlsTree.nWarps);
+  EXPECT_EQ(kFullBlockWarps, smallNvlsTree.nWarps);
 
   comm_->nvlsChannels = 4;
   comm_->isOneRPN = false;
   ncclTuningResult_t pat = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, 1ull << 30);
   EXPECT_EQ(4, pat.nChannels);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, pat.nWarps);
+  EXPECT_EQ(kFullBlockWarps, pat.nWarps);
   comm_->isOneRPN = true;
   ncclTuningResult_t oneRpnPat = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, 1ull << 30);
   EXPECT_EQ(8, oneRpnPat.nChannels);
   comm_->tuningContext.maxThreads[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 64;
   ncclTuningResult_t forcedPatThreads = GetChannels(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE, 1ull << 30);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, forcedPatThreads.nWarps);
+  EXPECT_EQ(kFullBlockWarps, forcedPatThreads.nWarps);
 
   SetChannelDefaults(24);
   comm_->channels[0].collnetDirect.nHeads = 1;
@@ -601,7 +664,7 @@ TEST_F(TuningGeneralMicrotest, ChannelSelectionHandlesTreeNvlsPatAndCollnet) {
   EXPECT_EQ(8, collnet.nChannels);
   ncclTuningResult_t smallCollnet = GetChannels(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE, 1);
   EXPECT_EQ(1, smallCollnet.nChannels);
-  EXPECT_EQ(NCCL_MAX_NTHREADS / WARP_SIZE, smallCollnet.nWarps);
+  EXPECT_EQ(kFullBlockWarps, smallCollnet.nWarps);
   ncclTuningResult_t midCollnet = GetChannels(NCCL_ALGO_COLLNET_DIRECT, NCCL_PROTO_SIMPLE, 50000);
   EXPECT_EQ(3, midCollnet.nChannels);
 }

@@ -3267,6 +3267,10 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
  *  @details Same two-call sizing convention as rsmi_dev_ampp_profiles_get:
  *  if @p fields is nullptr, only *num_fields is filled in.
  *
+ *  A "node_"-prefixed field is node-wide rather than per-GPU, and is only
+ *  returned on the primary GPU of the node (xgmi_physical_id == 0); it is
+ *  silently omitted on any other GPU.
+ *
  *  @param[in] dv_ind a device index
  *  @param[in] profile_name name of the profile (e.g. "profile_2")
  *  @param[inout] num_fields capacity of @p fields on input, count on output
@@ -3302,6 +3306,11 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
 
 /**
  *  @brief Stage/commit field values into a writable custom profile slot.
+ *
+ *  @details A "node_"-prefixed field is node-wide rather than per-GPU, and
+ *  can only be staged/committed from the primary GPU of the node
+ *  (xgmi_physical_id == 0); on any other GPU, @p fields containing such a
+ *  name is rejected with ::RSMI_STATUS_INVALID_ARGS before any sysfs write.
  *
  *  @param[in] dv_ind a device index
  *  @param[in] profile_name name of the profile (e.g. "profile_5")

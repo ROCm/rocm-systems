@@ -7,6 +7,11 @@
 add_library(
     rj_arith
     STATIC
+    mfma/mfma_half.cpp
+    mfma/mfma_f64.cpp
+    mfma/matrix_i8.cpp
+    mfma/mfma_f32.cpp
+    mfma/mfma_fp8.cpp
     common/cpu.cpp
     common/cpu_decode.cpp
     conversion/byte_conversion.cpp
@@ -28,6 +33,7 @@ add_library(
     dot/fp8_dot.cpp
     dot/half_dot.cpp
     dot/integer_dot.cpp
+    dual/dual.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
@@ -48,6 +54,20 @@ add_library(
     graphics/interp16.cpp
     graphics/interp32.cpp
     graphics/mullit.cpp
+    integer/bit_count.cpp
+    integer/bitfield.cpp
+    integer/boolean.cpp
+    integer/carry.cpp
+    integer/integer16.cpp
+    integer/integer16_ternary.cpp
+    integer/integer_add.cpp
+    integer/integer_mad.cpp
+    integer/integer_minmax.cpp
+    integer/integer_mul.cpp
+    integer/integer_ternary.cpp
+    integer/mad64.cpp
+    integer/sad.cpp
+    integer/shift.cpp
     register/cndmask.cpp
     math/half_trig.cpp
     math/half_unary.cpp
@@ -63,10 +83,29 @@ add_library(
     register/permlane.cpp
     register/relative_move.cpp
     register/swap.cpp
+    scalar/guest_mode.cpp
+    scalar/pseudo_scalar.cpp
+    scalar/scalar_boolean.cpp
+    scalar/scalar_shift.cpp
+    scalar/scalar_count.cpp
+    scalar/scalar_compare.cpp
+    scalar/scalar_convert.cpp
+    scalar/scalar_exec.cpp
+    scalar/scalar_field.cpp
+    scalar/scalar_fma.cpp
+    scalar/scalar_fp.cpp
+    scalar/scalar_integer.cpp
+    scalar/scalar_move.cpp
+    scalar/scalar_pack.cpp
+    scalar/scalar_relative_move.cpp
+    scalar/scalar_round.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp
     wmma/swmmac_integer.cpp
+    wmma/wmma_gfx1250_fp8.cpp
+    wmma/wmma_gfx1250_f32.cpp
+    wmma/wmma_gfx1250_half.cpp
     wmma/wmma.cpp
     wmma/wmma_fp8_integer.cpp
     wmma/wmma_replicated.cpp

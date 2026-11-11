@@ -3489,6 +3489,8 @@ struct Rdna4DppTraits {
   using VCmpxEqU32Vop3 = rdna4::VCmpxEqU32Vop3;
   using VFmaMixF32Vop3p = rdna4::VFmaMixF32Vop3p;
   using VAddCoCiU32Vop3SdstEnc = rdna4::VAddCoCiU32Vop3SdstEnc;
+  using VSubCoU32Vop3SdstEnc = rdna4::VSubCoU32Vop3SdstEnc;
+  using VSubrevCoU32Vop3SdstEnc = rdna4::VSubrevCoU32Vop3SdstEnc;
   static constexpr bool dpp_carry_has_fi = true;
   static constexpr bool dpp_carry_has_carry_in = true;
   static void set_aligned_vop3p_opsel(Vop3pVopDpp16MachineInst &raw) {
@@ -3519,6 +3521,8 @@ struct Rdna3DppTraits {
   using VCmpxEqU32Vop3 = rdna3::VCmpxEqU32Vop3;
   using VFmaMixF32Vop3p = rdna3::VFmaMixF32Vop3p;
   using VAddCoCiU32Vop3SdstEnc = rdna3::VAddCoCiU32Vop3SdstEnc;
+  using VSubCoU32Vop3SdstEnc = rdna3::VSubCoU32Vop3SdstEnc;
+  using VSubrevCoU32Vop3SdstEnc = rdna3::VSubrevCoU32Vop3SdstEnc;
   static void set_aligned_vop3p_opsel(Vop3pVopDpp16MachineInst &raw) {
     raw.op_sel = 0;
     raw.op_sel_hi = 0x3;
@@ -3547,6 +3551,8 @@ struct Rdna3_5DppTraits {
   using VCmpxEqU32Vop3 = rdna3_5::VCmpxEqU32Vop3;
   using VFmaMixF32Vop3p = rdna3_5::VFmaMixF32Vop3p;
   using VAddCoCiU32Vop3SdstEnc = rdna3_5::VAddCoCiU32Vop3SdstEnc;
+  using VSubCoU32Vop3SdstEnc = rdna3_5::VSubCoU32Vop3SdstEnc;
+  using VSubrevCoU32Vop3SdstEnc = rdna3_5::VSubrevCoU32Vop3SdstEnc;
   static void set_aligned_vop3p_opsel(Vop3pVopDpp16MachineInst &raw) {
     raw.op_sel = 0;
     raw.op_sel_hi = 0x3;
@@ -3580,6 +3586,8 @@ struct Gfx1250DppTraits {
   using VCmpxEqU32Vop3 = cdna5::VCmpxEqU32Vop3;
   using VFmaMixF32Vop3p = cdna5::VFmaMixF32Vop3p;
   using VAddCoCiU32Vop3SdstEnc = cdna5::VAddCoCiU32Vop3SdstEnc;
+  using VSubCoU32Vop3SdstEnc = cdna5::VSubCoU32Vop3SdstEnc;
+  using VSubrevCoU32Vop3SdstEnc = cdna5::VSubrevCoU32Vop3SdstEnc;
   static constexpr bool dpp_carry_has_fi = true;
   static constexpr bool dpp_carry_has_carry_in = true;
   static void set_aligned_vop3p_opsel(Vop3pVopDpp16MachineInst &raw) {
@@ -4407,8 +4415,9 @@ void rdna4_generated_vop2_dpp_inactive_source_preserves_destination() {
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), std::bit_cast<uint32_t>(42.0f));
 }
 
-template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_only() {
+template <typename Traits> void generated_vop2_dpp_carry_masks() {
   SCOPED_TRACE(Traits::name);
+  constexpr bool clears_masked_carry = Traits::arch != ROCJITSU_CODE_ARCH_CDNA4;
   ScopedIsaExecutionBackend execution_backend_scope{&Traits::backend()};
   amdgpu::GpuMemory mem(std::string(Traits::name) + "_vop2_dpp_carry_mem");
   amdgpu::L2Cache l2(std::string(Traits::name) + "_vop2_dpp_carry_l2");
@@ -4469,14 +4478,14 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
 
     fill_vgprs(0, 0);
 
-    // ROW_SHR1 has no source for lane 0. BOUND_CTRL=0 suppresses both the
-    // vector destination and the VCC side result for that active lane.
+    // ROW_SHR1 has no source for lane 0. BOUND_CTRL=0 preserves its VGPR.
+    // On GFX11 and later the corresponding carry bit clears.
     wf->set_exec(full_exec);
     wf->set_vcc_raw(vcc_hi_sentinel | 1);
     auto bc0_raw = make_raw();
     execute(bc0_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), kSentinel);
-    EXPECT_EQ(wf->vcc(), vcc_hi_sentinel | 1);
+    EXPECT_EQ(wf->vcc(), vcc_hi_sentinel | (clears_masked_carry ? 0u : 1u));
 
     // BOUND_CTRL=1 supplies zero instead, so the lane executes normally and
     // consumes its incoming carry bit.
@@ -4489,8 +4498,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), Traits::dpp_carry_has_carry_in ? 1u : 0u);
     EXPECT_EQ(wf->vcc(), vcc_hi_sentinel);
 
-    // Row/bank masks select only the VGPR destination. A bank-masked lane's
-    // carry bit is still fully written.
+    // Disable the first bank within every row.
     fill_vgprs(0xFFFFFFFFu, 1);
     wf->set_exec(full_exec);
     wf->set_vcc_raw(0);
@@ -4500,10 +4508,9 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     execute(row_bank_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), kSentinel);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 4), 0u);
-    EXPECT_EQ(wf->vcc(), full_exec);
+    EXPECT_EQ(wf->vcc(), clears_masked_carry ? 0xFFF0FFF0u : full_exec);
 
-    // Row masking has the same VGPR-only scope. Exercise a distinct row so
-    // this cannot pass solely through the bank-mask implementation.
+    // Disable a whole row independently of the bank mask.
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       cu->write_vgpr(vbase + kDst, lane, kSentinel);
     wf->set_exec(full_exec);
@@ -4514,11 +4521,10 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
     execute(row_mask_raw);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), kSentinel);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, wf->wf_size() == 64 ? 32 : 0), 0u);
-    EXPECT_EQ(wf->vcc(), full_exec);
+    EXPECT_EQ(wf->vcc(), clears_masked_carry ? 0x0000FFFFu : full_exec);
 
     // On modern DPP16, FI=0 makes lane 1's ROW_SHR1 source invalid when lane
-    // 0 is inactive. BOUND_CTRL=0 therefore preserves lane 1's old carry,
-    // while the inactive destination lane itself is cleared in VCC.
+    // 0 is inactive. Both lanes' carry bits clear.
     if constexpr (Traits::dpp_carry_has_fi) {
       fill_vgprs(0, 0);
       wf->set_exec(full_exec & ~1ULL);
@@ -4527,7 +4533,7 @@ template <typename Traits> void generated_vop2_dpp_carry_uses_source_write_mask_
       inactive_source_raw.fi = 0;
       execute(inactive_source_raw);
       EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), kSentinel);
-      EXPECT_EQ(wf->vcc(), 2u);
+      EXPECT_EQ(wf->vcc(), 0u);
     } else {
       // CDNA4 is Wave64-only. Verify that source suppression and legacy
       // inactive-source reads work in upper rows with sparse EXEC/VCC masks.
@@ -4976,7 +4982,7 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xABCD0000u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), 1u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 2), 0u);
-    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFEFFFDu);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFEFFFCu);
     EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut + 1), 0xA5A5A5A5u);
 
     initialize();
@@ -4989,10 +4995,7 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
     EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFEFFFCu);
 
     initialize();
-    // ROW_SELECT_BASE broadcasts lane 0 within each row. Keep every other
-    // lane distinct so the scalar carry mask proves that even row/bank-masked
-    // destination lanes consume the permuted source rather than their
-    // unpermuted src0 value.
+    // Broadcast lane 0 within each row, then disable the first bank.
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       cu->write_vgpr(vbase + kSrc0, lane, lane % 16 == 0 ? 0xFFFFFFFFu : 0u);
     cu->write_sgpr(sbase + kCarryOut, 0u);
@@ -5004,7 +5007,68 @@ void wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations() {
     masked.execute_impl(*wf);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xABCD0000u);
     EXPECT_EQ(cu->read_vgpr(vbase + kDst, 4), 0u);
-    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFFFFFFu);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFF0FFF0u);
+
+    // SUB and SUBREV route the minuend through DPP, including zero-fill at
+    // the row boundary. Only the first row is enabled for vector and borrow results.
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vbase + kSrc0, lane, 10 + 3 * lane);
+      cu->write_vgpr(vbase + kSrc1, lane, 200 + 11 * lane);
+    }
+    auto sub_raw = make_raw();
+    sub_raw.dpp_ctrl = amdgpu::dpp::ROW_SHL1;
+    sub_raw.row_mask = 1;
+    sub_raw.bound_ctrl = 1;
+    typename Traits::VSubCoU32Vop3SdstEnc sub(
+        reinterpret_cast<const typename Traits::MachineInst *>(&sub_raw));
+    sub.execute_impl(*wf);
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), 16u - 211u);
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0u - 365u);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0xFFFFu);
+    typename Traits::VSubrevCoU32Vop3SdstEnc subrev(
+        reinterpret_cast<const typename Traits::MachineInst *>(&sub_raw));
+    subrev.execute_impl(*wf);
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), 222u - 13u);
+    EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0u - 55u);
+    EXPECT_EQ(cu->read_sgpr(sbase + kCarryOut), 0x8000u);
+
+    // Use the LLVM encodings to cover both plain-integer DPP forms and the
+    // GFX12 scalar-only and inline sources through the public decoder.
+    auto decoder = Decoder::create(Traits::arch);
+    auto check = [&](std::initializer_list<uint32_t> words, uint32_t expected) {
+      auto inst = decoder->decode_window(std::span(words.begin(), words.size()));
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_vgpr(vbase + kDst, 1), expected) << inst.value()->mnemonic();
+    };
+    check({0x4e1810fa, 0xff090104}, 209);             // v_subrev_nc_u32_dpp
+    check({0xd527000c, 0x000210fa, 0xff090104}, 209); // v_subrev_nc_u32_e64_dpp
+    if constexpr (Traits::arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                  Traits::arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                  Traits::arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      wf->debug_write_sgpr(8, 200);
+      check({0xd702140c, 0x02001104}, 187);                  // plain v_subrev_co_u32 reads s8
+      check({0xd702140c, 0x000010fa, 0xff090104}, 0u - 13u); // DPP16 with s8
+      EXPECT_EQ(wf->debug_read_sgpr(20), 0xffffffffu);
+      check({0xd527000c, 0x000102ea, 0x1f58d104}, 0u - 13u); // DPP8 with inline 1
+    }
+    for (unsigned lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(vbase + kSrc0, lane, std::bit_cast<uint32_t>(float(10 + 3 * lane)));
+      cu->write_vgpr(vbase + kSrc1, lane, std::bit_cast<uint32_t>(float(200 + 11 * lane)));
+    }
+    // Floating reverse subtract routes src0 and computes 211 - 16 at lane 1.
+    check({0x0a1810fa, 0xff090104}, std::bit_cast<uint32_t>(195.0f));
+
+    // Only lane 1 executes. FI fetches the minuend from inactive lane 2.
+    // Using lane 1's own minuend instead would borrow and produce -2.
+    wf->set_exec(1u << 1);
+    wf->debug_write_sgpr(kCarryIn, 1u << 1);
+    cu->write_vgpr(vbase + kSrc0, 1, 13);
+    cu->write_vgpr(vbase + kSrc1, 1, 12);
+    cu->write_vgpr(vbase + kSrc1, 2, 222);
+    // v_subrev_co_ci_u32_e64_dpp v12, s20, v4, v8, s16 dpp8:[1,2,3,4,5,6,7,0] fi:1
+    check({0xd522140c, 0x004210ea, 0x1f58d104}, 208);
+    EXPECT_EQ(wf->debug_read_sgpr(kCarryOut), 0u);
   }
 }
 
@@ -5707,16 +5771,16 @@ TEST(DppPermuteTest, Rdna4GeneratedVop2DppInactiveSourcePreservesDestination) {
   rdna4_generated_vop2_dpp_inactive_source_preserves_destination();
 }
 
-TEST(DppPermuteTest, Rdna4GeneratedVop2DppCarryUsesSourceWriteMaskOnly) {
-  generated_vop2_dpp_carry_uses_source_write_mask_only<Rdna4DppTraits>();
+TEST(DppPermuteTest, Rdna4GeneratedVop2DppCarryMasks) {
+  generated_vop2_dpp_carry_masks<Rdna4DppTraits>();
 }
 
-TEST(DppPermuteTest, Gfx1250GeneratedVop2DppCarryUsesSourceWriteMaskOnly) {
-  generated_vop2_dpp_carry_uses_source_write_mask_only<Gfx1250DppTraits>();
+TEST(DppPermuteTest, Gfx1250GeneratedVop2DppCarryMasks) {
+  generated_vop2_dpp_carry_masks<Gfx1250DppTraits>();
 }
 
-TEST(DppPermuteTest, Cdna4GeneratedVop2DppCarryUsesSourceWriteMaskOnly) {
-  generated_vop2_dpp_carry_uses_source_write_mask_only<Cdna4DppTraits>();
+TEST(DppPermuteTest, Cdna4GeneratedVop2DppCarryMasks) {
+  generated_vop2_dpp_carry_masks<Cdna4DppTraits>();
 }
 
 TEST(DppPermuteTest, RdnaGeneratedVop1Dpp8FetchInactiveUsesFi) {
@@ -5785,6 +5849,61 @@ TEST(DppPermuteTest, RdnaGeneratedVop3SdstDppMasksVectorAndScalarDestinations) {
 TEST(DppPermuteTest, Gfx1250GeneratedVop3SdstDppMasksVectorAndScalarDestinations) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   wave32_generated_vop3_sdst_dpp_masks_vector_and_scalar_destinations<Gfx1250DppTraits>();
+}
+
+TEST(DppPermuteTest, ReverseShiftsRouteTheValueBeforeGfx11AndTheAmountFromGfx11) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    const bool cdna4 = arch == ROCJITSU_CODE_ARCH_CDNA4;
+    const bool rdna2 = arch == ROCJITSU_CODE_ARCH_RDNA2;
+    amdgpu::GpuMemory memory("shift_memory");
+    amdgpu::L2Cache l2("shift_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("shift_cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    auto *wf = cu->dispatch_wf(0, 0, 104, 32, cdna4 ? 64 : 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(0x6); // Lanes 1 and 2 are active. ROW_SHL1 routes lane 2 to lane 1.
+    const auto base = wf->vgpr_alloc().base;
+    cu->write_vgpr(base + 4, 1, 2);
+    cu->write_vgpr(base + 4, 2, 3);
+    cu->write_vgpr(base + 8, 1, 0x80008100u);
+    cu->write_vgpr(base + 8, 2, 0x80008200u);
+    auto decoder = Decoder::create(arch);
+    auto check = [&](uint32_t word0, uint32_t expected, uint32_t mask = ~0u) {
+      const std::array<uint32_t, 2> words{word0, 0xff090104}; // row_shl:1 bound_ctrl:1
+      auto inst = decoder->decode_window(words);
+      ASSERT_TRUE(inst.succeeded());
+      ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wf).succeeded());
+      EXPECT_EQ(cu->read_vgpr(base + 12, 1) & mask, expected) << inst.value()->mnemonic();
+    };
+    for (bool scalar : {false, true}) {
+      ForceScalarGuard guard(scalar);
+      // The RDNA and CDNA encodings differ for each VOP2 base opcode.
+      if (cdna4) {
+        check(0x241810fa, 0x00020800u); // LSHLREV_B32
+        check(0x201810fa, 0x20002080u); // LSHRREV_B32
+        check(0x221810fa, 0xe0002080u); // ASHRREV_I32
+        check(0x541810fa, 0x0800u, 0xffffu);
+        check(0x561810fa, 0x2080u, 0xffffu);
+        check(0x581810fa, 0xe080u, 0xffffu);
+      } else if (rdna2) {
+        check(0x341810fa, 0x00020800u);
+        check(0x2c1810fa, 0x20002080u);
+        check(0x301810fa, 0xe0002080u);
+      } else {
+        check(0x301810fa, 0x00040800u);
+        check(0x321810fa, 0x10001020u);
+        check(0x341810fa, 0xf0001020u);
+      }
+    }
+  }
 }
 
 TEST(DppPermuteTest, GeneratedDppInstructionReuseReadsCurrentSource) {

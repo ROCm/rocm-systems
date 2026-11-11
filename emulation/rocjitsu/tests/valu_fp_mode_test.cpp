@@ -844,9 +844,8 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                          std::vector<std::pair<uint32_t, uint32_t>> sources,
                          std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
                          int host_rounding = FE_TONEAREST) {
-      if (instruction == 6 && encoding.arch != ROCJITSU_CODE_ARCH_CDNA1 &&
-          encoding.arch != ROCJITSU_CODE_ARCH_CDNA2 && encoding.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-          encoding.arch != ROCJITSU_CODE_ARCH_CDNA4)
+      // V_DIV_FIXUP_F16 preserves the high half of the harness's 0xdeadbeef destination.
+      if (instruction == 6)
         expected.front().second |= 0xdead0000u;
       cases.push_back({std::string(encoding.name) + name, encoding.arch,
                        encoding.words[instruction], std::move(sources), std::move(expected), mode,
@@ -1331,7 +1330,7 @@ std::vector<ArithmeticCase> host_mxcsr_cases() {
                          mode,
                          FE_TONEAREST,
                          kControlMask,
-                         daz});
+                         uses_default_host_controls(arch) ? (0x1f80u & kControlMask) : daz});
       };
       add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
       add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
@@ -3792,14 +3791,16 @@ std::vector<ArithmeticCase> fp8_cases() {
   cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
   cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
   cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
-  // gfx1250 is uncaptured too; the CDNA5 manual's table gives the same rule.
+  // CDNA5 Table 7 (p. 22) preserves true infinity outside WMMA. Section 7.6.2
+  // (p. 81) instead specifies max finite with FP16_OVFL set for these converts.
+  // These encodings use physical gfx1201 results as a proxy pending gfx1250 data.
   const auto cdna5_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
     manual_pk(name, ROCJITSU_CODE_ARCH_CDNA5,
               cdna5::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
   };
-  cdna5_pk("Gfx1250PkFp8InfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
-  cdna5_pk("Gfx1250PkFp8NegInfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
-  cdna5_pk("Gfx1250PkBf8InfinityFp16Ovfl", cdna5::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
+  cdna5_pk("Gfx1250PkFp8InfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna5_pk("Gfx1250PkFp8NegInfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna5_pk("Gfx1250PkBf8InfinityFp16Ovfl", cdna5::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7cu);
   return cases;
 }
 
@@ -5477,8 +5478,7 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
 class ValuFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 TEST_P(ValuFpModeTest, HonorsModeAndPreservesInactiveLanes) {
-  // VOPD still uses the legacy handlers and their host-environment contract.
-  const bool uses_arith = GetParam().name.find("Vopd") == std::string::npos;
+  const bool uses_arith = true;
   expect_arithmetic_case(GetParam(), {}, uses_arith);
 }
 
@@ -5510,7 +5510,7 @@ TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar, /*uses_arith=*/true), true);
   }
 }
 #endif
@@ -5725,7 +5725,8 @@ TEST_P(ValuVopdSubtractionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true), true);
   }
 }
 

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -31,6 +31,7 @@ class Lds;
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
+  Failed,
 };
 
 using MemoryAccessDeferredCompletion = std::function<void()>;
@@ -109,6 +110,7 @@ protected:
   virtual VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) = 0;
   /// Return Complete and do not call complete, or return Deferred and call it
   /// exactly once after the memory response is ready for architectural writeback.
+  /// Failed must not invoke complete. Earlier lane writes may remain.
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
@@ -118,7 +120,7 @@ protected:
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   bool cancel_wait_check_issue(const PipelineEntry &entry);
-  void complete_entry(PipelineEntry entry);
+  VmAccessOutcome complete_entry(PipelineEntry entry);
 
   void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {

@@ -36,6 +36,11 @@ namespace detail {
 /// enter it around every instruction, which otherwise took two out-of-line
 /// calls that each resolved this thread-local again.
 extern constinit thread_local const IsaExecutionBackend *active_isa_execution_backend;
+
+inline const void *current_isa_operand_backend_inline() noexcept {
+  const auto *backend = active_isa_execution_backend;
+  return backend == nullptr ? nullptr : backend->operand_backend;
+}
 } // namespace detail
 
 /// @brief Temporarily select one ISA backend for generated constructors.

@@ -115,12 +115,15 @@ constexpr unsigned valu_permutation_source(ValuPermutation kind, unsigned lane, 
   group_width = std::min(group_width, wave_size);
   const unsigned base = (lane / group_width) * group_width;
   const unsigned offset = lane - base;
-  const unsigned source = kind == ValuPermutation::Bcast  ? selector % group_width
-                          : kind == ValuPermutation::Down ? offset + selector
-                          : kind == ValuPermutation::Up
-                              ? (selector <= offset ? offset - selector : group_width)
-                              : offset ^ selector;
-  return source < group_width ? base + source : wave_size;
+  if (kind == ValuPermutation::Bcast)
+    return base + selector % group_width;
+  if (kind == ValuPermutation::Up)
+    return selector <= offset ? lane - selector : lane;
+  if (kind == ValuPermutation::Down)
+    return selector < group_width - offset ? lane + selector : lane;
+  // PERMLANE_XOR can read an earlier group. Only its upper group edge is a bound.
+  const unsigned source = lane ^ selector;
+  return selector < wave_size && source < base + group_width ? source : lane;
 }
 
 struct PermutationLanes {
@@ -139,11 +142,8 @@ PermutationLanes valu_permutation_lanes(ValuPermutation kind, uint64_t exec, uns
       continue;
     const unsigned source =
         valu_permutation_source(kind, lane, select(lane), group_width, wave_size);
-    if (source >= wave_size) {
-      if (!row16 && kind != ValuPermutation::Perm64)
-        result.write |= uint64_t{1} << lane;
+    if (source >= wave_size)
       continue;
-    }
     if (row16 && !fi && !(exec & (uint64_t{1} << source))) {
       if (bound_ctrl)
         result.write |= uint64_t{1} << lane;
@@ -509,6 +509,16 @@ enum class SourceModifierFormat {
 };
 
 } // namespace sdwa
+
+/// Select each result half independently, then flip its source sign bit if requested.
+template <typename V>
+inline V select_packed_halves(V value, uint32_t low, uint32_t high, unsigned operand,
+                              uint32_t negations = 0) {
+  const V selected = ((value >> (((low >> operand) & 1u) * 16)) & V(0xffffu)) |
+                     ((value >> (((high >> operand) & 1u) * 16)) << 16);
+  const uint32_t sign_bits = ((negations >> operand) & 0x00010001u) << 15;
+  return selected ^ V(sign_bits);
+}
 
 /// @brief Return the VOP3 output-select field across MRISA spelling variants.
 template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {

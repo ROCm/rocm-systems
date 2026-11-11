@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -59,6 +61,20 @@ bool InstructionComputeUnitView::signal_queue_exception(
   return raw_cu().defer_queue_exception(retain_wave ? &raw_wavefront() : nullptr, queue_id,
                                         process_id, status, clear_debug_stop_on_success,
                                         retain_failure_for_debugger, delivery_policy);
+}
+
+uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                            uint32_t process_id) const {
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -540,6 +556,12 @@ void ComputeUnitCore::flush_cp_notifications() {
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.instruction_execution_failed()) {
+    fail_wave_instruction(
+        wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
+        wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
+    return;
+  }
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
@@ -1850,8 +1872,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
     const GpuVmAccess *vm_access = active->vm_access();
-    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
-                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    const uint64_t pc =
+        vm_access || active->process_id() ? active->vm_instruction_pc() : active->pc;
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, pc, word)
+                                    : inst_cache_.peek_word(pc, active->process_id(), word);
     if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
@@ -1973,6 +1997,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
   const bool vm_address_space = vm_access != nullptr;
+  const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
 
   std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> words{};
   constexpr uint32_t kFirstFetchBytes = InstructionCache::kFetchBytes;
@@ -1996,7 +2021,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
     return VmAccessOutcome::Complete;
   };
-  VmAccessOutcome fetch_outcome = fetch(active->pc, words.data(), kFirstFetchBytes);
+  VmAccessOutcome fetch_outcome = fetch(fetch_pc, words.data(), kFirstFetchBytes);
   // GFX10 MIMG has a two-bit NSA count at bits 2:1. Only NSA=3 needs
   // a fifth word; shorter instructions must not fetch beyond the normal window.
   constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
@@ -2004,7 +2029,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   if (fetch_outcome == VmAccessOutcome::Complete &&
       (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
       (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
-    fetch_outcome = fetch(active->pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
+    fetch_outcome = fetch(fetch_pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
@@ -2022,7 +2047,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       return IssueOutcome::NotIssued;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false, active->pc)) {
+        memory_violation_handler_(*active, fetch_pc, false, active->pc)) {
       return IssueOutcome::NotIssued;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2101,7 +2126,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     bool may_submit = true;
     std::optional<uint64_t> issuer;
     auto *admission = storage ? storage->admission : nullptr;
-    if (window && window->take_issuer(active->pc)) {
+    if (window && window->take_issuer(fetch_pc)) {
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
@@ -2112,7 +2137,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words.begin(), first.size(), first.begin());
-        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, fetch_pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }

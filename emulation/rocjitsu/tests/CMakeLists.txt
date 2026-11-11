@@ -174,6 +174,31 @@ add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
 rj_add_gtest_tests(rj_execution_fuzz_test)
 
 add_executable(
+    rj_concurrent_dispatch_fuzz_test
+    fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_concurrent_dispatch_fuzz_test
+    PRIVATE
+        rj_concurrent_dispatch_fuzz_core
+        rocjitsu_isa_registry
+        GTest::gtest_main
+)
+rj_configure_target(rj_concurrent_dispatch_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_concurrent_dispatch_fuzz_test rj_concurrent_dispatch_fuzz)
+rj_add_gtest_tests(rj_concurrent_dispatch_fuzz_test)
+add_test(
+    NAME ConcurrentDispatchFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND}
+        -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/concurrent-dispatch-fuzz-cli
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/concurrent_dispatch/test_concurrent_dispatch_fuzz_cli.cmake
+)
+set_tests_properties(ConcurrentDispatchFuzzCliTest PROPERTIES TIMEOUT 120)
+
+add_executable(
     rj_multiplexer_fuzz_test
     fuzz/multiplexer/multiplexer_fuzz_test.cpp
 )
@@ -193,6 +218,21 @@ add_test(
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND NOT CMAKE_CROSSCOMPILING
+    AND CMAKE_GENERATOR MATCHES "^Ninja"
+)
+    add_test(
+        NAME cmake.build_path_cache
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_build_path_cache.py
+            ${CMAKE_COMMAND} ${CMAKE_CXX_COMPILER} "${CMAKE_CXX_COMPILER_ARG1}"
+            ${CMAKE_MAKE_PROGRAM}
+    )
+    set_tests_properties(cmake.build_path_cache PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Exercise the native runtime resolved by the configured Python environment.
     # Reinstall native changes first, or put an uninstalled build on PATH when
@@ -405,9 +445,9 @@ add_executable(
     legacy_page_table_cache_test.cpp
     config_test.cpp
     checkpoint_restore_errors_test.cpp
-    rj_arith_bridge_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -562,6 +602,7 @@ add_executable(
     cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp
     clocked_issue_cycle_test.cpp
+    wavefront_slot_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -1037,6 +1078,23 @@ if(RJ_BUILD_CONSAN_ANALYZER)
         )
     endif()
 endif()
+
+# Host-only checked anchor regressions use model ISA providers.
+add_executable(rocjitsu_text_edit_tests patch/checked_text_edits_test.cpp)
+target_include_directories(
+    rocjitsu_text_edit_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(
+    rocjitsu_text_edit_tests
+    PRIVATE
+        rocjitsu_dbt_internal
+        rocjitsu_amdgpu_isa_model_registry
+        simdojo_headers
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
+rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.
@@ -2199,11 +2257,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
     )
     rj_configure_target(vm_shared_memory_api_test TEST)
-    target_compile_definitions(
+    rj_add_test_path(
         vm_shared_memory_api_test
-        PRIVATE
-            RJ_VM_API_LIBRARY="$<TARGET_FILE:rocjitsu_shared>"
-            RJ_VM_API_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
+        RJ_VM_API_LIBRARY
+        "$<TARGET_FILE:rocjitsu_shared>"
+    )
+    rj_add_test_path(
+        vm_shared_memory_api_test
+        RJ_VM_API_CONFIG
+        "${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json"
     )
     add_dependencies(vm_shared_memory_api_test rocjitsu_shared rocjitsu_memory)
     foreach(_backing IN ITEMS native zero-hard-limit)
@@ -2538,6 +2600,7 @@ set(_rj_interposer_pm4_tests
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
     ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch
     GridProductOverflowFailsFence
+    IndirectBranchFetchesHighVaShader
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
     FailedFenceIsStillAvailable
@@ -2591,6 +2654,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         TokenLargeFenceOnlyBufferNeedsTemporaryAttachment
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
         SUFFIX ".fallback" PREFIX prlimit --fsize=4096:4096
+    )
+endforeach()
+
+foreach(
+    _config
+    IN
+    ITEMS gfx90a_mi210_kmd gfx942_cdna3_kmd gfx950_mi350x_kmd gfx1250_mi455x
+)
+    rj_add_interposer_test_suite(
+        InterposerPm4Test IndirectBranchFetchesHighVaShader
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
     )
 endforeach()
 

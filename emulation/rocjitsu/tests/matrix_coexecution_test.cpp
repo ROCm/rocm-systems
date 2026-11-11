@@ -50,10 +50,10 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
   amdgpu::InstructionCache icache;
   constexpr uint64_t pc = 0x480000;
   const auto a =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
   const auto b =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+      cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
   for (unsigned i = 0; i != 2; ++i) {
     memory.write32(pc + 4 * i, a[i]);
@@ -102,10 +102,10 @@ TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
     amdgpu::GpuMemory memory("admission_hazard");
     amdgpu::InstructionCache icache;
     const auto a =
-        cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+        cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                            {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
     const uint8_t dst = hazard == 2 ? 0 : hazard == 3 ? 64 : 96;
-    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto b = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                       {.vdst = dst,
                                        .src0 = static_cast<uint16_t>(hazard == 1 ? 320 : 256),
                                        .src1 = 288,
@@ -137,7 +137,7 @@ TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
     for (unsigned i = 0; i != 4; ++i) {
       const uint8_t dst = 64 + 16 * i;
       const auto words =
-          cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+          cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                              {.vdst = dst,
                               .src0 = static_cast<uint16_t>(hazard && i == 3 ? 320 : 256),
                               .src1 = 288,
@@ -174,10 +174,10 @@ static_assert(!amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL,
                                           rdna4::Isa>::supports_async_execution);
 
 TEST(MatrixCoexecutionTest, SelectsOnlySupportedLargeMatrixInstructions) {
-  EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
-  EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x128_bf8_bf8"));
+  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x64_fp8_fp8"));
+  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_bf8_bf8"));
   EXPECT_TRUE(mc::async_candidate("v_wmma_f32_32x16x128_f4"));
-  EXPECT_TRUE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
+  EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x32_f16"));
   EXPECT_FALSE(mc::async_candidate("v_wmma_f32_16x16x128_f8f6f4"));
   EXPECT_FALSE(mc::async_candidate("v_add_f32"));
 }
@@ -266,7 +266,7 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
         cu->step();
       EXPECT_EQ(wf->pc, pc + 16);
       EXPECT_EQ(snapshot(), expected);
-      EXPECT_EQ(amdgpu::async_execution::stats.mma - pairs, hazard == 0 ? 1u : 0u);
+      EXPECT_EQ(amdgpu::async_execution::stats.mma - pairs, fp4 && hazard == 0 ? 1u : 0u);
     }
   }
 }
@@ -450,7 +450,7 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
   EXPECT_EQ(actual, expected);
   const auto offloads = amdgpu::async_execution::stats.mma - submitted;
   EXPECT_EQ(amdgpu::async_execution::stats.retired_mma - retired, offloads);
-  EXPECT_GT(offloads, 0u);
+  EXPECT_EQ(offloads, 0u);
 }
 
 TEST(MatrixCoexecutionTest, SharedPoolDoesNotWaitForBusyHelpersAndReusesThemAcrossIssuers) {
@@ -899,7 +899,7 @@ std::vector<ExtendedMmaCase> extended_mma_cases() {
                                              .src1 = 288,
                                              .src2 = 320,
                                              .blgp = format}),
-            0x38383838, 0, 8);
+            0x38383838, 0, 2);
   for (unsigned opcode : {45, 46})
     for (bool inline_scale : {false, true})
       add(ROCJITSU_CODE_ARCH_CDNA4,
@@ -921,8 +921,8 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
     const bool expect_async = c.mfma
-                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (14u & c.mfma_family) != 0
-                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k >= 32;
+                                  ? c.arch == ROCJITSU_CODE_ARCH_CDNA4 && (c.mfma_family & 2) != 0
+                                  : c.arch == ROCJITSU_CODE_ARCH_CDNA5 && c.wmma_k > 32;
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {

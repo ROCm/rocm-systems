@@ -22,14 +22,20 @@
 //   GlobalStore_*   — global stores and vmcnt interaction
 //   MultiReg_*      — multi-register loads
 //   Mixed_*         — simultaneous vmcnt and lgkmcnt events
-//   DualOffset_*    — dual-offset LDS events
+//   DualAddress_*   — LDS events with two address sets per lane
 //   TensorDma_*     — tensor load/store LDS races and tensorcnt waits
 
 #include "race_test_builder.h"
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <span>
+#include <utility>
+#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -47,31 +53,42 @@ constexpr std::array kMixedOrderGenericFlatLoadObligations{
 } // namespace
 
 TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_VGPR),
-            amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_GLOBAL),
-            amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_LDS), amdgpu::WaitCounterType::VMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_VGPR), amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::VGPR_TO_LDS), amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_SGPR),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::GLOBAL_TO_TTMP),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::SCALAR_TO_GLOBAL),
-            amdgpu::WaitCounterType::LGKMCNT);
-  EXPECT_EQ(defaultWaitCounterType(MemoryEventType::LDS_TO_GLOBAL),
-            amdgpu::WaitCounterType::TENSORCNT);
-
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_VGPR), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_GLOBAL), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_LDS), MemoryOrderClass::VMEM);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_VGPR), MemoryOrderClass::LDS);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS), MemoryOrderClass::LDS);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_SGPR), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(defaultMemoryOrder(MemoryEventType::LDS_TO_GLOBAL), MemoryOrderClass::TENSOR);
+  struct TestCase {
+    MemoryEventType type;
+    amdgpu::WaitCounterType counter;
+    MemoryOrderClass order;
+  };
+  constexpr TestCase cases[] = {
+      {MemoryEventType::GLOBAL_TO_VGPR, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::VGPR_TO_GLOBAL, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::GLOBAL_TO_LDS, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM},
+      {MemoryEventType::LDS_TO_VGPR, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS},
+      {MemoryEventType::VGPR_TO_LDS, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS},
+      {MemoryEventType::GLOBAL_TO_SGPR, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::GLOBAL_TO_TTMP, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::SCALAR_TO_GLOBAL, amdgpu::WaitCounterType::LGKMCNT,
+       MemoryOrderClass::UNORDERED},
+      {MemoryEventType::LDS_TO_GLOBAL, amdgpu::WaitCounterType::TENSORCNT,
+       MemoryOrderClass::TENSOR},
+  };
+  RaceDetector detector(
+      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+      /*ldsSizeBytes=*/1024);
+  for (const TestCase &test : cases) {
+    SCOPED_TRACE(static_cast<int>(test.type));
+    const EventId event = detector.allocateEventId(WaveId{0}, testInstruction(0), test.type,
+                                                   /*registers=*/{}, /*execMask=*/1);
+    const auto &events = detector.events();
+    EXPECT_TRUE(events.hasPendingWaitCounter(event, test.counter));
+    EXPECT_EQ(events.pendingCompletionClass(event, test.counter), test.order);
+    EXPECT_EQ(events.pendingCounterIncrement(event, test.counter), 1);
+    EXPECT_EQ(events.memoryOrder(event), test.order);
+    EXPECT_FALSE(events.allWaitCountersSatisfied(event));
+    EXPECT_TRUE(detector.satisfyEventWaitCounter(event, test.counter));
+    EXPECT_FALSE(events.hasPendingWaitCounter(event, test.counter));
+  }
 }
 
 // ---- VGPR races (vmcnt) ----
@@ -120,17 +137,42 @@ TEST(RaceDetector, FlatGlobalLoadRequiresBothCounterWaits) {
 }
 
 TEST(RaceDetector, FlatLdsLoadRequiresBothCounterWaits) {
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
-  b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
+  for (bool vmcnt_first : {false, true}) {
+    SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
+    RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+    b.flatLdsLoad(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, /*vgprDst=*/1);
 
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/-1, /*lgkmcnt=*/0);
-  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_TRUE(b.hasVgprRace(1));
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
+    b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+    EXPECT_TRUE(b.hasVgprRace(1));
 
-  b.clearViolations();
-  b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
-  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  EXPECT_FALSE(b.hasRace());
+    b.clearViolations();
+    b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_TRUE(b.hasLdsRace(0));
+
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? -1 : 0, /*lgkmcnt=*/vmcnt_first ? 0 : -1);
+    b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+    b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_FALSE(b.hasRace());
+  }
+}
+
+TEST(RaceDetector, FlatLdsStoreRequiresBothCounterWaits) {
+  for (bool vmcnt_first : {false, true}) {
+    SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
+    RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/8, /*sgprs=*/8);
+    b.flatLdsStore(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? 0 : -1, /*lgkmcnt=*/vmcnt_first ? -1 : 0);
+    b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_TRUE(b.hasLdsRace(0));
+
+    b.clearViolations();
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/vmcnt_first ? -1 : 0, /*lgkmcnt=*/vmcnt_first ? 0 : -1);
+    b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
+    EXPECT_FALSE(b.hasRace());
+  }
 }
 
 TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
@@ -161,14 +203,17 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
     wait.add(amdgpu::WaitCounterType::DSCNT, 1);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+    // A single-wave workgroup retires a completed event with LDS bytes at once;
+    // one without LDS bytes stays wave-complete until the registry trims it.
+    EXPECT_EQ(events.status(EventId{0}),
+              lds_mask != 0 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
     for (int lane : {0, 1}) {
-      wave.checkVgprRead(1, lane, 0xf);
+      wave.checkVgprReadLanes(1, uint64_t{1} << lane, 0xf);
       EXPECT_TRUE(violations.empty());
     }
     for (int lane : {0, 1}) {
-      wave.checkVgprRead(2, lane, 0xf);
+      wave.checkVgprReadLanes(2, uint64_t{1} << lane, 0xf);
       ASSERT_EQ(violations.size(), 1u);
       EXPECT_EQ(violations.front().lane, lane);
       violations.clear();
@@ -190,8 +235,10 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
-    detector.allocateEventId(WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-                             amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    detector.allocateEventId(
+        WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
   }
   struct Range {
     int address;
@@ -238,7 +285,7 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
     for (int lane = 0; lane < 4; ++lane)
-      wave.checkVgprRead(1, lane, 0xf);
+      wave.checkVgprReadLanes(1, uint64_t{1} << lane, 0xf);
     EXPECT_EQ(violations.size(), 4u);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::LOADCNT, 0);
@@ -247,7 +294,8 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     wait.updates.clear();
     wait.add(amdgpu::WaitCounterType::DSCNT, 0);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+    // The event has LDS bytes, so the single-wave workgroup retires it at once.
+    EXPECT_EQ(events.status(event), EventStatus::RETIRED);
     violations.clear();
     wave.checkVgprReadLanes(1, 0xf, 0xf);
     EXPECT_TRUE(violations.empty());
@@ -323,7 +371,8 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     intervals.append(64, 68);
     const auto event = detector.allocateEventId(
         WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-        amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);
@@ -1355,11 +1404,12 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     MemoryOrderClass eventOrder;
     EventStatus olderAfterWait;
   };
+  // A completed event has LDS bytes, so the single-wave workgroup retires it.
   for (const Case c :
-       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::WAVE_COMPLETE},
+       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::RETIRED},
         Case{MemoryOrderClass::UNORDERED, MemoryOrderClass::TENSOR, EventStatus::ACTIVE}}) {
-    SCOPED_TRACE(c.olderAfterWait == EventStatus::WAVE_COMPLETE ? "TENSOR obligation"
-                                                                : "UNORDERED obligation");
+    SCOPED_TRACE(c.olderAfterWait == EventStatus::RETIRED ? "TENSOR obligation"
+                                                          : "UNORDERED obligation");
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
@@ -2147,15 +2197,11 @@ TEST(RaceDetector, Dtl_MultiLane_CrossWaveSafeWithBarrier) {
   EXPECT_FALSE(b.hasRace());
 }
 
-// ---- Dual-offset LDS ----
+// ---- Two LDS address sets per lane ----
 
-TEST(RaceDetector, DualOffset_CrossWaveRace) {
-  // registerDualOffsetLdsEvent: each lane writes TWO 8-byte intervals.
-  // Lane 0 base=100: [100, 108) (offset0=0) and [116, 124) (offset1=2).
-  // Another wave reading either interval without a barrier → RACE.
-  //
-  // Uses RaceDetector/WaveRaceState directly since the builder doesn't
-  // expose registerDualOffsetLdsEvent.
+TEST(RaceDetector, DualAddress_CrossWaveRace) {
+  // Like ds_write2_b64, lane 0 writes [100, 108) and [116, 124). Another wave
+  // reading either interval without a barrier races.
   std::vector<RaceViolation> violations;
   RaceDetector detector(/*nWaves=*/
                         2, /*vgprCount=*/4,
@@ -2164,13 +2210,17 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &rs = detector.getWaveRaceState(0);
-  std::vector<uint32_t> ldsAddrs(64, 0);
-  ldsAddrs[0] = 100;
-  rs.registerDualOffsetLdsEvent(testInstruction(/*pc=*/0), MemoryEventType::VGPR_TO_LDS,
-                                /*registers=*/{},
-                                /*execMask=*/1, /*waveSize=*/64, ldsAddrs,
-                                /*offset0=*/0, /*offset1=*/2);
-  // Lane 0 wrote: [100, 108) and [116, 124)
+  std::vector<uint32_t> firstAddrs(64, 0);
+  std::vector<uint32_t> secondAddrs(64, 0);
+  firstAddrs[0] = 100;
+  secondAddrs[0] = 116;
+  const std::array obligations{
+      amdgpu::MemoryCounterObligation{defaultWaitCounterType(MemoryEventType::VGPR_TO_LDS),
+                                      defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS)}};
+  rs.registerLdsEvent(testInstruction(/*pc=*/0), MemoryEventType::VGPR_TO_LDS,
+                      /*registers=*/{}, /*execMask=*/1, /*waveSize=*/64, firstAddrs, secondAddrs,
+                      /*bytesPerLane=*/8, /*byteMask=*/0xF, obligations,
+                      defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS));
   detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 1u); // first interval
   detector.validateRead(/*addr=*/116, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
@@ -2182,28 +2232,16 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
 
 // ---- Exec mask and lane-level checks ----
 
-TEST(RaceDetector, CheckVgprReadAllLanes) {
-  // checkVgprReadAllLanes checks all 64 lanes for races on a register.
-  // A global load with partial exec (lane 5 only) should race when
-  // checkVgprReadAllLanes is called (it checks lane 5 among others).
-  RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  // Use the WaveRaceState directly for checkVgprReadAllLanes.
-  b.violations(); // ensure handler is set up
-  // checkVgprReadAllLanes iterates all lanes, should hit lane 5.
-  // Access it through the detector:
-  RaceTestBuilder b2(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b2.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  // Check individual lane 5 → race
-  b2.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/5);
-  EXPECT_TRUE(b2.hasVgprRace(1));
-  // Check lane 0 (not in exec mask) → should still race because the event
-  // is active and checkVgprRead checks if ANY pending load overlaps.
-  RaceTestBuilder b3(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
-  b3.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
-  b3.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
-  // Lane 0 was not in the exec mask of the load, so it should NOT race.
-  EXPECT_FALSE(b3.hasRace());
+TEST(RaceDetector, CheckVgprReadOnlyReportsLanesInLoadExecMask) {
+  RaceTestBuilder active(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  active.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  active.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/5);
+  EXPECT_TRUE(active.hasVgprRace(1));
+
+  RaceTestBuilder inactive(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
+  inactive.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/1ULL << 5);
+  inactive.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+  EXPECT_FALSE(inactive.hasRace());
 }
 
 TEST(RaceDetector, CheckVgprReadLanesReportsMaskedLane) {
