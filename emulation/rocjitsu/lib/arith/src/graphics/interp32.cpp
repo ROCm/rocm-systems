@@ -27,9 +27,6 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
           rocjitsu::arith::validate(flags, mode & ~known, rocjitsu::arith::interp_fp_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
@@ -37,7 +34,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     return lanes ? rocjitsu::arith::interp_guest<P2, false>(flags, lanes, mode, d, a, b, c)
                  : RJ_ARITH_SUCCESS;
   };
-  if (flags & rocjitsu::arith::interp_round_denorm_flags) {
+  if (rocjitsu::arith::is_exact(flags) || (flags & rocjitsu::arith::interp_round_denorm_flags)) {
     return guest(exec_mask);
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
