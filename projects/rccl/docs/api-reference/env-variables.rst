@@ -733,6 +733,8 @@ in the following table.
         | Minimum message size (in bytes) before the payload is split across
         | multiple NICs/QPs.
         | Smaller messages use one QP for data to reduce latency.
+        | The threshold now also applies when the CAST QP scheduler is disabled;
+        | previously it was honoured only while the scheduler was active.
         | This variable can be leveraged when NIC Fusion (``NCCL_NET_MERGE_LEVEL``) and/or data splitting on QPs (``NCCL_IB_SPLIT_DATA_ON_QPS``) is enabled.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
