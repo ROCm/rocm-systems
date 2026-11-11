@@ -67,13 +67,17 @@ class DdaReduceScatterIpcMicrotest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
     EXPECT_EQ(launch.kernel, Kernel<T>());
-    ASSERT_EQ(launch.args.size(), 6u);
+    ASSERT_EQ(launch.args.size(), 7u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<size_t>(2), recvcount);
     EXPECT_EQ(launch.Arg<const T*>(3), kSendbuff);
     EXPECT_EQ(launch.Arg<int>(4), 2);
     EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+    // No signal memory in this host test, so the completion mark is empty.
+    const DdaDoneMark done = launch.Arg<DdaDoneMark>(6);
+    EXPECT_EQ(done.seq, nullptr);
+    EXPECT_EQ(done.value, 0u);
   }
 
   DdaIpcMockComm mock_;

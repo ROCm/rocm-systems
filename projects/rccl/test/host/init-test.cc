@@ -7196,9 +7196,10 @@ TEST_F(InitMicrotest, CommFree_TempBuff_ReleasesItThroughTheCommsMemManager) {
   int buf = 0;
   comm->tempBuff = &buf;
 
+  void* done = comm->addonDone;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&buf, done}), spy.freed());
   EXPECT_EQ(nullptr, comm->tempBuff);
   ::free(comm);
 }
@@ -7214,9 +7215,10 @@ TEST_F(InitMicrotest, CommFree_HierarchicalTempBuffer_ReleasesItAndClearsThePoin
   int buf = 0;
   comm->hierarchicalTempBuffer = &buf;
 
+  void* done = comm->addonDone;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&buf}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&buf, done}), spy.freed());
   EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
   ::free(comm);
 }
@@ -7234,9 +7236,10 @@ TEST_F(InitMicrotest, CommFree_BothTempBuffers_ReleasesTempBuffBeforeTheHierarch
   comm->tempBuff = &temp;
   comm->hierarchicalTempBuffer = &hierarchical;
 
+  void* done = comm->addonDone;
   Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(std::vector<void*>({&temp, &hierarchical}), spy.freed());
+  EXPECT_EQ(std::vector<void*>({&temp, &hierarchical, done}), spy.freed());
   EXPECT_EQ(nullptr, comm->tempBuff);
   EXPECT_EQ(nullptr, comm->hierarchicalTempBuffer);
   ::free(comm);
