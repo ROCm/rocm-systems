@@ -133,13 +133,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                     "ROCPROF_ATTACH_DURATION": args.attach_duration_msec,
                 })
 
-        if args.kokkos_trace:
-            # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
-            console_error(
-                "The option '--kokkos-trace' is not supported in the current "
-                "version of rocprof-compute. This functionality is planned for a "
-                "future release. Please adjust your profiling options accordingly."
-            )
         # Kernel filtering
         if args.kernel:
             options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)

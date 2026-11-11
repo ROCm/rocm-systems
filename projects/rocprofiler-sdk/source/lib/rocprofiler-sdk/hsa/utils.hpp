@@ -118,6 +118,13 @@ struct formatter<hsa_amd_vmem_alloc_handle_t>
 : rocprofiler::hsa::utils::handle_formatter<hsa_amd_vmem_alloc_handle_t>
 {};
 
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+template <>
+struct formatter<hsa_amd_signal_batch_t>
+: rocprofiler::hsa::utils::handle_formatter<hsa_amd_signal_batch_t>
+{};
+#    endif
+
 template <>
 struct formatter<hsa_access_permission_t>
 {

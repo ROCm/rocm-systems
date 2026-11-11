@@ -12,6 +12,7 @@
 #define RCCL_GIN_LOG_HOST_HPP
 
 #include "debug.h"
+#include "nccl_device/gin/rocshmem_gda/gda_config.h"  // BUILD_DEBUG_DEVICE (guarded)
 #include <cstdlib>
 
 #define LOG_ERROR(fmt, ...)       WARN("GIN: " fmt, ##__VA_ARGS__)
@@ -25,12 +26,20 @@
 #define LOG_TRACE(...)            do {} while(0)
 #endif
 
-// Device-side logging stubs for rocshmem device code that may include log.hpp.
-// LOGD_ERROR_ABORT maps to __builtin_trap on device; others are no-ops.
-#define LOGD_ERROR_ABORT(fmt, ...) __builtin_trap()
+// Device-side logging for rocshmem device code compiled into librccl.so. Like
+// the installed shim: constmem-free device printf gated on BUILD_DEBUG_DEVICE
+// (no __constant__ logd_constants, no PE/rank prefix), else no-ops.
+#define LOGD_ERROR_ABORT(fmt, ...) do { LOGD_ERROR(fmt, ##__VA_ARGS__); __builtin_trap(); } while (0)
+#if defined(BUILD_DEBUG_DEVICE)
+#define LOGD_ERROR(fmt, ...)       printf("GIN-GDA ERROR: " fmt " (" __FILE__ ":%d)\n", ##__VA_ARGS__, __LINE__)
+#define LOGD_WARN(fmt, ...)        printf("GIN-GDA WARN: "  fmt " (" __FILE__ ":%d)\n", ##__VA_ARGS__, __LINE__)
+#define LOGD_INFO(fmt, ...)        printf("GIN-GDA INFO: "  fmt " (" __FILE__ ":%d)\n", ##__VA_ARGS__, __LINE__)
+#define LOGD_TRACE(fmt, ...)       printf("GIN-GDA TRACE: " fmt " (" __FILE__ ":%d)\n", ##__VA_ARGS__, __LINE__)
+#else
 #define LOGD_ERROR(fmt, ...)       ((void)0)
 #define LOGD_WARN(fmt, ...)        ((void)0)
 #define LOGD_INFO(fmt, ...)        ((void)0)
 #define LOGD_TRACE(fmt, ...)       ((void)0)
+#endif
 
 #endif // RCCL_GIN_LOG_HOST_HPP

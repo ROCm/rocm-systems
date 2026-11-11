@@ -377,7 +377,7 @@ public:
                      aqlprofile_memory_alloc_callback_t   alloc,
                      aqlprofile_memory_dealloc_callback_t dealloc,
                      void*                                data)
-    : MemoryManager(agent, alloc, dealloc, data)
+    : MemoryManager(hsa_agent, alloc, dealloc, data)
     {
         this->agent_handle = aql_agent;
     }

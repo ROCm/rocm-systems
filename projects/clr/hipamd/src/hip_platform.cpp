@@ -53,8 +53,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t maxVGPRs = adjust_for_wave64
       ? device.info().vgprsPerSimd_ >> 1
       : device.info().vgprsPerSimd_;
+
   const size_t VgprWaves = wrkGrpInfo->usedVGPRs_ > 0
-      ? maxVGPRs / amd::alignUp(wrkGrpInfo->usedVGPRs_, VgprGranularity)
+      ? maxVGPRs / amd::roundUp<size_t>(wrkGrpInfo->usedVGPRs_, VgprGranularity)
       : MaxWavesPerSimd;
 
   if (VgprWaves == 0) {
@@ -70,8 +71,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
       ? device.info().sgprAllocGranularity_
       : DefaultSgprAllocGranule;
+
   const size_t sgprsPerWave =
-      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      amd::roundUp<size_t>(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
       device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
       ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)
@@ -155,7 +157,6 @@ struct __CudaFatBinaryWrapper {
 };
 
 // Forward declarations
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
@@ -291,17 +292,16 @@ void __hipRegisterManagedVar(
 
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
                                    size, align, reinterpret_cast<hip::FatBinaryInfo**>(hipModule));
-  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
-  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 
   if (enable_deferred_loading) {
-    // Allocate temporary var on host and initialize
     *pointer = amd::Os::reserveMemory(0, size, align, amd::Os::MEM_PROT_RW);
+    guarantee(*pointer != nullptr, "Cannot reserve host memory for Static Managed Var");
     ::memcpy(*pointer, init_value, size);
   } else {
     HIP_INIT_VOID();
-    status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->SetAllocFlag(true);
+    hipError_t status = ihipMallocManaged(pointer, size, align, /*use_host_ptr=*/false,
+                                         ManagedMemOwner::kModuleVariable);
+    var_ptr->SetManagedVarMapped(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
@@ -314,6 +314,9 @@ void __hipRegisterManagedVar(
       guarantee(false, "Error during allocation of managed memory!, error: %d", status);
     }
   }
+
+  hipError_t status = PlatformState::Instance().StatCO().RegisterManagedVar(var_ptr);
+  guarantee(status == hipSuccess, "Cannot register Static Managed Var, error: %d", status);
 }
 
 // ================================================================================================
@@ -1017,16 +1020,20 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
 }
 
 // ================================================================================================
-void PlatformState::Init() {
+hipError_t PlatformState::Init() {
   std::scoped_lock lock(lock_);
   if (initialized_ || g_devices.empty()) {
-    return;
+    return hipSuccess;
   }
-  initialized_ = true;
   statCO_.ResizeForDevices(g_devices.size());
+
   amd::RuntimeTearDown::RegisterTearDownCallback("PlatformState static fatbin cleanup", [this]() {
     statCO_.RemoveAllFatBinaries();
   });
+
+  IHIP_RETURN_ONFAIL(statCO_.EnsureAllManagedVarsAreMapped());
+  initialized_ = true;
+  return hipSuccess;
 }
 
 // ================================================================================================

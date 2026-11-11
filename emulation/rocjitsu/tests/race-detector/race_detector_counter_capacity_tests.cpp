@@ -109,7 +109,7 @@ TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitIsNoOpBelowCapacity) {
 TEST(RaceDetector, CounterCapacity_MissingConfiguredCapacityFailsLoudly) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/1, /*sgprCount=*/1, Dim3d(0), [](RaceViolation) {},
-                        CounterCapacities{.vmcnt = 0, .lgkmcnt = 0});
+                        CounterCapacities{.vmcnt = 0, .lgkmcnt = 0}, /*ldsSizeBytes=*/64 * 1024);
 
   EXPECT_THROW(
       detector.getWaveRaceState(0).prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT),
@@ -122,6 +122,22 @@ TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresOldestOrderedReads) {
 
   expectVgprReady(builder, /*vgpr=*/kLgkmcntOverflow - 1);
   expectVgprPending(builder, /*vgpr=*/kLgkmcntOverflow);
+}
+
+// Backpressure completes the oldest DS reads like a wait does, so a
+// single-wave workgroup retires their LDS events at once, while a workgroup
+// with another wave keeps them for a barrier.
+TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresLdsEventsOnlyInASingleWaveWorkgroup) {
+  for (const int numWaves : {1, 2}) {
+    SCOPED_TRACE(numWaves);
+    RaceTestBuilder builder(numWaves, /*vgprs=*/kLgkmcntCapacity + kLgkmcntOverflow,
+                            /*sgprs=*/kScalarRegisters);
+    issueOrderedLdsReads(builder, kLgkmcntCapacity + kLgkmcntOverflow);
+
+    const auto completed = numWaves == 1 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE;
+    EXPECT_EQ(builder.events().status(EventId{kLgkmcntOverflow - 1}), completed);
+    EXPECT_EQ(builder.events().status(EventId{kLgkmcntOverflow}), EventStatus::ACTIVE);
+  }
 }
 
 TEST(RaceDetector, CounterCapacity_VmcntOverflowRetiresOldestOrderedLoads) {

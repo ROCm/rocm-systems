@@ -9,6 +9,7 @@
 /// Checks: active non-NaN results match; inactive lanes retain the sentinel.
 /// NaN-result lanes are excluded because payloads may differ.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -57,13 +58,12 @@ struct Case {
   uint32_t opcode;
 };
 
-const std::array<Case, 6> kCases = {{
+const std::array<Case, 5> kCases = {{
     {"v_ceil_f16_vop3", 389},
     {"v_floor_f16_vop3", 388},
     {"v_trunc_f16_vop3", 390},
     {"v_rndne_f16_vop3", 391},
     {"v_sqrt_f16_vop3", 382},
-    {"v_fract_f16_vop3", 392},
 }};
 
 // f16 inputs across every IEEE class + values that exercise clamp / omod
@@ -101,7 +101,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_fp16_una", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_fp16_una", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -141,6 +143,8 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

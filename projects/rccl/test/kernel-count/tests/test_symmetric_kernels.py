@@ -36,15 +36,15 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "symmetric" / "generate.py"
 # If a change moves these numbers, update them here AND explain in the PR
 # description WHY. Do not blind-update.
 # ---------------------------------------------------------------------------
-EXPECTED_TOTAL = 43
+EXPECTED_TOTAL = 44
 EXPECTED_PER_COLL = {
-    "AllGather": 3,
+    "AllGather": 4,
     "AllReduce": 10,
     "ReduceScatter": 30,
 }
 EXPECTED_DIMS = {
     "coll": {"AllGather", "AllReduce", "ReduceScatter"},
-    "algo": {"LL", "ST", "RailRing_LsaST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD"},
+    "algo": {"LL", "ST", "RailRing_LsaST", "HierLsaST", "AGxLL_R", "RSxLD_AGxST", "LD", "RailA2A_LsaLD"},
     "red": {"sum", "avg"},
     "ty": {"f32", "f16", "bf16", "f8e4m3", "f8e5m2"},
 }
@@ -52,8 +52,8 @@ EXPECTED_DIMS = {
 # The generator takes GPU_TARGETS as its second argument and emits the Tma* algos
 # only when a target carries a DMA tile mover (gfx1250's Tensor Data Mover). Those
 # kernels are therefore invisible to the baselines above, so guard them separately:
-# +1 AllGather (TmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only), +10 ReduceScatter
-# (TmaLD, sum and avg).
+# +2 AllGather (TmaST, HierLsaTmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only),
+# +10 ReduceScatter (TmaLD, sum and avg).
 #
 # These two are GPU_TARGETS lists, not lists of movers: gfx942 has no TDM and is in
 # both on purpose. A build always passes GPU_TARGETS whole (src/CMakeLists.txt), so a
@@ -62,13 +62,13 @@ EXPECTED_DIMS = {
 # arch from one that only asks whether any target was given.
 GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
 GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
-EXPECTED_TDM_TOTAL = 59
+EXPECTED_TDM_TOTAL = 61
 EXPECTED_TDM_PER_COLL = {
-    "AllGather": 4,
+    "AllGather": 6,
     "AllReduce": 15,
     "ReduceScatter": 40,
 }
-EXPECTED_TDM_ALGOS = {"TmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
+EXPECTED_TDM_ALGOS = {"TmaST", "HierLsaTmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
 
 # Anchors for parsing kernel names. Reductions carry a trailing _<red>_<ty>;
 # non-reductions (AllGather) carry only _<algo>. Algorithm tokens themselves

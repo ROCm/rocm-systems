@@ -26,6 +26,10 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
   case ncclSymkKernelId_AllGather_ST:
     return ncclSymkIsGfx950(comm) ? std::min(ncclSymkMaxBlocks, 24) : ncclSymkMaxBlocks;
 #endif
+  case ncclSymkKernelId_AllGather_HierLsaST:
+    return ncclSymkAgHierMaxBlocks;
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    return ncclSymkAgHierTmaMaxBlocks;
   default:
     return ncclSymkMaxBlocks;
   }
@@ -67,7 +71,7 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
 
   // minCTAs/maxCTAs are resolved (env > per-call > comm) at task-append time.
   // NCCL_SYM_CTAS is an explicit override of the resolved bounds.
-  int nUserCTAs = ncclSymkModelCtasEnvOverride();
+  int nUserCTAs = ncclSymkModelCtasEnvOverride(kernelId);
   if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = nUserCTAs;
 
   // Even CTA counts are preferred for optimal performance, except for when CTAs==1.
@@ -122,5 +126,8 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
 
   // TDM throughput keeps scaling with resident blocks, so launch it at the widest allowed count.
   if (usesTdm(comm, kernelId)) *nBlocks = nMaxBlocks;
+  if (kernelId == ncclSymkKernelId_AllGather_HierLsaST || kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
+    *nBlocks = ncclSymkAgHierLaunchBlocks(comm, *nBlocks);
+  }
   return ncclSuccess;
 }
