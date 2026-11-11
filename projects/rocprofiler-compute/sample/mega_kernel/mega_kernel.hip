@@ -2244,61 +2244,13 @@ __device__ void test_mfma_operations([[maybe_unused]] TestResults* results,
 // ------------------------
 // 1. SAME-WAVE CO-ISSUE (VOPD/VOPD3) - MI300 (gfx942), MI350 (gfx950), gfx1250:
 //    - Single instruction encodes two VALU operations (X and Y opcodes)
-//    - Example: VOPD encoding packs v_add_f32 + v_mul_f32 in one instruction
-//    - VOPD3 extends this with 3 source operands per instruction
 //
 // 2. CROSS-WAVE CO-ISSUE - MI350 (gfx950), gfx1250 ONLY:
 //    - Two waves each contribute one VALU instruction
 //    - Requires dual VALU arbiters (new hardware in gfx950+)
 //
-// DUAL-ISSUE REQUIREMENTS:
-// ------------------------
-// For cross-wave co-issue to occur, BOTH instructions must satisfy:
-//   - Both waves must be Wave32 (NOT Wave64)
-//   - Both must be single-cycle VALU instructions
-//   - Neither instruction uses DPP (Data-Parallel Primitives)
-//   - Non-DPFP instruction is NOT VOPD or VOPD3
-//   - Neither is a Transcendental (sin, cos, exp, log, etc.) or WMMA instruction
-//   - Source operands must not conflict (no register bank conflicts)
-//
-// INSTRUCTIONS THAT CAN CO-EXECUTE:
-// ---------------------------------
-//   - Single-cycle FP32/FP16/BF16 operations (v_add_f32, v_mul_f32, v_fma_f32, etc.)
-//   - Single-cycle integer operations (v_add_i32, v_mul_lo_u32, etc.)
-//   - Comparison operations
-//   - Bitwise operations
-//
-// INSTRUCTIONS THAT BLOCK DUAL-ISSUE:
-// -----------------------------------
-//   - VOPD/VOPD3 instructions (already dual-op)
-//   - DPP instructions (data-parallel primitives)
-//   - DGEMM/SGEMM (matrix multiply)
-//   - XDL/WMMA instructions
-//   - Multi-cycle instructions (V_SWAP*, V_MQSAD*, V_MUL_U64, etc.)
-//   - Transcendental operations (v_sin_f32, v_cos_f32, v_exp_f32, etc.)
-//   - PIPEFLUSH operations
-//
-// HOW TO MAXIMIZE DUAL-ISSUE IN YOUR CODE:
-// ----------------------------------------
-// 1. Mix FP64 operations with FP32/FP16 operations
-//    Example: While one wave does FP64 accumulation, another does FP32 normalization
-//
-// 2. Avoid back-to-back transcendentals - they block co-execution
-//    Bad:  sin(x); cos(x);   // Neither can dual-issue
-//    Good: sin(x); a + b;    // a+b might co-issue with sin from another wave
-//
-// 3. Use Wave32 dispatch for maximum dual-issue opportunity
-//
-// 4. Minimize register conflicts between concurrent operations
-//
-// DUAL-ISSUE PERFORMANCE TEST:
-// ----------------------------
 // The following test demonstrates instruction patterns that enable dual-issue.
-// On MI350, mixing FP64 and FP32 ops from different waves can achieve 2x IPC.
-//
-// NOTE: Actual dual-issue happens at hardware scheduling level between waves.
-// This test provides instruction patterns that are dual-issue eligible.
-//
+
 
 __device__ void test_dual_issue_patterns([[maybe_unused]] TestResults* results,
                                          [[maybe_unused]] int lane_id) {
