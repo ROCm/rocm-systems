@@ -50,8 +50,8 @@ storage_t::impl::impl(std::string             database_path,
 , m_uuid(std::move(uuid))
 {
     // Store the schema the writer will create. version_t{} is unspecified and resolves
-    // to the newest writable schema. An embedded schema the writer cannot populate,
-    // such as 3.0.5, fails here before a database is created.
+    // to the newest writable schema. A version with no writer fails here before a
+    // database is created.
     const auto* schema = resolve_writable_schema(schema_version);
     if(schema == nullptr)
     {

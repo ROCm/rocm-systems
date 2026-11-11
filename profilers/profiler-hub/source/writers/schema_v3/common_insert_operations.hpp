@@ -63,8 +63,8 @@ public:
         return pk;
     }
 
-    void insert_sample(const writer_types::sample_data_t& sample_data,
-                       const primary_key_t&               event_pk)
+    primary_key_t insert_sample(const writer_types::sample_data_t& sample_data,
+                                std::optional<primary_key_t>       event_pk)
     {
         auto& track_info_utility = m_ctx->registry->track_info();
 
@@ -93,6 +93,7 @@ public:
 
         m_stmts->sample_statement()(
             pk, track_pk, sample_data.timestamp, event_pk, sample_data.extdata);
+        return pk;
     }
 
     void insert_arg(const writer_types::arg_data_t& arg_data, primary_key_t event_id)

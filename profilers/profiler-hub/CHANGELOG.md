@@ -22,7 +22,9 @@ downstream consumer of the library.
 
 ### Added
 
-- `storage_t` accepts a RocPD schema version: 3.0.0 and 3.0.1 are writable, and other versions throw at construction.
+- `storage_t` accepts RocPD schema 3.0.0 through 3.0.5. `version_t{}` and the two-argument constructor select 3.0.5. Other versions throw at construction.
+- Writer structs are the superset of schema 3.0.0 through 3.0.5. Setting a field the selected schema does not store throws `std::runtime_error`.
+- `insert_graph_launch_data` writes `rocpd_graph_launch` on schema 3.0.2 and newer. `insert_hip_event_data` writes `rocpd_hip_event` on schema 3.0.4 and newer.
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
 

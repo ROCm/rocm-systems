@@ -32,6 +32,11 @@ namespace profiler_hub::writer_types
  * After register_*() returns, the writer owns internal copies and the
  * original string data may be freed.
  *
+ * These structs are the superset of RocPD schema 3.0.0 through 3.0.5. A caller
+ * fills the same structs for every one of those schemas. A field comment names
+ * the schemas that store it. Fields with no such comment are stored by all of
+ * them. Leave a field unset when the selected schema does not store it.
+ *
  * Fields use:
  *   - std::string_view: For NOT NULL fields (must have a value)
  *   - std::optional<std::string_view>: For nullable fields (can be NULL in DB)
@@ -93,6 +98,8 @@ constexpr std::string_view empty_json = "{}";
  * @note This is a struct which will be used to identify the agent uniquely.
  * @param logical_index Logical index which will uniquely identify the agent.
  * @param agent_type Agent type which will uniquely identify the agent.
+ * "CPU" and "GPU" are stored by every schema. "NIC" is stored by schema 3.0.1
+ * and newer.
  */
 struct agent_unique_id_t
 {
@@ -201,15 +208,27 @@ struct pmc_info_unique_id_t
 {
     pmc_description_name_t           name;
     std::optional<agent_unique_id_t> agent_id;
+    // SPM location row. Unset on the base counter. A location row is a separate
+    // pmc, so these fields are part of the id.
+    std::optional<size_t> xcc;            ///< Stored by schema 3.0.5 and newer.
+    std::optional<size_t> shader_engine;  ///< Stored by schema 3.0.5 and newer.
+    std::optional<size_t> shader_array;   ///< Stored by schema 3.0.5 and newer.
+    std::optional<size_t> wgp;            ///< Stored by schema 3.0.5 and newer.
+    std::optional<size_t> instance;       ///< Stored by schema 3.0.5 and newer.
 
     bool operator==(const pmc_info_unique_id_t& other) const noexcept
     {
+        const bool same_location = xcc == other.xcc &&
+                                   shader_engine == other.shader_engine &&
+                                   shader_array == other.shader_array &&
+                                   wgp == other.wgp && instance == other.instance;
         const bool are_names_same = name == other.name;
         if(agent_id.has_value() && other.agent_id.has_value())
         {
-            return are_names_same && (agent_id.value() == other.agent_id.value());
+            return are_names_same && same_location &&
+                   (agent_id.value() == other.agent_id.value());
         }
-        return are_names_same;
+        return are_names_same && same_location;
     }
 };
 
@@ -221,6 +240,8 @@ struct pmc_info_unique_id_t
  * to node_info.
  * @param process_id Process id which will uniquely identify the process. Use this
  * value to refer to process_info.
+ * @note target_arch accepts "CPU" and "GPU" in every schema. "NIC" is stored by
+ * schema 3.0.1 and newer.
  */
 struct pmc_info_t
 {
@@ -239,6 +260,7 @@ struct pmc_info_t
     std::optional<std::string_view> expression;
     size_t                          is_constant{};
     size_t                          is_derived{};
+    std::optional<size_t>           spm_support;  ///< Stored by schema 3.0.3 and newer.
     std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
@@ -469,8 +491,14 @@ struct pmc_event_data_t
 {
     std::optional<event_data_t> event;    ///< Common event metadata
     double                      value{};  ///< Counter value
-    std::string_view            extdata = empty_json;
-    sample_data_t               sample;  ///< Timestamp information
+    // When set, the writer inserts `sample` and stores that row's id. The
+    // number assigned here is not the stored id. Leave unset to store NULL.
+    std::optional<size_t> sample_id;      ///< Stored by schema 3.0.3 and newer.
+    std::optional<size_t> xcc;            ///< Stored by schema 3.0.3 and 3.0.4.
+    std::optional<size_t> shader_engine;  ///< Stored by schema 3.0.3 and 3.0.4.
+    std::optional<size_t> instance;       ///< Stored by schema 3.0.3 and 3.0.4.
+    std::string_view      extdata = empty_json;
+    sample_data_t         sample;  ///< Timestamp information
 };
 
 /**
@@ -487,14 +515,16 @@ struct kernel_dispatch_data_t
     timestamp_ns_t              end_timestamp{};     ///< Kernel end time (nanoseconds)
     kernel_symbol_id_t          kernel_symbol_id{};  ///< Kernel symbol id
     code_object_id_t            code_object_id{};    ///< Code object id
-    size_t private_segment_size{};  ///< Private memory per work-item (bytes)
-    size_t group_segment_size{};    ///< LDS memory per workgroup (bytes)
-    size_t workgroup_size_x{};      ///< Workgroup size in X dimension
-    size_t workgroup_size_y{};      ///< Workgroup size in Y dimension
-    size_t workgroup_size_z{};      ///< Workgroup size in Z dimension
-    size_t grid_size_x{};           ///< Grid size in X dimension
-    size_t grid_size_y{};           ///< Grid size in Y dimension
-    size_t grid_size_z{};           ///< Grid size in Z dimension
+    size_t private_segment_size{};        ///< Private memory per work-item (bytes)
+    size_t group_segment_size{};          ///< LDS memory per workgroup (bytes)
+    size_t workgroup_size_x{};            ///< Workgroup size in X dimension
+    size_t workgroup_size_y{};            ///< Workgroup size in Y dimension
+    size_t workgroup_size_z{};            ///< Workgroup size in Z dimension
+    size_t grid_size_x{};                 ///< Grid size in X dimension
+    size_t grid_size_y{};                 ///< Grid size in Y dimension
+    size_t grid_size_z{};                 ///< Grid size in Z dimension
+    std::optional<size_t> graph_exec_id;  ///< Stored by schema 3.0.2 and newer.
+    std::optional<size_t> graph_node_id;  ///< Stored by schema 3.0.2 and newer.
 
     std::optional<std::string_view> name;  ///< Kernel name (region_name_id nullable)
     std::string_view                extdata = empty_json;
@@ -516,6 +546,8 @@ struct memory_copy_data_t
     std::optional<agent_unique_id_t> src_agent_id;  ///< Source agent id
     std::optional<size_t>            src_address;   ///< Source memory address
     size_t                           size{};        ///< Transfer size (bytes)
+    std::optional<size_t> graph_exec_id;            ///< Stored by schema 3.0.2 and newer.
+    std::optional<size_t> graph_node_id;            ///< Stored by schema 3.0.2 and newer.
 
     std::string_view                name;         ///< Operation name
     std::optional<std::string_view> region_name;  ///< Region name
@@ -540,6 +572,39 @@ struct memory_alloc_data_t
     std::optional<size_t> address;            ///< Allocated memory address
     size_t                size{};             ///< Allocation size (bytes)
     std::string_view      extdata = empty_json;
+};
+
+/**
+ * @brief HIP graph launch summary. One row per successful hipGraphLaunch.
+ * @note The rocpd_graph_launch table exists in schema 3.0.2 and newer. Node,
+ * process, thread, agent, and queue come from the trace environment passed
+ * with the insert.
+ */
+struct graph_launch_data_t
+{
+    timestamp_ns_t              start_timestamp{};
+    timestamp_ns_t              end_timestamp{};
+    size_t                      graph_exec_id{};
+    size_t                      kernel_dispatch_count{};
+    std::optional<event_data_t> event;
+    std::string_view            extdata = empty_json;
+};
+
+/**
+ * @brief HIP event barrier (hipEventRecord / hipStreamWaitEvent).
+ * @note The rocpd_hip_event table exists in schema 3.0.4 and newer. Node,
+ * process, thread, agent, queue, and stream come from the trace environment
+ * passed with the insert.
+ */
+struct hip_event_data_t
+{
+    timestamp_ns_t              start_timestamp{};
+    timestamp_ns_t              end_timestamp{};
+    std::string_view            name;
+    size_t                      hip_event_handle{};
+    std::optional<size_t>       source_queue_id;
+    std::optional<event_data_t> event;
+    std::string_view            extdata = empty_json;
 };
 
 }  // namespace profiler_hub::writer_types

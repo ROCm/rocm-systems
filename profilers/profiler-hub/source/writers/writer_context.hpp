@@ -7,6 +7,7 @@
 #include "entity_registry.hpp"
 #include "insert_validator.hpp"
 #include "primary_key_providers.hpp"
+#include "profiler-hub/version.hpp"
 
 #include <memory>
 #include <string>
@@ -21,6 +22,7 @@ struct writer_context
     std::shared_ptr<primary_key_providers>        key_providers;
     std::shared_ptr<insert_validator>             validator;
     std::string                                   uuid;
+    profiler_hub::version_t                       schema_version{};
 };
 
 }  // namespace profiler_hub

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "writers/interfaces/graph_launch_writer_interface.hpp"
+#include "writers/interfaces/hip_event_writer_interface.hpp"
 #include "writers/interfaces/info_registration_writer_interface.hpp"
 #include "writers/interfaces/kernel_dispatch_writer_interface.hpp"
 #include "writers/interfaces/memory_alloc_writer_interface.hpp"
@@ -32,7 +34,9 @@ struct has_required_type_aliases<Policy,
                                              typename Policy::kernel_dispatch_writer_t,
                                              typename Policy::memory_copy_writer_t,
                                              typename Policy::memory_alloc_writer_t,
-                                             typename Policy::pmc_event_writer_t>>
+                                             typename Policy::pmc_event_writer_t,
+                                             typename Policy::graph_launch_writer_t,
+                                             typename Policy::hip_event_writer_t>>
 : std::true_type
 {};
 
@@ -59,7 +63,11 @@ struct has_valid_writer_interfaces<
                      satisfies_interface<typename Policy::memory_alloc_writer_t,
                                          memory_alloc_writer_interface>::value &&
                      satisfies_interface<typename Policy::pmc_event_writer_t,
-                                         pmc_event_writer_interface>::value>
+                                         pmc_event_writer_interface>::value &&
+                     satisfies_interface<typename Policy::graph_launch_writer_t,
+                                         graph_launch_writer_interface>::value &&
+                     satisfies_interface<typename Policy::hip_event_writer_t,
+                                         hip_event_writer_interface>::value>
 {};
 
 }  // namespace detail

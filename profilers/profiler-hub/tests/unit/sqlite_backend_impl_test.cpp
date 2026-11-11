@@ -395,7 +395,7 @@ TEST(sqlite_backend_impl_test,
     const embedded_schema_t* writable =
         resolve_writable_schema(profiler_hub::version_t{});
     ASSERT_NE(writable, nullptr);
-    EXPECT_STREQ(writable->version, "3.0.1");
+    EXPECT_STREQ(writable->version, "3.0.5");
 
     const profiler_hub::storage_t storage{ db_path, uuid, profiler_hub::version_t{} };
     const profiler_hub::version_t created{ writable->major,
@@ -443,15 +443,15 @@ TEST(sqlite_backend_impl_test, storage_3_0_0_executes_the_embedded_3_0_0_schema)
     ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
 }
 
-TEST(sqlite_backend_impl_test, storage_3_0_2_is_rejected)
+TEST(sqlite_backend_impl_test, storage_unsupported_schema_is_rejected)
 {
     const std::string uuid = "schematest";
     const auto        db_path =
-        (std::filesystem::temp_directory_path() / "profiler_hub_mock_schema_302.db")
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_schema_306.db")
             .string();
     std::filesystem::remove(db_path);
 
-    const profiler_hub::version_t requested{ 3, 0, 2 };
+    const profiler_hub::version_t requested{ 3, 0, 6 };
     EXPECT_EQ(resolve_writable_schema(requested), nullptr);
     EXPECT_THROW((profiler_hub::storage_t{ db_path, uuid, requested }),
                  std::runtime_error);
@@ -534,7 +534,7 @@ TEST(sqlite_backend_impl_test,
 
 TEST(sqlite_backend_impl_test, supported_writable_schemas_lists_writer_versions)
 {
-    EXPECT_EQ(supported_writable_schemas(), "3.0.0, 3.0.1");
+    EXPECT_EQ(supported_writable_schemas(), "3.0.0, 3.0.1, 3.0.2, 3.0.3, 3.0.4, 3.0.5");
 }
 
 TEST(sqlite_backend_impl_test, latest_schema_version_matches_newest_embedded_schema)
@@ -625,13 +625,13 @@ TEST(sqlite_backend_impl_test, rejected_schema_names_the_writable_schemas)
     {
         const profiler_hub::storage_t storage{ db_path,
                                                "schematest",
-                                               profiler_hub::version_t{ 3, 0, 2 } };
-        FAIL() << "storage construction accepted schema 3.0.2";
+                                               profiler_hub::version_t{ 3, 0, 6 } };
+        FAIL() << "storage construction accepted schema 3.0.6";
         (void) storage;
     } catch(const std::runtime_error& error)
     {
         const std::string message = error.what();
-        EXPECT_NE(message.find("3.0.2"), std::string::npos);
+        EXPECT_NE(message.find("3.0.6"), std::string::npos);
         EXPECT_NE(message.find(supported_writable_schemas()), std::string::npos);
     }
 }

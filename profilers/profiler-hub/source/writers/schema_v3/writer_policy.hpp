@@ -4,6 +4,8 @@
 #pragma once
 
 #include "writers/schema_v3/common_insert_operations.hpp"
+#include "writers/schema_v3/graph_launch_writer.hpp"
+#include "writers/schema_v3/hip_event_writer.hpp"
 #include "writers/schema_v3/info_registration_writer.hpp"
 #include "writers/schema_v3/kernel_dispatch_writer.hpp"
 #include "writers/schema_v3/memory_alloc_writer.hpp"
@@ -17,7 +19,9 @@
 namespace profiler_hub
 {
 
-struct writer_policy_v3
+// Schema 3.0.0. Later policies inherit this and replace only the writer whose
+// table changed.
+struct writer_policy_3_0_0
 {
     using schema_tag_t = data_storage::schema_v3_tag;
     using insert_statements_t =
@@ -29,6 +33,10 @@ struct writer_policy_v3
     using memory_copy_writer_t     = memory_copy_writer<schema_tag_t>;
     using memory_alloc_writer_t    = memory_alloc_writer<schema_tag_t>;
     using pmc_event_writer_t       = pmc_event_writer<schema_tag_t>;
+    using graph_launch_writer_t    = graph_launch_writer<schema_tag_t>;
+    using hip_event_writer_t       = hip_event_writer<schema_tag_t>;
 };
+
+using writer_policy_v3 = writer_policy_3_0_0;
 
 }  // namespace profiler_hub
