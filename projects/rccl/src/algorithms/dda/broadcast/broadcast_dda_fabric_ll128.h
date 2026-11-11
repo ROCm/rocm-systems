@@ -116,7 +116,12 @@ __launch_bounds__(512)
       if (s >= slices) continue;
       uint64_t* wire = selfBase + dataWords + s * kSliceWords + 2 * lane;
       uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWireBatched<kLine, kWarp>(wire, vr, flag, lane, params)) break;
+#if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
+      const bool landed = ddaLL128PollWireBatched<kLine, kWarp>(wire, vr, flag, lane, params);
+#else
+      const bool landed = ddaLL128PollWire<kLine, kWarp>(wire, vr, flag, lane, params);
+#endif
+      if (!landed) break;
       const size_t rem = bytes - s * kSliceBytes;
       ddaLL128StoreRegs<int8_t, kLine, kAligned, kWarp>(dst + s * kSliceBytes, vr,
                                                        rem < kSliceBytes ? (int)rem : kSliceBytes, lane, flagLane);
