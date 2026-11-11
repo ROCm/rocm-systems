@@ -636,6 +636,40 @@ TEST(RegisterAccessTest, SdwaStageSourceAppliesModifiersInSemanticFloatWidth) {
   EXPECT_EQ(RegisterAccess(*fx.wf).read_operand(*storage, 1).lane(0), 0x4000u);
 }
 
+TEST(RegisterAccessTest, UnobservedScalarReadReturnsStorageWithoutObservation) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 0x1234'5678u);
+  fx.wf->set_ttmp(2, 0x9ABC'DEF0u);
+  fx.wf->set_vcc_raw(0x0BAD'F00D'0000'0001ull);
+
+  const RegisterAccess regs(*fx.wf);
+  const ScalarRegisterRange sgprs{ScalarRegisterStorage::SGPR, /*index=*/4, /*width=*/2};
+  const ScalarRegisterRange ttmp{ScalarRegisterStorage::TTMP, /*index=*/2, /*width=*/1};
+  const ScalarRegisterRange vcc{ScalarRegisterStorage::VCC, /*index=*/0, /*width=*/2};
+  EXPECT_EQ(regs.read_scalar_unobserved(sgprs, /*offset=*/1), 0x1234'5678u);
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp), 0x9ABC'DEF0u);
+  EXPECT_EQ(regs.read_scalar_unobserved(vcc, /*offset=*/1), 0x0BAD'F00Du);
+  EXPECT_EQ(regs.read_scalar_unobserved(ttmp, /*offset=*/1), 0u);
+
+  EXPECT_TRUE(fx.plugin->sgpr_reads.empty());
+  EXPECT_TRUE(fx.plugin->scalar_reads.empty());
+}
+
+// An SGPR range the wave does not own reads as zero, as an unowned write is
+// dropped by write_scalar_unobserved().
+TEST(RegisterAccessTest, UnobservedScalarReadRejectsUnownedSgprs) {
+  // A second wavefront slot gives SGPR storage past this wave's allocation.
+  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.cu->write_sgpr(fx.sgpr_base() + kSgprsPerWave, 0x1234'5678u);
+
+  const RegisterAccess regs(*fx.wf);
+  const ScalarRegisterRange beyond{ScalarRegisterStorage::SGPR,
+                                   static_cast<uint16_t>(kSgprsPerWave), /*width=*/1};
+  EXPECT_EQ(regs.read_scalar_unobserved(beyond), 0u);
+}
+
 TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
