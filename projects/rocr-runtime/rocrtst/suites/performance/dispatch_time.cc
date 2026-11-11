@@ -282,22 +282,30 @@ void DispatchTime::RunMulti() {
         reinterpret_cast<hsa_kernel_dispatch_packet_t *>
                           (&q_base_addr[index[num_batch_ - 1] & queue_mask]));
 
-    // Set packet header reversly; set all headers except the very first
-    // one, for now.
-    for (uint32_t j = num_batch_ - 1; j > 0; j--) {
+    // Set the remaining packet headers in reverse, skipping both ends. The
+    // last packet already has its header, written above with the barrier bit.
+    // The first is written once the timer is running, so that it launches the
+    // batch.
+    for (uint32_t j = num_batch_ - 1; j > 1; j--) {
       rocrtst::AtomicSetPacketHeader(
           kDispatchPacketHeader,
           aql().setup,
           reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                      (&q_base_addr[index[j] & queue_mask]));
+                      (&q_base_addr[index[j - 1] & queue_mask]));
     }
+
+    // A single-packet batch makes the first packet the last one as well, so
+    // it has to keep the barrier bit. Decided before the timer starts.
+    const uint16_t first_header = (num_batch_ == 1)
+        ? (kDispatchPacketHeader | (1 << HSA_PACKET_HEADER_BARRIER))
+        : kDispatchPacketHeader;
 
     // Get timing stamp and ring the doorbell to dispatch the kernel.
     int id = p_timer.CreateTimer();
     p_timer.StartTimer(id);
     // Set the very first header...
     rocrtst::AtomicSetPacketHeader(
-        kDispatchPacketHeader,
+        first_header,
         aql().setup,
         reinterpret_cast<hsa_kernel_dispatch_packet_t *>
                                      (&(q_base_addr)[index[0] & queue_mask]));

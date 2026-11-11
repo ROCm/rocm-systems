@@ -286,9 +286,9 @@ void EnqueueLatency::EnqueueMultiPackets() {
                       (&(q_base_addr)[index[num_of_pkts_ - 1] & queue_mask]));
 
 
-    // Set packet header reversly; set all headers except the very first
-    // one, for now.
-    for (int32_t j = num_of_pkts_ - 1; j >= 0; j--) {
+    // Set the remaining packet headers in reverse. The last packet already has
+    // its header, written above with the barrier bit.
+    for (int32_t j = static_cast<int32_t>(num_of_pkts_) - 2; j >= 0; j--) {
       rocrtst::AtomicSetPacketHeader(
           kDispatchPacketHeader,
           aql().setup,
