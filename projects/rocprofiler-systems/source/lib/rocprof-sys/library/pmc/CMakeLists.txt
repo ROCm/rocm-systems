@@ -13,6 +13,8 @@ add_subdirectory(pollers)
 set(pmc_sampler_sources
     ${CMAKE_CURRENT_LIST_DIR}/sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sampler.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sources.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sources.cpp
 )
 
 # Collect all PMC sources
