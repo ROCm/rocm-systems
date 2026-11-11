@@ -17,8 +17,10 @@ has no comments; the comments here only explain the fields.
 {
   "archs": ["gfx950"],                    // GPUs that use this layout
   "description": "CU, L2, and fabric, with xGMI and PCIe.",
-  "scope": {"labels": ["GPU", "Fabric"],  // labels of the bar above the grid
-            "split": "fabric"},           // "Fabric" starts at this block's column
+  "scope": [                              // labels of the bar above the grid
+    {"label": "GPU", "columns": [0, 1]},  // spans columns 0 to 1
+    {"label": "Fabric", "columns": [2, 2]}
+  ],
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0,
      "style": "list", "content": [
@@ -77,7 +79,7 @@ All fields are required.
 |---|---|
 | `archs` | GPUs that use the layout, as analysis config folder names such as `gfx950` or `gfx115x`. |
 | `description` | One line that says what the chart shows. |
-| `scope` | `labels` holds the two labels of the bar above the grid. `split` is the id of the block where the second label starts. |
+| `scope` | The labels of the bar above the grid, left to right. Each has a `label` and the `columns` it spans as `[first, last]`, with both ends included. How a reader draws them is up to the reader. |
 | `blocks` | All blocks of the chart, in any order. |
 | `arrows` | The arrows between blocks, in drawing order. |
 
@@ -136,7 +138,8 @@ All fields are required.
 `analyze` skips a layout that breaks these rules:
 
 - Block ids are unique, and `parent`, `from`, and `to` name blocks in the layout.
-- `scope.split` names a top-level block in row 0, after the first column.
+- `scope` has at least one label. Its column ranges cover every column from 0 to the
+  last, in order, without gaps or overlaps.
 - Columns are numbered 0, 1, 2, and so on with no gaps. So are the orders in each stack.
 - Rows -1 and 1 each hold at most one block, in a column of the grid.
 - An arrow in row 0 goes to the next column. An arrow to row -1 starts at the top block
