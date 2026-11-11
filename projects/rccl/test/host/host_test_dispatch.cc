@@ -1276,6 +1276,29 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
 //
 // Falls back to the single pid when there is no such group, which is what a child that died
 // between the fork and its setpgid() leaves behind.
+// Set from the SIGTERM/SIGINT handler; read by the scheduler between reaps.
+volatile std::sig_atomic_t g_stopRequested = 0;
+
+extern "C" void requestStop(int)
+{
+    g_stopRequested = 1;
+}
+
+// Ask for SIGTERM and SIGINT to stop the run rather than end it outright, so the children are
+// killed with it and a report of what did finish is still written.
+//
+// Deliberately without SA_RESTART: the scheduler spends an untimed run blocked in waitpid(), and
+// the EINTR is what gets it back to the flag this sets.
+void installStopHandler()
+{
+    struct sigaction action {};
+    action.sa_handler = requestStop;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    sigaction(SIGTERM, &action, nullptr);
+    sigaction(SIGINT, &action, nullptr);
+}
+
 void signalChildGroup(pid_t pid, int signal)
 {
     if (::kill(-pid, signal) == 0 || errno != ESRCH) {
@@ -1296,8 +1319,12 @@ pid_t reapAnyChild(int &exitStatus, std::optional<std::chrono::milliseconds> wit
         std::chrono::steady_clock::now() + within.value_or(std::chrono::milliseconds{0});
     for (;;) {
         int status = 0;
-        pid_t pid = 0;
-        while ((pid = waitpid(-1, &status, within ? WNOHANG : 0)) < 0 && errno == EINTR) {
+        const pid_t pid = waitpid(-1, &status, within ? WNOHANG : 0);
+        if (pid < 0 && errno == EINTR) {
+            // A signal arrived. The caller is the one that knows whether it means the run is
+            // being stopped, so hand control back rather than re-entering the wait.
+            exitStatus = 0;
+            return 0;
         }
         if (pid < 0) {
             exitStatus = 1;
@@ -1713,6 +1740,8 @@ using ReapFn =
 using KillFn = std::function<void(pid_t pid, int signal)>;
 using NowFn = std::function<std::chrono::steady_clock::time_point()>;
 using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
+// Whether the run has been asked to stop since it was last consulted.
+using TerminatedFn = std::function<bool()>;
 
 struct SchedulerOperations {
     SpawnFn spawn;
@@ -1720,6 +1749,7 @@ struct SchedulerOperations {
     KillFn kill;
     NowFn now;
     ReportPathFn reportPath;
+    TerminatedFn terminated;   // unset means a run that cannot be asked to stop
 };
 
 struct ScheduleOptions {
@@ -1754,9 +1784,11 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         // When this child is next due a signal: its deadline while it is still running freely,
         // then one grace period later each time it has been signalled and is still here.
         std::chrono::steady_clock::time_point due;
-        bool termed = false;     // SIGTERM has been sent, so the next signal is SIGKILL
-        bool timedOut = false;   // whatever it writes, it is a timeout and is reported as one
+        bool termed = false;      // SIGTERM has been sent, so the next signal is SIGKILL
+        bool timedOut = false;    // whatever it writes, it is a timeout and is reported as one
+        bool abandoned = false;   // killed because the run itself was asked to stop
     };
+    bool stopping = false;   // the run has been asked to stop and is winding the children down
     std::deque<size_t> ready;   // selections with a part still to start
     for (size_t index = 0; index < selections.size(); ++index) {
         ready.push_back(index);
@@ -1764,6 +1796,28 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
     std::vector<RunningChild> running;
 
     while (!ready.empty() || !running.empty()) {
+        // Asked to stop -- an outer watchdog's SIGTERM, or a user's Ctrl-C. Nothing further is
+        // started, what is running is wound down, and the loop then exits through its ordinary
+        // path so the caller still writes a report of everything that did finish.
+        if (!stopping && ops.terminated && ops.terminated()) {
+            stopping = true;
+            const std::chrono::steady_clock::time_point now = ops.now();
+            for (const size_t index : ready) {
+                perSelection[index].push_back(
+                    crashFragment(selections[index].qualifier,
+                                  "run was stopped before this binary started"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+            }
+            ready.clear();
+            for (RunningChild &child : running) {
+                child.abandoned = true;
+                ops.kill(child.pid, SIGTERM);
+                child.termed = true;
+                child.due = now + kTerminateGrace;
+            }
+        }
+
         while (!ready.empty() && running.size() < schedule.jobs) {
             const size_t index = ready.front();
             ready.pop_front();
@@ -1813,7 +1867,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         // them: an unbounded reap blocks in waitpid() and costs nothing, which is what a run
         // without a child timeout gets.
         std::optional<std::chrono::milliseconds> within;
-        if (timed && !running.empty()) {
+        if ((timed || stopping) && !running.empty()) {
             const auto nearest = std::min_element(running.begin(), running.end(),
                                                   [](const RunningChild &a, const RunningChild &b) {
                                                       return a.due < b.due;
@@ -1826,6 +1880,9 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
         int status = 0;
         const pid_t finished = ops.reap(status, within);
         if (finished == 0) {
+            if (!timed && !stopping) {
+                continue;   // an unbounded reap, interrupted by a signal: no deadline to act on
+            }
             // Nothing finished before the nearest deadline. Every child now past its own is
             // signalled and given another grace period, so one that ignores SIGKILL costs a
             // signal every kTerminateGrace rather than a spin.
@@ -1834,7 +1891,7 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                 if (now < child.due) {
                     continue;
                 }
-                child.timedOut = true;
+                child.timedOut = !child.abandoned;
                 ops.kill(child.pid, child.termed ? SIGKILL : SIGTERM);
                 child.termed = true;
                 child.due = now + kTerminateGrace;
@@ -1858,6 +1915,21 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
 
         const size_t index = slot->selection;
         const Selection &selection = selections[index];
+        if (slot->abandoned) {
+            // Killed partway through, so its report is missing whatever it had not reached; the
+            // cases it did run are lost with it, but every binary already finished is kept.
+            perSelection[index].push_back(crashFragment(
+                selection.qualifier,
+                fmt::format("run was stopped and this binary was killed before it finished{}",
+                            slot->logPath.empty() ? std::string()
+                                                  : fmt::format("; output in {}", slot->logPath))));
+            ++failures;
+            nextPart[index] = filters[index].size();
+            std::error_code ec;
+            fs::remove(slot->reportPath, ec);
+            running.erase(slot);
+            continue;
+        }
         if (slot->timedOut) {
             // Whatever it exited with, and whatever report it left behind, it was killed partway
             // through: the report would be missing exactly the cases that hung. Its remaining
@@ -2082,6 +2154,8 @@ int main(int argc, char **argv)
         }
     }
 
+    installStopHandler();
+
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
@@ -2117,6 +2191,7 @@ int main(int argc, char **argv)
         [&reportDir, &options](const std::string &qualifier, size_t part) {
             return reportDir.reportPath(qualifier, part, options.outputFormat);
         },
+        [] { return g_stopRequested != 0; },
     };
     std::vector<SuiteFragment> ranFragments =
         runSelections(selections, filters, schedule, ops, failures);

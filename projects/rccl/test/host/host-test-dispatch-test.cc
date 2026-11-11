@@ -1738,6 +1738,15 @@ public:
     // The child started *index*-th leaves no report behind, as a binary dying partway does.
     void silenceChild(size_t index) { silent_.insert(static_cast<pid_t>(100 + index)); }
 
+    // The run is asked to stop once *spawns* children have been started, standing in for the
+    // SIGTERM an outer watchdog sends partway through.
+    void stopAfter(size_t spawns) { stopAfter_ = spawns; }
+
+    TerminatedFn terminated()
+    {
+        return [this] { return stopAfter_.has_value() && started_.size() >= *stopAfter_; };
+    }
+
     KillFn kill()
     {
         return [this](pid_t pid, int signal) {
@@ -1755,7 +1764,8 @@ public:
 
     SchedulerOperations ops()
     {
-        return SchedulerOperations{spawn(), reapNewestFirst(), kill(), now(), reportPaths()};
+        return SchedulerOperations{spawn(),  reapNewestFirst(), kill(),
+                                   now(),    reportPaths(),     terminated()};
     }
 
     const std::vector<Started> &started() const { return started_; }
@@ -1789,6 +1799,7 @@ private:
     size_t expiries_ = 0;
     size_t boundedReaps_ = 0;
     size_t inFlightHighWater_ = 0;
+    std::optional<size_t> stopAfter_;
     pid_t nextPid_ = 100;
 };
 
@@ -2161,6 +2172,90 @@ TEST(HostDispatchSchedulerMicrotest, AnUnconfiguredRunNeverBoundsItsReap)
                   ScheduleOptions{1, ReportFormat::Xml, {}, ""}, fake.ops(), failures);
 
     EXPECT_EQ(fake.boundedReaps(), 0u);
+    EXPECT_EQ(failures, 0);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AStoppedRunKillsItsChildrenAndKeepsWhatFinished)
+{
+    // An outer watchdog's SIGTERM, or a user's Ctrl-C. The binaries already finished are the
+    // whole point of handling it: killing the dispatcher outright loses all of them, which is
+    // what turns one hung binary into a report of ~11,000 timed-out cases.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+    fake.stopAfter(2);   // observed once all three are in flight and the first has been reaped
+                         // -- the fake reaps newest first, so Gamma is the one that finishes
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{3, ReportFormat::Xml, {}, ""},
+                      fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 3u);
+    EXPECT_NE(fragments[0].xml.find("run was stopped"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[1].xml.find("run was stopped"), std::string::npos) << fragments[1].xml;
+    EXPECT_NE(fragments[2].xml.find("GammaCase0"), std::string::npos) << fragments[2].xml;
+    EXPECT_EQ(fake.signals().size(), 2u) << "both surviving children must be signalled";
+    for (const std::pair<pid_t, int> &signal : fake.signals()) {
+        EXPECT_EQ(signal.second, SIGTERM);
+    }
+    EXPECT_EQ(failures, 2);
+}
+
+TEST(HostDispatchSchedulerMicrotest, AStoppedRunNamesTheBinariesItNeverStarted)
+{
+    // Silence would read as a selection that was never asked for. The report says they did not
+    // run, so a consumer comparing it with --gtest_list_tests sees why.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta", "Gamma"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+    fake.stopAfter(1);   // one at a time, so the stop lands with two still unstarted
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{1, ReportFormat::Xml, {}, ""},
+                      fake.ops(), failures);
+
+    ASSERT_EQ(fragments.size(), 3u);
+    EXPECT_NE(fragments[0].xml.find("AlphaCase0"), std::string::npos) << fragments[0].xml;
+    EXPECT_NE(fragments[1].xml.find("stopped before this binary started"), std::string::npos)
+        << fragments[1].xml;
+    EXPECT_NE(fragments[2].xml.find("stopped before this binary started"), std::string::npos)
+        << fragments[2].xml;
+    EXPECT_TRUE(fake.started().size() == 1u) << "nothing may start after the run is stopped";
+    EXPECT_EQ(failures, 2);
+}
+
+TEST(HostDispatchSchedulerMicrotest, ARunThatIsNeverStoppedSignalsNothing)
+{
+    // The stop path must be inert otherwise: an ordinary run has no watchdog behind it and must
+    // not kill a child for taking its time.
+    const ScopedDir dir("rccl-host-dispatch-scheduler");
+    FakeScheduler fake(dir.path());
+    std::vector<Selection> selections;
+    std::vector<std::vector<std::string>> filters;
+    for (const std::string &qualifier : {"Alpha", "Beta"}) {
+        selections.push_back(schedulerSelection(qualifier, 1));
+        filters.push_back(childFilters(selections.back()));
+    }
+
+    int failures = 0;
+    const std::vector<SuiteFragment> fragments =
+        runSelections(selections, filters, ScheduleOptions{2, ReportFormat::Xml, {}, ""},
+                      fake.ops(), failures);
+
+    EXPECT_TRUE(fake.signals().empty());
+    EXPECT_EQ(fragments.size(), 2u);
     EXPECT_EQ(failures, 0);
 }
 
