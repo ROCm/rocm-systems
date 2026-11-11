@@ -15,15 +15,15 @@ carries the same numbers in readable form.
 
 ## 1. Collect
 
-Roofline is collected by default, so an ordinary profile already has it:
+Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> -b roof -- <application> <args>
 ```
 
 Collecting it runs microbenchmarks in addition to profiling the application,
-which takes extra time. `--no-roof` skips them when the user only wants
-counters.
+which takes extra time. An existing profile already has roofline unless it was
+collected with `--no-roof`, or with a `-b` list that left out `roof`.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
 supported architecture does. On MI100 the benchmark is skipped and the profile
@@ -39,6 +39,26 @@ choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read the table
 

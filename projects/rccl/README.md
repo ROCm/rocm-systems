@@ -2,7 +2,6 @@
 
 ROCm Communication Collectives Library
 
-[![RCCL](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frccl?repoName=ROCm%2Frccl&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=107&repoName=ROCm%2Frccl&branchName=develop)
 [![TheRock CI](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml)
 
 > **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
@@ -169,6 +168,12 @@ cd docs
 pip3 install -r sphinx/requirements.txt
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
+
+## Changelog
+
+Do not edit [CHANGELOG.md](CHANGELOG.md) by hand. If your pull request needs a changelog entry,
+add one file to [changelog.d/](changelog.d/README.md), named `<name>.<section>.md`. That README
+gives the sections and the format. A nightly workflow folds the files into `CHANGELOG.md`.
 
 ## Copyright
 

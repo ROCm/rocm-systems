@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, it } from 'vitest';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
 
@@ -16,7 +16,7 @@ it('compares relevant configuration/environment facts without noisy per-executio
     environmentId: 'fictional-env-2', timestamp: '2026-10-02T12:00:00Z',
     environment: [{ key: 'sdk', label: 'ROCm SDK', value: 'fictional-new' }],
   };
-  const html = renderToStaticMarkup(createElement(RunMetadataDiff, {
+  const html = renderToStaticMarkup(themed(RunMetadataDiff, {
     baseline: run, candidate, filters: { targets: ['gfx1250'], modes: ['default'], suites: [] },
   }));
   for (const key of ['runId', 'commit', 'message', 'branch', 'base', 'pullRequest', 'commitTime', 'runTime', 'trigger', 'plugin', 'workflow', 'comparisonId', 'environmentId']) {

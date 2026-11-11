@@ -54,6 +54,9 @@
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
+### Changed
+* The AMD Pensando IONIC GDA provider now requires
+  network driver and firmware support for CQ collapsing.
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

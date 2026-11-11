@@ -20,9 +20,9 @@ namespace rocjitsu::plugins::race_detector {
 /// constructor rejects any other length, so encoding() is never empty.
 class InstructionSnapshot {
 public:
-  /// @brief Maximum encoding length in words, matching the CU's 16-byte
-  /// instruction fetch window.
-  static constexpr size_t kMaxWords = 4;
+  /// @brief Maximum encoding length in words, matching the CU decode
+  /// window, including the optional GFX10 MIMG extension.
+  static constexpr size_t kMaxWords = 5;
 
   /// @brief Copy the complete encoding of the instruction at `pc`.
   /// @throws std::logic_error if `encoding` is empty or longer than kMaxWords.
