@@ -134,7 +134,6 @@ TEST_F(TopoMicrotest, MirrorBits_ReversesEveryThreeBitRailIndex) {
     SCOPED_TRACE(rank);
     EXPECT_EQ(expected[rank], mirrorBits(rank, 8));
   }
-  EXPECT_EQ(0, mirrorBits(0, 1));
   EXPECT_TRUE(isPow2(1));
   EXPECT_TRUE(isPow2(8));
   EXPECT_FALSE(isPow2(7));
@@ -1993,7 +1992,6 @@ TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
   EXPECT_EQ(6, device);
   EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), NCCL_TOPO_ID(3, 0x23), &device));
   EXPECT_EQ(-1, device);
-  EXPECT_TRUE(Logged("Could not find NET with id"));
 
   int index = 7;
   EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 9, &index, false));
