@@ -79,17 +79,21 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 #endif
   uint32_t result[2][32];
   for (int lane = 0; lane < 32; ++lane) {
-    double x = rocjitsu::arith::fp64_input(a, lane, instruction_flags), y = 0;
+    double x = rocjitsu::arith::fp64_input(a, lane, instruction_flags), y = 0, z = 0;
     if constexpr (rocjitsu::arith::fp64_sources(Op) >= 2) {
       y = rocjitsu::arith::fp64_input(b, lane, instruction_flags >> 1);
+    }
+    if constexpr (rocjitsu::arith::fp64_sources(Op) == 3) {
+      z = rocjitsu::arith::fp64_input(c, lane, instruction_flags >> 2);
     }
     if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
       x = rocjitsu::arith::fp64_flush_denorm(x);
       y = rocjitsu::arith::fp64_flush_denorm(y);
+      z = rocjitsu::arith::fp64_flush_denorm(z);
     }
+    const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
     double value;
     if constexpr (Op == rocjitsu::arith::Fp64::Add || Op == rocjitsu::arith::Fp64::Mul) {
-      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
       const uint64_t xb = rocjitsu::arith::double_bits(x), yb = rocjitsu::arith::double_bits(y);
       constexpr uint64_t exponent = 0x7ff0000000000000ULL;
       if (rounding && (xb & exponent) != exponent && (yb & exponent) != exponent) {
@@ -108,11 +112,6 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       }
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
-      double z = rocjitsu::arith::fp64_input(c, lane, instruction_flags >> 2);
-      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-        z = rocjitsu::arith::fp64_flush_denorm(z);
-      }
-      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
       const uint64_t xb = rocjitsu::arith::double_bits(x), yb = rocjitsu::arith::double_bits(y),
                      zb = rocjitsu::arith::double_bits(z);
       constexpr uint64_t exponent = 0x7ff0000000000000ULL;
@@ -123,6 +122,17 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
               : __builtin_fma(x, y, z);
       if constexpr (!Rdna3) {
         value = rocjitsu::arith::fp64_nan_priority<true>(value, x, y, z);
+      }
+    }
+    if constexpr (Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fma) {
+      // Products judge tininess after rounding, so a result that reaches the smallest normal
+      // only on the subnormal grid still flushes, and OMOD zeroes it even when MODE keeps
+      // denormals. ADD results are exact on the subnormal grid and never need this.
+      if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ||
+          (instruction_flags & RJ_ARITH_ALU_OMOD_MASK)) {
+        value = rocjitsu::arith::as_double(rocjitsu::arith::fma_flush_tiny_f64(
+            rocjitsu::arith::double_bits(value), rocjitsu::arith::double_bits(x),
+            rocjitsu::arith::double_bits(y), rocjitsu::arith::double_bits(z), rounding));
       }
     }
     if constexpr (Op == rocjitsu::arith::Fp64::MinLegacy ||
@@ -175,7 +185,6 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Fract) {
       const uint64_t bits = rocjitsu::arith::double_bits(x);
-      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
       // FRACT rounds the subtraction in the guest mode, then caps its range.
       value = rounding && (bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL
                   ? rocjitsu::arith::as_double(rocjitsu::arith::fma_finite_f64(
