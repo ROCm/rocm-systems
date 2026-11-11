@@ -35,3 +35,16 @@ TEST(GpuUnit, XgmiPhysicalIdParsesSysfsValueAsDecimalNotHex) {
   EXPECT_EQ(id, kDecimalPhysicalId);
   EXPECT_NE(id, kHexMisparsedValue);
 }
+
+// Every other id get_id() reads (e.g. "revision") must stay on the base-16
+// branch: amdgpu prints those in hex, unlike xgmi_physical_id.
+TEST(GpuUnit, RevisionIdStillParsesSysfsValueAsHex) {
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/revision", "18\n");
+  ScopedRocmSmiDevice device(tree.root() + "/card0");
+
+  uint16_t revision = 0;
+  ASSERT_EQ(rsmi_dev_revision_get(device.index(), &revision), RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(revision, kHexMisparsedValue);
+  EXPECT_NE(revision, kDecimalPhysicalId);
+}

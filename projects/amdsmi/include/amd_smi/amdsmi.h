@@ -1135,20 +1135,19 @@ typedef struct {
                                               //!< not supported
   char asic_serial[AMDSMI_MAX_STRING_LENGTH]; /**< The socket's unique serial number, 0xFFFFFFFF if
                                                    not supported */
-  uint32_t oam_id;                   //!< XGMI physical node ID within the hive (PF_LFB_REGION),
-                                     //!< 0-based; 0xFFFFFFFF if not supported or not in a
-                                     //!< multi-node hive
-  uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
-  uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t subsystem_id;             //!> The subsystem ID
-  uint64_t flags;                    //!< Chip flags
-  uint32_t physical_acc_id;          //!< Physical accelerator ID, 0xFFFFFFFF if not supported
-  uint32_t chip_rev_id;              /**< amdgpu chip_rev: internal chip revision (stepping)
-                                          as the driver reports it, not decoded.
-                                          0xFFFFFFFF if not supported */
-  uint32_t external_rev_id;          /**< amdgpu external_rev. Family-scoped, so the same value
-                                          recurs across unrelated ASIC families; pair it with
-                                          device_id. 0xFFFFFFFF if not supported */
+  uint32_t oam_id;                            //!< XGMI physical node ID within the hive, 0-based;
+                                              //!< 0xFFFFFFFF if not supported
+  uint32_t num_of_compute_units;              //!< 0xFFFFFFFF if not supported
+  uint64_t target_graphics_version;           //!< 0xFFFFFFFFFFFFFFFF if not supported
+  uint32_t subsystem_id;                      //!> The subsystem ID
+  uint64_t flags;                             //!< Chip flags
+  uint32_t physical_acc_id;  //!< Physical accelerator ID, 0xFFFFFFFF if not supported
+  uint32_t chip_rev_id;      /**< amdgpu chip_rev: internal chip revision (stepping)
+                                  as the driver reports it, not decoded.
+                                  0xFFFFFFFF if not supported */
+  uint32_t external_rev_id;  /**< amdgpu external_rev. Family-scoped, so the same value
+                                  recurs across unrelated ASIC families; pair it with
+                                  device_id. 0xFFFFFFFF if not supported */
   uint32_t reserved[15];
 } amdsmi_asic_info_t;
 
