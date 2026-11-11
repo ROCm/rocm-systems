@@ -556,6 +556,12 @@ void ComputeUnitCore::flush_cp_notifications() {
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.instruction_execution_failed()) {
+    fail_wave_instruction(
+        wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
+        wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
+    return;
+  }
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
