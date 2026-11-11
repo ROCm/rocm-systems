@@ -793,6 +793,10 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRej
    The moved graph is owned by the parent and must not be destroyed by the test: it is
    released when the parent graph is destroyed.
  */
+// Child graph node ownership was introduced in CUDA 12.9. Older CUDA has neither the
+// ownership enum nor the 'ownership' member of cudaChildGraphNodeParams, so this test
+// cannot be compiled there at all.
+#if HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
 HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
@@ -983,3 +987,4 @@ HIP_TEST_CASE(Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership)
   HIP_CHECK(hipFree(D_d));
   HIP_CHECK(hipFree(S_d));
 }
+#endif  // HT_AMD || (HT_NVIDIA && CUDA_VERSION >= 12090)
