@@ -7,6 +7,7 @@
 // vecElementAdd<T> adds a[k] + b[k] per element in memory order, bit-exact with a host reference.
 // The fp8 adds (ddaLLAddPayload, ddaLL128AddWord, vecElementAdd) are instead checked against core
 // RCCL's hadd2 / hadd2_b, so DDA and the core reduce kernels round the same way.
+// ddaSetLLEpoch is checked across grid changes, so every launch reads one consistent epoch.
 
 #include <algorithm>
 #include <cmath>
@@ -180,6 +181,18 @@ std::vector<E> PseudoRandomBits(size_t n, uint32_t seed) {
   return v;
 }
 
+// Same prologue and epilogue as the LL kernels, with the 2-D flat block id the fabric kernels use.
+__global__ void LLEpochKernel(uint32_t* epochDev, int epochLen, uint32_t* out) {
+  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
+  const int total = gridDim.x * gridDim.y;
+  const uint32_t flag = dda::common::ddaGetLLEpochInc(epochDev, flatBlockId, 1);
+  if (threadIdx.x == 0) out[flatBlockId] = flag;
+  dda::common::ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+}
+
+constexpr int kLLEpochMaxGrid = 8;
+constexpr int kLLEpochPad = 16;
+
 } // namespace
 
 class DdaVecElementAdd : public DeviceTestBase {
@@ -339,6 +352,44 @@ TEST_F(DdaVecElementAdd, Fp8E4m3MatchesCoreForAllPairs) {
 
 TEST_F(DdaVecElementAdd, Fp8E5m2MatchesCoreForAllPairs) {
   ExpectFp8MatchesCoreForAllPairs<fp8e5m2>();
+}
+
+// Every cell in [0, epochLen) must hold the new flag after each launch, whatever the grid and block size.
+TEST_F(DdaVecElementAdd, LLEpochAllCellsSetAcrossGridChanges) {
+  struct Launch { dim3 grid; int block; };
+  const Launch launches[] = {
+      {dim3(1), 64}, {dim3(3), 64}, {dim3(1), 256}, {dim3(5), 128}, {dim3(2, 3), 64}, {dim3(2), 64}};
+  for (int epochLen : {1, 200, 1152}) {
+    SCOPED_TRACE(testing::Message() << "epochLen=" << epochLen);
+    const size_t cells = epochLen + kLLEpochPad;
+    DeviceBuffer<uint32_t> epoch(cells);
+    DeviceBuffer<uint32_t> out(kLLEpochMaxGrid);
+    ASSERT_NO_FATAL_FAILURE(epoch.zero());
+
+    uint32_t prevFlag = 0;
+    for (const Launch& l : launches) {
+      const int nBlocks = static_cast<int>(l.grid.x * l.grid.y);
+      SCOPED_TRACE(testing::Message() << "grid=" << l.grid.x << "x" << l.grid.y << " block=" << l.block);
+      ASSERT_NO_FATAL_FAILURE(out.zero());
+      LLEpochKernel<<<l.grid, l.block>>>(epoch.ptr, epochLen, out.ptr);
+      ASSERT_NO_FATAL_FAILURE(syncAndCheck());
+
+      const std::vector<uint32_t> flags = out.copyTo();
+      const uint32_t flag = prevFlag + 1;
+      // Blocks whose epoch cell lies outside [0, epochLen) read a cell nobody maintains.
+      for (int b = 0; b < nBlocks && b < epochLen; ++b) {
+        EXPECT_EQ(flags[b], flag) << "block " << b;
+      }
+      const std::vector<uint32_t> cellsHost = epoch.copyTo();
+      for (int e = 0; e < epochLen; ++e) {
+        ASSERT_EQ(cellsHost[e], flag) << "epoch cell " << e;
+      }
+      for (size_t e = epochLen; e < cells; ++e) {
+        ASSERT_EQ(cellsHost[e], 0u) << "cell " << e << " beyond epochLen was written";
+      }
+      prevFlag = flag;
+    }
+  }
 }
 
 } // namespace RcclUnitTesting

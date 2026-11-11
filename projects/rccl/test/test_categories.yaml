@@ -119,6 +119,8 @@ test_categories:
       - "DdaReduceScatterFabricLL.*"
       - "DdaAllReduceFabricLL.*"
       - "RasDiagnostics.*"
+      - "ProfilerApiEventRank.*"
+      - "Diagnostics.*"
     exclude_windows:
       - "*"
     labels:

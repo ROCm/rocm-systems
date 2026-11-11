@@ -298,6 +298,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     check_memory_result(inst, wf,
                         (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf) : lanes,
                         modifiers);
+  // SUBREV permutes VSRC1, unlike other integer DPP instructions.
+  const bool reverse_dpp =
+      name.starts_with("v_subrev_") &&
+      (name.ends_with("u32") || name.ends_with("u32_e32") || name.ends_with("u32_e64")) &&
+      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4);
+  const Operand *routed_source = reverse_dpp ? inst.src_operand(1) : modifiers.src0;
+  // Floating DOT4 filters its non-routed source observations with its destinations.
+  const bool filtered_dot4 =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 && name.starts_with("v_dot4_f32_");
+  uint64_t source_lanes = lanes;
   uint64_t src0_lanes = lanes;
   uint64_t destination_lanes = lanes;
   if (modifiers.dpp || modifiers.dpp8) {
@@ -307,8 +317,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                  modifiers.bank_mask, modifiers.bound_ctrl, modifiers.fi, wf.exec(),
                                  modifiers.inactive_uses_bound_ctrl)
             : dpp::make_dpp8_plan(wf.wf_size(), modifiers.control, modifiers.fi, wf.exec());
-    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
     destination_lanes &= plan.row_bank_mask & plan.source_write_mask;
+    if (filtered_dot4)
+      source_lanes = destination_lanes;
+    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
   }
   if (modifiers.ds_permutation != DsPermutation::None) {
     std::optional<RegisterRef> address;
@@ -537,6 +549,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   if (selected_lane) {
     const auto *selector = first_lane ? nullptr : inst.src_operand(inst.num_src_operands() - 1);
+    // WRITELANE's tied VDST precedes SRC0 on older targets and follows SRC1 on newer ones.
+    if (scalar_lane_write && selector == inst.dst_operand(0))
+      selector = inst.src_operand(inst.num_src_operands() - 2);
     if (selector)
       if (auto reg = resolve(*selector, false))
         access(*reg, ~uint64_t{0}, 0xf, false);
@@ -614,10 +629,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
+    // gfx1201 DPP8/DPP16 SUBREV substitutes zero for a scalar/inline SRC1.
+    if (!write && reverse_dpp && (modifiers.dpp || modifiers.dpp8) && op == routed_source &&
+        reg->cls != RegClass::VGPR && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+      return;
     uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
                               : write                    ? destination_lanes
-                              : op == modifiers.src0     ? src0_lanes
-                                                         : lanes;
+                              : op == routed_source      ? src0_lanes
+                                                         : source_lanes;
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
