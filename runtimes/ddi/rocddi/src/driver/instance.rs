@@ -23,7 +23,7 @@ use crate::device::gpu::profiling::{
 use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, TopologySnapshot};
+use crate::topology::{Endpoint, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -125,11 +125,14 @@ impl DriverInstance {
         }
     }
 
-    pub(crate) fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+    pub(crate) fn contribute_topology_graph(
+        &self,
+        snapshot: &mut TopologyGraphSnapshot,
+    ) -> Result<(), Error> {
         match self {
-            Self::LinuxKfd(driver) => driver.contribute_topology(snapshot),
+            Self::LinuxKfd(driver) => driver.contribute_topology_graph(snapshot),
             #[cfg(test)]
-            Self::Test(driver) => driver.contribute_topology(snapshot),
+            Self::Test(driver) => driver.contribute_topology_graph(snapshot),
         }
     }
 

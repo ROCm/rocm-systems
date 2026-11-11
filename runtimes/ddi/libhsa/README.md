@@ -59,7 +59,7 @@ If a callback itself calls `fork`, its child must `exec` or `_exit` before
 returning from the callback into the inherited runtime call.
 
 The single HSA CPU agent is frontend policy built from rocddi's passive host
-topology snapshot. It does not activate a CPU device. HSA prefers CPU cache
+topology graph snapshot. It does not activate a CPU device. HSA prefers CPU cache
 records from OS NUMA node zero and uses the system scan when that node is
 absent. Cache handles, names, callback order, and agent attributes belong to
 libhsa.

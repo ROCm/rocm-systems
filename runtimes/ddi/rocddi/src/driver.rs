@@ -52,7 +52,7 @@ use crate::memory::{
     VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
+use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
@@ -133,10 +133,10 @@ pub(crate) trait Driver: Send + Sync {
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
-    /// Adds one generation-consistent contributor to a candidate snapshot.
+    /// Adds one generation-consistent contributor to a candidate graph snapshot.
     /// Generic drivers report one opaque node per endpoint until they expose
     /// a richer passive topology source.
-    fn contribute_topology(&self, snapshot: &mut TopologySnapshot) -> Result<(), Error> {
+    fn contribute_topology_graph(&self, snapshot: &mut TopologyGraphSnapshot) -> Result<(), Error> {
         let source =
             snapshot.add_source(SourceKind::Driver, None, true, Some(self.driver_instance()))?;
         let mut ordinal = 0_u64;
