@@ -10,7 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -54,7 +55,10 @@ enum class InstructionExecutionError : uint8_t {
   None,
   InvalidInstructionEncoding,
   UnsupportedOperandValue,
+  MissingExecutionBackend,
+  InvalidRegisterAccess,
   UnimplementedInstruction,
+  DecodeFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -82,9 +86,12 @@ struct RegAllocation {
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
 ///
-/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
-/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
-/// fires before the wavefront's first instruction.
+/// Plugin state (plugin_states_) is not cleared by reset(). Plugins initialize
+/// it in onAmdgpuWorkgroupDispatched or onAmdgpuWavefrontDispatched, before the
+/// first instruction of each wave incarnation. onAmdgpuWavefrontHalted or
+/// onAmdgpuWavefrontCancelled ends that incarnation, including a cluster
+/// placement rolled back before retry in the same slot. See the cancellation
+/// contract in execution_plugin.h for terminal-hook and retry semantics.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -232,14 +239,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
-  /// @details This is the queue read index at which the dispatch packet was
-  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
-  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
-  uint32_t aql_packet_id() const { return aql_packet_id_; }
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
 
-  /// @brief Set the AQL ring packet id (called at dispatch).
-  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
 
   /// @brief GPU load bias for code-object-relative function addresses.
   uint64_t code_load_bias() const { return code_load_bias_; }
@@ -276,12 +282,23 @@ public:
   }
 
   /// @brief Return the immutable VM snapshot captured when this wave was admitted.
-  const GpuVmAccess *vm_access() const { return vm_access_.get(); }
+  const GpuVmAccess *vm_access() const { return vm_access_ ? &vm_access_->value : nullptr; }
 
   /// @brief Share the dispatch-scoped VM snapshot with this wave.
-  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) { vm_access_ = std::move(access); }
+  void set_vm_access(util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> access) {
+    vm_access_ = std::move(access);
+  }
   /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
+  void set_drm_shader_addresses(bool enabled) { drm_shader_addresses_ = enabled; }
+  /// @brief Address of this instruction in the GPU VM. PM4 indirect branches
+  /// leave a raw PC, while DRM maps the high half at sign-extended addresses.
+  uint64_t vm_instruction_pc() const {
+    if (!drm_shader_addresses_ || pc < (uint64_t{1} << 47))
+      return pc;
+    const unsigned bits = cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 57 : 48;
+    return (pc >> (bits - 1)) == 1 ? pc | (~uint64_t{0} << bits) : pc;
+  }
   /// @brief Read the realtime clock selected by the launch ABI.
   uint64_t realtime_timestamp() const;
   /// @brief Bind wave errors to the PM4 submission that launched this wave.
@@ -362,6 +379,16 @@ public:
   /// exposing the owning compute unit or reclassifying the address through the
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// Standalone plugin modules do not link the simulator, so they reach the CU's
+  /// decoder through this virtual call. It is pure virtual because an out-of-line
+  /// definition would become Wavefront's key function, and plugins could then no
+  /// longer emit Wavefront's type information themselves.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
+  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                              uint64_t pc) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -469,6 +496,13 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
+  /// MODE.FP_ROUND field (bits 3:0) and MODE.FP_DENORM field (bits 7:4).
+  static constexpr uint32_t FP_ROUND_MASK = 0xFu;
+  static constexpr uint32_t FP_DENORM_SHIFT = 4;
+  static constexpr uint32_t FP_DENORM_MASK = 0xFu << FP_DENORM_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -478,10 +512,34 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
+  /// @brief Set MODE.FP_ROUND (bits 3:0) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed rounding modes; only the lowest 4 bits are used.
+  void set_fp_round_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_ROUND_MASK) | (val & FP_ROUND_MASK));
+  }
+
+  /// @brief Set MODE.FP_DENORM (bits 7:4) from a packed 4-bit value,
+  /// leaving every other MODE bit unchanged.
+  /// @param val Packed denorm modes; only the lowest 4 bits are used.
+  void set_fp_denorm_mode(uint32_t val) {
+    set_mode_raw((mode_raw_ & ~FP_DENORM_MASK) | ((val << FP_DENORM_SHIFT) & FP_DENORM_MASK));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
-  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
-  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> 6) & 0x3u; }
+  uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> FP_DENORM_SHIFT) & 0x3u; }
+  uint32_t fp_denorm_mode_f16_f64() const { return (mode_raw_ >> (FP_DENORM_SHIFT + 2)) & 0x3u; }
   uint32_t gpr_idx_offset() const { return m0() & 0xFF; }
   uint32_t gpr_idx_mode() const { return (m0() >> 12) & 0xF; }
 
@@ -558,7 +616,15 @@ public:
 
   /// Wait for every modeled memory pipeline, including stores and async DMA.
   void set_wait_all() {
-    wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    wait_target_ = {.vmcnt = 0,
+                    .lgkmcnt = 0,
+                    .expcnt = 0,
+                    .vscnt = 0,
+                    .dscnt = 0,
+                    .kmcnt = 0,
+                    .tensorcnt = 0,
+                    .asynccnt = 0,
+                    .samplecnt = 0};
     if (!wait_satisfied())
       set_state(WfState::WAITCNT);
   }
@@ -660,7 +726,11 @@ public:
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
-    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+    } else if (name == "wait_samplecnt") {
+      wait_target_.samplecnt = static_cast<uint8_t>(threshold & 0x3f);
+      if (!wait_satisfied())
+        set_state(WfState::WAITCNT);
+    } else if (name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
@@ -728,13 +798,20 @@ public:
 
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
-  /// behavior is not implemented. Callers must not treat it as a hardware trap.
-  void report_instruction_execution_error(InstructionExecutionError error) const {
+  /// behavior is not implemented, or for invalid register-view operations.
+  /// Callers must not treat it as a hardware trap. Detail must have static lifetime.
+  void report_instruction_execution_error(InstructionExecutionError error,
+                                          const char *detail = nullptr) const {
     instruction_execution_error_ = error;
+    instruction_execution_error_detail_ = detail;
   }
 
   InstructionExecutionError instruction_execution_error() const {
     return instruction_execution_error_;
+  }
+
+  const char *instruction_execution_error_detail() const {
+    return instruction_execution_error_detail_;
   }
 
   bool instruction_execution_failed() const {
@@ -743,6 +820,7 @@ public:
 
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
   }
 
   // -- KFD debugger (trap) state --
@@ -894,10 +972,15 @@ public:
   uint64_t debug_wave_id() const { return debug_wave_id_; }
   void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
 
-  /// @brief Read one allocated SGPR for debugger state capture.
+  /// @brief Read an SGPR relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// when the resulting index is outside the physical register file.
   uint32_t debug_read_sgpr(uint32_t reg) const;
 
-  /// @brief Read one allocated VGPR lane for debugger state capture.
+  /// @brief Read a VGPR lane relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// for an index outside the physical register file or a lane outside the
+  /// stored lane range.
   uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
 
   /// @brief Write one allocated SGPR from debugger state restore.
@@ -1000,13 +1083,14 @@ public:
     wg_id_ = 0;
     wg_coord_ = {};
     dispatch_id_ = 0;
-    aql_packet_id_ = 0;
+    queue_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
     vm_access_.reset();
     process_id_ = 0;
     use_system_clock_ = false;
+    drm_shader_addresses_ = false;
     scratch_lease_.reset();
     pm4_failure_.reset();
     lds_base_ = 0;
@@ -1058,6 +1142,7 @@ public:
     trapsts_ = 0;
     pending_alu_causes_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
+    instruction_execution_error_detail_ = nullptr;
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -1096,19 +1181,22 @@ protected:
   uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
   uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
   AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
-  std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
+  util::IntrusiveSharedPtr<const GpuVmAccessSnapshot>
+      vm_access_;           ///< Dispatch-scoped immutable VM snapshot.
   uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 
-  bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
+  bool use_system_clock_ = false; ///< PM4 shader timestamps use host monotonic time.
+  bool drm_shader_addresses_ = false;
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  mutable const char *instruction_execution_error_detail_ = nullptr;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
@@ -1282,6 +1370,9 @@ public:
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
+
+  std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                      uint64_t pc) const override;
 };
 
 } // namespace amdgpu

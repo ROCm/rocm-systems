@@ -25,6 +25,7 @@
 #include "sdma_put_nbi_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "backend_bc.hpp"
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
@@ -32,17 +33,34 @@
 
 using namespace rocshmem;
 
+namespace rocshmem {
+extern Backend *backend;
+}
+
 /******************************************************************************
  * DEVICE TEST KERNEL
  *
  * One-way non-blocking put using anvil directly on the SDMA queue.
  * Pipelines multiple sdma_anvil::put calls and quiets only at batch boundaries.
+ * With poll set, each quiet spins on the non-blocking isFlushed() instead.
  *****************************************************************************/
+static __device__ void SdmaPutNbiQuiet(sdma_anvil::SdmaQueueDeviceHandle &handle,
+                                       bool poll) {
+  if (!poll) {
+    sdma_anvil::quiet(handle);
+    return;
+  }
+  uint64_t target = sdma_anvil::quietTarget(handle);
+  while (!sdma_anvil::isFlushed(handle, target)) {
+  }
+}
+
 __global__ void SdmaPutNbiTest(int loop, int skip,
                                long long int *start_time,
                                long long int *end_time,
                                char *source, char *dest, size_t size,
-                               int batch, ShmemContextType ctx_type) {
+                               int batch, ShmemContextType ctx_type,
+                               bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -74,7 +92,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       int slot = (start_slot + i) % batch;
 
       if (slot == 0) {
-        sdma_anvil::quiet(*handle);
+        SdmaPutNbiQuiet(*handle, poll);
         if (i == skip) {
           start_time[wg_id] = wall_clock64();
         }
@@ -86,7 +104,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       sdma_anvil::put(*handle, remote_dest, source, size);
     }
 
-    sdma_anvil::quiet(*handle);
+    SdmaPutNbiQuiet(*handle, poll);
     end_time[wg_id] = wall_clock64();
   }
 
@@ -99,6 +117,13 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 SdmaPutNbiTester::SdmaPutNbiTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size);
   r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
+
+  // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
+  sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
+  if (sdma_unavailable && args.myid == 0) {
+    std::cout << "sdma_putnbi: SKIPPED (SDMA did not connect on this "
+                 "topology; fell back to IPC memcpy)\n";
+  }
 }
 
 SdmaPutNbiTester::~SdmaPutNbiTester() {
@@ -113,17 +138,25 @@ void SdmaPutNbiTester::resetBuffers(size_t size) {
 
 void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                     size_t size) {
+  if (sdma_unavailable) return;
+
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
-                     s_buf, r_buf, size, batch_size, _shmem_context);
+                     s_buf, r_buf, size, batch_size, _shmem_context,
+                     _type == SdmaPutNbiPollTestType);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
 void SdmaPutNbiTester::verifyResults(size_t size) {
+  if (sdma_unavailable) {
+    _print_results = false;
+    return;
+  }
+
   if (args.myid != 1) return;
 
   size_t check_bytes = size * batch_size;

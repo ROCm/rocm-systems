@@ -64,7 +64,7 @@ class GpuDevice : public ::testing::Test {
 protected:
   GpuDevice() {
     xcd_.set_command_processor(&command_processor_);
-    soc_.add_xcd(&xcd_);
+    EXPECT_TRUE(soc_.add_xcd(&xcd_).succeeded());
     command_processor_.set_gpu_vm(&soc_.gpu_vm());
   }
 
@@ -118,7 +118,7 @@ protected:
   void add_hidden_xcd() {
     ASSERT_EQ(soc_.num_xcds(), 1u);
     hidden_xcd_.set_command_processor(&hidden_command_processor_);
-    soc_.add_xcd(&hidden_xcd_);
+    ASSERT_TRUE(soc_.add_xcd(&hidden_xcd_).succeeded());
     command_processor_.set_xcd_topology(0, {&command_processor_, &hidden_command_processor_});
     hidden_command_processor_.set_xcd_topology(1,
                                                {&command_processor_, &hidden_command_processor_});

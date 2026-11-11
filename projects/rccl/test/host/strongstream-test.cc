@@ -797,6 +797,44 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_CaptureQueryFailureLeavesTheListAlo
   ncclStrongStreamDestruct(&ss_);
 }
 
+// An ended capture already unlinked as the spare is released when a later status query fails.
+TEST_F(StrongstreamMicrotest, AcquireCapture_StatusFailureAfterTakingASpareReleasesTheSpare) {
+  Construct(&ss_);
+  hipStream_t first = AcquireCapture(&ss_, 1);
+  hipStream_t second = AcquireCapture(&ss_, 2);
+  g_capture[first].status = hipStreamCaptureStatusNone;
+  g_capture[second].status = hipStreamCaptureStatusNone;
+  ncclStrongStreamCapture* tail = ss_.captureHead->next;  // graph 1's entry; graph 2's is the head
+  FailNext("hipStreamIsCapturing", 2);
+  hipStream_t work = nullptr;
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(3), &ss_, true, &work), ncclUnhandledCudaError);
+  EXPECT_EQ(work, nullptr);
+  EXPECT_EQ(ss_.captureHead, tail);
+  EXPECT_EQ(g_liveStreams.count(second), 0u);
+  EXPECT_EQ(g_frees, 1);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
+  ncclStrongStreamDestruct(&ss_);
+}
+
+// The same spare on the success path: graph 1's ended entry sits ahead of graph 2's (new entries go on the head),
+// so it is unlinked as the spare before graph 2 matches and must not be dropped with the early return.
+TEST_F(StrongstreamMicrotest, AcquireCapture_MatchAfterTakingASpareReleasesTheSpare) {
+  Construct(&ss_);
+  hipStream_t second = AcquireCapture(&ss_, 2);
+  hipStream_t first = AcquireCapture(&ss_, 1);
+  g_capture[first].status = hipStreamCaptureStatusNone;
+  hipStream_t work = nullptr;
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(2), &ss_, true, &work), ncclSuccess);
+  EXPECT_EQ(work, second);
+  ASSERT_NE(ss_.captureHead, nullptr);
+  EXPECT_EQ(ss_.captureHead->captureStream, second);
+  EXPECT_EQ(ss_.captureHead->next, nullptr);
+  EXPECT_EQ(g_liveStreams.count(first), 0u);
+  EXPECT_EQ(g_frees, 1);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
+  ncclStrongStreamDestruct(&ss_);
+}
+
 TEST_F(StrongstreamMicrotest, AcquireCapture_AllocationFailureIsASystemError) {
   Construct(&ss_);
   g_failCalloc = true;
@@ -808,16 +846,16 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_AllocationFailureIsASystemError) {
   ncclStrongStreamDestruct(&ss_);
 }
 
-// The error propagates, but the calloc'd entry is not freed; a fix flips this pin.
-TEST_F(StrongstreamMicrotest, AcquireCapture_KnownBug_CaptureStreamCreateFailureLeaksTheEntry) {
+TEST_F(StrongstreamMicrotest, AcquireCapture_CaptureStreamCreateFailureFreesTheNewEntry) {
   Construct(&ss_);
   FailNext("hipStreamCreateWithFlags");
   hipStream_t work = nullptr;
   EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss_, false, &work), ncclUnhandledCudaError);
   EXPECT_EQ(ss_.captureHead, nullptr);
+  EXPECT_EQ(work, nullptr);
   ASSERT_EQ(g_callocs.size(), 1u);
-  EXPECT_EQ(g_frees, 0);
-  std::free(g_callocs[0]);
+  EXPECT_EQ(g_frees, 1);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
   ncclStrongStreamDestruct(&ss_);
 }
 
@@ -836,6 +874,7 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_JoinFailuresPropagate) {
     EXPECT_EQ(work, ss_.captureHead->captureStream);
     g_failAt.clear();
     ncclStrongStreamDestruct(&ss_);
+    EXPECT_TRUE(g_liveEvents.empty());  // the scratch event is destroyed on every failure
   }
 }
 
@@ -1037,6 +1076,34 @@ TEST_F(StrongstreamMicrotest, AdvanceToEvent_CapturedHipFailuresPropagate) {
     SCOPED_TRACE(fn);
     FailNext(fn);
     EXPECT_EQ(ncclStreamAdvanceToEvent(Captured(1), kOrigin, nullptr), ncclUnhandledCudaError);
+  }
+}
+
+// `s` takes over the dependency set of `source` directly, without a scratch stream.
+TEST_F(StrongstreamMicrotest, AdvanceToStream_ReplacesTheFrontierWithTheSources) {
+  const hipStream_t source = reinterpret_cast<hipStream_t>(0x999);
+  hipGraphNode_t n1 = reinterpret_cast<hipGraphNode_t>(0x51), n2 = reinterpret_cast<hipGraphNode_t>(0x52);
+  g_capture[source] = {hipStreamCaptureStatusActive, 1, kGraph, {n1, n2}};
+  g_capture[kOrigin] = {hipStreamCaptureStatusActive, 1, kGraph, {reinterpret_cast<hipGraphNode_t>(0x50)}};
+  ASSERT_EQ(ncclStreamAdvanceToStream(kOrigin, source), ncclSuccess);
+  ASSERT_EQ(g_calls.size(), 2u);
+  EXPECT_EQ(g_calls[0].fn, "hipStreamGetCaptureInfo_v2");
+  EXPECT_EQ(g_calls[0].a, source);
+  EXPECT_EQ(g_calls[1].fn, "hipStreamUpdateCaptureDependencies");
+  EXPECT_EQ(g_calls[1].a, kOrigin);
+  EXPECT_EQ(g_calls[1].b, g_capture[source].deps.data());
+  EXPECT_EQ(g_calls[1].n, 2u);
+  EXPECT_EQ(g_calls[1].flags, (uint64_t)hipStreamSetCaptureDependencies);
+  EXPECT_EQ(Count("hipStreamCreateWithFlags"), 0);
+  EXPECT_EQ(Count("hipStreamDestroy"), 0);
+}
+
+TEST_F(StrongstreamMicrotest, AdvanceToStream_HipFailuresPropagate) {
+  const hipStream_t source = reinterpret_cast<hipStream_t>(0x999);
+  for (const char* fn : {"hipStreamGetCaptureInfo_v2", "hipStreamUpdateCaptureDependencies"}) {
+    SCOPED_TRACE(fn);
+    FailNext(fn);
+    EXPECT_EQ(ncclStreamAdvanceToStream(kOrigin, source), ncclUnhandledCudaError);
   }
 }
 

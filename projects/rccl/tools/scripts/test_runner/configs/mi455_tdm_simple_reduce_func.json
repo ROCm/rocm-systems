@@ -1,0 +1,186 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Validate-MI455X-TDM-SIMPLE-Reduce",
+    "description": "Functional validation of the gfx1250 TDM SIMPLE reduce path. Builds with --enable-tdm-simple, sets RCCL_TDM_SIMPLE_REDUCE_ENABLE=1 and runs the reducing collectives of the unit suite under forced SIMPLE on Ring and Tree, mirroring the full_pow2_ring_simple and full_pow2_tree_simple categories in test/test_categories.yaml."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-$HOME/ompi}"
+  },
+  "env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "RCCL_USE_AMD_SMI_LIB": "0",
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "RCCL_TDM_SIMPLE_REDUCE_ENABLE": "1",
+    "RCCL_TEST_EXPECT_TDM_SIMPLE": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--mca rmaps_base_oversubscribe 1",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "-l",
+      "-t",
+      "--enable-tdm-simple"
+    ],
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {},
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "tdm_reduce_ring": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "NCCL_PROTO": "Simple",
+        "NCCL_ALGO": "Ring"
+      },
+      "tests": [
+        {
+          "name": "TDM_Reduce_Ring_AllReduce",
+          "description": "AllReduce under forced Ring + SIMPLE with the TDM reduce path enabled",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        },
+        {
+          "name": "TDM_Reduce_Ring_ReduceScatter",
+          "description": "ReduceScatter under forced Ring + SIMPLE",
+          "test_filter": "ReduceScatter.*"
+        },
+        {
+          "name": "TDM_Reduce_Ring_Reduce",
+          "description": "Reduce under forced Ring + SIMPLE",
+          "test_filter": "Reduce.*"
+        },
+        {
+          "name": "TDM_Reduce_Ring_GroupCall",
+          "description": "Grouped collectives, including reductions, under forced Ring + SIMPLE",
+          "test_filter": "GroupCall.*"
+        }
+      ]
+    },
+    "tdm_reduce_tree": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "NCCL_PROTO": "Simple",
+        "NCCL_ALGO": "Tree"
+      },
+      "tests": [
+        {
+          "name": "TDM_Reduce_Tree_AllReduce",
+          "description": "AllReduce under forced Tree + SIMPLE with the TDM reduce path enabled",
+          "test_filter": "AllReduce.*:-AllReduce.UserBufferRegistration:-AllReduce.ManagedMemUserBufferRegistration:-AllReduce.ROCTX"
+        }
+      ]
+    },
+    "tdm_reduce_ubr": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 7200,
+      "env_variables": {
+        "RCCL_LOG_ROCTX": "1",
+        "UT_MIN_GPUS": "1",
+        "UT_MAX_GPUS": "8",
+        "UT_POW2_GPUS": "1",
+        "UT_DATATYPES": "all",
+        "UT_REDOPS": "all",
+        "NCCL_PROTO": "Simple",
+        "NCCL_ALGO": "Ring"
+      },
+      "tests": [
+        {
+          "name": "TDM_Reduce_Ring_AllReduce_UserBufferRegistration",
+          "description": "Registered user buffers under forced Ring + SIMPLE, where the TDM reduce reads peer buffers directly with the system-scope cache policy",
+          "test_filter": "AllReduce.UserBufferRegistration:AllReduce.ManagedMemUserBufferRegistration"
+        }
+      ]
+    },
+    "tdm_capability": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixtures",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {},
+      "tests": [
+        {
+          "name": "TDM_Capability",
+          "description": "Fails when the SDK cannot build the tensor data mover, which would otherwise compile the TDM reduce path away and leave the suites below covering nothing",
+          "test_filter": "TdmCopyTest.HostCapabilityMatchesArch"
+        },
+        {
+          "name": "TDM_Reduce_PathCompiledIn",
+          "description": "Fails when --enable-tdm-simple did not reach the build or the device pass, which would leave every suite below exercising the vector path under a TDM-named config",
+          "test_filter": "TdmReduceCopyTest.BuildFlagMatchesExpectation"
+        },
+        {
+          "name": "TDM_Reduce_Device",
+          "description": "reduceCopy with the TDM reduce switch on and off against a host reference, including the TDM gate's decision, pre-op and post-op handling, and the fallback cases",
+          "test_filter": "TdmReduceCopyTest.*:-TdmReduceCopyTest.BuildFlagMatchesExpectation"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "TDM SIMPLE Reduce - Toolchain capability",
+      "description": "Guards the suites below: a build without tensor-data-mover support makes them vacuous",
+      "config": "tdm_capability",
+      "enabled": true
+    },
+    {
+      "name": "TDM SIMPLE Reduce - Ring",
+      "description": "Reducing collectives under forced Ring + SIMPLE on a TDM-enabled build",
+      "config": "tdm_reduce_ring",
+      "enabled": true
+    },
+    {
+      "name": "TDM SIMPLE Reduce - Tree",
+      "description": "AllReduce under forced Tree + SIMPLE on a TDM-enabled build",
+      "config": "tdm_reduce_tree",
+      "enabled": true
+    },
+    {
+      "name": "TDM SIMPLE Reduce - Registered user buffers",
+      "description": "Registered-buffer cases under forced Ring + SIMPLE, covering the system-scope cache policy",
+      "config": "tdm_reduce_ubr",
+      "enabled": true
+    }
+  ]
+}

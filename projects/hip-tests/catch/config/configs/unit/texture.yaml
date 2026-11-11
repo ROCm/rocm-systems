@@ -3,6 +3,9 @@ texture:
   Unit_hipCreateTextureObject_ArgValidation:
     <<: *level_default
     tags: [texobj, image]
+  Unit_hipCreateTextureObject_MaxAnisotropy_Positive:
+    <<: *level_default
+    tags: [texobj, image]
   Unit_hipCreateTextureObject_LinearResource:
     <<: *level_default
     tags: [texobj, image]

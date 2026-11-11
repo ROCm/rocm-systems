@@ -5,9 +5,12 @@
 // Keeps this instruction's matrix inputs and expected results beside its aliasing and flag
 // checks.
 
+#include "common/cpu.h"
 #include "common/floating_point.h"
 #include "common/registers.h"
+#include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 
 #include <bit>
@@ -25,6 +28,14 @@ using Registers = rocjitsu::arith::test::Registers<33, 32>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32F16W32Gfx11, Arithmetic) {
+  rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, true, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32);
+
+  rocjitsu::arith::test::expect_matrix_modifiers<false, 32, true>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32);
+  rocjitsu::arith::test::expect_wmma_fixed_controls<false, 32, true, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32);
+
   Registers input;
 
   // Named engine with its standardized default seed and explicit mapping (no distributions).
@@ -88,19 +99,14 @@ TEST(WmmaF32F16W32Gfx11, Arithmetic) {
   // clang-format on
 
   // Invalid requests must be rejected before operand access or output writes.
-  // Nonzero instruction modifiers are rejected in this slice.
+  // This instruction supports the six NEG/ABS modifier bits, with no DPP.
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_f16_w32, input,
-                                                     24, 0, 8, 16, 0);
+                                                     24, 0, 8, 16,
+                                                     rocjitsu::arith::test::kFloatingWmmaModifiers);
 
   // A=VGPRs 0..7, B=8..15, C=16..23; D spans eight registers. Offsets
   // cover A alias, partial A/B overlap, B alias, partial B/C overlap, C alias,
   // and disjoint D.
-  rocjitsu::arith::test::expect_gfx11_wmma_arithmetic(rj_arith_v_wmma_f32_16x16x16_f16_w32, input,
-                                                      golden, {0, 4, 8, 12, 16, 24});
-}
-
-TEST(WmmaF32F16W32Gfx11, UnsupportedGuestControls) {
-  rocjitsu::arith::test::expect_unsupported_guest_controls([](uint64_t flag) {
-    return rj_arith_v_wmma_f32_16x16x16_f16_w32(flag, 0, nullptr, nullptr, nullptr, nullptr);
-  });
+  rocjitsu::arith::test::expect_wmma_f32_arithmetic</*Gfx11=*/true>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32, input, golden, {0, 4, 8, 12, 16, 24});
 }

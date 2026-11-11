@@ -22,6 +22,8 @@ struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 int IbCastRelaxedOrderingEnabled = 0;
 ncclProfilerCallback_t IbCastProfilerFunction;
 std::thread IbCastAsyncThread;
+// net.cc compares a plugin's address against it.
+ncclNet_t netIbCast = {"IB-CAST"};
 
 int64_t ncclParamIbCastSplitDataOnQps() { return g_loadParam("IB_SPLIT_DATA_ON_QPS", 0); }
 int64_t ncclParamIbCastPrepostReceiveWorkRequests() { return g_loadParam("IB_PREPOST_RECEIVE_WORK_REQUESTS", -2); }

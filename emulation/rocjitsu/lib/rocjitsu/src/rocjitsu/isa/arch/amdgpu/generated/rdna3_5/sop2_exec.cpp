@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -234,8 +235,7 @@ void SMinF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
       sdst,
       amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMin>{
           input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
-          amdgpu::RegisterAccess(wf).read_scalar(ssrc0),
-          amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+          amdgpu::read_scalar_f16_carrier(ssrc0, wf), amdgpu::read_scalar_f16_carrier(ssrc1, wf)));
 }
 
 void SMaxF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
@@ -244,8 +244,7 @@ void SMaxF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
       sdst,
       amdgpu::minmax::LegacyOperation<amdgpu::fp_format::F16, amdgpu::minmax::LegacyMax>{
           input_policy, amdgpu::fp_mode::legacy_minmax_policy(wf.cu().arch(), wf.ieee_mode())}(
-          amdgpu::RegisterAccess(wf).read_scalar(ssrc0),
-          amdgpu::RegisterAccess(wf).read_scalar(ssrc1)));
+          amdgpu::read_scalar_f16_carrier(ssrc0, wf), amdgpu::read_scalar_f16_carrier(ssrc1, wf)));
 }
 
 void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }

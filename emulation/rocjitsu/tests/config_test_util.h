@@ -4,6 +4,7 @@
 #pragma once
 
 #include "embedded_schema.h"
+#include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_loader.h"
 #include "util/diagnostic.h"
 
@@ -16,6 +17,34 @@
 #include <utility>
 
 namespace rocjitsu::test {
+
+/// Resolve expected-valid settings, preserving output on failure.
+/// Call with ASSERT_TRUE before consuming output.
+[[nodiscard]] inline testing::AssertionResult
+resolve_valid_execution_threads(config::ExecutionThreadAllocation &output,
+                                const config::ExecutionThreadSettings &settings,
+                                uint32_t host_threads) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::ExecutionThreadAllocation> result =
+      settings.resolve(host_threads, diagnostic.emitter());
+  if (result.failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
+
+/// Restore an expected-valid checkpoint, preserving the caller's output on failure.
+/// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.
+[[nodiscard]] inline testing::AssertionResult
+restore_valid_checkpoint(const std::string &path, config::LoadedConfig &output) {
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<config::LoadedConfig> result =
+      config::restore_checkpoint(path, diagnostic.emitter());
+  if (result.failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
 
 /// Load an expected-valid config, preserving the caller's output on failure.
 /// Call with ASSERT_TRUE so a failure stops the consuming test or fixture.

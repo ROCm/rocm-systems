@@ -84,7 +84,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             }
         }
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             Err(failure) => (failure.status, failure.operands_may_be_live),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &retained, may_be_live);
         status
@@ -190,7 +190,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         }
         let device = runtime.gpus[index].device.clone();
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
+        let health = runtime.health.clone();
         drop(guard);
 
         let (status, may_be_live) = match device.gpu() {
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             Err(error) => (map_error(error), false),
         };
         if may_be_live {
-            quarantine.store(true, Ordering::Release);
+            health.quarantine();
         }
         release_async_resources(&[], &[Some(base)], may_be_live);
         status
@@ -380,7 +380,10 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
         if attributes.len() > SVM_MAX_ATTRIBUTES {
             return INVALID_ARGUMENT;
         }
-        linux_interop::set_kfd_svm_attributes(&runtime.session, address, size, &attributes)
+        let Some(session) = runtime.session() else {
+            return ERROR;
+        };
+        linux_interop::set_kfd_svm_attributes(session, address, size, &attributes)
             .map_or_else(map_error, |()| SUCCESS)
     })
 }
@@ -488,8 +491,11 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
         if attributes.len() > SVM_MAX_ATTRIBUTES {
             return INVALID_ARGUMENT;
         }
+        let Some(session) = runtime.session() else {
+            return ERROR;
+        };
         if let Err(error) =
-            linux_interop::get_kfd_svm_attributes(&runtime.session, address, size, &mut attributes)
+            linux_interop::get_kfd_svm_attributes(session, address, size, &mut attributes)
         {
             return map_error(error);
         }
@@ -677,7 +683,9 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(pending) => pending,
             Err(status) => return status,
         };
-        let session = runtime.session.clone();
+        let Some(session) = runtime.session.clone() else {
+            return ERROR;
+        };
         let stop = runtime.stop_workers.clone();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();

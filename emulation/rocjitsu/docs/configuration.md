@@ -13,9 +13,9 @@ Pre-built simulator configs are in `configs/`:
 | `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
-| `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
-| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
-| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx950_mi350x.json` | Single CDNA4 GPU (standalone simulation) |
+| `gfx950_mi350x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
+| `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
@@ -23,6 +23,13 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+`gfx950_mi355x.json`, `gfx950_mi355x_kmd.json` and `gfx950_mi355x_kmd_2gpu.json`
+are deprecated copies of the `gfx950_mi350x*` configs. Despite their names, they
+describe an MI350X (PCI device ID `0x75a0`). They remain only so that existing
+callers keep working; use the `gfx950_mi350x*` names instead. The
+`gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`);
+see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
 
 ### PCI/VFIO guest compatibility
 
@@ -101,11 +108,12 @@ The example above is intentionally minimal.
 
 | Field | Type | Description |
 |---|---|---|
-| `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
+| `max_ticks` | int | Finite tick horizon (0 = unlimited). A finite run also stops if an active primary has no queued work before the limit. |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
 | `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
 | `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
+| `arithmetic` | object | CPU arithmetic policy; see [CPU arithmetic policy](#cpu-arithmetic-policy). |
 | `wait_checking` | string | Override wait diagnostics on every CU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
@@ -161,9 +169,11 @@ engine — the loader resolves the default, it does not enforce it.
 
 **A multi-partition engine needs a partition policy.** Code that builds an
 engine by hand must call `partition_topology_by_xcds()` after `set_root()` and
-before `create()`, or `create()` throws "multi-threaded SimulationEngine
-requires an explicit topology partition policy". `rj_vm_create()` already does
-this, so this only affects direct `SimulationEngine` users.
+before `create()`, or `create()` returns failure and emits "multi-threaded
+SimulationEngine requires an explicit topology partition policy" through its
+`emit_error` parameter. Omitting the emitter discards the diagnostic.
+`rj_vm_create()` already does this, so this only affects direct
+`SimulationEngine` users.
 
 For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
 across all SoCs. Partition assignment follows one global XCD ordering across
@@ -171,7 +181,8 @@ the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
 permit up to 16 partitions, while `num_threads: 4` assigns XCDs from both GPUs
 to each partition.
 
-`gfx950_mi355x_kmd_2gpu.json` and `gfx1250_mi455x_kmd_4gpu.json` are the
+`gfx950_mi350x_kmd_2gpu.json` (with its deprecated copy
+`gfx950_mi355x_kmd_2gpu.json`) and `gfx1250_mi455x_kmd_4gpu.json` are the
 shipped configs that still pin `num_threads: 1`. Any multi-partition setting on
 the 2-GPU config hangs RCCL collectives (`AllReduce`, `Broadcast`, `AllGather`,
 `ReduceScatter`) with the engine workers spinning and the simulation making no
@@ -227,7 +238,7 @@ A budget of 12 selects the eight-thread row.
 Print allocations for any target without constructing a simulated GPU:
 
 ```sh
-rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+rocjitsu --config configs/gfx950_mi350x.json --thread-budget-table
 ```
 
 The configured row reflects the file's budget and current affinity. Remaining
@@ -337,6 +348,82 @@ by shader engine, array, and WGP. Within an engine, array `a` and WGP `w` select
 CU child `a * num_cu_per_sh + w`, which reports `WGP_ID = w`. The KFD mask loop
 does not select direct-CU groups; their WGP IDs still follow CU child order.
 
+### CPU arithmetic policy
+
+The optional top-level `arithmetic` object selects one semantics mode for
+instructions executed through rj-arith, regardless of GPU architecture.
+Instructions not yet migrated to rj-arith retain their existing implementations
+and do not use this setting.
+
+```json
+"arithmetic": {
+  "semantics": "compatibility"
+}
+```
+
+| `semantics` | rj-arith mode | Loose fallback | FP status reporting |
+|---|---:|---|---|
+| `loose` | 0 | Loose arithmetic | No |
+| `bit_exact_empirical_allow_loose` | 1 | Allowed | No |
+| `bit_exact_empirical_no_fp_status` | 2 | Forbidden | No |
+| `bit_exact_empirical` | 3 | Forbidden | Required |
+| `compatibility` (temporary default) | 7 | Per instruction | Per instruction |
+
+These names map directly to the corresponding `RJ_ARITH_SEMANTICS_*` constants.
+Modes 4–6 are reserved and unavailable. Strict requests fail through the
+instruction-execution error mechanism when exact arithmetic or required FP
+status is unavailable for that instruction or guest mode.
+
+A supplied top-level object overrides every CU's policy; an omitted `semantics`
+field uses mode 7. Without that object, CU topology `config` entries may set
+`arithmetic_semantics` individually. Unknown semantics names and per-CU keys starting with `arithmetic_` other than
+`arithmetic_semantics` are rejected, including invalid per-CU policies hidden by a top-level
+override. Unknown fields within `arithmetic` are rejected; `semantics` is its
+only supported field. Unrelated objects retain their existing parsing policy.
+
+The effective per-CU semantics is preserved in checkpoints. Checkpoints without
+an arithmetic policy use mode 7; existing configurations need no migration.
+CPU capabilities are detected during initialization and cached in each CU,
+without synchronized initialization during instruction execution.
+
+Modes 0–3 are totally ordered: larger values impose stricter requirements.
+Temporary compatibility mode 7 is excluded from that ordering. Handlers forward
+it unchanged to rj-arith, whose entry points choose the mode closest to old rocjitsu
+behavior. Exact arithmetic with/without reporting becomes mode 3/2; loose becomes
+mode 0. Old loose arithmetic with reporting also becomes mode 0, so it remains
+executable but may lose FP status. This mode exists only for the rj-arith transition.
+See [rj-arith's design](arith-design.md#compatibility-mode)
+for the instruction-dependent policy and remaining gaps.
+For migrated instructions with architectural FP status, mode 3 requires faithful reporting.
+Modes 0–2 leave FP status untouched; ordinary results such as comparison masks,
+SCC, EXEC and explicit register writes remain required in every mode. Matrix
+instructions and DIV_SCALE have no FP status output. DIV_SCALE still writes its
+ordinary per-lane condition mask in every semantics mode. On observed gfx1201,
+FP8/BF8 DOT4 and FP32-output DOT2 likewise leave FP status unchanged, including
+invalid and inexact cases; mode 3 accepts those instructions.
+
+Decoding, register
+addressing, memory operations, scheduling, HWREG access and trap delivery remain
+rocjitsu responsibilities.
+
+Matrix adapters forward FP16_OVFL where applicable. Floating-point WMMA ignores
+guest rounding and denormal controls; integer WMMA does not accept those controls.
+rj-arith never explicitly changes host FP controls. It assumes the default host FP
+environment: round-to-nearest, FTZ/DAZ disabled, and exceptions masked. In local mode,
+the executable must satisfy this precondition too: linking with `-ffast-math` can
+enable FTZ/DAZ before emulation starts. Arithmetic may set host sticky exception flags. Compatibility deliberately
+does not retain legacy host-environment isolation; nondefault host controls are
+outside the contract in every semantics mode. `RJ_FORCE_SCALAR`
+selects rj-arith's baseline CPU path; the test override also applies to existing CUs.
+It does not change semantics.
+
+Scalar FP arithmetic currently retains a guest-rounding limitation from the legacy
+handlers: Compatibility uses nearest-even for scalar F16/F32 add, subtract,
+multiply, and integer-to-F32 conversion. For example, `S_CVT_F32_I32 0x01000001`
+produces `0x4b800000` even with guest rounding toward +infinity; gfx1201 produces
+`0x4b800001`. The corresponding library entry points reject nonzero rounding flags.
+
+
 ### Memory wait diagnostics
 
 Ordinary memory wait diagnostics are enabled by default; gfx1250 XCNT replay-source
@@ -413,7 +500,7 @@ location IDs. Each GPU gets its own command processor, memory, and
 cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on `gpu_id`.
 
-`configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
+`configs/gfx950_mi350x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
 provides a four-GPU daemon topology for explicit multi-GPU runs.
 When the selected ROCm compiler parses `gfx1250`, its HIP runtime advertises

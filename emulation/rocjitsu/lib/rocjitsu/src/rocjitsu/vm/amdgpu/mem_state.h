@@ -16,7 +16,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
@@ -26,6 +26,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -78,6 +79,22 @@ public:
   bool atomic_loaded = false;
 };
 
+/// @brief Texel footprint captured at issue time for one filtered image instruction.
+struct ImageSampleAccess {
+  struct Tap {
+    std::array<uint64_t, 64> addresses{};
+    std::array<float, 64> weights{};
+    uint64_t lane_mask = 0;
+    std::vector<uint8_t> response;
+    TranslatedMemoryProgress translated;
+  };
+  std::vector<Tap> taps;
+  uint32_t next_tap = 0;
+  bool gather = false;
+  /// GFX12 quads with an active fractional-mip lane blend every active lane.
+  uint64_t mip_blend_mask = 0;
+};
+
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).
 class ScalarMemState : public DynamicInstState {
 public:
@@ -95,6 +112,9 @@ public:
   AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
+  /// One bit per DWORD of a buffer access. A set bit selects the DWORD for
+  /// access; a clear bit makes a load return zero for it or skips it for a
+  /// store. An atomic's mask is all set or all clear.
   uint16_t load_dword_mask = 0xffff;
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
@@ -194,6 +214,10 @@ public:
   // the routed observation's callback snapshot.
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  // Captured during routing after RDNA4 U17 address math, before the workgroup
+  // LDS base is added. Keep addresses intact for routed observations and retries.
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
@@ -209,6 +233,12 @@ public:
   uint32_t buffer_selectors = 0;
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
+  // Image DMASK packs only enabled shader components into the data tuple.
+  // A nonzero mask asks store capture to scatter that tuple back into its
+  // original X/Y/Z/W slots before applying image selector/padding semantics.
+  uint32_t image_store_component_mask = 0;
+  bool image_srgb = false;
+  std::unique_ptr<ImageSampleAccess> image_sample;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for
   // scratch and GFX9 buffers, and 4 or 16 bytes for RDNA buffers.

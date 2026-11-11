@@ -14,9 +14,10 @@ use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities,
-    MemoryBank, MemoryBankKind, MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind,
-    NativeNodeId, NodeKind, PciInfo, SourceKind, TopologyCache, TopologySnapshot,
+    CacheAssociations, CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo,
+    GpuQueueCapabilities, GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind,
+    MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind,
+    PciInfo, SourceKind, TopologyCache, TopologyGraphSnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -50,6 +51,8 @@ pub(crate) struct KfdNode {
 pub(crate) struct KfdQueueProperties {
     /// Encoded GFX target reported by KFD.
     pub gfx_target: u32,
+    /// Packet and scratch dialect resolved from the target at discovery.
+    pub target_profile: crate::topology::GpuTargetProfile,
     /// Enabled compute-unit count.
     pub compute_units: u32,
     /// Maximum resident waves per compute unit.
@@ -266,6 +269,13 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
         (false, true) => CacheKind::Instruction,
         (false, false) => CacheKind::Other,
     };
+    let mut associations = CacheAssociations::NONE;
+    if native_kind & (1 << 2) != 0 {
+        associations |= CacheAssociations::CPU;
+    }
+    if native_kind & (1 << 3) != 0 {
+        associations |= CacheAssociations::GPU_COMPUTE_UNIT;
+    }
     // KFD reports cache capacity in KiB; driver facts use bytes.
     Ok((
         CacheInfo {
@@ -273,8 +283,7 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
             size_bytes: u64::from(properties.u32("size")?) * 1024,
             line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
             kind,
-            cpu_cache: native_kind & (1 << 2) != 0,
-            compute_unit_cache: native_kind & (1 << 3) != 0,
+            associations,
         },
         properties
             .optional_u32("persisting_cache_size_max")?
@@ -562,11 +571,11 @@ pub(super) fn enumerate(
     Ok(())
 }
 
-pub(super) fn contribute_topology(
+pub(super) fn contribute_topology_graph(
     root: &str,
     drm: &str,
     driver_instance: DriverInstanceId,
-    snapshot: &mut TopologySnapshot,
+    snapshot: &mut TopologyGraphSnapshot,
 ) -> Result<(), Error> {
     let discovered = read_all(root, drm, driver_instance, true)?;
     let source = snapshot.add_source(
@@ -581,9 +590,9 @@ pub(super) fn contribute_topology(
             source,
             NativeNodeId::LinuxKfd(record.node),
             if record.gpu_id == 0 {
-                NodeKind::KfdHost
+                NodeKind::Host
             } else {
-                NodeKind::KfdGpu
+                NodeKind::Gpu
             },
         )?;
         nodes.try_push((record.node, record.gpu_id, id))?;
@@ -1044,9 +1053,18 @@ fn read_node(
     // ROCr's SDMA v4 packet path, so its IP version must match that dialect.
     // Commands remain target-specific and caller-owned; a discovered SDMA IP
     // does not change any frontend's advertised transport revision.
-    let gfx9_sdma = matches!(gfx, 90008 | 90010 | 90402 | 90500)
-        && sdma_ip.is_some_and(|(major, _, _)| major == 4);
-    let sdma_qualified = (gfx9_sdma || (100_100..=120_001).contains(&gfx) || gfx == 120_500)
+    let target_profile = GpuTargetProfile::from_kfd_target(gfx);
+    let gfx9_sdma =
+        target_profile == GpuTargetProfile::Gfx9 && sdma_ip.is_some_and(|(major, _, _)| major == 4);
+    let sdma_qualified = (gfx9_sdma
+        || matches!(
+            target_profile,
+            GpuTargetProfile::Gfx10
+                | GpuTargetProfile::Gfx11
+                | GpuTargetProfile::Gfx1200
+                | GpuTargetProfile::Gfx1201
+                | GpuTargetProfile::Gfx1250
+        ))
         && sdma.unwrap_or(0) != 0
         && sdma_queues.unwrap_or(0) != 0;
 
@@ -1066,6 +1084,7 @@ fn read_node(
     let public = if integrated { 0 } else { visible };
     let queues = KfdQueueProperties {
         gfx_target: gfx,
+        target_profile,
         compute_units: simds / per_cu,
         maximum_wave_count_per_compute_unit: waves,
         maximum_scratch_wave_count_per_compute_unit: scratch,
@@ -1133,10 +1152,10 @@ fn read_node(
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
-                native_gpu_id: gpu_id,
                 gfx_major: gfx / 10000,
                 gfx_minor: (gfx / 100) % 100,
                 gfx_stepping: gfx % 100,
+                target_profile: queues.target_profile,
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
@@ -1174,7 +1193,7 @@ fn read_node(
                     // GFX12 shares the AQL system-scope cache protocol.
                     aql_system_cache_control: cfg!(target_arch = "x86_64")
                         && supports_aql
-                        && matches!(gfx, 120_000 | 120_001 | 120_500),
+                        && target_profile.supports_kernel_submission(),
                     pm4: supports_pm4,
                     kernel_pm4: supports_pm4,
                     // PM4 uses the GFX12 ACQUIRE_MEM GCR encoding.
@@ -1182,13 +1201,19 @@ fn read_node(
                     sdma: sdma_qualified,
                     kernel_sdma: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     // USER_GCR requires the matching target-specific SDMA packet format.
                     sdma_system_cache_control: cfg!(target_arch = "x86_64")
                         && sdma_qualified
-                        && ((matches!(gfx, 120_000 | 120_001) && sdma_ip == Some((7, 0, 1)))
-                            || (gfx == 120_500 && sdma_ip == Some((7, 1, 0)))),
+                        && matches!(
+                            (target_profile.sdma_dialect(), sdma_ip),
+                            (Some(GpuSdmaDialect::Gfx1200), Some((7, 0, 1)))
+                                | (Some(GpuSdmaDialect::Gfx1250), Some((7, 1, 0)))
+                        ),
                     sdma_engine_count: if sdma_qualified { sdma.unwrap_or(0) } else { 0 },
                 },
             },
@@ -1197,8 +1222,15 @@ fn read_node(
         host_visible_local_memory_bytes: public,
         host_local_cacheability: (cfg!(target_arch = "x86_64")
             && public != 0
-            && ((100_100..=120_001).contains(&gfx) || gfx == 120_500))
-            .then_some(HostCacheability::WriteCombined),
+            && matches!(
+                target_profile,
+                GpuTargetProfile::Gfx10
+                    | GpuTargetProfile::Gfx11
+                    | GpuTargetProfile::Gfx1200
+                    | GpuTargetProfile::Gfx1201
+                    | GpuTargetProfile::Gfx1250
+            ))
+        .then_some(HostCacheability::WriteCombined),
         allocation_granularity: 4096,
         address_bit_count: bits,
         minimum_address: 65536,
@@ -1333,9 +1365,10 @@ mod tests {
         super::probe_endpoint(root, drm, DriverInstanceId::TEST, id)
     }
 
-    fn topology(root: &str, drm: &str) -> TopologySnapshot {
-        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot()).unwrap();
-        super::contribute_topology(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
+    fn topology_graph_snapshot(root: &str, drm: &str) -> TopologyGraphSnapshot {
+        let mut snapshot =
+            TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot()).unwrap();
+        super::contribute_topology_graph(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
         snapshot
     }
 
@@ -1431,7 +1464,7 @@ mod tests {
         let gpu = endpoint.gpu().unwrap();
         assert_eq!(gpu.memory_bus_width_bits, 384);
         assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let gpu_node = snapshot
             .nodes
             .iter()
@@ -1712,12 +1745,12 @@ mod tests {
         .unwrap();
 
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
             node.native_id == NativeNodeId::LinuxKfd(0)
-                && node.kind == NodeKind::KfdHost
+                && node.kind == NodeKind::Host
                 && node.cpu
                     == Some(CpuNodeInfo {
                         core_count: 8,
@@ -1799,7 +1832,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let host = snapshot
             .nodes
             .iter()
@@ -1812,7 +1845,7 @@ mod tests {
             .unwrap();
         assert!(snapshot.caches.iter().any(|cache| {
             cache.node == host.id
-                && cache.info.cpu_cache
+                && cache.info.associations.contains(CacheAssociations::CPU)
                 && cache.info.level == 3
                 && cache.info.size_bytes == 512 * 1024
         }));
@@ -1854,7 +1887,7 @@ mod tests {
         )
         .unwrap();
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let first = snapshot
             .endpoints
             .iter()
@@ -1879,7 +1912,7 @@ mod tests {
         let contents = std::fs::read_to_string(&properties).unwrap();
         std::fs::write(
             &properties,
-            contents.replace("caches_count 0", "caches_count 4"),
+            contents.replace("caches_count 0", "caches_count 5"),
         )
         .unwrap();
         for (ordinal, level, size, kind) in [
@@ -1887,6 +1920,7 @@ mod tests {
             (1, 1, 32, 10),
             (0, 1, 32, 9),
             (2, 3, 8192, 5),
+            (4, 2, 128, 13),
         ] {
             let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
             std::fs::create_dir_all(&directory).unwrap();
@@ -1899,7 +1933,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert!(snapshot.memory_locations.iter().any(|location| {
             location.kind == MemoryLocationKind::DeviceLocal
@@ -1910,13 +1944,19 @@ mod tests {
             .caches_for_endpoint(endpoint)
             .copied()
             .collect::<Vec<_>>();
-        assert_eq!(caches.len(), 4);
+        assert_eq!(caches.len(), 5);
         assert_eq!(caches[0].level, 1);
         assert_eq!(caches[0].size_bytes, 32_768);
         assert!(crate::device::gpu::is_compute_data_cache(&caches[0]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[1]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[2]));
         assert!(crate::device::gpu::is_compute_data_cache(&caches[3]));
+        assert_eq!(caches[2].associations, CacheAssociations::CPU);
+        assert_eq!(
+            caches[4].associations,
+            CacheAssociations::CPU | CacheAssociations::GPU_COMPUTE_UNIT
+        );
+        assert!(crate::device::gpu::is_compute_data_cache(&caches[4]));
         assert_eq!(caches[3].level, 2);
         assert_eq!(caches[3].size_bytes, 262_144);
         assert_eq!(caches[3].line_size_bytes, Some(64));
@@ -2108,36 +2148,38 @@ mod tests {
         let (root, drm) = fixture.roots();
         let callbacks = crate::test_support::allocator::State::default();
         // SAFETY: Test state outlives the scoped metadata fault hook.
-        let _scope = unsafe { callbacks.allocator() }.scope();
-        let mut endpoint = None;
-        enumerate(&root, &drm, &mut |e| {
-            endpoint = Some(e);
-            Ok(())
-        })
-        .unwrap();
-        assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
-        assert_eq!(
-            callbacks.allocations.load(Ordering::Relaxed),
-            callbacks.frees.load(Ordering::Relaxed)
-        );
-        let session =
-            crate::session::Session::new(crate::session::DriverContextLifetime::Session).unwrap();
-        assert_eq!(
-            session.activate(&endpoint.unwrap()).err().unwrap().kind(),
-            ErrorKind::InvalidArgument
-        );
-        callbacks.fail.store(true, Ordering::Relaxed);
-        let mut visited = false;
-        assert_eq!(
-            enumerate(&root, &drm, &mut |_| {
-                visited = true;
+        unsafe { callbacks.allocator() }.with_scope(|| {
+            let mut endpoint = None;
+            enumerate(&root, &drm, &mut |e| {
+                endpoint = Some(e);
                 Ok(())
             })
-            .unwrap_err()
-            .kind(),
-            ErrorKind::ResourceExhausted
-        );
-        assert!(!visited);
+            .unwrap();
+            assert!(callbacks.allocations.load(Ordering::Relaxed) >= 1);
+            assert_eq!(
+                callbacks.allocations.load(Ordering::Relaxed),
+                callbacks.frees.load(Ordering::Relaxed)
+            );
+            let session =
+                crate::session::Session::new(crate::session::DriverContextLifetime::Session)
+                    .unwrap();
+            assert_eq!(
+                session.activate(&endpoint.unwrap()).err().unwrap().kind(),
+                ErrorKind::InvalidArgument
+            );
+            callbacks.fail.store(true, Ordering::Relaxed);
+            let mut visited = false;
+            assert_eq!(
+                enumerate(&root, &drm, &mut |_| {
+                    visited = true;
+                    Ok(())
+                })
+                .unwrap_err()
+                .kind(),
+                ErrorKind::ResourceExhausted
+            );
+            assert!(!visited);
+        });
     }
 
     #[test]

@@ -24,6 +24,8 @@ EXAMPLES = {
             "projects/rccl/test/host/CMakeLists.txt",
             "projects/rccl/test/host/run_host_tests.sh",
             "projects/rccl/test/host/fakes/os_fakes.cc",
+            "projects/rccl/test/test_categories_micro.yaml",
+            "projects/rccl/test/test_categories_micro_net.yaml",
         ],
         [
             "projects/rccl/test/host",
@@ -32,6 +34,24 @@ EXAMPLES = {
             "projects/rccl/test/CMakeLists.txt",
             "projects/rccl/src/test/host/x.cc",
             "projects/rccl-tests/test/host/x.cc",
+            "projects/rccl/test/test_categories.yaml",
+            "projects/rccl/test/test_categories_fixtures.yaml",
+            "projects/rccl/test/test_categories_mpi.yaml",
+            "projects/rccl/test/test_categories_micro.yml",
+            "projects/rccl/test/test_categories_microbench.yaml",
+        ],
+    ),
+    "test runner": (
+        [
+            "projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json",
+            "projects/rccl/tools/scripts/test_runner/lib/test_executor.py",
+            "projects/rccl/tools/scripts/test_runner/test_runner.py",
+        ],
+        [
+            "projects/rccl/tools/scripts/test_runner",
+            "projects/rccl/tools/scripts/test_runner_x/a.py",
+            "projects/rccl/tools/scripts/topo_expl/x.py",
+            "projects/rccl/tools/test_runner/a.py",
         ],
     ),
 }

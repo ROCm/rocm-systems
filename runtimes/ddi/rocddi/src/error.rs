@@ -31,6 +31,8 @@ pub enum ErrorKind {
     Unsupported,
     /// The process lacks permission for a required operation.
     PermissionDenied,
+    /// The requested endpoint or native object no longer exists.
+    NotFound,
     /// A kernel driver or operating-system operation failed.
     Driver,
     /// A driver violated its advertised interface contract.

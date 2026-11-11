@@ -11,6 +11,7 @@
 /// register window is restored outside each timed interval so every call
 /// starts from the same accumulator state.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
@@ -168,7 +169,7 @@ struct BenchFixture {
     cfg.sgprs_per_wf = mma_test::SGPRS_PER_WF;
     cfg.vgprs_per_wf = mma_test::VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_smfmac_simd_bench", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_smfmac_simd_bench", cfg, &gpu_mem, &l2);
     if (cu) {
       wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       if (wf)

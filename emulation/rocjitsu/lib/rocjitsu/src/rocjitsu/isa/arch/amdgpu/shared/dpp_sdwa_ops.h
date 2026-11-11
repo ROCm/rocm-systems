@@ -23,7 +23,6 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -60,6 +59,9 @@ public:
 
   std::string name() const override { return "staged_src"; }
   bool simd_capable() const override { return true; }
+  bool execution_backend_available() const override {
+    return !delegate() || delegate()->execution_backend_available();
+  }
 
   void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
   void set_lane64(uint32_t lane, uint64_t value) {
@@ -496,10 +498,12 @@ inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_
 }
 
 /// Apply the DPP16 extension's floating source modifiers after permutation.
-/// Stage an unpermuted second source only when it has a modifier.
+/// Stage an unpermuted second source only when it has a modifier, observing
+/// only its consumed lanes (within EXEC).
 inline void apply_source_modifiers(const Operand &source, std::optional<StagedOperand> &storage,
                                    amdgpu::Wavefront &wf, uint64_t sign, SourceModifiers modifiers,
-                                   uint32_t source_index) {
+                                   uint32_t source_index, uint64_t source_lanes = ~uint64_t{0}) {
+  source_lanes &= wf.exec();
   const bool absolute = modifiers.absolute & (1u << source_index);
   const bool negate = modifiers.negate & (1u << source_index);
   if (!absolute && !negate)
@@ -508,17 +512,17 @@ inline void apply_source_modifiers(const Operand &source, std::optional<StagedOp
     RegisterAccess regs(wf);
     storage.emplace(source, static_cast<int>(wf.wf_size()));
     if (source.size_bits_ > 32) {
-      const auto values = regs.read_operand64(source, wf.exec());
+      const auto values = regs.read_operand64(source, source_lanes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane64(lane, values.lane(lane));
     } else if (!source.simd_capable()) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        if (wf.exec() & (uint64_t{1} << lane))
+        if (source_lanes & (uint64_t{1} << lane))
           storage->set_lane(lane, regs.read_lane(source, lane));
     } else {
       const uint8_t bytes = source.size_bits_ == 16 ? ExecutionPlugin::kLowHalfByteMask
                                                     : ExecutionPlugin::kFullByteMask;
-      const auto values = regs.read_operand(source, wf.exec(), bytes);
+      const auto values = regs.read_operand(source, source_lanes, bytes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane(lane, values.lane(lane));
     }
@@ -531,11 +535,13 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
+/// @brief Stage a DPP8 source whose decoded width is at most one dword.
 inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
                        std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
-  if (source.size_bits() > 32)
-    throw util::InvalidInst("DPP8 requires a source no wider than 32 bits", "");
+  // Generator _instruction_supports_dpp8 checks the encoded source width;
+  // _gen_execute_body separately checks the semantic source used by MOVREL.
+  assert(source.size_bits() <= 32 && "DPP8 requires a source no wider than 32 bits");
   const DppPlan plan = make_dpp8_plan(wf.wf_size(), lane_sel, fi, wf.exec());
   stage_dpp_operand(source, plan, wf.exec(), storage, wf, source_byte_mask);
 }

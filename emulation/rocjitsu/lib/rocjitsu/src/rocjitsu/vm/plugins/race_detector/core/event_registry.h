@@ -3,13 +3,16 @@
 
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
-#include <ranges>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -22,12 +25,14 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// An event is trimmable when it can never be accessed again:
 ///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
-///   - WAVE_COMPLETE non-LDS events. These have left all per-wave and
-///     per-register lists; retireEvent is a no-op for them, so they don't
-///     need to wait for s_barrier.
-///   - WAVE_COMPLETE LDS events are NOT trimmable until retired, because
-///     retireEvent must still remove them from ldsWriteEvents/ldsReadEvents
-///     and adjust byte counts.
+///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
+///     events that touch no LDS bytes, such as a tensor transfer that moves no
+///     data. These have left all per-wave and per-register lists and were never
+///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
+///     so they don't need to wait for s_barrier.
+///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
+///     retired, because retireEvent must still remove them from
+///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -35,7 +40,7 @@ namespace rocjitsu::plugins::race_detector {
 class EventRegistry {
   struct EventInfo {
     WaveId waveId;
-    uint64_t pc;
+    InstructionSnapshot instruction;
     MemoryEventType type;
     std::array<amdgpu::MemoryCounterObligation, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS>
         counterObligations;
@@ -51,16 +56,17 @@ class EventRegistry {
   };
 
 public:
-  /// Allocate a new event with every simultaneous counter obligation.
-  EventId add(WaveId waveId, uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
-              uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  /// Allocate an event with its producing instruction and every counter obligation.
+  EventId add(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
+              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+              IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
               MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty());
     assert(counterObligations.size() <= amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS);
     EventInfo event{waveId,
-                    pc,
+                    instruction,
                     type,
                     {},
                     static_cast<uint8_t>(counterObligations.size()),
@@ -95,10 +101,6 @@ public:
   // -- Typed accessors (all inline) --
 
   MemoryEventType type(EventId id) const { return entries_[index(id)].type; }
-  std::span<const amdgpu::MemoryCounterObligation> counterObligations(EventId id) const {
-    const auto &event = entries_[index(id)];
-    return {event.counterObligations.data(), event.numCounterObligations};
-  }
   bool hasPendingWaitCounter(EventId id, amdgpu::WaitCounterType waitType) const {
     const auto &event = entries_[index(id)];
     for (uint8_t i = 0; i < event.numCounterObligations; ++i) {
@@ -144,8 +146,9 @@ public:
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
-  uint64_t pc(EventId id) const { return entries_[index(id)].pc; }
-  uint8_t byteMask(EventId id) const { return entries_[index(id)].byteMask; }
+  const InstructionSnapshot &instruction(EventId id) const {
+    return entries_[index(id)].instruction;
+  }
   /// Packed loads can write fewer bytes in the last destination without
   /// creating a second event or consuming another wait-counter increment.
   uint8_t registerByteMask(EventId id, uint32_t reg) const {
@@ -159,10 +162,6 @@ public:
   std::span<const uint32_t> registers(EventId id) const { return entries_[index(id)].registers; }
 
   const IntervalSet &ldsIntervals(EventId id) const { return entries_[index(id)].ldsIntervals; }
-
-  bool isActiveForLane(EventId id, int lane) const {
-    return (entries_[index(id)].execMask >> lane) & 1;
-  }
 
   // -- Test helpers --
 
@@ -188,7 +187,8 @@ private:
   static bool isEntryTrimmable(const EventInfo &e) {
     if (e.status == EventStatus::RETIRED)
       return true;
-    return e.status == EventStatus::WAVE_COMPLETE && isWaveLocal(e.type);
+    return e.status == EventStatus::WAVE_COMPLETE &&
+           (isWaveLocal(e.type) || e.ldsIntervals.empty());
   }
 
   void tryTrimEvents() {

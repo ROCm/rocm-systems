@@ -6,6 +6,9 @@
 /// @file
 /// @brief PM4 packets, shader registers and submission lifetime state.
 
+#include "util/diagnostic.h"
+#include "util/result.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -13,7 +16,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -87,20 +89,27 @@ public:
     std::lock_guard lock(mutex_);
     return free_.size() >= count;
   }
-  std::shared_ptr<uint32_t> acquire() {
-    auto slot = std::make_unique<uint32_t>();
+  /// @brief Lease one slot until the last shared owner releases it.
+  /// @details Exhaustion returns failure without changing existing leases.
+  /// The pool must itself have shared ownership. Allocation failures may still throw.
+  /// @param emit_error Destination for failure diagnostics.
+  util::FailureOr<std::shared_ptr<uint32_t>> acquire(util::DiagnosticEmitter emit_error = {}) {
+    std::unique_ptr<uint32_t> slot;
     {
-      std::lock_guard lock(mutex_);
-      if (free_.empty())
-        throw std::runtime_error("PM4 scratch pool exhausted");
+      std::unique_lock lock(mutex_);
+      if (free_.empty()) {
+        lock.unlock();
+        return emit_error.emit() << "PM4 scratch pool exhausted";
+      }
+      slot = std::make_unique<uint32_t>();
       *slot = free_.back();
       free_.pop_back();
     }
-    return {slot.release(), [pool = shared_from_this()](uint32_t *slot) {
-              std::lock_guard lock(pool->mutex_);
-              pool->free_.push_back(*slot);
-              delete slot;
-            }};
+    return std::shared_ptr<uint32_t>{slot.release(), [pool = shared_from_this()](uint32_t *slot) {
+                                       std::lock_guard lock(pool->mutex_);
+                                       pool->free_.push_back(*slot);
+                                       delete slot;
+                                     }};
   }
 
 private:
@@ -140,7 +149,18 @@ struct Pm4Submission {
   static constexpr uint32_t kMaxIndirectDepth = 64;
   static constexpr uint32_t kMaxIndirectExpansions = 4096;
   std::shared_ptr<Pm4FailureState> failure = std::make_shared<Pm4FailureState>();
-  std::function<bool()> ready;
+  /// @brief Check whether submission dependencies allow execution.
+  /// @details Leave unset when there are no dependencies. Checked before each packet
+  /// and before successful completion, including submissions without command buffers.
+  /// Success with true allows progress; success with false returns for a later retry,
+  /// leaving the submission queued and earlier packet effects intact. Before returning
+  /// failure, the callback must emit its reason through the supplied DiagnosticEmitter.
+  /// The processor logs that reason and invokes fault_queue; the CP then invokes each
+  /// installed completion callback for every queued submission with false.
+  std::function<util::FailureOr<bool>(util::DiagnosticEmitter)> ready;
+  /// @brief Report submission retirement, failure, or cancellation.
+  /// @details Called with true after successful retirement, including an empty stream,
+  /// or false when the submission fails or is cancelled.
   std::function<void(bool)> complete;
 };
 

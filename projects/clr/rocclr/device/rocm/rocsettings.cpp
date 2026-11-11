@@ -212,13 +212,15 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_indirect_max_size_ = 0x3fffffff;  // ROCr MaxSingleLinearCopySize
   }
 
+  sdma_asymmetric_swap_supported_ = false;
+
 #if defined(_WIN32)
   if (gfxipMajor >= 11) {
-    // Due to driver limitation,
-    // D3D10/11 sharing extensions are only supported on GFX11 or later,
-    // and D3D9 sharing extension is not supported on any hardware as it is deprecated.
+    // Due to driver limitation, the D3D sharing extensions are only supported on
+    // GFX11 or later.
     enableExtension(ClKhrD3d10Sharing);
     enableExtension(ClKhrD3d11Sharing);
+    enableExtension(ClKhrD3d9Sharing);
     enableExtension(ClAmdPlanarYuv);
   }
 #endif

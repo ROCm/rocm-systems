@@ -23,6 +23,9 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
 
+#include "util/diagnostic.h"
+#include "util/result.h"
+
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -74,10 +77,24 @@ public:
   /// the same path from its destructor.
   void release_vm_resources();
 
+  /// Move the GPU component tree into a VM wrapper, retaining its traversal root.
+  void move_components_to(simdojo::CompositeComponent &owner) {
+    owner.adopt_children(*this);
+    component_root_ = &owner;
+  }
+
+  /// Return this GPU's component tree, including components outside the XCD hierarchy.
+  const simdojo::CompositeComponent &component_root() const { return *component_root_; }
+
   uint32_t gpu_id() const { return gpu_id_; }
 
-  void add_xcd(amdgpu::Xcd *xcd);
-  void add_iod(amdgpu::Iod *iod);
+  /// @brief Attach an XCD during topology construction, before its CUs can execute.
+  /// @details A null pointer returns failure without changes. Failure diagnostics
+  /// are discarded when the emitter is omitted.
+  util::Result add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error = {});
+  /// @brief Add an IOD, or return failure without changes for a null pointer.
+  /// @details Failure diagnostics are discarded when the emitter is omitted.
+  util::Result add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via the SPI hierarchy.
   void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
@@ -93,7 +110,10 @@ public:
 
   /// @brief Wire L2 → HBM backing store links (call after engine build).
   void wire_backing(simdojo::Topology &topo);
-  void set_arch(rj_code_arch_t arch);
+  /// @brief Set the architecture, or return failure while copy queues exist.
+  /// @details Rejection preserves both the architecture and the SDMA dialect.
+  /// Failure diagnostics are discarded when the emitter is omitted.
+  util::Result set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error = {});
   rj_code_arch_t arch() const { return arch_; }
   void set_exec_mode(simdojo::ExecMode mode) { exec_mode_ = mode; }
   simdojo::ExecMode exec_mode() const { return exec_mode_; }
@@ -278,6 +298,7 @@ private:
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
 
+  const simdojo::CompositeComponent *component_root_ = this;
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;

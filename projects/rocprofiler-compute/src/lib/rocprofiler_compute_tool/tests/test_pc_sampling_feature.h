@@ -16,6 +16,7 @@ protected:
 
     rocprofiler_compute_tool::pc_sampling_feature_t create_feature();
 
+    rocprofiler_compute_tool::tool_data_t    m_tool_data;
     std::shared_ptr<MockPcSamplingCollector> m_collector;
     std::shared_ptr<MockSourceSnapshotter>   m_snapshotter;
     std::shared_ptr<MockCodeObjectWriter>    m_writer;

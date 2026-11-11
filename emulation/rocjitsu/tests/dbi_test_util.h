@@ -432,12 +432,15 @@ make_gfx950_kd_crossing_section_elf(const std::vector<uint32_t> &text_words,
                                 /*kd_crosses_section=*/true);
 }
 
-// Like make_gfx950_kernel_elf but exports *two* `.kd` descriptors (both entering
+// Like make_amdgpu_kernel_elf but exports *two* `.kd` descriptors (both entering
 // .text at offset 0) so kernel_descriptors() returns two kernels, exercising the
-// orchestrator's single-kernel spill guard. Only the count matters here.
-inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
+// orchestrator's multi-kernel guards. `wave32[i]` sets kernel i's Wave32 bit, which
+// only RDNA has.
+inline std::vector<uint8_t> make_amdgpu_two_kernel_elf(const std::vector<uint32_t> &text_words,
                                                        uint32_t private_bytes,
-                                                       uint32_t granulated_sgpr_count = 3) {
+                                                       uint32_t granulated_sgpr_count,
+                                                       uint32_t e_flags,
+                                                       std::array<bool, 2> wave32 = {}) {
   namespace kd = rocjitsu::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -480,7 +483,7 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
   ehdr.e_version = 1;
   ehdr.e_phoff = sizeof(Elf64_Ehdr);
   ehdr.e_shoff = shoff;
-  ehdr.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX950;
+  ehdr.e_flags = e_flags;
   ehdr.e_ehsize = sizeof(Elf64_Ehdr);
   ehdr.e_phentsize = sizeof(Elf64_Phdr);
   ehdr.e_phnum = phdr_count;
@@ -521,6 +524,10 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
     RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1,
                        kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
+    if (wave32[i]) {
+      RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                         kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+    }
     std::memcpy(image.data() + rodata_offset + i * sizeof(KD), &desc, sizeof(desc));
   }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -580,6 +587,14 @@ inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
+}
+
+// CDNA4 (gfx950) two-kernel target ELF.
+inline std::vector<uint8_t> make_gfx950_two_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                       uint32_t private_bytes,
+                                                       uint32_t granulated_sgpr_count = 3) {
+  return make_amdgpu_two_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                    EF_AMDGPU_MACH_AMDGCN_GFX950);
 }
 
 // Probe ELF: one exported STT_FUNC symbol

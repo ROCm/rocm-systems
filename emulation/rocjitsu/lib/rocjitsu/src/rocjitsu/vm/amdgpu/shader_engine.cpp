@@ -3,6 +3,9 @@
 
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 
+#include "util/diagnostic.h"
+#include "util/except.h"
+
 #include <memory>
 #include <string>
 
@@ -21,8 +24,13 @@ ShaderEngine::ShaderEngine(std::string name, const Config &config, rj_code_arch_
 
   // Create compute units, sharing the XCD's L2 cache.
   for (uint32_t i = 0; i < config.num_compute_units; ++i) {
+    util::StringDiagnostic diagnostic;
     auto cu = ComputeUnitCore::create(se_name + ".cu" + std::to_string(i), cu_config, memory, l2,
-                                      exec_mode);
+                                      exec_mode, diagnostic.emitter());
+    // This legacy constructor remains a throwing boundary until topology
+    // construction is migrated; no partially populated shader engine escapes.
+    if (!cu)
+      throw util::ConfigError(diagnostic.message());
     cus_.push_back(static_cast<ComputeUnitCore *>(cu.get()));
     add_child(std::move(cu));
   }

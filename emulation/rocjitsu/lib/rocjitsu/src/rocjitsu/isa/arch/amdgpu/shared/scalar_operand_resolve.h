@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -121,32 +122,28 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
                                   }>(wf, ev, m0_ev);
 }
 
-// 16-bit reads of the inline float constants use the half-precision bit
-// patterns rather than the single-precision ones; every other encoding value
-// resolves identically to the 32-bit path.
-inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
-  switch (ev) {
-  case 240:
-    return 0x3800u; // 0.5h
-  case 241:
-    return 0xB800u; // -0.5h
-  case 242:
-    return 0x3C00u; // 1.0h
-  case 243:
-    return 0xBC00u; // -1.0h
-  case 244:
-    return 0x4000u; // 2.0h
-  case 245:
-    return 0xC000u; // -2.0h
-  case 246:
-    return 0x4400u; // 4.0h
-  case 247:
-    return 0xC400u; // -4.0h
-  case 248:
-    return 0x3118u; // f16 1/(2*pi)
-  default:
-    return resolve_src_scalar(wf, ev, m0_ev);
+inline std::optional<uint32_t>
+resolve_lane_inline_float_statically(int ev, Operand::LaneInlineFloatFormat format) {
+  switch (format) {
+  case Operand::LaneInlineFloatFormat::F16:
+    return resolve_inline_float16_statically(ev);
+  case Operand::LaneInlineFloatFormat::BF16:
+    return resolve_inline_bfloat16_statically(ev);
+  case Operand::LaneInlineFloatFormat::F32:
+    if (is_inline_float_src(ev))
+      return static_cast<uint32_t>(*resolve_src_scalar_statically(ev));
+    return std::nullopt;
   }
+  return std::nullopt;
+}
+
+// Only floating inline selectors depend on the lane's numeric format.
+// Registers, integer inlines and literals retain their raw carriers.
+inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev,
+                                     Operand::LaneInlineFloatFormat format) {
+  if (auto value = resolve_lane_inline_float_statically(ev, format))
+    return *value;
+  return resolve_src_scalar(wf, ev, m0_ev);
 }
 
 // Must stay in sync with resolve_src_scalar above. This returns true for exactly
@@ -247,7 +244,10 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (RegisterAccess(wf)
+            .write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
@@ -263,7 +263,7 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     RegisterAccess(wf).write_ttmp(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return; // NULL
   if (ev == m0_ev) {
     wf.set_m0(val);
@@ -291,7 +291,10 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     return;
   }
   if (ev <= static_cast<int>(kScalarSgprSelectorLast)) {
-    RegisterAccess(wf).write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);
+    if (RegisterAccess(wf)
+            .write_sgpr64(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val)
+            .failed())
+      return;
     return;
   }
   if (ev == static_cast<int>(kVccSelectorFirst)) {
@@ -303,7 +306,7 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     RegisterAccess(wf).write_ttmp64(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return;
   if (ev == static_cast<int>(kExecSelectorFirst)) {
     wf.set_exec_raw(val);

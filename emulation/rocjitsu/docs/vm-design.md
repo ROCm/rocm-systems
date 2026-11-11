@@ -173,6 +173,20 @@ ring extent. An unavailable access retains the snapshot and exact progress for a
 later retry; faulted or malformed work becomes terminal after any required cursor
 publication.
 
+`COPY_LINEAR_SWAP` supports disjoint, adjacent, and identical operand ranges.
+Partially overlapping ranges are unsupported: the processor rejects them before
+writing either operand and logs the packet operands `address_a` and `address_b`
+and the byte count. ROCr places the API destination in A and source in B. The
+queue becomes terminal and subsequent completion packets remain
+unexecuted. ROCr may accept such submissions, but that acceptance does not
+establish hardware overlap semantics. This conservative restriction is a
+simulator limitation.
+
+Malformed packet warnings label the root packet's starting byte cursor as
+`root_cursor`; the reported header can belong to that root packet or an indirect
+packet within it. A cursor-publication failure preserves this packet diagnostic,
+including when the cursor store faults after an unavailable retry.
+
 KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
 and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
 from an MQD. KFD supplies the zero cursor it establishes during queue creation.
@@ -222,7 +236,7 @@ uses bounded queue turns for event-loop fairness and retains CP queue
 serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
-while a consumed ring cursor, dispatch completion, or queue-idle signal still
+while a consumed ring cursor, dispatch completion, or queue-idle notification still
 needs retry, and reports a terminal publication failure instead of silently
 dropping it. Reset and rollback use a distinct force-cancel operation.
 
@@ -481,7 +495,10 @@ wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
-Completion-signal and queue-inactive writes are durable per-queue journals.
+Each queue journals its completion-signal updates and idle notifications.
+An idle notification writes the event ID to the queue event's mailbox when
+present, delivers the targeted interrupt for a nonzero event ID, then delivers
+the generic interrupt.
 An unavailable translated backing pauses admission and advancement only for
 the queue whose journal is incomplete; the CP continues fetching, dispatching,
 and retiring independent queues. A later retry resumes at the first uncommitted
@@ -549,13 +566,21 @@ SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
-**Scalar atomics** (`s_atomic_*` and `s_atomic_*_x2`, CDNA1–4) bypass the
-L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
-coherence epoch makes stale K$ lines refetch. The old value is returned to
-SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
-smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
-the compare value from SDATA and returns only the old value, to the low half.
-`s_buffer_atomic_*` are not yet implemented.
+**Scalar atomics** (`s_atomic_*`, `s_buffer_atomic_*` and their `_x2` forms,
+CDNA1–4) bypass the L1 scalar cache and perform read-modify-write at L2; the
+atomic boundary's coherence epoch makes stale K$ lines refetch. The old value
+is returned to SDATA when GLC is set. Supported: swap, cmpswap, add, sub,
+smin/umin, smax/umax, and, or, xor, inc, dec. Compare-swap reads the source
+and then the compare value from SDATA and returns only the old value, to the
+low half. A buffer atomic's address is the V# base plus the offset; stride
+only scales the bound. A buffer atomic whose element is not wholly in range
+performs no access and returns zero when GLC is set. A misaligned `_x2` buffer
+atomic faults even when out of range. The CDNA ISA manuals do not describe
+these bounds and fault-order rules. They are observed on gfx90a with
+`s_buffer_atomic_inc[_x2]`, and the fault order also with
+`s_buffer_atomic_dec_x2`. The other operations and CDNA targets are modeled
+the same way by extrapolation, including `s_buffer_atomic_cmpswap_x2`, whose
+bound covers its 8-byte memory element although SDATA holds 16 bytes.
 
 **Cache management instructions:**
 
@@ -774,7 +799,7 @@ convenience wrapper that releases the last reference and tears down the VM.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/gfx950_mi355x.json", &vm);
+rj_vm_create("configs/gfx950_mi350x.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

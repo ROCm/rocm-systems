@@ -84,6 +84,11 @@ void InstallCommAllocSuccess() {
 void InstallDevCommSetupSuccess() {
   InstallCommAllocSuccess();
   g_hipAsyncOpsResult = hipSuccess;
+  g_hipMemGetAddressRange = [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t ptr) {
+    if (base) *base = ptr;
+    if (size) *size = 0;
+    return hipSuccess;
+  };
 }
 
 void ResetInitFakes() {
@@ -99,6 +104,7 @@ void ResetInitFakes() {
   ResetMemManagerFakes();
   ResetNcclFakes();
   ResetNcclStubs();
+  ResetChannelFakes();
   ResetOsFakes();
   ResetRcclArchThresholdsFakes();
   ResetRcclWrapFakes();
@@ -110,6 +116,7 @@ void ResetInitFakes() {
   ResetStrongStreamStubs();
   ResetTopoStubs();
   ResetTransportStubs();
+  ResetTransportNetIbFakes();
   ResetTuningFakes();
   g_ncclNetInitResult = ncclSuccess;
 }
