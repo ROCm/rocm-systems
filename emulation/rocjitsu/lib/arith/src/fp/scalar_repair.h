@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Baseline-ISA FMA repair entry points for target-specific SIMD backends.
+// Baseline-ISA FMA and division repair entry points for target-specific SIMD backends.
 // Keep scalar model definitions out of SIMD translation units so linker
 // COMDAT selection cannot redirect baseline calls to a higher ISA.
 
@@ -28,5 +28,11 @@ uint32_t repair_mixed_fma(MixedFma destination, bool rdna3, uint64_t flags,
 
 // Return the mixed-half model's NaN/infinity result for decoded FP32 inputs.
 uint16_t repair_mixed_special(uint32_t a, uint32_t b, uint32_t c);
+
+// Return one DIV_SCALE lane from raw operands under validated instruction and guest controls.
+uint32_t repair_div_scale_f32(uint32_t a, uint32_t b, uint32_t c, uint32_t instruction_flags,
+                              bool quiet_nan, uint64_t flags);
+uint64_t repair_div_scale_f64(uint64_t a, uint64_t b, uint64_t c, uint32_t instruction_flags,
+                              bool quiet_nan, uint64_t flags);
 
 } // namespace rocjitsu::arith

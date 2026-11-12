@@ -8,6 +8,7 @@
 
 #include "fp/div_scale_impl.h"
 #include "fp/float_output.h"
+#include "fp/scalar_repair.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
@@ -97,9 +98,11 @@ public:
 };
 
 // Return scaled division operands and produce the post-scaling predicate for DIV_FMAS.
+// repair marks lanes the scalar model must recompute.
 template <int Width>
 __m256i scale_value(__m256i a, __m256i b, __m256i c, uint32_t mode, bool quiet_nan, uint64_t flags,
-                    typename Ops<Width == 64>::Mask &post) {
+                    typename Ops<Width == 64>::Mask &post,
+                    typename Ops<Width == 64>::Mask &repair) {
   using F = rocjitsu::arith::IeeeFormat<Width>;
   using VectorOps = Ops<Width == 64>;
   constexpr int threshold = Width == 32 ? 96 : 768, scale = Width == 32 ? 64 : 128;
@@ -159,6 +162,8 @@ __m256i scale_value(__m256i a, __m256i b, __m256i c, uint32_t mode, bool quiet_n
                      VectorOps::set(F::bias + F::fraction - 1));
   auto exponent =
       VectorOps::add(VectorOps::select(subnormal, small_exponent, original_exponent), adjustment);
+  // Scaling down below the normal range follows the scalar model's measured rule.
+  repair = VectorOps::both(VectorOps::gt(zero, adjustment), VectorOps::gt(one, exponent));
   auto mantissa = _mm256_and_si256(VectorOps::select(subnormal, normalized, a), fraction_mask);
   auto sign = _mm256_and_si256(a, signbit);
   auto result =
@@ -268,6 +273,34 @@ template <int Width> __m256i load(const uint32_t *const *v, int lane, uint32_t m
   return _mm256_xor_si256(result, flip);
 }
 
+// Recompute the marked lanes with the scalar model from their raw operands.
+template <int Width>
+[[gnu::noinline, gnu::cold]] __m256i
+repair_lanes(__m256i result, unsigned marked, int lane, uint32_t mode, const uint32_t *const *a,
+             const uint32_t *const *b, const uint32_t *const *c, bool quiet_nan, uint64_t flags) {
+  using T = typename rocjitsu::arith::IeeeFormat<Width>::Bits;
+  alignas(32) T values[256 / Width];
+  _mm256_store_si256(reinterpret_cast<__m256i *>(values), result);
+  auto raw = [&](const uint32_t *const *v, int i) {
+    T bits = v[0][i];
+    if constexpr (Width == 64) {
+      bits |= T(v[1][i]) << 32;
+    }
+    return bits;
+  };
+  for (; marked; marked &= marked - 1) {
+    const int i = __builtin_ctz(marked), l = lane + i;
+    if constexpr (Width == 64) {
+      values[i] = rocjitsu::arith::repair_div_scale_f64(raw(a, l), raw(b, l), raw(c, l), mode,
+                                                        quiet_nan, flags);
+    } else {
+      values[i] = rocjitsu::arith::repair_div_scale_f32(raw(a, l), raw(b, l), raw(c, l), mode,
+                                                        quiet_nan, flags);
+    }
+  }
+  return _mm256_load_si256(reinterpret_cast<const __m256i *>(values));
+}
+
 } // namespace
 
 namespace rocjitsu::arith {
@@ -282,9 +315,19 @@ uint32_t div_scale_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *const 
   constexpr int lanes = Width == 64 ? 4 : 8;
   uint32_t staged[2][32], conditions = 0;
   for (int lane = 0; lane < 32; lane += lanes) {
-    typename Ops<Width == 64>::Mask post;
-    auto result = scale_value<Width>(load<Width>(a, lane, mode, 0), load<Width>(b, lane, mode, 1),
-                                     load<Width>(c, lane, mode, 2), mode, quiet_nan, flags, post);
+    typename Ops<Width == 64>::Mask post, repair;
+    auto result =
+        scale_value<Width>(load<Width>(a, lane, mode, 0), load<Width>(b, lane, mode, 1),
+                           load<Width>(c, lane, mode, 2), mode, quiet_nan, flags, post, repair);
+    unsigned marked;
+    if constexpr (Width == 64) {
+      marked = unsigned(_mm256_movemask_pd(_mm256_castsi256_pd(repair)));
+    } else {
+      marked = unsigned(_mm256_movemask_ps(_mm256_castsi256_ps(repair)));
+    }
+    if (__builtin_expect(marked != 0, 0)) {
+      result = repair_lanes<Width>(result, marked, lane, mode, a, b, c, quiet_nan, flags);
+    }
     if constexpr (Width == 64) {
       conditions |= uint32_t(_mm256_movemask_pd(_mm256_castsi256_pd(post))) << lane;
     } else {

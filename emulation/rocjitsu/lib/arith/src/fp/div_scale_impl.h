@@ -80,6 +80,25 @@ division_scale(typename IeeeFormat<Width>::Bits a, typename IeeeFormat<Width>::B
     value = a;
   } else {
     value = division_scale_bits<Width>(a, adjustment, rounding);
+    // gfx1201 and gfx1100 have no gradual underflow when scaling A down. Below the
+    // denormal window (normalized exponent < 0 for FP32, < -11 for FP64) the result is
+    // the overflow value. Inside it, flushed outputs are signed zero even if rounding
+    // reaches the smallest normal; FP32 truncates in every rounding mode.
+    const T magnitude = a & (F::sign - 1);
+    if (adjustment < 0 && magnitude && magnitude < F::infinity) {
+      int exponent = int(magnitude >> F::fraction);
+      if (!exponent) {
+        exponent = 1 - (F::fraction + 1 - rocjitsu::arith::bit_width(magnitude));
+      }
+      exponent += adjustment;
+      if (exponent < (Width == 32 ? 0 : -11)) {
+        value = (a & F::sign) | division_overflow<Width>((a & F::sign) != 0, rounding);
+      } else if (exponent <= 0) {
+        value = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ? a & F::sign
+                : Width == 32 ? division_scale_bits<Width>(a, adjustment, 3)
+                              : value;
+      }
+    }
   }
   if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (value & F::infinity) == 0) {
     value &= F::sign;

@@ -108,6 +108,9 @@ int rj_arith_v_div_fmas_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // Division pre-scaling. A must equal B (denominator) or C (numerator) after
 // source NEG modifiers. Writes the pre-scaled value to D and the per-lane
 // post-scaling condition to condition (the wave32 SDST operand).
+// Any other A matches gfx1201/gfx1100 too: scaling it down has no gradual underflow.
+// Below the denormal window (normalized exponent < 0 for FP32, < -11 for FP64) D is the
+// overflow value; inside it, FP32 truncates and flushed outputs are signed zero.
 // Supports source NEG, OMOD and CLAMP; ABS is not encoded by these instructions.
 // Condition bits for inactive lanes are cleared. Even zero EXEC writes zero to
 // condition, so that pointer must always be writable; VGPR pointers may then be
