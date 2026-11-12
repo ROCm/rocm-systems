@@ -927,6 +927,17 @@ typedef enum _RSMI_IO_LINK_TYPE {
 #define CPU_NODE_INDEX 0xFFFFFFFF
 
 /**
+ * @brief One GPU<->CPU link (any type -- XGMI, PCIe, etc), distinct from the
+ * single-slot NUMA-affinity CPU neighbor used elsewhere (@see CPU_NODE_INDEX).
+ */
+typedef struct {
+  uint32_t numa_node_id;   //!< the CPU neighbor's real Linux NUMA node id
+  RSMI_IO_LINK_TYPE type;  //!< the link's type (e.g. RSMI_IOLINK_TYPE_XGMI,
+                           //!< RSMI_IOLINK_TYPE_PCIEXPRESS)
+  uint32_t reserved[4];
+} rsmi_cpu_link_t;
+
+/**
  * @brief The utilization counter type
  */
 typedef enum {
@@ -5140,6 +5151,30 @@ rsmi_status_t rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst
  */
 rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, uint64_t* hops,
                                       RSMI_IO_LINK_TYPE* type);
+
+/**
+ *  @brief Retrieve a device's directly-connected CPU link(s), of any type
+ *
+ *  @details Given a source device index @p dv_ind, this discovers every
+ *  CPU-destined io_link neighbor of that GPU (e.g. MI450's XGMI-typed
+ *  GPU-to-CPU-socket connection, or another ASIC's PCIe-typed one) and
+ *  writes up to @p *num_links of them to @p links. On return, @p *num_links
+ *  holds the number of links found (which may be more than fit in the
+ *  caller's buffer if @p links is too small). A GPU is physically wired to
+ *  exactly one CPU socket, so p2p_link-reported *reachability* to a second,
+ *  non-directly-connected CPU is intentionally not considered here.
+ *
+ *  @param[in] dv_ind the source device index
+ *
+ *  @param[inout] num_links in: capacity of @p links; out: number of links found
+ *
+ *  @param[out] links buffer of at least *num_links entries (as passed in)
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful (including when zero
+ *  links are found -- that is a normal result, not an error)
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_topo_get_cpu_links(uint32_t dv_ind, uint32_t* num_links, rsmi_cpu_link_t* links);
 
 /**
  *  @brief Return P2P availability status between 2 GPUs

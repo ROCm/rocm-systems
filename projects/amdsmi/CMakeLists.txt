@@ -340,6 +340,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
     "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_cpu_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi.cc"
