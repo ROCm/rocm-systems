@@ -18,12 +18,13 @@ fails when the manifest fields written by capture and the table below disagree.
   `HIP_HRR_CAPTURE_CONSENT=yes`, or the line `yes` in their consent file.
 - **Controlled capture location.** Archives are written only to the directory named by
   `HIP_HRR_CAPTURE_OUTPUT`.
-- **No network communication during capture.** Apart from the archive, capture writes only
-  to stderr and the HIP log, and opens no network connection.
+- **No network communication during capture.** Apart from the archive and any missing
+  parent directories of `HIP_HRR_CAPTURE_OUTPUT`, capture writes only to stderr and the HIP
+  log, and opens no network connection.
 - **Archive content transparency.** This page and the notice described under
   [Sharing an archive](#sharing-an-archive) say what an archive may contain.
-- **Local filesystem access control.** On Linux, capture creates the archive with
-  directories 0700 and files 0600, as described under
+- **Local filesystem access control.** On Linux, the directories capture creates are 0700
+  and its files 0600; an output directory that already exists keeps its own mode. See
   [How the archive is protected on disk](#how-the-archive-is-protected-on-disk).
 - **Secure replay handling.** Replay treats an archive as untrusted input, within the limits
   described under
@@ -182,8 +183,9 @@ serving stack can still hold its clients' prompts, as listed above.
 
 ## How the archive is protected on disk
 
-On Linux the archive is readable only by the user who captured it (directories 0700, files
-0600). On Windows capture sets no access rights of its own: the archive takes those of the
+On Linux the archive is readable only by the user who captured it: the directories capture
+creates are 0700 and its files 0600. An output directory that already exists keeps its own
+mode. On Windows capture sets no access rights of its own: the archive takes those of the
 output directory. [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
 write go through the directory descriptors capture checked.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878) keeps the crash-time
