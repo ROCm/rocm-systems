@@ -482,6 +482,67 @@ TEST(RegisterHazardPluginTest, RaceAloneEnablesCoreCheckingWithWarningsOff) {
   EXPECT_EQ(h.fixture.cu()->memory_wait_diagnostic_count(), 0u);
 }
 
+TEST(RegisterHazardPluginTest, MfmaBroadcastReportsKnownFalsePositiveForUnusedLane) {
+  for (uint32_t lane : {8u, 40u})
+    for (bool broadcast : {false, true})
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(std::format("lane={} broadcast={} waited={}", lane, broadcast, waited));
+        Program program;
+        const auto producer = program.emit(cdna4::build_flat(
+            cdna4::kFlatLoadDwordFlat, {.seg = 2, .addr = 4, .saddr = 0x7f, .vdst = 16}));
+        if (waited)
+          program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0x0f70}));
+        // Only the load is masked; the MFMA executes with full EXEC.
+        program.emit(cdna4::build_sop1(cdna4::kSMovB64Sop1, {.ssrc0 = 193, .sdst = 126}));
+        const auto consumer = program.emit(
+            cdna4::build_vop3p_mfma(cdna4::kVMfmaF324x4x116bF32Vop3pMfma,
+                                    {.vdst = 64,
+                                     .src0 = 256,
+                                     .src1 = 272,
+                                     .src2 = 128,
+                                     .blgp = static_cast<uint8_t>(broadcast ? 4 : 0)}));
+        program.emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0x0f70}));
+        program.end();
+
+        DiagnosticHarness h;
+        ASSERT_NO_FATAL_FAILURE(h.initialize());
+        h.fixture.mem->write32(0x2000, std::bit_cast<uint32_t>(1.0f));
+        h.probe->dispatch = [lane](std::span<Wavefront *> waves) {
+          ASSERT_EQ(waves.size(), 1u);
+          auto &wave = *waves.front();
+          wave.set_exec(uint64_t{1} << lane);
+          const RegisterAccess registers(wave);
+          const auto base = wave.vgpr_alloc().base;
+          for (uint32_t input_lane = 0; input_lane < wave.wf_size(); ++input_lane) {
+            registers.write_vgpr(base, input_lane, std::bit_cast<uint32_t>(1.0f));
+            registers.write_vgpr(base + 16, input_lane, std::bit_cast<uint32_t>(1.0f));
+            registers.write_vgpr(base + 4, input_lane, 0x2000);
+            registers.write_vgpr(base + 5, input_lane, 0);
+          }
+        };
+        ASSERT_NO_FATAL_FAILURE(h.run(program.words));
+        const auto output = reports(h.sink->str());
+        // TODO(https://github.com/ROCm/rocm-systems/pull/15704): Expect no report
+        // for an unwaited load into lane 40 with BLGP=4: the MFMA reads B only
+        // from lanes 0-15. For now, assert that false positive alongside the real hazards.
+        ASSERT_EQ(output.size(), waited ? 0u : 1u) << h.sink->str();
+        EXPECT_EQ(h.probe->hazards.size(), output.size());
+        EXPECT_EQ(h.fixture.cu()->memory_wait_diagnostic_count(), 0u);
+        if (!waited) {
+          const auto &fields = output.front().fields;
+          EXPECT_EQ(fields.at("checker"), "core");
+          EXPECT_EQ(fields.at("producer_pc"), std::format("{:#x}", producer));
+          EXPECT_EQ(fields.at("consumer_pc"), std::format("{:#x}", consumer));
+          EXPECT_EQ(fields.at("access"), "read");
+          EXPECT_EQ(fields.at("type"), "VGPR");
+          EXPECT_EQ(fields.at("reg"), "16");
+          EXPECT_EQ(fields.at("lanes"), std::format("{:#x}", uint64_t{1} << lane));
+          EXPECT_EQ(fields.at("counter"), "vmcnt");
+          EXPECT_EQ(fields.at("required_wait"), "0");
+        }
+      }
+}
+
 TEST(RegisterHazardPluginTest, FindingsPrecedeActualAsyncIssueNotification) {
   if (!async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";

@@ -155,6 +155,11 @@ only where the target's counter capacity and completion ordering prove readiness
 unqualified completion classes remain conservative. The checker does not simulate
 hardware occupancy or select a latency at which memory becomes visible.
 
+MFMA broadcast reads are still checked across the whole wave. A pending load into
+B's lane 40 can therefore be reported by an MFMA with `blgp:4`, even though it reads
+B only from lanes 0–15. The race plugin also reports this known false positive;
+the correction is in [PR #15704](https://github.com/ROCm/rocm-systems/pull/15704).
+
 These are known limits, not an exhaustive list. Investigate warnings against the
 target's ordering rules; use `--wait-checking=off` to suppress both warning classes
 when needed. The race plugin reports these same register findings and separately
@@ -183,11 +188,6 @@ before being read for planning. Planning does not fire execution-plugin callback
 The checks and producer registration precede execution lane loops and async MMA
 publication. Only the issuing thread accesses the scoreboard: register accessors,
 MMA workers, observer snapshots and memory writeback do not check it.
-
-MFMA broadcast forms share execution's A/B lane-selection helpers, so pending
-results outside the selected source lanes do not report. Accumulators and
-destinations still use the whole wave. Fields with other meanings, such as
-F64 negation or mixed input formats, do not select broadcast lanes.
 
 Lane masks distinguish divergent consumers and pending results across waterfall
 iterations. Qualified sub-dword forms also distinguish consumed and written bytes,
