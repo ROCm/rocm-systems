@@ -87,7 +87,8 @@ void exercise_lifecycle(bool create_queue) {
     ASSERT_NO_FATAL_FAILURE(check_actions());
     const auto create = load_function<decltype(&rj_vm_create_from_string)>(
         library.get(), "rj_vm_create_from_string");
-    const auto destroy = load_function<decltype(&rj_vm_destroy)>(library.get(), "rj_vm_destroy");
+    const auto destroy =
+        load_function<decltype(&rj_vm_destroy_checked)>(library.get(), "rj_vm_destroy_checked");
     const auto run = load_function<decltype(&rj_vm_run)>(library.get(), "rj_vm_run");
     const auto request_exit =
         load_function<decltype(&rj_vm_request_exit)>(library.get(), "rj_vm_request_exit");
@@ -134,6 +135,16 @@ void exercise_lifecycle(bool create_queue) {
       allocation.gpu_id = 1250;
       allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
       ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, allocation));
+      struct {
+        // KFD command header followed by its inline device list.
+        kfd_ioctl_map_memory_to_gpu_args arguments{};
+        // GPU receiving access to the queue descriptor.
+        uint32_t gpu_id = 1250;
+      } mapping;
+      mapping.arguments.handle = allocation.handle;
+      mapping.arguments.n_devices = 1;
+      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_MAP_MEMORY_TO_GPU, mapping));
+      ASSERT_EQ(mapping.arguments.n_success, 1u);
       queue.ring_base_address = reinterpret_cast<uintptr_t>(ring.data());
       queue.ring_size = sizeof(ring);
       queue.read_pointer_address = reinterpret_cast<uintptr_t>(&descriptor.read_dispatch_id);
@@ -155,12 +166,23 @@ void exercise_lifecycle(bool create_queue) {
       kfd_ioctl_destroy_queue_args destroy_queue{};
       destroy_queue.queue_id = queue.queue_id;
       ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_DESTROY_QUEUE, destroy_queue));
+      struct {
+        // KFD command header followed by its inline device list.
+        kfd_ioctl_unmap_memory_from_gpu_args arguments{};
+        // GPU whose descriptor access is retired before freeing the backing.
+        uint32_t gpu_id = 1250;
+      } unmapping;
+      unmapping.arguments.handle = allocation.handle;
+      unmapping.arguments.n_devices = 1;
+      ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, unmapping));
+      ASSERT_EQ(unmapping.arguments.n_success, 1u);
       kfd_ioctl_free_memory_of_gpu_args free_memory{};
       free_memory.handle = allocation.handle;
       ASSERT_NO_FATAL_FAILURE(command(AMDKFD_IOC_FREE_MEMORY_OF_GPU, free_memory));
     }
     EXPECT_EQ(close_device(vm.get(), process_id), ROCJITSU_STATUS_SUCCESS);
-    vm.reset();
+    ASSERT_EQ(destroy(vm.get()), ROCJITSU_STATUS_SUCCESS);
+    (void)vm.release();
     EXPECT_EQ(keeper_lease_count(), initial_leases + 1);
     ASSERT_NO_FATAL_FAILURE(check_actions());
     EXPECT_EQ(dlclose(library.release()), 0);
