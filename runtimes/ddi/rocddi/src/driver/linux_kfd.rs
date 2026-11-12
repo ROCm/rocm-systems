@@ -16,9 +16,11 @@ mod queue;
 mod registered_host;
 pub(super) mod sys;
 mod sysfs;
+mod target;
 mod uapi;
 use crate::memory::storage::TryPush;
 use crate::os::linux::{errno, file as os_file, memory as os_memory};
+use target::KfdTargetProfile;
 mod vmem;
 
 use crate::device::gpu::kernel_queue::{
