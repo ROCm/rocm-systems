@@ -3519,13 +3519,20 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
            ihipGraphIsSelfOrDescendant(reinterpret_cast<hip::Graph*>(graph), childGraph))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
-      node = new hip::ChildGraphNode(childGraph,
-                                     ownership == hipGraphChildGraphOwnershipMove
-                                         ? hip::ChildGraphNode::Ownership::kMove
-                                         : hip::ChildGraphNode::Ownership::kClone);
+      const bool moveOwnership = (ownership == hipGraphChildGraphOwnershipMove);
+      auto* childNode = new hip::ChildGraphNode(
+          childGraph, moveOwnership ? hip::ChildGraphNode::Ownership::kMove
+                                    : hip::ChildGraphNode::Ownership::kClone);
+      node = childNode;
       status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
                                 reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                                 numDependencies, false);
+      // Take the caller's graph only after the node is in place. ihipGraphAddNode rejects
+      // bad dependencies, and a call that fails must leave childGraph intact and
+      // destroyable rather than consuming a graph the caller still owns.
+      if (status == hipSuccess && moveOwnership) {
+        childNode->CommitMove(childGraph);
+      }
       break;
     }
     case hipGraphNodeTypeWaitEvent:

@@ -1484,16 +1484,18 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
   ChildGraphNode(Graph* g, Ownership ownership = Ownership::kClone)
       : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExecSegmented() {
     graphCaptureStatus_ = false;
-    if (ownership == Ownership::kMove) {
-      // Adopt rather than clone: the caller's node handles become this child's nodes,
-      // so after instantiate GraphExecBase::ResolveClonedNode maps them to the exec's
-      // copies exactly as it does for the embedded handles of a cloned child.
-      Graph::AdoptNodesFrom(g);
-      movedFrom_ = g;
-      g->SetMovedInto(this);
-    } else {
+    if (ownership == Ownership::kClone) {
       g->clone(this);
     }
+    // kMove leaves this node empty until CommitMove() runs. Taking the caller's graph is
+    // not reversible, so it must wait until the node is known to be addable.
+  }
+
+  //! Completes an ownership MOVE once the node has been added to its parent.
+  void CommitMove(Graph* g) {
+    Graph::AdoptNodesFrom(g);
+    movedFrom_ = g;
+    g->SetMovedInto(this);
   }
 
   ~ChildGraphNode() {
