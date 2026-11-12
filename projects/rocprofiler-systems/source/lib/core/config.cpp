@@ -1515,14 +1515,10 @@ configure_settings(bool _init)
     _add_advanced_category(env_vars::JSON_OUTPUT);
     _add_advanced_category(env_vars::TREE_OUTPUT);
     _add_advanced_category(env_vars::TEXT_OUTPUT);
-    _add_advanced_category(env_vars::DIFF_OUTPUT);
     _add_advanced_category(env_vars::DEBUG_MODE);
     _add_advanced_category(env_vars::LOG_LEVEL);
     _add_advanced_category(env_vars::ENABLE_SIGNAL_HANDLER);
     _add_advanced_category(env_vars::FLAT_PROFILE);
-    _add_advanced_category(env_vars::INPUT_EXTENSIONS);
-    _add_advanced_category(env_vars::INPUT_PATH);
-    _add_advanced_category(env_vars::INPUT_PREFIX);
     _add_advanced_category(env_vars::MAX_DEPTH);
     _add_advanced_category(env_vars::MAX_WIDTH);
     _add_advanced_category(env_vars::MEMORY_PRECISION);
