@@ -1,4 +1,4 @@
-# Regenerates one library's Fortran binding (bindings/fortran/<lib>.F90) with
+# Regenerates one library's Fortran binding (bindings/fortran/<lib>/) with
 # ROCm/rocm-fortran-generator, straight from the source headers: no build, no
 # ROCm install, no GPU. Called by the per-library fortran-bindings-<lib>.yml.
 #   pull_request: fail if the PR's headers no longer generate a binding that
@@ -11,7 +11,7 @@ on:
   workflow_call:
     inputs:
       lib:
-        description: Generator library name (hip, roctx); the binding is bindings/fortran/<lib>.F90
+        description: Generator library name (hip, roctx); the binding is bindings/fortran/<lib>/
         required: true
         type: string
     secrets:
@@ -26,7 +26,7 @@ permissions:
 
 env:
   # Bump on purpose: a generator change must not fail unrelated header PRs.
-  GENERATOR_REF: 2839e03f51b7d4de7e2762f37634c0bf7cdbda3a
+  GENERATOR_REF: 17e42c044d89fbcdebb4aab9e52f2100a3549369
 
 jobs:
   generate:
@@ -47,7 +47,7 @@ jobs:
             /projects/rocprofiler-sdk/source/include/
             /projects/rocprofiler-sdk/CMakeLists.txt
             /projects/rocprofiler-sdk/VERSION
-            /bindings/fortran/
+            /bindings/fortran/${{ inputs.lib }}/
 
       - name: Checkout rocm-fortran-generator
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -72,13 +72,13 @@ jobs:
           ROCM_FORTRAN_STRICT: 1
           LIB: ${{ inputs.lib }}
         run: |
-          # --overwrite copies the module into bindings/fortran/, which must
+          # --overwrite copies the module into bindings/fortran/<lib>/, which must
           # exist; without it this is a pure header check.
           overwrite=()
-          if [ -d rocm-systems/bindings/fortran ]; then
+          if [ -d "rocm-systems/bindings/fortran/${LIB}" ]; then
             overwrite=(--overwrite)
           else
-            echo "::notice::No committed bindings in bindings/fortran/ yet: header check only."
+            echo "::notice::No committed binding in bindings/fortran/${LIB}/ yet: header check only."
           fi
           generator/gen.sh "${overwrite[@]}" "${LIB}"
 
@@ -93,8 +93,8 @@ jobs:
         env:
           LIB: ${{ inputs.lib }}
         run: |
-          drift="$(git status --porcelain -- "bindings/fortran/${LIB}.F90")"
-          if [ ! -d bindings/fortran ]; then
+          drift="$(git status --porcelain -- "bindings/fortran/${LIB}")"
+          if [ ! -d "bindings/fortran/${LIB}" ]; then
             echo "No committed binding to compare against."
           elif [ -z "${drift}" ]; then
             echo "Committed binding is up to date."
@@ -120,11 +120,11 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           branch: fortran-bindings/regenerate-${{ inputs.lib }}
           base: develop
-          add-paths: bindings/fortran/${{ inputs.lib }}.F90
+          add-paths: bindings/fortran/${{ inputs.lib }}/*.F90
           commit-message: 'chore(${{ inputs.lib }}): regenerate the Fortran binding'
           title: 'chore(${{ inputs.lib }}): regenerate the Fortran binding'
           body: |
-            Regenerated `bindings/fortran/${{ inputs.lib }}.F90` from the `develop` headers with
+            Regenerated `bindings/fortran/${{ inputs.lib }}/` from the `develop` headers with
             [rocm-fortran-generator@${{ env.GENERATOR_REF }}](https://github.com/ROCm/rocm-fortran-generator/tree/${{ env.GENERATOR_REF }}).
 
             Opened by the [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) workflow; it updates this PR until it is merged.
