@@ -7,7 +7,6 @@
 #include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
 #include "sql_cancel.hpp"
-#include "trace_trim.hpp"
 #include "track_file_store.hpp"
 #include "track_read_options.hpp"
 
@@ -751,6 +750,15 @@ ph_ctx::trim_trace(uint64_t    start_ts,
     if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
     if(m_sources.empty()) return PH_RESULT_INVALID_FILE;
 
+    // One output database cannot hold files of different formats.
+    for(const accepted_source_t& accepted : m_accepted)
+    {
+        if(accepted.schema != m_accepted.front().schema)
+        {
+            return PH_RESULT_UNSUPPORTED_FILE;
+        }
+    }
+
     // SaveTrimmedData adds source 0's origin when that origin is greater than
     // zero. Subtract it back, then put the same displayed range on each source.
     constexpr uint64_t k_unset = std::numeric_limits<uint64_t>::max();
@@ -790,8 +798,8 @@ ph_ctx::trim_trace(uint64_t    start_ts,
     const profiler_hub::version_t version{ m_schema_version.major,
                                            m_schema_version.minor,
                                            m_schema_version.patch };
-    return profiler_hub::trim_trace_files(
-        inputs, output_path, m_trace_schema, version, future);
+    return profiler_hub::trim_in_format(
+        m_trace_schema, version, inputs, output_path, future);
 }
 
 ph_track_list_t

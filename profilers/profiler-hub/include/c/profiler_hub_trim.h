@@ -31,7 +31,8 @@ extern "C"
      *         PH_RESULT_INVALID_ARGUMENT if @p output_path is null or names
      *         the source file, PH_RESULT_INVALID_FILE if the output cannot be
      *         replaced, PH_RESULT_UNSUPPORTED_FILE if this schema has no trim
-     *         rules, PH_RESULT_CANCELLED if @p future is cancelled.
+     *         rules or the files in @p ctx differ in schema,
+     *         PH_RESULT_CANCELLED if @p future is cancelled.
      * @note The copy keeps the source schema. Duration rows that overlap the
      *       window are kept, and rows that belong to those events are kept
      *       with them. Tables the schema does not describe are copied whole.

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "formats/trace_formats.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader_types.hpp"
 
@@ -14,15 +15,6 @@ struct ph_future;
 
 namespace profiler_hub
 {
-
-/** One file and GUID, with the absolute time window that GUID keeps. */
-struct trim_source_t
-{
-    std::string path;
-    std::string uuid;
-    uint64_t    start_ts{};
-    uint64_t    end_ts{};
-};
 
 /**
  * Copies every source into one database at @p output_path. Sources that share

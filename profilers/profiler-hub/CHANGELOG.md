@@ -217,6 +217,8 @@ downstream consumer of the library.
   `(nid,pid,tid)` (observed in real traces, previously exposed as
   separate, redundant tracks reporting identical event counts) now
   correctly collapse into a single track.
+- `ph_trim_trace` returns `PH_RESULT_UNSUPPORTED_FILE` when the files in the
+  context differ in schema, because one output file cannot hold two schemas.
 
 ### Fixed
 

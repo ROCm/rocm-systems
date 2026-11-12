@@ -121,7 +121,8 @@ flowchart TB
   ready --> place
   ready --> sfe
   ready --> pick
-  c_trim --> trimctx --> trimmer
+  c_trim --> trimctx --> registry
+  registry -->|"trim"| trimmer
 
   readtrace --> source
   readtrace -.->|"load or save"| cas
@@ -422,8 +423,10 @@ sequenceDiagram
 
   O->>C: ph_trim_trace(ctx, window, output path)
   C->>X: trim_trace
+  X->>X: sources of more than one format: return PH_RESULT_UNSUPPORTED_FILE
   X->>X: convert window to each source's clock
-  X->>TT: sources, schema, windows
+  X->>R: trim_in_format(schema, version, sources, windows)
+  R->>TT: the entry's trim, or PH_RESULT_UNSUPPORTED_FILE when it has none
   TT->>TT: reject output equal to an input, delete old output
   TT->>R: trim rules for the format
   TT->>S: read sqlite_master
