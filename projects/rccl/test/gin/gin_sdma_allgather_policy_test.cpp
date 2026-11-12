@@ -231,6 +231,54 @@ TEST(GatherPolicyCtas, EnvPinStillWinsAndIsClamped) {
   EXPECT_EQ(allGatherCtas(64ull << 20, 32768, 0, allGatherPoolCtas(16), 1), 1);
 }
 
+TEST(GatherPolicyCtas, LsaTierUsesPassedCtaCount) {
+  const int pool = allGatherPoolCtas(16);
+  EXPECT_EQ(allGatherCtas(1024, 32768, kAllGatherCtasUnset, pool, 1, 2), 2);
+  EXPECT_EQ(allGatherCtas(64ull << 20, 32768, kAllGatherCtasUnset, pool, 1, 2), 1);  // SDMA tier
+  EXPECT_EQ(allGatherCtas(1024, 32768, 4, pool, 1, 2), 4);                           // pin wins
+  EXPECT_EQ(allGatherCtas(1024, 32768, kAllGatherCtasUnset, pool, 1, 1000), pool);   // clamped
+  EXPECT_EQ(allGatherCtas(1024, 32768, kAllGatherCtasUnset, pool, 1, 0), 1);         // floor of 1
+}
+
+// ---- lsaCtasFromLadder: per-size LSA-tier CTA count --------------------------
+
+constexpr LsaCtaStep kLadder[] = {{8u << 10, 1}, {16u << 10, 2}};
+constexpr size_t kLadderSize = sizeof(kLadder) / sizeof(kLadder[0]);
+
+TEST(GatherPolicyLsaLadder, StepBoundariesAreInclusive) {
+  EXPECT_EQ(lsaCtasFromLadder(0, kLadder, kLadderSize, 8), 1);
+  EXPECT_EQ(lsaCtasFromLadder(8u << 10, kLadder, kLadderSize, 8), 1);
+  EXPECT_EQ(lsaCtasFromLadder((8u << 10) + 1, kLadder, kLadderSize, 8), 2);
+  EXPECT_EQ(lsaCtasFromLadder(16u << 10, kLadder, kLadderSize, 8), 2);
+  EXPECT_EQ(lsaCtasFromLadder((16u << 10) + 1, kLadder, kLadderSize, 8), 8);
+  EXPECT_EQ(lsaCtasFromLadder(512u << 10, kLadder, kLadderSize, 8), 8);
+}
+
+TEST(GatherPolicyLsaLadder, EmptyLadderUsesAbove) {
+  EXPECT_EQ(lsaCtasFromLadder(1024, nullptr, 0, kAllGatherCtasLsa), kAllGatherCtasLsa);
+  EXPECT_EQ(lsaCtasFromLadder(1024, kLadder, 0, kAllGatherCtasLsa), kAllGatherCtasLsa);
+}
+
+TEST(GatherPolicyLsaLadder, LadderFitsDefaultPool) {
+  const int pool = allGatherPoolCtas(16);
+  for (size_t c : {size_t{0}, size_t{4096}, size_t{12288}, size_t{1} << 19}) {
+    const int g = allGatherCtas(c, 512u << 10, kAllGatherCtasUnset, pool, 1,
+                                lsaCtasFromLadder(c, kLadder, kLadderSize, 8));
+    EXPECT_GE(g, 1);
+    EXPECT_LE(g, pool);
+  }
+}
+
+TEST(GatherPolicyArch, GcnArchMatchesBaseNameOnly) {
+  EXPECT_TRUE(gcnArchMatches("gfx1250", "gfx1250"));
+  EXPECT_TRUE(gcnArchMatches("gfx1250-strict", "gfx1250"));
+  EXPECT_TRUE(gcnArchMatches("gfx942:sramecc+:xnack-", "gfx942"));
+  EXPECT_FALSE(gcnArchMatches("gfx12500", "gfx1250"));
+  EXPECT_FALSE(gcnArchMatches("gfx125", "gfx1250"));
+  EXPECT_FALSE(gcnArchMatches(nullptr, "gfx1250"));
+  EXPECT_FALSE(gcnArchMatches("gfx1250", nullptr));
+}
+
 // ---- Gather -D 3 in-place: root skips its self-put and waits for one fewer ----
 
 TEST(GatherPolicyInPlace, RootSkipsSelfPutOnlyInPlace) {

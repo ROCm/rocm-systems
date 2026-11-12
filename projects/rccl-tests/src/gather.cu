@@ -72,14 +72,22 @@ static constexpr gin_sdma_allgather::ArchSdmaThreshold kGatherSdmaThresholdByArc
   {"gfx1250", 512u << 10},
 };
 
+// gcnArchName of the current device, read once per process; nullptr if unavailable.
+static const char* gatherGcnArchName() {
+  static char name[256] = "";
+  static const bool ok = [] {
+    int dev = 0;
+    hipDeviceProp_t prop;
+    if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) return false;
+    snprintf(name, sizeof(name), "%s", prop.gcnArchName);
+    return true;
+  }();
+  return ok ? name : nullptr;
+}
+
 static size_t gatherArchSdmaThreshold() {
-  int dev = 0;
-  hipDeviceProp_t prop;
-  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
-    return kGatherSdmaThresholdDefault;
-  }
   return gin_sdma_allgather::archSdmaThreshold(
-      prop.gcnArchName, kGatherSdmaThresholdByArch,
+      gatherGcnArchName(), kGatherSdmaThresholdByArch,
       sizeof(kGatherSdmaThresholdByArch) / sizeof(kGatherSdmaThresholdByArch[0]),
       kGatherSdmaThresholdDefault);
 }
@@ -99,9 +107,32 @@ static inline size_t GatherResolveSdmaThreshold() {
 #endif
 }
 
-// One CTA issues the root put. The LSA tier reuses the AllGather 16-CTA store grid.
-// NCCL_GIN_ANVIL_SDMA_GATHER_CTAS pins both tiers, clamped to the barrier pool.
+// One CTA issues the root put. The LSA tier uses the AllGather 16-CTA store grid, except
+// on archs with a measured ladder below. NCCL_GIN_ANVIL_SDMA_GATHER_CTAS pins both tiers,
+// clamped to the barrier pool.
 static constexpr int kGatherCtasSdma = 1;
+
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+// Every CTA runs its own LSA barrier, so small chunks are barrier-bound and fewer CTAs win.
+// Measured on 4x MI455X (gfx1250): 1 CTA up to 8 KiB per rank, 2 up to 32 KiB, 8 above.
+static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx1250[] = {
+  {8u << 10, 1},
+  {32u << 10, 2},
+};
+static constexpr int kGatherLsaCtasGfx1250Above = 8;
+#endif
+
+static inline int GatherLsaCtas(size_t chunkBytes) {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+  return gin_sdma_allgather::kAllGatherCtasLsa;
+#else
+  static const bool gfx1250 = gin_sdma_allgather::gcnArchMatches(gatherGcnArchName(), "gfx1250");
+  if (!gfx1250) return gin_sdma_allgather::kAllGatherCtasLsa;
+  return gin_sdma_allgather::lsaCtasFromLadder(
+      chunkBytes, kGatherLsaCtasGfx1250,
+      sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), kGatherLsaCtasGfx1250Above);
+#endif
+}
 
 static inline size_t GatherResolveCtasEnv() {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
@@ -114,7 +145,7 @@ static inline size_t GatherResolveCtasEnv() {
 
 static inline int GatherResolveLaunchCtas(size_t chunkBytes, size_t sdmaThreshold, int poolCtas) {
   return gin_sdma_allgather::allGatherCtas(chunkBytes, sdmaThreshold, GatherResolveCtasEnv(),
-                                           poolCtas, kGatherCtasSdma);
+                                           poolCtas, kGatherCtasSdma, GatherLsaCtas(chunkBytes));
 }
 
 // Each rank stores its chunk into root's recv slice. `root` is a world rank;
@@ -127,9 +158,26 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   char* dst = (char*)ncclGetPeerPointer(recvwin, recvoffset, root) + dstOff;
   if (src == dst) return;
   if ((((uintptr_t)src | (uintptr_t)dst | chunkBytes) & 15) == 0) {
-    const uint4* s = (const uint4*)src;
-    uint4* d = (uint4*)dst;
-    for (size_t i = tid; i < chunkBytes / 16; i += nthreads) d[i] = s[i];
+    // src and dst are distinct buffers once src == dst has returned, so __restrict__
+    // holds. Issuing all kUnroll loads before their stores keeps several remote stores
+    // in flight per thread (about 2x LSA-tier bandwidth on gfx1250). The tail stays in
+    // the batched loop: a plain one-load remainder loop is as slow as no unrolling.
+    constexpr int kUnroll = 8;
+    const uint4* __restrict__ s = (const uint4*)src;
+    uint4* __restrict__ d = (uint4*)dst;
+    const size_t n = chunkBytes / 16;
+    const size_t stride = (size_t)nthreads;
+    for (size_t i = tid; i < n; i += kUnroll * stride) {
+      uint4 v[kUnroll];
+#pragma unroll
+      for (int k = 0; k < kUnroll; k++) {
+        if (i + k * stride < n) v[k] = s[i + k * stride];
+      }
+#pragma unroll
+      for (int k = 0; k < kUnroll; k++) {
+        if (i + k * stride < n) d[i + k * stride] = v[k];
+      }
+    }
   } else {
     for (size_t i = tid; i < chunkBytes; i += nthreads) dst[i] = src[i];
   }

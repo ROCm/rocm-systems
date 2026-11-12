@@ -96,14 +96,19 @@ struct ArchSdmaThreshold {
 // arch matches gcnArchName up to its end or a feature/variant suffix (':' or '-'),
 // so "gfx1250" matches "gfx1250-strict" and "gfx942" matches "gfx942:sramecc+:xnack-",
 // but "gfx94" matches neither. Falls back when the name is null or not in the table.
+inline bool gcnArchMatches(const char* gcnArchName, const char* arch) {
+  if (!gcnArchName || !arch) return false;
+  const char* a = arch;
+  const char* g = gcnArchName;
+  while (*a && *a == *g) { a++; g++; }
+  return *a == '\0' && (*g == '\0' || *g == ':' || *g == '-');
+}
+
 inline size_t archSdmaThreshold(const char* gcnArchName, const ArchSdmaThreshold* table,
                                 size_t tableSize, size_t fallback) {
   if (!gcnArchName || !table) return fallback;
   for (size_t i = 0; i < tableSize; i++) {
-    const char* a = table[i].arch;
-    const char* g = gcnArchName;
-    while (*a && *a == *g) { a++; g++; }
-    if (*a == '\0' && (*g == '\0' || *g == ':' || *g == '-')) return table[i].threshold;
+    if (gcnArchMatches(gcnArchName, table[i].arch)) return table[i].threshold;
   }
   return fallback;
 }
@@ -149,14 +154,33 @@ GIN_SDMA_AG_HD inline int allGatherPoolCtas(int deviceCtaCount) {
 // honored but clamped to poolCtas so the grid never exceeds the barrier/signal pool
 // (avoids the OOB the pin used to allow when it exceeded max(-V, 16)).
 // sdmaCtas is the SDMA-tier grid; Gather passes 1 because it issues a single put.
+// lsaCtas is the LSA-tier grid; Gather passes its per-size ladder (lsaCtasFromLadder).
 GIN_SDMA_AG_HD inline int allGatherCtas(size_t chunkBytes_, size_t sdmaThreshold,
                                         size_t envCtas, int poolCtas,
-                                        int sdmaCtas = kAllGatherCtasSdma) {
+                                        int sdmaCtas = kAllGatherCtasSdma,
+                                        int lsaCtas = kAllGatherCtasLsa) {
   if (poolCtas < 1) poolCtas = 1;
   if (envCtas != kAllGatherCtasUnset && envCtas > 0)
     return (envCtas > (size_t)poolCtas) ? poolCtas : (int)envCtas;
-  const int adaptive = chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? kAllGatherCtasLsa : sdmaCtas;
+  int adaptive = chunkUsesLsaTier(chunkBytes_, sdmaThreshold) ? lsaCtas : sdmaCtas;
+  if (adaptive < 1) adaptive = 1;
   return (adaptive > poolCtas) ? poolCtas : adaptive;
+}
+
+// One step of an LSA-tier CTA ladder: chunks of at most maxChunkBytes per rank
+// launch `ctas` CTAs. Steps are in ascending maxChunkBytes order.
+struct LsaCtaStep {
+  size_t maxChunkBytes;
+  int ctas;
+};
+
+// LSA-tier CTA count for a chunk: the first step covering it, else `above`.
+GIN_SDMA_AG_HD inline int lsaCtasFromLadder(size_t chunkBytes_, const LsaCtaStep* steps,
+                                            size_t nSteps, int above) {
+  for (size_t i = 0; steps && i < nSteps; i++) {
+    if (chunkBytes_ <= steps[i].maxChunkBytes) return steps[i].ctas;
+  }
+  return above;
 }
 
 // Element offset of rank r's contribution within EVERY peer's AllGather recv
