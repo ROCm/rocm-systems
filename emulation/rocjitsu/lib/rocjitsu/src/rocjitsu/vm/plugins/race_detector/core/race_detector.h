@@ -115,6 +115,9 @@ public:
   }
 
 private:
+  void validateAccess(int addr, WaveId wave, int lane, int nBytes,
+                      MemoryOrderClass currentMemoryOrder, bool isWrite, uint8_t atomicBytes) const;
+
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event

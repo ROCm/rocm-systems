@@ -24,13 +24,16 @@ class LdsHistoryTest : public ::testing::Test {
 protected:
   static constexpr int kNumWaves = 4;
   static constexpr int kLdsBytes = 256;
-  static constexpr std::array kOrders{MemoryOrderClass::LDS, MemoryOrderClass::VMEM,
+  static constexpr std::array kOrders{MemoryOrderClass::LDS,         MemoryOrderClass::VMEM,
+                                      MemoryOrderClass::GDS,         MemoryOrderClass::ASYNC_LOAD,
+                                      MemoryOrderClass::ASYNC_STORE, MemoryOrderClass::TENSOR,
                                       MemoryOrderClass::UNORDERED};
 
   struct Query {
     int wave;
     bool write;
     MemoryOrderClass order;
+    int lane = 0;
   };
 
   static Query sampleQuery(std::mt19937 &random) {
@@ -87,7 +90,7 @@ protected:
     std::bitset<kLdsBytes> query;
     for (int byte = addr; byte < addr + bytes; ++byte)
       query.set(byte);
-    std::vector<int> expected;
+    std::vector<std::pair<int, int>> expected;
     for (const auto &event : events_) {
       if (event.write == access.write || (event.bytes & query).none())
         continue;
@@ -97,26 +100,69 @@ protected:
           (event.complete ||
            (access.order != MemoryOrderClass::UNORDERED && event.order == access.order)))
         continue;
-      expected.push_back(event.id.value);
+      int firstByte = addr;
+      while (!event.bytes.test(firstByte))
+        ++firstByte;
+      expected.emplace_back(event.id.value, firstByte);
     }
     observed_.clear();
     if (access.write)
-      detector_.validateWrite(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
+      detector_.validateWrite(addr, WaveId{access.wave}, access.lane, bytes, access.order);
     else
-      detector_.validateRead(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
+      detector_.validateRead(addr, WaveId{access.wave}, access.lane, bytes, access.order);
+    std::vector<std::pair<int, int>> actual;
+    for (const auto &violation : observed_) {
+      EXPECT_EQ(violation.wave, access.wave);
+      EXPECT_EQ(violation.lane, access.lane);
+      EXPECT_EQ(violation.isWrite, access.write);
+      EXPECT_EQ(violation.workgroupId.x, 3);
+      EXPECT_EQ(violation.workgroupId.y, 5);
+      EXPECT_EQ(violation.workgroupId.z, 7);
+      actual.emplace_back(violation.conflictingEvent.value, violation.address);
+    }
     // Retirement may reorder the detector's lists. Compare exact event
     // identities, so a missing report cannot cancel out an extra report.
     std::ranges::sort(expected);
-    std::ranges::sort(observed_);
-    ASSERT_EQ(observed_, expected);
+    std::ranges::sort(actual);
+    ASSERT_EQ(actual, expected);
   }
 
   std::vector<Event> events_;
-  std::vector<int> observed_;
-  RaceDetector detector_{kNumWaves, Dim3d(0),
-                         [this](RaceViolation v) { observed_.push_back(v.conflictingEvent.value); },
-                         CounterCapacities{}, /*ldsSizeBytes=*/64 * 1024};
+  std::vector<RaceViolation> observed_;
+  RaceDetector detector_{kNumWaves, Dim3d(3, 5, 7),
+                         [this](RaceViolation v) { observed_.push_back(v); }, CounterCapacities{},
+                         /*ldsSizeBytes=*/64 * 1024};
 };
+
+TEST_F(LdsHistoryTest, ReadWriteOrderingAndWitnesses) {
+  for (const bool producerWrites : {false, true}) {
+    for (const auto producerOrder : kOrders) {
+      SCOPED_TRACE(::testing::Message()
+                   << "producer write=" << producerWrites << " order=" << int(producerOrder));
+      add(/*wave=*/0, producerWrites, producerOrder, {{15, 17}, {32, 36}});
+      for (const auto status :
+           {EventStatus::ACTIVE, EventStatus::WAVE_COMPLETE, EventStatus::RETIRED}) {
+        SCOPED_TRACE(int(status));
+        if (status == EventStatus::WAVE_COMPLETE)
+          ASSERT_NO_FATAL_FAILURE(complete(0));
+        else if (status == EventStatus::RETIRED)
+          ASSERT_NO_FATAL_FAILURE(retire(0));
+        for (const auto order : kOrders) {
+          for (const int wave : {0, 1}) {
+            for (const bool write : {false, true}) {
+              for (const int lane : {-1, 7}) {
+                const Query access{wave, write, order, lane};
+                ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/12, /*bytes=*/6, access));
+                ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/17, /*bytes=*/15, access));
+                ASSERT_NO_FATAL_FAILURE(checkRange(/*addr=*/34, /*bytes=*/4, access));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
 
 TEST_F(LdsHistoryTest, DeterministicSoak) {
   // Use raw mt19937 output so the fixed seed also fixes the sequence across

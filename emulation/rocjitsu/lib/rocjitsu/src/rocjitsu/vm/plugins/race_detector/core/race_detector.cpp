@@ -75,48 +75,31 @@ void RaceDetector::retireEvent(EventId eventId) {
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
                                 MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
-  if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
-    return;
-  if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
-    return;
-  }
-
-  for (EventId eventId : ldsWriteEvents) {
-    if (events_.atomicLdsElementMatches(eventId, atomicBytes))
-      continue;
-    if (wave == events_.waveId(eventId)) {
-      // Operations in the same non-UNORDERED class complete in issue order.
-      // A completed event is safe for its owning wave regardless of class, but
-      // remains live for cross-wave checks until a barrier retires it.
-      const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
-      const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                      pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
-        continue;
-      }
-    }
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler({*byte, wave.value, lane, false, workgroupId, eventId});
-    }
-  }
+  validateAccess(addr, wave, lane, nBytes, currentMemoryOrder, /*isWrite=*/false, atomicBytes);
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                  MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
+  validateAccess(addr, wave, lane, nBytes, currentMemoryOrder, /*isWrite=*/true, atomicBytes);
+}
+
+void RaceDetector::validateAccess(int addr, WaveId wave, int lane, int nBytes,
+                                  MemoryOrderClass currentMemoryOrder, bool isWrite,
+                                  uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
-  if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
+  const auto &counts = isWrite ? byteReadCounts : byteWriteCounts;
+  if (!hasPotentialLdsConflict(addr, nBytes, counts, wave, currentMemoryOrder)) {
     return;
   }
 
-  for (EventId eventId : ldsReadEvents) {
+  const auto &events = isWrite ? ldsReadEvents : ldsWriteEvents;
+  for (EventId eventId : events) {
     if (events_.atomicLdsElementMatches(eventId, atomicBytes))
       continue;
     if (wave == events_.waveId(eventId)) {
-      // The LDS bytes are safe only when the two operations share a proven
-      // FIFO completion class, or an explicit wait completed the older event.
-      // This WAR check does not cover LDS write/write ordering.
+      // Same-wave accesses are safe after completion or within the same
+      // non-UNORDERED memory-order class. Completed evidence remains for peers.
       const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
@@ -125,7 +108,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     }
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler({*byte, wave.value, lane, true, workgroupId, eventId});
+      raceHandler({*byte, wave.value, lane, isWrite, workgroupId, eventId});
     }
   }
 }
