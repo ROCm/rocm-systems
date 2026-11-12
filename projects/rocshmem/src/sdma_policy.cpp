@@ -50,8 +50,6 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
   numChannels = static_cast<int>(envvar::sdma::num_channels);
-  // Not aborted on here: the group agrees on it below, so a rank with a bad value does not leave
-  // its peers waiting in the exchange.
   int status = initialSdmaStatus(sdmaEnabled, numChannels);
   if (status == kSdmaBadChannels) {
     LOG_ERROR("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);

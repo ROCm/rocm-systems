@@ -201,6 +201,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   }
 
   shm_comm = shmcomm;
+  owns_shm_comm = true;
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
@@ -295,9 +296,9 @@ __host__ void IpcOnImpl::ipcHostStop() {
     CHECK_HIP(hipFree(pes_with_ipc_avail));
   }
 
-  if (shm_comm != static_cast<MPI_Comm>(0) && shm_comm != MPI_COMM_NULL) {
+  if (owns_shm_comm) {
     mpilib_ftable_.Comm_free(&shm_comm);
-    shm_comm = static_cast<MPI_Comm>(0);
+    owns_shm_comm = false;
   }
 }
 
