@@ -15,14 +15,22 @@ target_link_libraries(
 if(BUILD_TESTING)
     add_executable(amdf_smoke_static tests/abi/native_c_smoke.c)
     target_compile_features(amdf_smoke_static PRIVATE c_std_11)
-    target_link_libraries(
-        amdf_smoke_static PRIVATE rocm_runtime::amdf_static
-    )
+    target_link_libraries(amdf_smoke_static PRIVATE rocm_runtime::amdf_static)
     add_test(NAME amdf.smoke.static COMMAND amdf_smoke_static)
     set_tests_properties(amdf.smoke.static PROPERTIES LABELS "host;abi")
     add_executable(amdf_layout tests/abi/amdf_layout.c)
     target_compile_features(amdf_layout PRIVATE c_std_11)
     target_link_libraries(amdf_layout PRIVATE rocm_runtime::runtime_headers)
-    add_test(NAME amdf.layout COMMAND amdf_layout)
-    set_tests_properties(amdf.layout PROPERTIES LABELS "host;abi")
+    add_test(
+        NAME amdf.layout
+        COMMAND
+            "${CMAKE_COMMAND}" -E env "RUSTC=${ROCM_RUNTIMES_RUSTC}"
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/abi/check_layout.py" --c-probe
+            "$<TARGET_FILE:amdf_layout>"
+    )
+    set_tests_properties(
+        amdf.layout
+        PROPERTIES LABELS "host;abi" WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()

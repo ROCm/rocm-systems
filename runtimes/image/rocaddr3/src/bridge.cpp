@@ -42,11 +42,11 @@ struct RocAddr3Output {
 
 namespace {
 
-void* Allocate(const rocr::ADDR_ALLOCSYSMEM_INPUT* input) {
+void *ADDR_API Allocate(const rocr::ADDR_ALLOCSYSMEM_INPUT *input) {
   return std::malloc(input->sizeInBytes);
 }
 
-ADDR_E_RETURNCODE Free(const rocr::ADDR_FREESYSMEM_INPUT* input) {
+ADDR_E_RETURNCODE ADDR_API Free(const rocr::ADDR_FREESYSMEM_INPUT *input) {
   std::free(input->pVirtAddr);
   return ADDR_OK;
 }
@@ -54,11 +54,12 @@ ADDR_E_RETURNCODE Free(const rocr::ADDR_FREESYSMEM_INPUT* input) {
 struct AddrOwner {
   rocr::ADDR_HANDLE handle = nullptr;
   ~AddrOwner() {
-    if (handle != nullptr) rocr::AddrDestroy(handle);
+    if (handle != nullptr)
+      rocr::AddrDestroy(handle);
   }
 };
 
-bool Create(const RocAddr3Input& request, AddrOwner& owner) {
+bool Create(const RocAddr3Input &request, AddrOwner &owner) {
   rocr::ADDR_CREATE_INPUT create = {};
   create.size = sizeof(create);
   create.chipEngine = CIASICIDGFXENGINE_ARCTICISLAND;
@@ -74,7 +75,7 @@ bool Create(const RocAddr3Input& request, AddrOwner& owner) {
   return status == ADDR_OK && owner.handle != nullptr;
 }
 
-bool ValidInput(const RocAddr3Input* request) {
+bool ValidInput(const RocAddr3Input *request) {
   return request != nullptr && request->mip_levels != 0 &&
          request->mip_levels <= 32 && request->width != 0 &&
          request->height != 0 && request->slices != 0 &&
@@ -83,16 +84,17 @@ bool ValidInput(const RocAddr3Input* request) {
          request->resource_type <= ADDR_RSRC_TEX_3D;
 }
 
-}  // namespace
+} // namespace
 
-extern "C" int rocaddr3_compute(const RocAddr3Input* request,
-                                  RocAddr3Output* result) noexcept {
+extern "C" int rocaddr3_compute(const RocAddr3Input *request,
+                                RocAddr3Output *result) noexcept {
   if (!ValidInput(request) || result == nullptr) {
     return 0;
   }
   try {
     AddrOwner owner;
-    if (!Create(*request, owner)) return 0;
+    if (!Create(*request, owner))
+      return 0;
 
     rocr::ADDR3_COMPUTE_SURFACE_INFO_INPUT surface = {};
     surface.size = sizeof(surface);
@@ -134,22 +136,24 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
     uint64_t smallest = std::numeric_limits<uint64_t>::max();
     int chosen = -1;
     for (int mode = ADDR3_LINEAR; mode < ADDR3_MAX_TYPE; ++mode) {
-      if ((modes.validModes.value & (1u << mode)) == 0) continue;
+      if ((modes.validModes.value & (1u << mode)) == 0)
+        continue;
       surface.swizzleMode = static_cast<Addr3SwizzleMode>(mode);
       rocr::ADDR3_COMPUTE_SURFACE_INFO_OUTPUT candidate = {};
       candidate.size = sizeof(candidate);
       if (rocr::Addr3ComputeSurfaceInfo(owner.handle, &surface, &candidate) !=
-          ADDR_OK || candidate.surfSize == 0) {
+              ADDR_OK ||
+          candidate.surfSize == 0) {
         continue;
       }
-      if (chosen < 0 ||
-          candidate.surfSize <= smallest ||
+      if (chosen < 0 || candidate.surfSize <= smallest ||
           candidate.surfSize - smallest <= smallest) {
         smallest = candidate.surfSize;
         chosen = mode;
       }
     }
-    if (chosen < 0) return 0;
+    if (chosen < 0)
+      return 0;
 
     surface.swizzleMode = static_cast<Addr3SwizzleMode>(chosen);
     std::array<rocr::ADDR3_MIP_INFO, 32> mip_info = {};
@@ -157,7 +161,8 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
     computed.size = sizeof(computed);
     computed.pMipInfo = mip_info.data();
     if (rocr::Addr3ComputeSurfaceInfo(owner.handle, &surface, &computed) !=
-        ADDR_OK || computed.surfSize == 0 || computed.baseAlign == 0) {
+            ADDR_OK ||
+        computed.surfSize == 0 || computed.baseAlign == 0) {
       return 0;
     }
     RocAddr3Output value = {};
@@ -179,14 +184,15 @@ extern "C" int rocaddr3_compute(const RocAddr3Input* request,
   }
 }
 
-extern "C" void* rocaddr3_mapper_create(const RocAddr3Input* request) noexcept {
+extern "C" void *rocaddr3_mapper_create(const RocAddr3Input *request) noexcept {
   if (!ValidInput(request)) {
     return nullptr;
   }
   try {
     AddrOwner owner;
-    if (!Create(*request, owner)) return nullptr;
-    void* handle = owner.handle;
+    if (!Create(*request, owner))
+      return nullptr;
+    void *handle = owner.handle;
     owner.handle = nullptr;
     return handle;
   } catch (...) {
@@ -194,25 +200,30 @@ extern "C" void* rocaddr3_mapper_create(const RocAddr3Input* request) noexcept {
   }
 }
 
-extern "C" void rocaddr3_mapper_destroy(void* mapper) noexcept {
+extern "C" void rocaddr3_mapper_destroy(void *mapper) noexcept {
   try {
-    if (mapper != nullptr) rocr::AddrDestroy(mapper);
+    if (mapper != nullptr)
+      rocr::AddrDestroy(mapper);
   } catch (...) {
     // Destruction cannot unwind through the Rust ABI.
   }
 }
 
-extern "C" int rocaddr3_mapper_map_row(void* mapper,
-                                        const RocAddr3Input* request,
-                                        uint32_t swizzle_mode, uint32_t mip,
-                                        uint32_t x, uint32_t y, uint32_t slice,
-                                        uint32_t count, uint64_t* offsets) noexcept {
-  if (mapper == nullptr || !ValidInput(request) || offsets == nullptr || count == 0 ||
-      swizzle_mode >= ADDR3_MAX_TYPE || mip >= request->mip_levels) {
+extern "C" int rocaddr3_mapper_map_row(void *mapper,
+                                       const RocAddr3Input *request,
+                                       uint32_t swizzle_mode, uint32_t mip,
+                                       uint32_t x, uint32_t y, uint32_t slice,
+                                       uint32_t count,
+                                       uint64_t *offsets) noexcept {
+  if (mapper == nullptr || !ValidInput(request) || offsets == nullptr ||
+      count == 0 || swizzle_mode >= ADDR3_MAX_TYPE ||
+      mip >= request->mip_levels) {
     return 0;
   }
-  const uint32_t width = (request->width >> mip) == 0 ? 1 : request->width >> mip;
-  const uint32_t height = (request->height >> mip) == 0 ? 1 : request->height >> mip;
+  const uint32_t width =
+      (request->width >> mip) == 0 ? 1 : request->width >> mip;
+  const uint32_t height =
+      (request->height >> mip) == 0 ? 1 : request->height >> mip;
   const uint32_t depth =
       request->resource_type == ADDR_RSRC_TEX_3D
           ? ((request->slices >> mip) == 0 ? 1 : request->slices >> mip)
@@ -242,7 +253,8 @@ extern "C" int rocaddr3_mapper_map_row(void* mapper,
       rocr::ADDR3_COMPUTE_SURFACE_ADDRFROMCOORD_OUTPUT output = {};
       output.size = sizeof(output);
       if (rocr::Addr3ComputeSurfaceAddrFromCoord(mapper, &input, &output) !=
-              ADDR_OK || output.bitPosition != 0) {
+              ADDR_OK ||
+          output.bitPosition != 0) {
         return 0;
       }
       offsets[index] = output.addr;
