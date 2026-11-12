@@ -18,6 +18,18 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     add_compile_options($<$<CONFIG:Debug>:-D_ITERATOR_DEBUG_LEVEL=0>)
+    # Must be set here, before add_subdirectory(rocclr) below, so rocclr and
+    # hipamd end up linked against the same MSVC runtime. hipamd/CMakeLists.txt
+    # sets this too (for standalone hipamd configs), but by then rocclr has
+    # already been configured with CMake's implicit default (/MD), causing a
+    # defaultlib 'MSVCRT' conflict and unresolved CRT externals at link time.
+    option(__HIP_USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically" OFF)
+    if(NOT __HIP_USE_MSVC_STATIC_RUNTIME)
+        set(__HIP_MSVC_RUNTIME_SUFFIX "DLL")
+    endif()
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${__HIP_MSVC_RUNTIME_SUFFIX}")
+    endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
         # CMake does not add these automatically.  Add them ourselves.
