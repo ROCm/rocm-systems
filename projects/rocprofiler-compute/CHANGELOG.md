@@ -72,7 +72,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
-* `--specs-correction` takes `name:value` pairs separated by spaces, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
 ### Removed
 
@@ -129,8 +129,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
-
-* Comma-separated `--specs-correction` pairs are deprecated and will be removed in a future release. Separate the pairs with spaces instead.
 
 ### Known issues
 

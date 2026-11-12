@@ -3,16 +3,12 @@
 
 import argparse
 import os
-import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
-
-# A --specs-correction pair starts with a spec name and ":"
-SPEC_PAIR_RE = re.compile(r"\s*[A-Za-z_]\w*\s*:")
 
 # Deprecated options by argparse dest: the option and what to use instead
 DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
@@ -57,12 +53,6 @@ def non_negative_int(value: str) -> int:
             f"must be a non-negative integer (0 means all), got {parsed}"
         )
     return parsed
-
-
-def spec_correction_pair(value: str) -> str:
-    if not SPEC_PAIR_RE.match(value):
-        raise argparse.ArgumentTypeError(f"expected name:value, got {value!r}")
-    return value
 
 
 def add_general_group(
@@ -842,12 +832,10 @@ Examples:
         "--specs-correction",
         metavar="<name:value>",
         nargs="+",
-        type=spec_correction_pair,
         help=(
-            "Correct system specs, given as name:value pairs separated by spaces.\n"
-            "Quote a value that contains spaces.\n"
-            "For example: --specs-correction num_xcd:4 cu_per_gpu:64.\n"
-            "Run -s/--specs to see the spec names."
+            "Correct the workload's system specs with name:value pairs.\n"
+            "The spec names are the column names in the workload's sysinfo.csv.\n"
+            "For example: --specs-correction num_xcd:4 cu_per_gpu:64"
         ),
     )
 

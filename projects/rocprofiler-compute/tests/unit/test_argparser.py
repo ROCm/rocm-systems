@@ -192,23 +192,6 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
-# analyze --specs-correction
-# =============================================================================
-
-
-def test_analyze_specs_correction_takes_space_separated_pairs():
-    args = build_args(["analyze", "--specs-correction", "num_xcd:4", "sbios:A, B:1"])
-    assert args.specs_correction == ["num_xcd:4", "sbios:A, B:1"]
-
-
-def test_analyze_specs_correction_rejects_value_without_name(capsys):
-    with pytest.raises(SystemExit) as exc:
-        build_args(["analyze", "--specs-correction", "num_xcd", "4"])
-    assert exc.value.code == 2
-    assert "expected name:value, got 'num_xcd'" in capsys.readouterr().err
-
-
-# =============================================================================
 # analyze --verify-deps
 # =============================================================================
 
