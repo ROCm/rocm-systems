@@ -10973,7 +10973,9 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
 typedef enum {
   AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
   AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
-  AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2         //!< Firmware chooses based on conditions
+  AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2,        //!< Firmware chooses based on conditions
+  AMDSMI_HAWK_INSERTION_PRIORITY_LAST =
+      AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC  //!< Highest valid priority value
 } amdsmi_hawk_insertion_priority_t;
 
 /**
@@ -11010,18 +11012,23 @@ typedef enum {
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
-  bool host_control_enabled;                            //!< Read-only: true if host has control of
-                                                        //!< Power Stabilization
-  bool enabled;                                         //!< Power Stabilization enabled
-  uint32_t power_floor;                                 //!< Power Floor, % of power limit (0-100)
-  uint32_t delay;                                       //!< Insertion delay, milliseconds
-  amdsmi_hawk_insertion_priority_t insertion_priority;  //!< HAWK insertion priority
-  bool ramp_enabled;                                    //!< Ramp Management enabled
-  uint32_t ramp_max_ramp_up_rate;                       //!< Max ramp-up rate, %PL/sec
-  uint32_t ramp_max_ramp_down_rate;                     //!< Max ramp-down rate, %PL/sec
-  uint32_t ramp_min_time_at_power_floor;                //!< Minimum time at Power Floor, seconds
-  uint32_t ramp_stop_delay;                             //!< Ramp stop delay, seconds
-  uint64_t reserved[11];                                //!< Reserved for future use
+  bool host_control_enabled;  //!< Read-only: true if host has control of
+                              //!< Power Stabilization
+  bool enabled;               //!< Power Stabilization enabled
+  uint32_t power_floor;       //!< Power Floor, % of power limit (0-100)
+  uint32_t delay;             //!< Insertion delay, milliseconds
+  amdsmi_hawk_insertion_priority_t
+      insertion_priority;                 //!< HAWK insertion priority. If the driver
+                                          //!< reports a value outside OPPORTUNISTIC..
+                                          //!< LAST, amdsmi_get_power_stabilization_info()
+                                          //!< returns ::AMDSMI_STATUS_UNEXPECTED_DATA
+                                          //!< and leaves this field unwritten
+  bool ramp_enabled;                      //!< Ramp Management enabled
+  uint32_t ramp_max_ramp_up_rate;         //!< Max ramp-up rate, %PL/sec
+  uint32_t ramp_max_ramp_down_rate;       //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_min_time_at_power_floor;  //!< Minimum time at Power Floor, seconds
+  uint32_t ramp_stop_delay;               //!< Ramp stop delay, seconds
+  uint64_t reserved[11];                  //!< Reserved for future use
 } amdsmi_power_stabilization_info_t;
 
 /**

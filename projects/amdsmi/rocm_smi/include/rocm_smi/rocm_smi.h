@@ -676,7 +676,9 @@ typedef struct {
 typedef enum {
   RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
   RSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
-  RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2         //!< Firmware chooses based on conditions
+  RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2,        //!< Firmware chooses based on conditions
+  RSMI_HAWK_INSERTION_PRIORITY_LAST =
+      RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC  //!< Highest valid priority value
 } rsmi_hawk_insertion_priority_t;
 
 /**

@@ -1261,28 +1261,25 @@ class StaticCommands:
                     ps_dict = {
                         "host_control_enabled": ps_info["host_control_enabled"],
                         "enabled": ps_info["enabled"],
-                        "power_floor": ps_info["power_floor"],
-                        "delay": ps_info["delay"],
+                        "power_floor": self.helpers.unit_format(
+                            self.logger, ps_info["power_floor"], "%"
+                        ),
+                        "delay": self.helpers.unit_format(self.logger, ps_info["delay"], "ms"),
                         "insertion_priority": ps_info["insertion_priority"].name,
                         "ramp_enabled": ps_info["ramp_enabled"],
-                        "ramp_max_ramp_up_rate": ps_info["ramp_max_ramp_up_rate"],
-                        "ramp_max_ramp_down_rate": ps_info["ramp_max_ramp_down_rate"],
-                        "ramp_min_time_at_power_floor": ps_info["ramp_min_time_at_power_floor"],
-                        "ramp_stop_delay": ps_info["ramp_stop_delay"],
+                        "ramp_max_ramp_up_rate": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_max_ramp_up_rate"], "%PL/sec"
+                        ),
+                        "ramp_max_ramp_down_rate": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_max_ramp_down_rate"], "%PL/sec"
+                        ),
+                        "ramp_min_time_at_power_floor": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_min_time_at_power_floor"], "sec"
+                        ),
+                        "ramp_stop_delay": self.helpers.unit_format(
+                            self.logger, ps_info["ramp_stop_delay"], "sec"
+                        ),
                     }
-                    if self.logger.is_human_readable_format():
-                        # Units are appended for human output only: --json/--csv
-                        # keep bare scalars so a `--json` dump stays replayable
-                        # via `set --power-stabilization-configure @<path>`.
-                        for key, unit in (
-                            ("power_floor", "%"),
-                            ("delay", "ms"),
-                            ("ramp_max_ramp_up_rate", "%PL/sec"),
-                            ("ramp_max_ramp_down_rate", "%PL/sec"),
-                            ("ramp_min_time_at_power_floor", "sec"),
-                            ("ramp_stop_delay", "sec"),
-                        ):
-                            ps_dict[key] = f"{ps_dict[key]} {unit}"
                     if self.logger.is_csv_format():
                         # Flatten completely to avoid a nested dict in a CSV cell
                         for key, value in ps_dict.items():

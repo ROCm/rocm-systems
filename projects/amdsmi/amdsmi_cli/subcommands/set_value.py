@@ -1109,10 +1109,18 @@ class SetValueCommands:
             "enabled": "enable",
             "ramp_enabled": "ramp_enable",
         }
+
         # JSON booleans (from the `--json` read-path dump) must become 0/1,
-        # not the strings "True"/"False".
+        # not the strings "True"/"False". Unit-bearing fields read back as
+        # unit_format()'s {"value": ..., "unit": ...} shape; unwrap to the
+        # bare value before building the KEY=VALUE token.
+        def _token_value(value):
+            if isinstance(value, dict) and "value" in value:
+                value = value["value"]
+            return int(value) if isinstance(value, bool) else value
+
         tokens = [
-            f"{read_to_write_key.get(key, key)}={int(value) if isinstance(value, bool) else value}"
+            f"{read_to_write_key.get(key, key)}={_token_value(value)}"
             for key, value in ps_entry.items()
         ]
 

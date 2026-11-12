@@ -417,17 +417,19 @@ class TestConfigurePowerStabilizationFromFileNpmNote(unittest.TestCase):
         return cmd
 
     def _write_ps_json(self, gpu_id=0):
+        # Mirrors the real `static --json` shape: unit-bearing fields come
+        # back as unit_format()'s {"value": ..., "unit": ...} dicts.
         entry = {
             "host_control_enabled": True,
             "enabled": True,
-            "power_floor": 80,
-            "delay": 0,
+            "power_floor": {"value": 80, "unit": "%"},
+            "delay": {"value": 0, "unit": "ms"},
             "insertion_priority": "DYNAMIC",
             "ramp_enabled": True,
-            "ramp_max_ramp_up_rate": 10,
-            "ramp_max_ramp_down_rate": 10,
-            "ramp_min_time_at_power_floor": 2,
-            "ramp_stop_delay": 1,
+            "ramp_max_ramp_up_rate": {"value": 10, "unit": "%PL/sec"},
+            "ramp_max_ramp_down_rate": {"value": 10, "unit": "%PL/sec"},
+            "ramp_min_time_at_power_floor": {"value": 2, "unit": "sec"},
+            "ramp_stop_delay": {"value": 1, "unit": "sec"},
         }
         data = {"gpu_data": [{"gpu": gpu_id, "power_stabilization": entry}]}
         fd, path = tempfile.mkstemp(suffix=".json")
@@ -446,6 +448,11 @@ class TestConfigurePowerStabilizationFromFileNpmNote(unittest.TestCase):
         args = types.SimpleNamespace(gpu=_FakeDeviceHandle(0))
 
         cmd._configure_power_stabilization_from_file(args, path, "0000:00:00.0", 0)
+
+        # The {"value": 80, "unit": "%"} dict from the dumped JSON must be
+        # unwrapped back to the bare int before reaching the setter.
+        power_floor_calls = [c for c in calls if c[1].name == "POWER_FLOOR"]
+        self.assertEqual(power_floor_calls, [(args.gpu, power_floor_calls[0][1], 80)])
 
         results = cmd.logger.output["power_stabilization_configure"]
         # host_control_enabled is read-only and silently skipped, leaving
@@ -535,7 +542,7 @@ class TestPrevalidatePowerStabilizationFile(unittest.TestCase):
         return cmd
 
     def _write_ps_json(self, gpu_ids):
-        entry = {"power_floor": 80}
+        entry = {"power_floor": {"value": 80, "unit": "%"}}
         data = {
             "gpu_data": [{"gpu": gpu_id, "power_stabilization": dict(entry)} for gpu_id in gpu_ids]
         }

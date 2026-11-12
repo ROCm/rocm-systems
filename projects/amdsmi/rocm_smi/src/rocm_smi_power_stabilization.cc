@@ -224,7 +224,7 @@ rsmi_status_t get_power_stabilization_info_internal(const std::string& base,
     return ret;
   }
   if (priority < RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC ||
-      priority > RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC) {
+      priority > RSMI_HAWK_INSERTION_PRIORITY_LAST) {
     // Out-of-range sysfs content -- either driver/firmware skew or a
     // malformed node. Reject here rather than propagating an unvalidated
     // value into an enum, which would later raise an uncaught ValueError
