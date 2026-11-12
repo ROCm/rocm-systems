@@ -3,8 +3,9 @@
 
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "mock_gpu_backend.hpp"
+
+#include <array>
 #include <cstdint>
-#include <cstring>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -2024,15 +2025,56 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
 
 namespace
 {
+template <typename T, size_t N>
+void
+expect_array_eq(const std::array<T, N>& got, const std::array<T, N>& expected)
+{
+    for(size_t i = 0; i < N; ++i)
+    {
+        EXPECT_EQ(got[i], expected[i]) << "index " << i;
+    }
+}
+
+// Compare fields. memcmp also compares padding, which amdclang does not clear.
 void
 expect_metrics_equal(const metrics& got, const metrics& expected)
 {
-    EXPECT_EQ(0, std::memcmp(&got, &expected, sizeof(got)));
+    EXPECT_EQ(got.current_socket_power, expected.current_socket_power);
+    EXPECT_EQ(got.average_socket_power, expected.average_socket_power);
+    EXPECT_EQ(got.memory_usage, expected.memory_usage);
+    EXPECT_EQ(got.hotspot_temperature, expected.hotspot_temperature);
+    EXPECT_EQ(got.edge_temperature, expected.edge_temperature);
+    EXPECT_EQ(got.gfx_activity, expected.gfx_activity);
+    EXPECT_EQ(got.umc_activity, expected.umc_activity);
+    EXPECT_EQ(got.mm_activity, expected.mm_activity);
+
+    for(size_t xcp = 0; xcp < got.xcp_stats.size(); ++xcp)
+    {
+        expect_array_eq(got.xcp_stats[xcp].vcn_busy, expected.xcp_stats[xcp].vcn_busy);
+        expect_array_eq(got.xcp_stats[xcp].jpeg_busy, expected.xcp_stats[xcp].jpeg_busy);
+    }
+
+    expect_array_eq(got.vcn_activity, expected.vcn_activity);
+    expect_array_eq(got.jpeg_activity, expected.jpeg_activity);
+
+    EXPECT_EQ(got.xgmi.link.width, expected.xgmi.link.width);
+    EXPECT_EQ(got.xgmi.link.speed, expected.xgmi.link.speed);
+    expect_array_eq(got.xgmi.data_acc.read, expected.xgmi.data_acc.read);
+    expect_array_eq(got.xgmi.data_acc.write, expected.xgmi.data_acc.write);
+
+    EXPECT_EQ(got.pcie.link.width, expected.pcie.link.width);
+    EXPECT_EQ(got.pcie.link.speed, expected.pcie.link.speed);
+    EXPECT_EQ(got.pcie.bandwidth.acc, expected.pcie.bandwidth.acc);
+    EXPECT_EQ(got.pcie.bandwidth.inst, expected.pcie.bandwidth.inst);
+
+    EXPECT_EQ(got.sdma_usage, expected.sdma_usage);
+    EXPECT_EQ(got.gfx_clock_mhz, expected.gfx_clock_mhz);
+    EXPECT_EQ(got.mem_clock_mhz, expected.mem_clock_mhz);
 }
 }  // namespace
 
-// get_metrics copies a field only when that bit is enabled. Compare the whole
-// struct so a field that was not requested cannot pass unnoticed.
+// get_metrics copies a field only when that bit is enabled. Compare every field
+// so one that was not requested cannot pass unnoticed.
 TEST_F(DeviceTest, enabled_bit_copies_only_power_activity_or_clock)
 {
     metrics raw      = CreateValidMetrics();
