@@ -796,10 +796,12 @@ static void acclNetRequestReadLocked(void) {
   pthread_cond_signal(&g.workCv);
 }
 
-// Untracked proxy ops still sending. An op whose stop never arrives (non-net
-// transports) stops counting after ACCL_NET_STUCK_US without a new one.
+// Untracked proxy ops still sending. Only net transports emit ProxyOp stop
+// (src/transport/net.cc), so an op that never stops belongs to a transport
+// without NIC traffic (shm/p2p memcpy, collnet): it stops counting after
+// ACCL_NET_STUCK_US without a new one.
 static int acclNetUntrackedActive(void) {
-  return g.untrackedLive > 0; // Unknown live work must never age into a clean window.
+  return g.untrackedLive > 0 && acclNetNowUs() - g.untrackedLastUs < ACCL_NET_STUCK_US;
 }
 
 static void acclNetFlagInflight(void) {
@@ -856,12 +858,17 @@ static int acclNetWaitReadLocked(void) {
   return !g.readPending;
 }
 
+static void acclNetAdoptBoundaryLocked(struct acclNetCommStats* st, const struct rcclAcclBoundaryInfo* info) {
+  int ok = info && info->version == RCCL_ACCL_BOUNDARY_VERSION;
+  st->boundarySupported = ok && info->supported && info->synchronize;
+  st->boundaryContext = ok ? info->context : NULL;
+  st->synchronize = ok ? info->synchronize : NULL;
+  st->boundarySucceeded = 0;
+}
+
 void acclNetBoundaryInfo(struct acclNetCommStats* st, const struct rcclAcclBoundaryInfo* info) {
   pthread_mutex_lock(&gNetMu);
-  st->boundarySupported = info && info->version == 1 && info->supported && info->synchronize;
-  st->boundaryContext = info ? info->context : NULL;
-  st->synchronize = info ? info->synchronize : NULL;
-  st->boundarySucceeded = 0;
+  acclNetAdoptBoundaryLocked(st, info);
   pthread_mutex_unlock(&gNetMu);
 }
 
@@ -883,7 +890,9 @@ static void acclNetStrictBoundary(struct acclNetCommStats* st) {
   int (*sync)(void*, int) = st->synchronize;
   void* context = st->boundaryContext;
   pthread_mutex_unlock(&gNetMu);
-  if (sync && st->boundarySupported) valid = sync(context, valid) == 0 && valid;
+  // Every rank must enter each exchange the others enter, so an unsupported
+  // rank still calls in and votes invalid; skipping would hang its peers.
+  if (sync) valid = sync(context, valid) == 0 && valid;
   else valid = 0;
   pthread_mutex_lock(&gNetMu);
   if (!valid) {
@@ -905,7 +914,7 @@ static void acclNetStrictBoundary(struct acclNetCommStats* st) {
     for (struct acclNetJob* j = g.head; j; j = j->next) j->unavailable = 1;
   }
   pthread_mutex_unlock(&gNetMu);
-  if (sync && st->boundarySupported) readOk = sync(context, valid && readOk) == 0 && readOk;
+  if (sync) readOk = sync(context, valid && readOk) == 0 && readOk;
   else readOk = 0;
   pthread_mutex_lock(&gNetMu);
   st->boundarySucceeded = valid && readOk;
@@ -913,8 +922,14 @@ static void acclNetStrictBoundary(struct acclNetCommStats* st) {
   pthread_mutex_unlock(&gNetMu);
 }
 
-void acclNetFinalBoundary(struct acclNetCommStats* st) {
+void acclNetFinalBoundary(struct acclNetCommStats* st, const struct rcclAcclBoundaryInfo* info) {
   if (!g.strict || st->finalBoundaryDone) return;
+  // The last launch may have been a P2P-only plan with no synchronize.
+  if (info) {
+    pthread_mutex_lock(&gNetMu);
+    acclNetAdoptBoundaryLocked(st, info);
+    pthread_mutex_unlock(&gNetMu);
+  }
   acclNetStrictBoundary(st);
   st->finalBoundaryDone = 1;
 }
@@ -1058,7 +1073,9 @@ int acclNetCollComplete(struct acclCommContext* ctx, struct acclNetCommStats* st
   job->st = st;
   job->before = cs->before;
   job->overlapped = cs->overlapped;
-  job->unavailable = cs->unavailable || !cs->completionVerified;
+  // Unverified completion (RCCL without the protocol) is reported, not
+  // invalidated: the report keeps such windows out of CLEAN.
+  job->unavailable = cs->unavailable;
   job->completionVerified = cs->completionVerified;
   job->coordinated = cs->coordinated;
   job->startUs = cs->startUs;

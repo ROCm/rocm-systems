@@ -120,7 +120,7 @@ ACCL_HIDDEN char* acclNetFinalize(struct acclNetCommStats* st, int* lost);
 
 // Event hooks.
 ACCL_HIDDEN void acclNetBoundaryInfo(struct acclNetCommStats*, const struct rcclAcclBoundaryInfo*);
-ACCL_HIDDEN void acclNetFinalBoundary(struct acclNetCommStats*);
+ACCL_HIDDEN void acclNetFinalBoundary(struct acclNetCommStats*, const struct rcclAcclBoundaryInfo*);
 ACCL_HIDDEN void acclNetRegistered(struct acclNetCollState*);
 ACCL_HIDDEN void acclNetKernelLaunch(struct acclNetCommStats* st);
 ACCL_HIDDEN void acclNetCollStart(struct acclNetCommStats* st, struct acclNetCollState* cs);

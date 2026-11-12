@@ -175,6 +175,9 @@ must enable it consistently. The measured NICs must be isolated from unrelated
 producers. Graphs, host-callback plans, grouped/P2P plans, symmetric/GPU-initiated
 operations, and CE/RMA paths are unsupported. Unsupported or unverified windows
 cannot produce CLEAN. Aborted runs can lose the final snapshot and report it.
+Every rank takes part in the boundary exchange of every plan that contains a
+collective, voting invalid when its plan is unsupported, so one rank's local
+state cannot leave its peers waiting; P2P-only plans take no part.
 
 The sequence is:
 
@@ -200,7 +203,8 @@ registration begins before GPU completion events are posted, and each actual
 proxy operation is counted before posting. Coll stop closes registration.
 The completion predicate waits for the registered count as well as all GPU
 channels and all observed proxy operations. Profiler ABI layouts are unchanged.
-Older RCCL builds without this protocol produce unverified counter windows.
+The events go only to this plugin (`ACCL-Profiler`). Older RCCL builds without
+this protocol produce unverified counter windows: still measured, never CLEAN.
 
 RDMA netlink STAT_GET reads bypass the sysfs lifespan cache. ethtool pause/PFC
 counters are stale context on ionic and never determine a collective verdict.
@@ -237,8 +241,9 @@ Configuration retained for passive compatibility:
 `net_tel_report.py OUTPUT --warmup 0 --trace trace.json` reports per-communicator,
 collective, and size. CLEAN requires registered/coordinated valid windows, all
 expected ranks, and at least three complete collective instances. Recognized
-loss/congestion produces NETWORK_SUSPECT; unclassified non-volume counter changes
-produce INCONCLUSIVE. Missing rank files cannot imply a healthy network.
+loss/congestion in any measured window, passive mode included, produces
+NETWORK_SUSPECT; unclassified non-volume counter changes produce INCONCLUSIVE.
+Missing rank files cannot imply a healthy network.
 
 The Perfetto trace has separate lanes for host-observed collective activity,
 NIC totals for that collective, and deduplicated raw hardware snapshots. Select

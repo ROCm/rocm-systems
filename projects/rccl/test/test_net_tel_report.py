@@ -399,3 +399,24 @@ def test_legacy_windows_without_completion_proof_cannot_be_clean(tmp_path):
         lines.append(json.dumps(r))
     rs, _ = load([_write(tmp_path, lines)], warmup=0)
     assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+
+
+def _passive(lines):
+    out = []
+    for line in lines:
+        r = json.loads(line)
+        r["net_counters"]["coordinated"] = False
+        out.append(json.dumps(r))
+    return out
+
+
+def test_passive_loss_is_still_suspect(tmp_path):
+    v = _verdict(tmp_path, _passive([_rec(i, rdma={"resp_rx_outouf_seq": 2}) for i in range(3)]))
+    assert v.verdict == "NETWORK_SUSPECT"
+    assert v.reason == "loss/retransmit (uncoordinated windows)"
+
+
+def test_passive_without_symptoms_cannot_be_clean(tmp_path):
+    v = _verdict(tmp_path, _passive([_rec(i) for i in range(4)]))
+    assert v.verdict == "INCONCLUSIVE"
+    assert "ACCL_NET_STRICT=1" in v.reason

@@ -852,7 +852,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_INFO) {
       acclNetBoundaryInfo(&ctx->net, (const rcclAcclBoundaryInfo*)eDescr->netPlugin.data);
     } else if (ctx->net.enabled && id == RCCL_ACCL_BOUNDARY_FINAL) {
-      acclNetFinalBoundary(&ctx->net);
+      acclNetFinalBoundary(&ctx->net, (const rcclAcclBoundaryInfo*)eDescr->netPlugin.data);
     } else if ((id == RCCL_ACCL_PROXY_BEGIN || id == RCCL_ACCL_PROXY_ADD) && eDescr->parentObj &&
                *(uint64_t*)eDescr->parentObj == ncclProfileColl) {
       auto* coll = (struct acclCollInfo*)eDescr->parentObj;

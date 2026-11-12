@@ -4092,7 +4092,7 @@ TEST(AcclNetAccuracy, StrictBoundaryCoordinatesBothSidesAndReusesSnapshot) {
         FakeNic nic; InstallFakeNic(&nic); gBoundaryCalls = 0;
         void* ctx = nullptr; int mask = 0;
         ASSERT_EQ(acclPluginInit(&ctx, 0xE2, &mask, "net", 1, 1, 0, nullptr), 0);
-        rcclAcclBoundaryInfo info = {1, 1, nullptr, FakeBoundary};
+        rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION, 1, nullptr, FakeBoundary};
         NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info);
         auto* first = NetLaunchColl(ctx, 0);
         nic.Add("tx_rdma_ucast_bytes", 4096); NetCompleteColl(ctx, first);
@@ -4131,7 +4131,7 @@ TEST(AcclNetAccuracy, StrictSnapshotRetainsLateHardwareCounterUpdates) {
         nic.counters = settled;
         InstallFakeNic(&nic); void* ctx = nullptr; int mask = 0;
         ASSERT_EQ(acclPluginInit(&ctx, 0xE3, &mask, "net", 1, 1, 0, nullptr), 0);
-        rcclAcclBoundaryInfo info = {1, 1, nullptr, FakeBoundary};
+        rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION, 1, nullptr, FakeBoundary};
         NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info);
         NetCompleteColl(ctx, NetLaunchColl(ctx, 0));
         NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_FINAL);
@@ -4152,7 +4152,7 @@ TEST(AcclNetAccuracy, StrictSnapshotRejectsCountersThatNeverSettle) {
         for (int i=0;i<40;i++) { auto values=nic.counters; values[0].second=i; nic.script.push_back(values); }
         InstallFakeNic(&nic); void* ctx=nullptr; int mask=0;
         ASSERT_EQ(acclPluginInit(&ctx,0xE4,&mask,"net",1,1,0,nullptr),0);
-        rcclAcclBoundaryInfo info={1,1,nullptr,FakeBoundary};
+        rcclAcclBoundaryInfo info={RCCL_ACCL_BOUNDARY_VERSION,1,nullptr,FakeBoundary};
         NetProtocolEvent(ctx,RCCL_ACCL_BOUNDARY_INFO,nullptr,&info);
         NetCompleteColl(ctx,NetLaunchColl(ctx,0));
         NetProtocolEvent(ctx,RCCL_ACCL_BOUNDARY_FINAL);
@@ -4171,7 +4171,7 @@ TEST(AcclNetAccuracy, StrictTimeoutInvalidatesTheReadBeforeAnyNextCollStart) {
     RUN_ISOLATED_TEST_WITH_ENV("AcclNetAccuracy.StrictTimeoutInvalidatesTheReadBeforeAnyNextCollStart", [&dir]() {
         FakeNic nic; InstallFakeNic(&nic); void* ctx=nullptr; int mask=0;
         ASSERT_EQ(acclPluginInit(&ctx,0xE5,&mask,"net",1,1,0,nullptr),0);
-        rcclAcclBoundaryInfo info={1,1,nullptr,FakeBoundary};
+        rcclAcclBoundaryInfo info={RCCL_ACCL_BOUNDARY_VERSION,1,nullptr,FakeBoundary};
         NetProtocolEvent(ctx,RCCL_ACCL_BOUNDARY_INFO,nullptr,&info);
         auto* coll=NetLaunchColl(ctx,0); nic.Add("tx_rdma_ucast_bytes",100);
         NetCompleteColl(ctx,coll);
@@ -4189,6 +4189,83 @@ TEST(AcclNetAccuracy, StrictTimeoutInvalidatesTheReadBeforeAnyNextCollStart) {
         EXPECT_TRUE(Has(records[0],"\"unavailable\":true"));
     }, {{"ACCL_PROFILER_OUTPUT_DIR",dir.path()}, {"ACCL_NET_COUNTERS","1"},
         {"ACCL_NET_STRICT","1"}, {"ACCL_NET_WAIT_MS","10"}, {"ACCL_NET_DEVICES","rdma0"}});
+}
+
+// supported is rank-local: an unsupported rank must still enter both exchanges
+// (voting invalid), or its peers block in the bootstrap allgather.
+TEST(AcclNetAccuracy, UnsupportedRankStillJoinsTheBoundary) {
+    ScopedProfilerDir dir("net_strict_unsupported");
+    RUN_ISOLATED_TEST_WITH_ENV("AcclNetAccuracy.UnsupportedRankStillJoinsTheBoundary", [&dir]() {
+        FakeNic nic; InstallFakeNic(&nic); gBoundaryCalls = 0;
+        void* ctx = nullptr; int mask = 0;
+        ASSERT_EQ(acclPluginInit(&ctx, 0xE7, &mask, "net", 1, 1, 0, nullptr), 0);
+        rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION, 0, nullptr, FakeBoundary};
+        NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info);
+        NetCompleteColl(ctx, NetLaunchColl(ctx, 0));
+        EXPECT_EQ(gBoundaryCalls, 2);
+        NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_FINAL, nullptr, &info);
+        EXPECT_EQ(gBoundaryCalls, 4);
+        ASSERT_EQ(acclPluginFinalize(ctx), 0); ClearNetHooks();
+        auto recs = CollRecords(ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xe7")));
+        ASSERT_EQ(recs.size(), 1u);
+        EXPECT_TRUE(Has(recs[0], "\"coordinated\":false"));
+        EXPECT_TRUE(Has(recs[0], "\"unavailable\":true"));
+    }, {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+        {"ACCL_NET_STRICT", "1"}, {"ACCL_NET_DEVICES", "rdma0"}});
+}
+
+// P2P-only plans are not launched on every rank: no synchronize, no exchange.
+// The final boundary brings its own and always takes part.
+TEST(AcclNetAccuracy, P2pPlanSkipsTheExchangeButFinalBoundaryJoins) {
+    ScopedProfilerDir dir("net_strict_p2p");
+    RUN_ISOLATED_TEST_WITH_ENV("AcclNetAccuracy.P2pPlanSkipsTheExchangeButFinalBoundaryJoins", [&dir]() {
+        FakeNic nic; InstallFakeNic(&nic); gBoundaryCalls = 0;
+        void* ctx = nullptr; int mask = 0;
+        ASSERT_EQ(acclPluginInit(&ctx, 0xE8, &mask, "net", 1, 1, 0, nullptr), 0);
+        rcclAcclBoundaryInfo p2p = {RCCL_ACCL_BOUNDARY_VERSION, 0, nullptr, nullptr};
+        NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_INFO, nullptr, &p2p);
+        ncclProfilerEventDescr_v5_t kl;
+        memset(&kl, 0, sizeof(kl));
+        kl.type = ncclProfileKernelLaunch;
+        void* h = nullptr;
+        ASSERT_EQ(acclPluginStartEvent(ctx, &h, &kl), 0);
+        EXPECT_EQ(gBoundaryCalls, 0);
+        rcclAcclBoundaryInfo fin = {RCCL_ACCL_BOUNDARY_VERSION, 1, nullptr, FakeBoundary};
+        NetProtocolEvent(ctx, RCCL_ACCL_BOUNDARY_FINAL, nullptr, &fin);
+        EXPECT_EQ(gBoundaryCalls, 2);
+        ASSERT_EQ(acclPluginFinalize(ctx), 0); ClearNetHooks();
+    }, {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+        {"ACCL_NET_STRICT", "1"}, {"ACCL_NET_DEVICES", "rdma0"}});
+}
+
+// Without the RCCL registration protocol the window is still measured:
+// flagged unverified, not unavailable.
+TEST(AcclNetAccuracy, UnverifiedCompletionIsReportedNotDropped) {
+    ScopedProfilerDir dir("net_unverified");
+    RUN_ISOLATED_TEST_WITH_ENV("AcclNetAccuracy.UnverifiedCompletionIsReportedNotDropped", [&dir]() {
+        FakeNic nic; InstallFakeNic(&nic);
+        void* ctx = nullptr; int mask = 0;
+        ASSERT_EQ(acclPluginInit(&ctx, 0xE9, &mask, "net", 1, 1, 0, nullptr), 0);
+        ncclProfilerEventDescr_v5_t kl;
+        memset(&kl, 0, sizeof(kl));
+        kl.type = ncclProfileKernelLaunch;
+        void* h = nullptr;
+        ASSERT_EQ(acclPluginStartEvent(ctx, &h, &kl), 0);
+        ncclProfilerEventDescr_v5_t cd;
+        MakeCollDescr(&cd, 1, 0, 1024);
+        void* coll = nullptr;
+        ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);  // no PROXY_BEGIN
+        ASSERT_EQ(acclPluginStopEvent(coll), 0);
+        nic.Add("tx_rdma_ucast_bytes", 77);
+        NetCompleteColl(ctx, coll);
+        ASSERT_EQ(acclPluginFinalize(ctx), 0); ClearNetHooks();
+        auto recs = CollRecords(ReadLines(NetOutputPath(ProfilerDirRoot(dir), 0, "0xe9")));
+        ASSERT_EQ(recs.size(), 1u);
+        EXPECT_TRUE(Has(recs[0], "\"completion_verified\":false"));
+        EXPECT_TRUE(Has(recs[0], "\"unavailable\":false"));
+        EXPECT_EQ(JsonNumber(recs[0], "tx_rdma_ucast_bytes"), 77.0);
+    }, {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}, {"ACCL_NET_COUNTERS", "1"},
+        {"ACCL_NET_DEVICES", "rdma0"}});
 }
 
 } // namespace RcclUnitTesting

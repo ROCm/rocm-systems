@@ -174,8 +174,16 @@ def pause_frames(net: dict) -> Tuple[int, int]:
     return rx, tx
 
 
+def measured(r: Rec) -> bool:
+    """A delta that belongs to this window alone (passive or strict)."""
+    return (bool(r.net) and not r.net.get('overlapped') and not r.net.get('unavailable')
+            and not r.net.get('counter_discontinuities'))
+
+
 def usable(r: Rec) -> bool:
-    return bool(r.net) and not r.net.get('overlapped') and not r.net.get('unavailable') and not r.net.get('counter_discontinuities') and r.net.get('completion_verified', False) and r.net.get('coordinated', False)
+    """Measured, completion-verified and coordinated: eligible for CLEAN."""
+    return (measured(r) and r.net.get('completion_verified', False)
+            and r.net.get('coordinated', False))
 
 
 def _hits(deltas, name):
@@ -186,10 +194,11 @@ def _hits(deltas, name):
 
 
 def verdicts(recs: List[Rec]) -> Dict[Tuple[str, str, int], Verdict]:
-    """Per (comm, coll, msg_size) verdict from clean windows only. Overlapped
-    windows hold other work; ethtool deltas are stale on ionic (about 5 s
-    refresh) and never drive a verdict. Every rank must contribute a clean
-    window: loss is often visible only on the receiver."""
+    """Per (comm, coll, msg_size) verdict. Loss or congestion in any measured
+    window (passive mode included) is NETWORK_SUSPECT. CLEAN needs coordinated,
+    completion-verified windows (ACCL_NET_STRICT=1) from every rank: loss is
+    often visible only on the receiver. Overlapped windows hold other work;
+    ethtool deltas are stale on ionic and never drive a verdict."""
     groups: Dict[Tuple[str, str, int], List[Rec]] = defaultdict(list)
     for r in recs:
         groups[(r.comm, r.coll, r.size)].append(r)
@@ -198,10 +207,11 @@ def verdicts(recs: List[Rec]) -> Dict[Tuple[str, str, int], Verdict]:
         rs = [r for r in all_rs if r.net is not None]
         if not rs:
             continue
-        good = [r for r in rs if usable(r)]
+        seen = [r for r in rs if measured(r)]
+        good = [r for r in seen if usable(r)]
         n_over = sum(1 for r in rs if r.net.get('overlapped'))
         n_unav = sum(1 for r in rs if r.net.get('unavailable'))
-        deltas = [(r, rdma_deltas(r.net)) for r in good]
+        deltas = [(r, rdma_deltas(r.net)) for r in seen]
         drivers = {}
         for name in list(NET_LOSS_COUNTERS) + list(NET_CONGESTION_COUNTERS):
             h = _hits(deltas, name)
@@ -217,9 +227,9 @@ def verdicts(recs: List[Rec]) -> Dict[Tuple[str, str, int], Verdict]:
         tx = sum(d.get('tx_rdma_ucast_bytes', 0) for _, d in deltas)
         traffic = sum(d.get(k, 0) for _, d in deltas for k in VOLUME)
         known = any('tx_rdma_ucast_bytes' in d for _, d in deltas)
-        pauses = [pause_frames(r.net) for r in good]
-        v = Verdict('CLEAN', len(rs), len(good), n_over, n_unav,
-                    tx / len(good) if good else 0.0, drivers, other,
+        pauses = [pause_frames(r.net) for r in seen]
+        v = Verdict('CLEAN', len(rs), len(seen), n_over, n_unav,
+                    tx / len(seen) if seen else 0.0, drivers, other,
                     sum(p[0] for p in pauses), sum(p[1] for p in pauses),
                     len(all_rs) - len(rs))
         loss = [k for k in drivers if k in NET_LOSS_COUNTERS]
@@ -229,19 +239,24 @@ def verdicts(recs: List[Rec]) -> Dict[Tuple[str, str, int], Verdict]:
         for r in good:
             by_sn[r.sn].add(r.rank)
         complete_sns = sum(expected <= ranks for ranks in by_sn.values())
-        if len(good) < MIN_USABLE or 2 * len(good) < len(rs):
+        passive = '' if all(usable(r) for r, d in deltas
+                            if any(d.get(k, 0) > 0 for k in drivers)) else ' (uncoordinated windows)'
+        if len(seen) < MIN_USABLE or 2 * len(seen) < len(rs):
             v.verdict = 'INCONCLUSIVE'
-            v.reason = f"{len(good)}/{len(rs)} usable ({n_over} overlapped, {n_unav} unavailable)"
+            v.reason = f"{len(seen)}/{len(rs)} usable ({n_over} overlapped, {n_unav} unavailable)"
         elif not known and not drivers:
             # Counter names are ionic's; another driver would read as clean.
             v.verdict = 'INCONCLUSIVE'
             v.reason = 'unknown counter names (not ionic)'
         elif loss:
             v.verdict = 'NETWORK_SUSPECT'
-            v.reason = 'loss/retransmit'
+            v.reason = 'loss/retransmit' + passive
         elif drivers:
             v.verdict = 'NETWORK_SUSPECT'
-            v.reason = 'congestion signalled (ECN/CNP), no loss'
+            v.reason = 'congestion signalled (ECN/CNP), no loss' + passive
+        elif not good:
+            v.verdict = 'INCONCLUSIVE'
+            v.reason = 'no symptoms, but CLEAN needs coordinated windows (ACCL_NET_STRICT=1)'
         elif unseen:
             v.verdict = 'INCONCLUSIVE'
             v.reason = 'no clean window on rank(s) ' + ','.join(str(rk) for rk in unseen)
@@ -405,8 +420,10 @@ def build_trace(recs: List[Rec]) -> dict:
                     if v and (k in NET_LOSS_COUNTERS or k in NET_CONGESTION_COUNTERS)}
         unclassified = {k: v for k, v in d.items() if v and k not in NET_LOSS_COUNTERS and k not in NET_CONGESTION_COUNTERS and k not in VOLUME_ALL}
         quality = 'overlapped' if n.get('overlapped') else (
-            'unavailable' if not usable(r) else ('suspect' if symptoms else ('unclassified' if unclassified else 'window')))
-        color = 'grey' if quality in ('overlapped', 'unavailable') else ('terrible' if symptoms else ('bad' if unclassified else 'good'))
+            'unavailable' if not measured(r) else ('suspect' if symptoms else (
+                'unclassified' if unclassified else ('window' if usable(r) else 'uncoordinated'))))
+        color = 'grey' if quality in ('overlapped', 'unavailable') else (
+            'terrible' if symptoms else ('bad' if unclassified else ('good' if quality == 'window' else 'yellow')))
         args = {'hardware_ucast_tx_bytes': d.get('tx_rdma_ucast_bytes'),
                 'hardware_CTS_tx_bytes': d.get('tx_rdma_ccl_cts_bytes', 0),
                 'software_payload_tx_bytes': sum(x['tx_bytes'] for x in n['sw']) if n.get('sw') else None,
@@ -456,7 +473,7 @@ def build_trace(recs: List[Rec]) -> dict:
                            'pid': pid, 'tid': base + 2, 'ts': snap['read_start_us'] - zero,
                            'dur': max(0, snap['read_end_us'] - snap['read_start_us']),
                            'cname': 'thread_state_iowait', 'args': snap})
-        if usable(r):
+        if measured(r):
             events.append({'ph': 'C', 'cat': 'interval_totals',
                            'name': f'rank {r.rank} totals per collective · pid {r.pid}' + (f' · {r.comm}' if multi_comm else ''),
                            'pid': pid, 'ts': (after['read_end_us'] if after else n['after_ts_us']) - zero,

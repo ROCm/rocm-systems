@@ -542,13 +542,30 @@ ncclResult_t ncclProfilerStopCollApiEvent() {
   return ncclSuccess;
 }
 
+// Read once: these run per proxy op.
 static bool acclCountersRequested() {
-  const char* e = getenv("ACCL_NET_COUNTERS");
-  return e && strcmp(e, "1") == 0;
+  static const bool on = [] {
+    const char* e = getenv("ACCL_NET_COUNTERS");
+    return e && strcmp(e, "1") == 0;
+  }();
+  return on;
+}
+
+static bool acclStrictRequested() {
+  static const bool on = [] {
+    const char* e = getenv("ACCL_NET_STRICT");
+    return e && strcmp(e, "1") == 0;
+  }();
+  return on;
+}
+
+// The protocol ids ride on NetPlugin events: only the ACCL plugin knows them.
+static bool acclPluginLoaded() {
+  return ncclProfiler && ncclProfiler->name && strcmp(ncclProfiler->name, "ACCL-Profiler") == 0;
 }
 
 ncclResult_t ncclProfilerAcclNotify(struct ncclComm* comm, int64_t id, void* parent, void* data) {
-  if (!ncclProfiler || !comm->profilerContext || !acclCountersRequested()) return ncclSuccess;
+  if (!acclPluginLoaded() || !comm->profilerContext || !acclCountersRequested()) return ncclSuccess;
   ncclProfilerEventDescr_t e = {};
   e.type = ncclProfileNetPlugin;
   e.rank = comm->rank;
@@ -573,7 +590,9 @@ static int acclSynchronizeBoundary(void* context, int locallyValid) {
 
 ncclResult_t ncclProfilerAcclFinalizeBoundary(struct ncclComm* comm) {
   if (!acclCountersRequested()) return ncclSuccess;
-  return ncclProfilerAcclNotify(comm, RCCL_ACCL_BOUNDARY_FINAL, nullptr, nullptr);
+  // Every rank destroys the comm, so every rank takes part.
+  rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION, 1, comm, acclSynchronizeBoundary};
+  return ncclProfilerAcclNotify(comm, RCCL_ACCL_BOUNDARY_FINAL, nullptr, &info);
 }
 
 ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cudaStream_t stream) {
@@ -603,18 +622,21 @@ ncclResult_t ncclProfilerStartKernelLaunchEvent(struct ncclKernelPlan* plan, cud
     }
 
   startKernelLaunchEvent:
-    if ((eActivationMask_ & ncclProfileKernelLaunch) && acclCountersRequested()) {
+    if ((eActivationMask_ & ncclProfileKernelLaunch) && acclCountersRequested() && acclPluginLoaded()) {
       auto* first = ncclIntruQueueHead(&plan->collTaskQueue);
       const char* oob = getenv("NCCL_OOB_NET_ENABLE");
-      rcclAcclBoundaryInfo info = {1,
+      // supported is rank-local (e.g. isHostCbEnq), so it is a vote, never a
+      // reason to skip the exchange. Every rank of the comm launches each
+      // collective plan; P2P-only plans are not launched on every rank, so
+      // they carry no synchronize and never take part.
+      rcclAcclBoundaryInfo info = {RCCL_ACCL_BOUNDARY_VERSION,
         !plan->persistent && !plan->isHostCbEnq && !plan->isSymColl &&
         !plan->isCeColl && !plan->isRma && first && !first->next &&
         ncclIntruQueueEmpty(&plan->p2pTaskQueue) && plan->comm->intraRanks == 1 &&
-        (!oob || strcmp(oob, "0") == 0), plan->comm, acclSynchronizeBoundary};
-      const char* strict = getenv("ACCL_NET_STRICT");
+        (!oob || strcmp(oob, "0") == 0), plan->comm, first ? acclSynchronizeBoundary : nullptr};
       // In strict diagnostic mode previous GPU work must retire before the
       // plugin drains proxy work and performs the distributed boundary.
-      if (info.supported && strict && strcmp(strict, "1") == 0)
+      if (info.supported && acclStrictRequested())
         CUDACHECK(cudaStreamSynchronize(stream));
       NCCLCHECK(ncclProfilerAcclNotify(plan->comm, RCCL_ACCL_BOUNDARY_INFO, nullptr, &info));
     }
