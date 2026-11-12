@@ -143,6 +143,7 @@ pub(crate) struct TestDriver {
     kind: EndpointKind,
     lifetime: DriverContextLifetime,
     host_registration: bool,
+    owned_allocation: bool,
     pub(crate) advice_enabled: bool,
     pub(crate) advice_prefetch_gate: Option<Arc<(std::sync::Barrier, std::sync::Barrier)>>,
     pub(crate) advice_calls: AtomicUsize,
@@ -315,6 +316,7 @@ impl TestDriver {
             kind,
             lifetime,
             host_registration: false,
+            owned_allocation: false,
             advice_enabled: false,
             advice_prefetch_gate: None,
             advice_calls: AtomicUsize::new(0),
@@ -374,6 +376,11 @@ impl TestDriver {
                 detail: "test event wait-start lock poisoned",
             })?;
         Ok(state.waiters != 0)
+    }
+
+    pub(crate) fn with_owned_allocation(mut self) -> Self {
+        self.owned_allocation = true;
+        self
     }
 
     pub(crate) fn with_host_registration(mut self) -> Self {
@@ -585,17 +592,30 @@ impl AllocationOperations for TestDriver {
 
     fn allocate_owned(
         &self,
-        _: &Self::DeviceState,
-        _: &[&Self::DeviceState],
-        _: MemoryKind,
-        _: u64,
-        _: u64,
-        _: DeviceAccess,
+        device: &Self::DeviceState,
+        peers: &[&Self::DeviceState],
+        kind: MemoryKind,
+        size: u64,
+        alignment: u64,
+        _permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error> {
-        Err(Error::Operation {
-            kind: ErrorKind::Unsupported,
-            detail: "test driver has no owned allocation",
-        })
+        if !self.owned_allocation || kind != MemoryKind::System || !peers.is_empty() {
+            return Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "unsupported test allocation",
+            });
+        }
+        let host = crate::memory::host::HostAllocation::allocate(size, alignment)?;
+        let info = host.info();
+        let backing = host.registration_lease()?;
+        Ok(Owned::new(TestAllocation {
+            id: device.id,
+            host_address: info.host_address,
+            device_address: info.host_address as u64,
+            size,
+            released: false,
+            backing: Some(backing),
+        })?)
     }
 
     /// # Safety
