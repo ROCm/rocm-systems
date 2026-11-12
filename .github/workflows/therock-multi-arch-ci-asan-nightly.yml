@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     with:
       build_variant: "asan"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
@@ -37,7 +37,7 @@ jobs:
       build_jax: false
       linux_amdgpu_families: "gfx94X,gfx950,gfx125X"
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
       # event_name tells TheRock's skip filter this is a scheduled run with no
       # meaningful diff, so it always runs CI instead of trying to diff files.
       external_repo: >-
@@ -71,7 +71,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -81,7 +81,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     permissions:
       contents: read
       id-token: write
@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+          ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

@@ -34,6 +34,7 @@
       "--log-trace",
       "--enable-code-coverage",
       "--enable-mpi-tests",
+      "--enable-rccl-ep-tests",
       "--no_clean"
     ],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=OFF -DBITCODE_LIB_ARCH=gfx950",
@@ -45,6 +46,25 @@
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
       }
+    },
+    "rccl_ep_argument_checks": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "RcclEp_CreateRejectsOutOfRangeArguments",
+          "description": "Reject invalid rccl_ep create arguments and accept valid single-rank and minimum shapes",
+          "test_filter": "RcclEpDispatchCombineTest.CreateRejectsOutOfRangeArguments"
+        }
+      ]
     },
     "shm_comprehensive": {
       "extends": "default",
@@ -3854,7 +3874,7 @@
       "num_gpus": 1,
       "timeout": 600,
       "env_variables": {
-        "ARCH": "gfx1250"
+        "ARCH": "gfx950"
       },
       "tests": [
         {
@@ -3909,9 +3929,29 @@
           }
         }
       ]
+    },
+    "net_ib_transfer_max_msg": {
+      "extends": "net_ib_transfer",
+      "description": "Same InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, so the 16 MiB transfer is posted as several work requests.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
+    },
+    "gin_device_get_flush_max_msg": {
+      "extends": "gin_device_get_flush",
+      "description": "Same GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE at 1 MiB, below the 4 MiB get.",
+      "env_variables": {
+        "RCCL_IB_MAX_MSG_SIZE": "1048576"
+      }
     }
   },
   "test_suites": [
+    {
+      "name": "RCCL EP Create Argument Checks",
+      "description": "Eight-rank single-node rccl_ep argument validation with bounded initialization",
+      "config": "rccl_ep_argument_checks",
+      "enabled": true
+    },
     {
       "name": "SHM Tests - Complete Suite",
       "description": "All shared memory transport tests (single node)",
@@ -4540,6 +4580,18 @@
       "name": "GIN Device MPI - Get/Flush Visibility",
       "description": "GIN proxy device-side get + flush / flushAsync + wait visibility and a put burst over RoCE across two nodes",
       "config": "gin_device_get_flush",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (1 MiB post cap)",
+      "description": "InfiniBand transfer tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "net_ib_transfer_max_msg",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Get/Flush Visibility (1 MiB post cap)",
+      "description": "GIN get/flush tests with RCCL_IB_MAX_MSG_SIZE=1 MiB",
+      "config": "gin_device_get_flush_max_msg",
       "enabled": true
     }
   ]

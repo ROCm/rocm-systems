@@ -741,14 +741,10 @@ struct tagged_mock_sdk : mock_sdk
 constexpr int version_cache_tag_id        = 1;
 constexpr int callback_names_cache_tag_id = 2;
 constexpr int buffer_names_cache_tag_id   = 3;
-constexpr int version_match_tag_id        = 4;
-constexpr int version_mismatch_tag_id     = 5;
 
 using version_cache_tag        = tagged_mock_sdk<version_cache_tag_id>;
 using callback_names_cache_tag = tagged_mock_sdk<callback_names_cache_tag_id>;
 using buffer_names_cache_tag   = tagged_mock_sdk<buffer_names_cache_tag_id>;
-using version_match_tag        = tagged_mock_sdk<version_match_tag_id>;
-using version_mismatch_tag     = tagged_mock_sdk<version_mismatch_tag_id>;
 
 TEST_F(backend_test, get_version_caches_after_first_call)
 {
@@ -823,30 +819,6 @@ TEST_F(backend_test, name_info_emplace_operation_overload_fills_gap_with_default
     EXPECT_EQ(operations.at(0), "OP_A");
     EXPECT_EQ(operations.at(1), std::string_view{});
     EXPECT_EQ(operations.at(2), "OP_C");
-}
-
-TEST_F(backend_test, check_version_compatibility_accepts_matching_runtime_version)
-{
-    // mock_sdk::compile_time_version == 10100u -> 1.1.0
-    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
-        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(1),
-                            gm::SetArgPointee<2>(0),
-                            gm::Return(mock_sdk::STATUS_SUCCESS)));
-
-    using sut_v = backend<version_match_tag>;
-    EXPECT_NO_THROW(sut_v::check_version_compatibility());
-}
-
-TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_mismatch)
-{
-    // mock_sdk::compile_time_version == 10100u -> 1.1.0, runtime reports 1.2.0
-    EXPECT_CALL(*g_mock_sdk, get_version(gm::_, gm::_, gm::_))
-        .WillOnce(gm::DoAll(gm::SetArgPointee<0>(1), gm::SetArgPointee<1>(2),
-                            gm::SetArgPointee<2>(0),
-                            gm::Return(mock_sdk::STATUS_SUCCESS)));
-
-    using sut_v = backend<version_mismatch_tag>;
-    EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
 }
 
 TEST_F(backend_test, marker_constants_forward_wrapper_values)

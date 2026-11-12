@@ -4,8 +4,9 @@
 // AVX2 vector INT8/INT4 dot products and staged integer saturation.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -30,6 +31,7 @@ void dot(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
     auto vb = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane));
     auto acc = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane));
     auto sum = _mm256_setzero_si256();
+    RJ_ARITH_UNROLL(4)
     for (int shift = 0; shift < 16; shift += Bits) {
       // Pair corresponding fields in the low and high halfwords.
       auto x = _mm256_and_si256(_mm256_srl_epi32(va, _mm_cvtsi32_si128(shift)), fields);

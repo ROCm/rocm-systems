@@ -233,6 +233,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                 ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                 struct rcclCollDecision* decision);
+// Broadcast selection: DDA LL -> LL128 (gfx1250; LL also on IPC with
+// RCCL_DDA_BC_ALLOW_IPC=1), else a native-algo placeholder (enqueue unchanged).
+// root is checked only when query=false.
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
@@ -445,6 +450,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName)
 // Decide the host-side value of comm->cheapPostSendFenceOff.
 // Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
 // __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+// Simple honors the result on every arch. LL128 honors it only where FIFO
+// stores are system scope (RCCL_LL_FIFO_SYS_SCOPE, gfx1250) and otherwise
+// always uses the full fence.
 //   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
 //                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
 //                          gfx1250 = 1250).
@@ -524,7 +532,6 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
                             struct ncclTaskColl* collHead, int nCollTasks);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);

@@ -373,6 +373,9 @@ class VirtualGPU : public device::VirtualDevice {
     //! True if the GPU may still be working on the last use of the signal
     virtual bool IsBusy(const ProfilingSignal* signal) const = 0;
 
+    //! The signal's last use is known complete from host bookkeeping, without reading it
+    virtual bool IsKnownRetired(const ProfilingSignal* signal) const { return false; }
+
     //! The operations consuming the waits of the previous WaitingSignal call have been submitted
     virtual void NoteWaitsSubmitted() {}
 
@@ -436,6 +439,7 @@ class VirtualGPU : public device::VirtualDevice {
     hsa_status_t SetAsyncHandler(ProfilingSignal* signal, Timestamp* ts,
                                  hsa_signal_value_t init_value) override;
     bool IsBusy(const ProfilingSignal* signal) const override;
+    bool IsKnownRetired(const ProfilingSignal* signal) const override;
     void NoteWaitsSubmitted() override;
     void NoteGpuWait(ProfilingSignal* signal) override;
 
@@ -568,12 +572,28 @@ class VirtualGPU : public device::VirtualDevice {
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
-                              bool device_mem_ring_buf) {
+                              bool device_mem_ring_buf, uint32_t rest = 0,
+                              AqlPacket* aql_loc = nullptr) {
         if (!HasMetadataQueue()) {
           return;
         }
         auto* dst = static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize;
         FillMetadata(packet, header, dst, use_movdir64b, device_mem_ring_buf);
+
+        // For Format 4 (DISPATCH_LD), set the launch_descriptor pointer in the AQL packet
+        // to point to the launch_descriptor structure in the metadata packet
+        if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+          hsa_amd_packet_type8_t amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+          if (amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
+            auto* metadata = GetMetadataPacket(index);
+            if (metadata != nullptr && aql_loc != nullptr) {
+              // Set the pointer in both the local packet copy and the queue location
+              auto* launch_desc = const_cast<amd_launch_descriptor_t*>(&metadata->launch_descriptor);
+              packet->launch_descriptor = launch_desc;
+              aql_loc->launch_descriptor = launch_desc;
+            }
+          }
+        }
       }
 
       //! Build the metadata-prefetch packet for a captured (graph) dispatch into a
@@ -803,6 +823,13 @@ class VirtualGPU : public device::VirtualDevice {
    * @return bool true if Wait returned successfully, false otherwise
    */
   bool releaseGpuMemoryFence(bool skip_copy_wait = false);
+  //! An armed gate signal for a graph end marker (DEBUG_CLR_GRAPH_FAST_LAUNCH) from the device's
+  //! pool, nullptr if none
+  ProfilingSignal* AcquireGateSignal();
+  //! Issues the pending fork wait (DEBUG_CLR_GRAPH_FAST_LAUNCH) as a barrier without signal
+  void FlushPendingForkWait();
+  //! Drops the pending fork wait and its reference
+  void ReleasePendingForkWait();
 
   hsa_agent_t gpu_device() const { return gpu_device_; }
   hsa_queue_t* gpu_queue() { return gpu_queue_; }
@@ -931,7 +958,13 @@ class VirtualGPU : public device::VirtualDevice {
   void adjustHeader(uint16_t& header);
 
   //! Dispatches a barrier with blocking HSA signals
-  void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
+  void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet,
+                            hsa_amd_packet_type8_t amd_format = 0);
+
+  //! Select ext-dispatch AQL packet format. Format 4 (DISPATCH_LD) is used only when
+  //! dynamic data prefetch is enabled and the device reports ucode support.
+  hsa_amd_packet_type8_t SelectExtDispatchAmdFormat(
+      bool ext_dispatch_packet, const amd::NDRangeKernelCommand* vcmd) const;
 
   //! Dispatch (or capture, when graph-capturing) a kernel dispatch packet.
   //! Handles both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t.
@@ -940,6 +973,7 @@ class VirtualGPU : public device::VirtualDevice {
                                                        bool attach_signal = false);
 
   //! Fast-path dispatch: pre-built flat contiguous buffer
+  bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) override;
   bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
                                   const std::vector<uint32_t>& validFullHeaders,
                                   amd::AccumulateCommand* vcmd = nullptr,
@@ -955,7 +989,7 @@ class VirtualGPU : public device::VirtualDevice {
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
   void dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal = false,
-                             hsa_signal_t signal = hsa_signal_t{0});
+                             hsa_signal_t signal = hsa_signal_t{0}, bool depSignalsSet = false);
   void dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveDepSignal = false,
                                   hsa_signal_t signal = hsa_signal_t{0},
                                   hsa_signal_value_t value = 0, hsa_signal_value_t mask = 0,
@@ -1111,6 +1145,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Retained ProfilingSignal of that last barrier; a coalesced record reuses it
   //! as its HwEvent so query/sync observe correct readiness. Released on reset.
   void* last_barrier_hw_event_ = nullptr;
+  //! DEBUG_CLR_GRAPH_FAST_LAUNCH: a fork wait of the launch whose end marker is
+  //! pending_fork_anchor_, held for that launch's first ext dispatch on this queue
+  ProfilingSignal* pending_fork_wait_ = nullptr;
+  const amd::Command* pending_fork_anchor_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;                //!< Active queue associated with a vgpu
   bool device_mem_ring_buf_ = false;           //!< Queue ring buffer is in device memory

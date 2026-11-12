@@ -346,6 +346,15 @@ VmTranslationResult GpuVmAccess::translate(uint64_t address, std::size_t size,
   return translated;
 }
 
+std::shared_ptr<const PrtRanges> GpuVmAccess::nonresident_prt_ranges() const {
+  if (!access_state_)
+    return {};
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid || !access_state_->translator)
+    return {};
+  return access_state_->translator->nonresident_prt_ranges();
+}
+
 bool GpuVmAccess::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
                                            Mtype instruction_mtype, Mtype expected_mtype) const {
   if (stores.size() < 2 || stores.size() > VmRamDwordStore::kMaxBatch || !access_state_)

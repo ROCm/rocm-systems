@@ -116,10 +116,14 @@ and an incoming increment of `U` leave at most `C-U` old counter units before
 admission, including when the incoming producer itself is unordered. Younger operations from a
 different completion class cannot prove readiness. Capacities come from the
 target's counter fields (for example, 15 for legacy CDNA LGKM and 63 for VMEM).
-SMEM, GDS, exports, messages and legacy CDNA FLAT do not acquire a FIFO guarantee
-from sharing a counter; their results require a zero wait, even after a nonzero
-partial wait. CDNA5 async load and store completion classes are separate;
-async barrier arrive orders with async loads. Proven completion also releases the
+SMEM, messages and legacy CDNA FLAT require a zero wait for their results.
+On RDNA3, RDNA 3.5 and RDNA4, a partial EXP wait can release an older export
+when enough younger exports of the same type have issued. RDNA4 groups ordinary MRT and
+depth exports in one FIFO and orders dual-source blends independently. Other targets require
+a zero EXP wait for exports. On RDNA1/2 a partial LGKM wait can release an older GDS result when
+enough younger GDS operations have issued. LDS operations use a different
+completion order on the same counter. CDNA5 async loads and stores use separate
+completion classes. Async barrier arrive orders with async loads. Proven completion also releases the
 associated replay translation prefix.
 
 FLAT admission is address-dependent, so the checker applies its memory-counter
