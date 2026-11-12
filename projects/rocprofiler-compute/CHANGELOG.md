@@ -89,10 +89,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--bench-only` → `--roofline-bench-only`
   * `--device` → `--roofline-device`
 
-* In profile mode, `--roofline` now works the same as `-b 4`:
-  * It can be combined with `-b` to specify additional blocks. For example, `-b 2 --roofline` profiles blocks 2 and 4.
-  * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
-
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
