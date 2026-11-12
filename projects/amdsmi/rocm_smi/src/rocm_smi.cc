@@ -6788,8 +6788,8 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
 
   GET_DEV_FROM_INDX
-  // Write the current mode too: drivers that support it cancel a different mode
-  // requested earlier, which would otherwise apply at the next driver reload.
+  // Write the current mode too: it cancels a different mode requested earlier,
+  // which would otherwise apply at the next driver reload.
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 

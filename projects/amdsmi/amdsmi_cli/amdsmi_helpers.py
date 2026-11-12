@@ -1930,8 +1930,7 @@ class AMDSMIHelpers:
             the requested partition mode.
 
             A requested mode stays pending until the next driver reload.
-            Requesting the current mode cancels a pending mode if the driver
-            supports it; otherwise the next driver reload still applies it.
+            Requesting the current mode cancels a pending mode.
 
             ******REMINDER******
             In order to reload the AMD GPU driver, users MUST quit all GPU

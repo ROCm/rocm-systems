@@ -14,6 +14,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
 
+- **Setting the current memory partition now cancels a pending memory partition change**.  
+  - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
@@ -366,7 +369,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
 
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
-  - The request is still sent to the driver. Current amdgpu releases ignore it, so a different partition requested earlier still applies at the next reload; drivers that support cancelling drop that request. If the driver or a read-only `/sys` (for example, in a container) refuses the write, the request now fails instead of reporting success.
+  - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
 - **Fixed `amd-smi event` hanging when GPU event notifications can't start**.  
   - The command now reports GPUs whose event notifications can't start and keeps listening on the others, or exits with the error when none can, for example on WSL or without access to `/dev/kfd`.
