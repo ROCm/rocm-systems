@@ -63,9 +63,7 @@ static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, 
                          : (archThreads > 0 ? archThreads : kDdaLL128BcDefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
-  if (nBlocksMax < 1) nBlocksMax = 1;
-  if (nBlocksMax < nPeers) nBlocksMax = nPeers;
+  int nBlocksMax = (int)ncclBroadcastDdaBlockBudget(comm);
 
   const size_t slices = ddaLL128Slices(totalBytes);
   const size_t cs = ddaLL128BcTwoShotChunkSlices(slices, comm->nRanks);
