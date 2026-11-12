@@ -163,14 +163,18 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     // page, captured once at discovery. So it is a total, and it can understate
     // the device's current cap once that cap changes after discovery.
     //
-    // Confirm against the agent's live free figure before refusing. Admitting on
-    // free is the stricter of the two bounds, so this cannot let through a request
-    // the region itself could never back. That figure also counts reclaimable
-    // cache, which the allocation path trims and retries against, and it is the
-    // same number applications are told is free.
+    // Confirm against the agent's live free figure before refusing. That figure
+    // is recomputed on each query rather than captured at discovery, so it
+    // follows a cap that changed after discovery, and it is the same number
+    // applications are told is free.
     //
-    // Reached only on a request the static check already rejected. The driver
-    // still makes the final decision in AllocateMemory below.
+    // It is not a reservation. It is this node's accounting at the moment of the
+    // query, counting every process on the node, plus this agent's own
+    // reclaimable cache and free scratch. Another process, or another partition
+    // where the allocation mode lets partitions on one device draw on the same
+    // memory, can consume it before the request lands. That is why this only
+    // relaxes a refusal, on a request the static check has already rejected:
+    // the driver still makes the final decision in AllocateMemory below.
     uint64_t live_free_size = 0;
     if (owner()->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL),
                          &live_free_size) != HSA_STATUS_SUCCESS ||
