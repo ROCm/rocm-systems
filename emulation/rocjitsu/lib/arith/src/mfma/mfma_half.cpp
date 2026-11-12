@@ -25,15 +25,16 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+  const bool clamp_overflow = Bf16 && (flags & RJ_ARITH_FP16_OVFL);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    mfma_half_x86_64_v4<M, K, Batch, Bf16>(instruction_flags, d, a, b, c);
+    mfma_half_x86_64_v4<M, K, Batch, Bf16>(instruction_flags, clamp_overflow, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    mfma_half_x86_64_v3<M, K, Batch, Bf16>(instruction_flags, d, a, b, c);
+    mfma_half_x86_64_v3<M, K, Batch, Bf16>(instruction_flags, clamp_overflow, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -45,7 +46,7 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
     left[i] = Bf16 ? bf16_to_float(x) : f16_to_float(x);
     right[i] = Bf16 ? bf16_to_float(y) : f16_to_float(y);
   }
-  mfma_reduce_scalar<M, K, Batch, 2, Bf16>(instruction_flags, d, left, right, c);
+  mfma_reduce_scalar<M, K, Batch, 2, Bf16>(instruction_flags, d, left, right, c, clamp_overflow);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

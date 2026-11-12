@@ -28,6 +28,10 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+                                 uint64_t request_lanes);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
@@ -128,7 +132,14 @@ protected:
       delete inst;
       return;
     }
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+      wf.record_rdna2_memory_violation();
     release_wait_counters(wf, counters);
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation)
+      wf.complete_flat_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
@@ -139,6 +150,9 @@ protected:
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
 };
+
+/// Suppress only buffer TFE elements inside published nonresident PRT ranges.
+void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
