@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests. The authoritative list is host_test_binaries.txt in the
-# build directory, which test/host/CMakeLists.txt writes from its
-# rccl_add_micro_binary() calls -- it is not duplicated here, so the two cannot drift.
+# host-only microtests, the latter through rccl-UnitTestsHostAll, the front door
+# that discovers the rccl-UnitTestsMicro* binaries at run time. This script
+# therefore holds no list of them, and adding one needs no change here.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.
@@ -49,6 +49,10 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
+#   NUM_PARALLEL_HOST_TEST_BINARIES  how many of the microtest binaries rccl-UnitTestsHostAll
+#                                                   runs at once (default: half the machine's
+#                                                   processors; 1 = sequential, which is what
+#                                                   bisecting an order-dependent failure wants)
 #   HOST_TEST_SHUFFLE  gtest ordering flag (run)   (default: --gtest_shuffle; set empty to disable
 #                                                   when bisecting a failure. Deliberately NOT named
 #                                                   GTEST_SHUFFLE: gtest owns that name and reads an
@@ -150,37 +154,26 @@ do_host_tests() {
     stamp=(cat)
   fi
 
-  # Every host binary the build configured, as test/host/CMakeLists.txt writes them to
-  # host_test_binaries.txt. Each writes its own JUnit XML (host_tests*.xml) and appends to the
-  # single console LOG_FILE. rccl-HostUnitTests keeps host_tests.xml for backward compatibility.
-  local manifest="$BUILD_DIR/host_test_binaries.txt"
-  if [ ! -f "$manifest" ]; then
-    echo "ERROR: $manifest not found -- run the configure phase first" >&2
-    return 1
-  fi
-  local -a binaries=()
-  local bin xml_stem
-  while IFS= read -r bin; do
-    [ -n "$bin" ] || continue
-    if [ "$bin" = rccl-HostUnitTests ]; then
-      binaries+=("$bin:$XML_FILE")
-      continue
-    fi
-    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
-    xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
-      | tr '[:upper:]' '[:lower:]')"
-    binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
-  done < "$manifest"
-  if [ "${#binaries[@]}" -eq 0 ]; then
-    echo "ERROR: $manifest lists no binaries" >&2
-    return 1
-  fi
+  # The two binaries this script runs directly. Each writes its own JUnit XML
+  # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+
+  local -a binaries=(
+    "rccl-HostUnitTests:$XML_FILE:$COVERAGE_DIR/rccl-HostUnitTests"
+    "rccl-UnitTestsHostAll:$SCRIPT_DIR/host_tests_micro.xml:$COVERAGE_DIR"
+  )
 
   : > "$LOG_FILE"   # truncate; each binary appends below
-  local rc=0 entry exe name xml profdir
+  local rc=0 entry exe name xml xml_base logs profdir
   for entry in "${binaries[@]}"; do
     name="${entry%%:*}"
-    xml="${entry#*:}"
+    xml="${entry#*:}"; xml="${xml%%:*}"
+    profdir="${entry##*:}"
+    xml_base="${xml##*/}"
+    if [ "$xml_base" = "$xml" ]; then
+      logs="${xml_base%.*}.logs"
+    else
+      logs="${xml%/*}/${xml_base%.*}.logs"
+    fi
     exe="$BUILD_DIR/$name"
     if [ ! -x "$exe" ]; then
       echo "ERROR: expected binary not built: $exe" | tee -a "$LOG_FILE"
@@ -188,12 +181,9 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
-    # Direct this binary's llvm profiles into its OWN subdir so `coverage` finds
-    # them at $COVERAGE_DIR/<binary>/. Without this, instrumented binaries write
-    # default.profraw into the CWD and coverage sees nothing. %p (PID) + %m
-    # (module hash) keep the process-isolated forks' files distinct; the runner
-    # inherits this value (it sets LLVM_PROFILE_FILE with overwrite=0).
-    profdir="$COVERAGE_DIR/$name"
+    # Start this binary's log directory empty.
+    rm -rf "$logs"
+    # Direct this binary's llvm profiles into the subdir `coverage` reads back.
     mkdir -p "$profdir"
     export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
@@ -213,8 +203,21 @@ do_host_tests() {
         | tee -a "$LOG_FILE"
       rc=1
     fi
+    append_child_logs "$logs"
   done
   return "$rc"
+}
+
+append_child_logs() {
+  local log_dir="$1" child
+  [ -d "$log_dir" ] || return 0
+  for child in "$log_dir"/*.log; do
+    [ -f "$child" ] || continue
+    {
+      echo "----- $(basename "$child" .log) ($child) -----"
+      cat "$child"
+    } >> "$LOG_FILE"
+  done
 }
 
 # CPU-only compile probes that #pragma GCC poison in poison_hip_atomics.h
@@ -356,7 +359,10 @@ do_coverage() {
   for dir in "$COVERAGE_DIR"/*/; do
     name="$(basename "$dir")"
     [ "$name" = overall ] && continue
+    # The fronted binaries build into micro/; the front door and rccl-HostUnitTests stay at the
+    # top. The profile directory is named after the binary alone, so look in both.
     exe="$BUILD_DIR/$name"
+    [ -x "$exe" ] || exe="$BUILD_DIR/micro/$name"
     if [ ! -x "$exe" ]; then
       echo "error: expected binary not built: $exe -- run the build phase first" >&2
       rc=1
@@ -368,12 +374,18 @@ do_coverage() {
       continue
     fi
 
-    # Per-binary: merge its own profraw and report against its own object only.
+    local from_front_door=0
+    if [ -f "$dir/merged.profdata" ] && [ -f "$dir/coverage.lcov" ]; then
+      from_front_door=1
+    fi
+
     # Guard each llvm invocation: under `set -e` one bad binary would otherwise
     # abort the whole phase mid-loop and discard the rc already accumulated.
     # Degrade instead -- mark the phase failed and move on to the next binary.
-    llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
-      || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
+    if [ "$from_front_door" -eq 0 ]; then
+      llvm-profdata merge -sparse "$dir"/*.profraw -o "$dir/merged.profdata" \
+        || { echo "    error: llvm-profdata failed for $name" >&2; rc=1; continue; }
+    fi
 
     llvm-cov report "$exe" \
       -instr-profile="$dir/merged.profdata" \
@@ -388,18 +400,26 @@ do_coverage() {
       || { echo "    error: llvm-cov show failed for $name" >&2; rc=1; continue; }
 
     # Per-binary lcov tracefile -- the hash-agnostic, line/branch-keyed form that
-    # can be unioned across binaries. Tag it with the binary name so genhtml and
-    # lcov diagnostics are legible.
-    llvm-cov export "$exe" \
-      -instr-profile="$dir/merged.profdata" \
-      --ignore-filename-regex='(/test/|nvtx)' \
-      -format=lcov > "$dir/coverage.lcov" \
-      || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
+    # can be unioned across binaries.
+    if [ "$from_front_door" -eq 0 ]; then
+      llvm-cov export "$exe" \
+        -instr-profile="$dir/merged.profdata" \
+        --ignore-filename-regex='(/test/|nvtx)' \
+        -format=lcov > "$dir/coverage.lcov" \
+        || { echo "    error: llvm-cov export failed for $name" >&2; rc=1; continue; }
+      tracefiles+=("$dir/coverage.lcov")
+    fi
 
     echo "    $name text report: $dir/coverage.txt"
     echo "    $name html report: $dir/html/index.html"
-    tracefiles+=("$dir/coverage.lcov")
   done
+
+  # The front door's merge of everything it ran, as one tracefile. Added whole
+  # rather than per binary, so the ~37 binaries behind it are unioned once, by
+  # the thing that ran them, instead of again here.
+  if [ -f "$COVERAGE_DIR/host-coverage.lcov" ]; then
+    tracefiles+=("$COVERAGE_DIR/host-coverage.lcov")
+  fi
 
   if [ "${#tracefiles[@]}" -eq 0 ]; then
     echo "error: no .profraw files found under $COVERAGE_DIR --" >&2

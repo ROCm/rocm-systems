@@ -290,9 +290,9 @@
 
     "gin_micro_finalize": {
       "extends": "default",
-      "description": "Host-only GinFinalizeTest microtests from the --rocshmem-gin build (ENABLE_ROCSHMEM_GIN), including SDMA then GDA then PROXY default order.",
+      "description": "Host-only GinFinalizeTest microtests from the --rocshmem-gin build (ENABLE_ROCSHMEM_GIN), including SDMA then GDA then PROXY default order. The only suite here that reaches into the host tree, and only until this build arm gets a binary of its own.",
       "is_gtest": true,
-      "binary": "host/rccl-UnitTestsMicro",
+      "binary": "host/micro/rccl-UnitTestsMicro",
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
@@ -406,7 +406,7 @@
     },
     {
       "name": "GIN host microtests - GinFinalize (rocSHMEM GIN build)",
-      "description": "GinFinalizeTest.* on host/rccl-UnitTestsMicro built with ENABLE_ROCSHMEM_GIN, covering SDMA>GDA>PROXY default order",
+      "description": "GinFinalizeTest.* on host/micro/rccl-UnitTestsMicro built with ENABLE_ROCSHMEM_GIN, covering SDMA>GDA>PROXY default order",
       "config": "gin_micro_finalize",
       "enabled": true
     },

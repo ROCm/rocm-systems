@@ -107,6 +107,15 @@ Examples:
                  "ROCm 7.15+ and falls back to host-only on older releases"
         )
         self.parser.add_argument(
+            '--host-coverage-lcov',
+            type=str,
+            default=None,
+            help="lcov tracefile holding the host-only tests' coverage, as written by "
+                 "rccl-UnitTestsHostAll (host-coverage.lcov). Unioned into the coverage "
+                 "report so it covers the host tree too. Defaults to "
+                 "test/host/build/coverage/host-coverage.lcov when that file exists"
+        )
+        self.parser.add_argument(
             '--build-dir',
             type=str,
             help="Custom build directory path (default: <workdir>/build/debug or build/release)"

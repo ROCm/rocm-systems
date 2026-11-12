@@ -1172,8 +1172,18 @@ class TestExecutor:
         os.makedirs(self.report_dir, exist_ok=True)
         os.makedirs(self.rawfiles_dir, exist_ok=True)
         if self.args.coverage_report and not getattr(self.args, "skip_tests", False):
-            for profile in Path(self.rawfiles_dir).glob("*.profraw"):
+            # Recursive: rccl-UnitTestsHostAll gives each binary it forks a
+            # directory of its own under here (see host_test_dispatch.cc,
+            # childProfileFile), so a flat glob would leave the previous run's
+            # host-test profiles in place and credit their coverage to this one.
+            for profile in Path(self.rawfiles_dir).rglob("*.profraw"):
                 profile.unlink()
+            # And the tracefile the host dispatcher writes beside them: a run that
+            # does not reach the host tests would otherwise report the last run's
+            # host coverage as its own.
+            stale = Path(self.rawfiles_dir, "host-coverage.lcov")
+            if stale.is_file():
+                stale.unlink()
 
         if self.args.verbose:
             print(f"Work directory:   {workdir}")
@@ -3178,6 +3188,124 @@ class TestExecutor:
             f"Load a ROCm module or set rocm_path/--rocm_home."
         )
 
+    def _host_coverage_tracefile(self):
+        """The host-only tests' lcov tracefile, or None.
+
+        Written by rccl-UnitTestsHostAll, the only thing that can pair each host
+        binary's profiles with that binary as llvm-cov's --object. The host binaries
+        compile the same source under different #defines, so their profiles cannot be
+        merged into this runner's .profdata and read back at all -- see
+        test/host/MICROTEST_README.md, "Why the whole tree's coverage is unioned as
+        lcov". The tracefile is the form that does compose: object-free, and keyed by
+        file/line/branch rather than by a per-binary hash.
+        """
+        explicit = getattr(self.args, "host_coverage_lcov", None)
+        if explicit:
+            path = os.path.abspath(os.path.expanduser(os.path.expandvars(explicit)))
+            if not os.path.isfile(path):
+                # Not fallen back on: the caller named a file they believe in, and a
+                # discovered one would report a number they would read as theirs.
+                print(f"WARNING: --host-coverage-lcov not found: {path}")
+                return None
+            return path
+        # Otherwise, where it is written, most recent first. When this runner drives
+        # the host binary itself, LLVM_PROFILE_FILE points at rawfiles_dir and the
+        # dispatcher writes the tracefile beside the profiles (host_test_dispatch.cc,
+        # coverageDirectory), so that copy is this run's; the build tree's is
+        # whatever an earlier run_host_tests.sh left there. Then the two roots this
+        # runner already knows: the configured workdir, and the tree the build
+        # directory sits in (<root>/build/<type>). Looked for by path, never searched.
+        candidates = []
+        rawfiles = getattr(self, "rawfiles_dir", "")
+        if rawfiles:
+            candidates.append(os.path.join(rawfiles, "host-coverage.lcov"))
+        for root in [self.paths.get("workdir", ""),
+                     os.path.dirname(os.path.dirname(getattr(self, "build_dir", "") or ""))]:
+            if root:
+                candidates.append(os.path.join(root, "test", "host", "build", "coverage",
+                                               "host-coverage.lcov"))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def _merge_host_coverage(self, llvm_cov, merged_profdata, object_files,
+                             ignore_regex, host_lcov):
+        """Union this run's coverage with the host tree's, at the lcov level.
+
+        llvm-cov has no lcov input, so this run's own data is exported to lcov first
+        and the two are unioned there: a line is covered if either side covered it.
+
+        Best effort throughout. The llvm-cov reports for this run are already written
+        by the time this is called, so a missing lcov or a rejected tracefile costs
+        the combined view and nothing else -- a host-side problem must not turn a
+        green GPU run red.
+        """
+        combined = os.path.join(self.report_dir, "combined_coverage.lcov")
+        own = os.path.join(self.report_dir, "runner_coverage.lcov")
+
+        lcov = shutil.which("lcov")
+        if not lcov:
+            print("NOTE: lcov not installed -- host-only coverage is not unioned into "
+                  f"this report (it remains readable at {host_lcov})")
+            return False
+
+        export_cmd = [llvm_cov, "export", f"--instr-profile={merged_profdata}",
+                      "--format=lcov", f"--ignore-filename-regex={ignore_regex}"]
+        export_cmd.extend(object_files)
+        try:
+            with open(own, "w") as handle:
+                subprocess.run(export_cmd, stdout=handle, stderr=subprocess.PIPE,
+                               text=True, check=True)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"WARNING: could not export this run's coverage as lcov: {exc}")
+            return False
+
+        # lcov 2.x enforces consistency checks that reject llvm-cov's tracefiles
+        # (e.g. "line is hit but no branches evaluated"); 1.x has neither those checks
+        # nor the error categories, so the flags differ by major version.
+        version = subprocess.run([lcov, "--version"], capture_output=True, text=True)
+        match = re.search(r"(\d+)", version.stdout or "")
+        major = int(match.group(1)) if match else 0
+        if major >= 2:
+            flags = ["--rc", "branch_coverage=1", "--rc", "check_data_consistency=0",
+                     "--ignore-errors", "inconsistent,unsupported,corrupt,format"]
+        else:
+            flags = ["--rc", "lcov_branch_coverage=1"]
+
+        union_cmd = [lcov, *flags, "--add-tracefile", own,
+                     "--add-tracefile", host_lcov, "-o", combined]
+        try:
+            subprocess.run(union_cmd, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as exc:
+            print(f"WARNING: could not union the host-only coverage: {exc.stderr}")
+            return False
+        print(f"Combined (library + host-only) tracefile: {combined}")
+
+        summary_path = os.path.join(self.report_dir, "combined_coverage_summary.txt")
+        summary = subprocess.run([lcov, *flags, "--summary", combined],
+                                 capture_output=True, text=True)
+        try:
+            with open(summary_path, "w") as handle:
+                handle.write((summary.stdout or "") + (summary.stderr or ""))
+            print(f"Combined coverage summary: {summary_path}")
+        except OSError as exc:
+            print(f"WARNING: could not write the combined summary: {exc}")
+
+        genhtml = shutil.which("genhtml")
+        if genhtml:
+            html_dir = os.path.join(self.report_dir, "combined_html")
+            html_args = [genhtml, "--branch-coverage"]
+            if major >= 2:
+                html_args += ["--ignore-errors", "inconsistent,unsupported,corrupt,format"]
+            result = subprocess.run(html_args + [combined, "-o", html_dir],
+                                    capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"Combined HTML report: {html_dir}/index.html")
+            else:
+                print("WARNING: genhtml failed -- no combined HTML report")
+        return True
+
     def generate_coverage_report(self):
         """Generate code coverage report.
 
@@ -3192,7 +3320,12 @@ class TestExecutor:
         print(f"{'='*80}")
 
         rccl_tests_build_dir = self._rccl_tests_build_dir()
-        profraw_files = sorted(glob.glob(os.path.join(self.rawfiles_dir, "*.profraw")))
+        # Recursive for the same reason the cleanup above is: the host-test
+        # front door profiles each binary it forks into its own subdirectory, so
+        # a flat glob would report no host-test coverage at all.
+        profraw_files = sorted(
+            glob.glob(os.path.join(self.rawfiles_dir, "**", "*.profraw"), recursive=True)
+        )
 
         if not profraw_files:
             print(f"ERROR: No .profraw files found in {self.rawfiles_dir}")
@@ -3282,18 +3415,6 @@ class TestExecutor:
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
-
-        # Add host-only microtest binaries (test/host). Unlike the binaries above
-        # they don't link librccl.so -- they compile their unit-under-test
-        # (p2p.cc/init.cc + oracle TUs from the hipify tree) directly, so their
-        # counters live in the binary itself and must be listed as --object for
-        # llvm-cov to attribute that coverage.
-        host_test_dir = os.path.join(test_dir, "host")
-        for binary_path in sorted(glob.glob(os.path.join(host_test_dir, "rccl-UnitTestsMicro*"))):
-            if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
-                object_files.extend(["--object", binary_path])
-                if self.args.verbose:
-                    print(f"Found microtest binary: {binary_path}")
 
         # Add rccl-tests perf binaries so their host coverage mapping is attributed.
         if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):
@@ -3447,6 +3568,18 @@ class TestExecutor:
             if self.args.verbose:
                 print(f"Command was: {' '.join(summary_cmd)}")
             return False
+
+        # This runner does not run the host-only tests, and their profiles could not
+        # be read against these objects if it did, so their coverage arrives as the
+        # tracefile the front door wrote and is unioned in at the lcov level.
+        host_lcov = self._host_coverage_tracefile()
+        if host_lcov:
+            print(f"Including host-only coverage from {host_lcov}")
+            self._merge_host_coverage(llvm_cov, merged_profdata, object_files,
+                                      ignore_regex, host_lcov)
+        elif self.args.verbose:
+            print("NOTE: no host-only tracefile found; this report covers the "
+                  "library and its GPU tests only")
 
         print(f"\n{'='*80}")
         print("COVERAGE REPORT GENERATION COMPLETE")

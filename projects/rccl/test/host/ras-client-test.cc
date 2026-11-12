@@ -127,10 +127,7 @@ void ResetRasClientGlobals() {
 
 // ===========================================================================
 // Default fixture for every test in this file. Tests that need extra per-test
-// state derive from it; report any derived suite name so it can be registered
-// in test/test_categories_micro.yaml. The trailing '.*' there anchors the end
-// of the suite name, so a derived suite is not covered by this one's pattern
-// and would build, pass locally, and never run under CTest.
+// state derive from it.
 // ===========================================================================
 class RasClientMicrotest : public ::testing::Test {
  protected:

@@ -455,6 +455,7 @@ Optional:
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate coverage; device coverage on ROCm 7.15+, host-only otherwise
+  --host-coverage-lcov PATH lcov tracefile from the host-only tests (host-coverage.lcov, written by rccl-UnitTestsHostAll) to union into the report; defaults to test/host/build/coverage/host-coverage.lcov when present
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
@@ -502,6 +503,11 @@ python test_runner.py --config test_config_sample.json --no-build --skip-tests \
 2. **Text Report**: Function-level coverage summary
    - Location: `<workspace>/report/function_coverage_report.txt`
    - Includes per-function and per-file statistics
+
+3. **Combined tracefile** (only when a host-only tracefile is available): the
+   coverage above unioned with the host-only tests', as
+   `<workspace>/report/combined_coverage.lcov`, with
+   `combined_coverage_summary.txt` and `combined_html/index.html` beside it
 
 ### Coverage Implementation Details
 
