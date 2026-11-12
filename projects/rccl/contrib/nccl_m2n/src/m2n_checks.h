@@ -112,6 +112,28 @@ static inline bool m2nSameTensorTopology(const ncclDistTensor_t& a, const ncclDi
 
 #define NCCL_M2N_CUDACHECK(cmd) NCCL_M2N_CUDACHECK_IMPL(cmd, NCCL_M2N_UNIQUE(m2nCudaError_))
 
+/* HIP rejects a cudaMemcpy3DAsync whose extent.width is >= 2^31 bytes with cudaErrorInvalidValue (CUDA accepts
+ * it), which a fully contiguous >= 2 GiB pack/unpack span produces. Issue such copies row by row instead. */
+inline cudaError_t m2nMemcpy3DAsync(const cudaMemcpy3DParms* p, cudaStream_t stream) {
+#if !defined(__HIP_PLATFORM_AMD__)
+  return cudaMemcpy3DAsync(p, stream);
+#else
+  if (p->extent.width < ((size_t)1 << 31)) return cudaMemcpy3DAsync(p, stream);
+  const cudaPitchedPtr& s = p->srcPtr;
+  const cudaPitchedPtr& d = p->dstPtr;
+  char* srcBase = (char*)s.ptr + (p->srcPos.z * s.ysize + p->srcPos.y) * s.pitch + p->srcPos.x;
+  char* dstBase = (char*)d.ptr + (p->dstPos.z * d.ysize + p->dstPos.y) * d.pitch + p->dstPos.x;
+  for (size_t z = 0; z < p->extent.depth; z++) {
+    for (size_t y = 0; y < p->extent.height; y++) {
+      cudaError_t e = cudaMemcpyAsync(dstBase + (z * d.ysize + y) * d.pitch, srcBase + (z * s.ysize + y) * s.pitch,
+                                      p->extent.width, p->kind, stream);
+      if (e != cudaSuccess) return e;
+    }
+  }
+  return cudaSuccess;
+#endif
+}
+
 #define NCCL_M2N_CHECK_ARG(cond, rank, ...) \
   do {                                          \
     if (!(cond)) {                              \

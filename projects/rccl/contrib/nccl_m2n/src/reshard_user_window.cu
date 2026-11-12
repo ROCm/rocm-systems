@@ -599,7 +599,7 @@ static ncclResult_t reshardCopyPackLsaHput(ncclComm_t comm, const ncclDistTensor
       cudaMemcpy3DParms cp =
         packBuildCopy((char*)src->dataPtr + targetPlans[t].srcBaseOffset, (char*)staging + txOffset[t], targetPlans[t],
                     targetPlans[t].outerSrcStrides, /*dst contig=*/nullptr);
-      NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+      NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
     }
   }
 
@@ -656,7 +656,7 @@ static ncclResult_t reshardCopyPackLsaHput(ncclComm_t comm, const ncclDistTensor
       cudaMemcpy3DParms cp =
         packBuildCopy((char*)staging + unpackRx[srcShard], (char*)dst->dataPtr + plan.dstBaseOffset, plan,
                     /*src contig=*/nullptr, plan.outerDstStrides);
-      NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+      NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
     }
   }
 
@@ -909,7 +909,7 @@ ncclResult_t reshardCopyPackNormalized(ncclComm_t comm, const ncclDistTensor_t* 
       }
       cudaMemcpy3DParms cp = packBuildCopy((char*)srcBuffer + origTargetPlan[t].srcBaseOffset, (char*)staging + txOffset[t],
                                          origTargetPlan[t], origTargetPlan[t].outerSrcStrides, /*dst contig=*/nullptr);
-      NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+      NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
     }
   }
 
@@ -967,7 +967,7 @@ ncclResult_t reshardCopyPackNormalized(ncclComm_t comm, const ncclDistTensor_t* 
                          stagingCapacity);
       cudaMemcpy3DParms cp = packBuildCopy((char*)staging + rxOff, (char*)dstBuffer + plan.dstBaseOffset, plan,
                                          /*src contig=*/nullptr, plan.outerDstStrides);
-      NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+      NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
     }
   }
 
@@ -1233,7 +1233,7 @@ static ncclResult_t reshardCopyPackGroupNormalized(ncclComm_t comm, const Reshar
           const ncclReshardTransferPlan& plan = targetPlans[index];
           cudaMemcpy3DParms cp = packBuildCopy((char*)setups[entries[e]].srcTensor.dataPtr + plan.srcBaseOffset,
                                              (char*)staging + entryCursor, plan, plan.outerSrcStrides, nullptr);
-          NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+          NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
         }
         NCCL_M2N_CHECK_ARG(m2nCheckedAddSize(entryCursor, targetBytes[index], &entryCursor), worldRank,
                            "ncclM2nGroupEnd: source packing offset overflow");
@@ -1301,7 +1301,7 @@ static ncclResult_t reshardCopyPackGroupNormalized(ncclComm_t comm, const Reshar
           packBuildCopy((char*)staging + offset,
                       (char*)setups[entries[e]].dstTensor.dataPtr + plan.dstBaseOffset, plan, nullptr,
                       plan.outerDstStrides);
-        NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, workStream));
+        NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, workStream));
       }
     }
   }

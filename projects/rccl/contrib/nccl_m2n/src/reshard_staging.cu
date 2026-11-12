@@ -1710,7 +1710,7 @@ static ncclResult_t pipeHostMemcpyRows(void* dst, const void* src, size_t width,
                 "PIPE host_rma %s memcpy3d enqueue begin width=%zu rows=%zu src_pitch=%zu dst_pitch=%zu src=%p "
                 "dst=%p",
                 tag, width, rows, srcPitch, dstPitch, src, dst);
-  NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, stream));
+  NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, stream));
   RESHARD_DEBUG(rank,
                 "PIPE host_rma %s memcpy3d enqueue end width=%zu rows=%zu src_pitch=%zu dst_pitch=%zu src=%p "
                 "dst=%p",
@@ -1738,7 +1738,7 @@ static ncclResult_t pipeHostMemcpyBox(void* dst, const void* src, size_t width, 
                 "PIPE host_rma %s memcpy3d enqueue begin width=%zu height=%zu depth=%zu src_pitch=%zu "
                 "dst_pitch=%zu src=%p dst=%p",
                 tag, width, height, depth, srcPitch, dstPitch, src, dst);
-  NCCL_M2N_CUDACHECK(cudaMemcpy3DAsync(&cp, stream));
+  NCCL_M2N_CUDACHECK(m2nMemcpy3DAsync(&cp, stream));
   RESHARD_DEBUG(rank,
                 "PIPE host_rma %s memcpy3d enqueue end width=%zu height=%zu depth=%zu src_pitch=%zu "
                 "dst_pitch=%zu src=%p dst=%p",
