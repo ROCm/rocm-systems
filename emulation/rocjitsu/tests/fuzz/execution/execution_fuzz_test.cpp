@@ -781,8 +781,9 @@ TEST(ExecutionFuzzInputTest, ThreadedInputsShareAsyncWmmaHelpers) {
         ASSERT_TRUE(maybe_stats.succeeded());
         const RunStats stats = maybe_stats.value();
         EXPECT_EQ(stats.async_enabled_inputs, 1u);
-        if (!(seed & 16))
+        if (!(seed & 16)) {
           EXPECT_EQ(stats.async_executed, 0u);
+        }
         results[worker].executed += stats.executed;
         results[worker].async_executed += stats.async_executed;
         results[worker].inputs += stats.inputs;
