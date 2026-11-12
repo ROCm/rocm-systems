@@ -2708,11 +2708,11 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
     void onAmdgpuWriteVgprLanes(const Wavefront *wf, uint32_t, uint64_t, uint8_t) override {
       snapshot(wf);
     }
-    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &) override {
-      snapshot(tensor_wave);
+    void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &,
+                                       const Wavefront &wf) override {
+      snapshot(&wf);
     }
     bool observes_tensor_dma_memory_access() const override { return true; }
-    const Wavefront *tensor_wave = nullptr;
     unsigned snapshots = 0;
   };
   Wave32PluginFixture f;
@@ -2725,7 +2725,6 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
   auto *wf = f.cu->dispatch_wf(0, 0x200, 104, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
-  snapshots->tensor_wave = wf;
   const amdgpu::RegisterAccess regs(*wf);
   const uint32_t sbase = wf->sgpr_alloc().base;
   const uint32_t vbase = wf->vgpr_alloc().base;

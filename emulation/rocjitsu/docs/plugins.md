@@ -571,16 +571,10 @@ in `valid_lane_mask` are meaningful.
 Resolved memory views are built only when a subscribed plugin requests them
 through `observes_memory_routing()`.
 
-The routed-memory callback has a source-compatible overload chain. Existing
-plugins may override the observation-only
-`onAmdgpuMemoryAccessRouted(access)` form. Plugins that need wave-local state may
-instead override `onAmdgpuMemoryAccessRouted(access, wf)`, avoiding a shared
-identity lookup. Plugins that also need the decoded instruction may override
-the context-preserving `onAmdgpuMemoryAccessRouted(access, inst, wf)` form.
-RocJITsu calls the most specific form; its defaults forward through the
-wavefront-aware form to the observation-only form. The borrowed instruction and
-wavefront already reflect the selected route and are valid only during the
-callback.
+`onAmdgpuMemoryAccessRouted(access, inst, wf)` supplies the resolved observation,
+instruction and wave together. Observers can inspect decoded metadata and use
+wave-local state directly. The instruction and wave already reflect the selected
+route and are borrowed only for the callback.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
@@ -597,9 +591,9 @@ wavefront has moved past the instruction. Consumers must opt in through
 `observes_tensor_dma_memory_access()`. A consumer that retains addresses must
 use `size()` to budget and allocate the event, then call `copy_to()` during the
 callback; a failed copy means the observation is malformed and must be rejected.
-Tensor-DMA observers that need wave-local state may override
-`onAmdgpuTensorDmaMemoryAccess(access, wf)`; its default forwards to the
-observation-only overload.
+`onAmdgpuTensorDmaMemoryAccess(access, wf)` also supplies the issuing wave for
+wave-local state. The wave is borrowed only for the callback; its current PC can
+differ from the observation's PC when the transfer was deferred.
 
 `onAmdgpuTensorDmaIssued(issue, wf)` is the tensor DMA counterpart of
 `onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in

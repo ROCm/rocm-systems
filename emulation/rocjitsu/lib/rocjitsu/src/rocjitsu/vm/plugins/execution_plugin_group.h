@@ -305,14 +305,6 @@ public:
     return false;
   }
 
-  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        if (entry.observes_memory_routing)
-          entry.plugin->onAmdgpuMemoryAccessRouted(access);
-    });
-  }
-
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) {
     dispatch_wave_hot_hook(&wf, [&](bool cached) {
@@ -355,14 +347,6 @@ public:
         return true;
     }
     return false;
-  }
-
-  void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access) {
-    dispatch_with_optional_plugin_lock([&]() {
-      for (auto &entry : plugins_)
-        if (entry.observes_tensor_dma_memory_access)
-          entry.plugin->onAmdgpuTensorDmaMemoryAccess(access);
-    });
   }
 
   void onAmdgpuTensorDmaMemoryAccess(const amdgpu::TensorDmaMemoryAccessObservation &access,

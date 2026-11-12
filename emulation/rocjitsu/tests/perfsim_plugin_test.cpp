@@ -1111,7 +1111,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     access.valid_lane_mask = 0x9;
     access.request_lane_mask = 0x9;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access, wave);
+    plugin.onAmdgpuMemoryAccessRouted(access, wmma, wave);
     addresses[0] = 0xDEADBEEF;
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
@@ -1227,7 +1227,7 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
     tensor_access.tensor_dim1_stride = 104;
     tensor_access.is_load = true;
     tensor_access.addresses = std::span<const uint64_t>(tensor_addresses);
-    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access);
+    plugin.onAmdgpuTensorDmaMemoryAccess(tensor_access, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -1410,7 +1410,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
       access.data_size = test_case.data_size;
       access.tensor_dim0_stride = test_case.tensor_dim0_stride;
       access.tensor_dim1_stride = test_case.tensor_dim1_stride;
-      plugin.onAmdgpuTensorDmaMemoryAccess(access);
+      plugin.onAmdgpuTensorDmaMemoryAccess(access, wave);
 
       const std::array<uint32_t, 1> end_words{0xBF810000};
       SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -1471,7 +1471,7 @@ TEST_F(PerfsimPluginTest, FilteredImageRecordsAllTexelsUnderOneInstruction) {
   access.active_lane_mask = access.architectural_exec_lane_mask = 1;
   access.valid_lane_mask = access.request_lane_mask = 1;
   access.image_sample_footprints = taps;
-  plugin.onAmdgpuMemoryAccessRouted(access);
+  plugin.onAmdgpuMemoryAccessRouted(access, sample, wave);
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
   plugin.onAmdgpuBeforeExecuteInstruction(0x2004, end, wave);
@@ -1543,7 +1543,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   flat_access.request_lane_mask = 0x7;
   flat_access.scratch_lane_mask = 0x5;
   flat_access.addresses = flat_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(flat_access);
+  plugin.onAmdgpuMemoryAccessRouted(flat_access, flat, wave);
 
   const std::array<uint32_t, 1> ds_words{0xD8000000};
   SyntheticInstruction ds("ds_read2_b32", ds_words, MEMORY_OP);
@@ -1567,7 +1567,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   ds_access.scratch_lane_mask = 0;
   ds_access.addresses = primary;
   ds_access.secondary_addresses = secondary;
-  plugin.onAmdgpuMemoryAccessRouted(ds_access);
+  plugin.onAmdgpuMemoryAccessRouted(ds_access, ds, wave);
 
   const std::array<uint32_t, 1> flat_lds_words{0xDEAD0002};
   SyntheticInstruction flat_lds("flat_load_dword", flat_lds_words, MEMORY_OP);
@@ -1595,7 +1595,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   flat_lds_access.addresses = effective_lds;
   flat_lds_access.pre_routing_addresses = aperture_addresses;
   flat_lds_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(flat_lds_access);
+  plugin.onAmdgpuMemoryAccessRouted(flat_lds_access, flat_lds, wave);
 
   const std::array<uint32_t, 1> append_words{0xD8340000};
   SyntheticInstruction append("ds_append", append_words, MEMORY_OP);
@@ -1612,7 +1612,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   append_access.request_lane_mask = 0xF;
   append_access.addresses = append_addresses;
   append_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(append_access);
+  plugin.onAmdgpuMemoryAccessRouted(append_access, append, wave);
 
   const std::array<uint32_t, 1> consume_words{0xD8350000};
   SyntheticInstruction consume("ds_consume", consume_words, MEMORY_OP);
@@ -1621,7 +1621,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   consume_access.mnemonic = "ds_consume";
   consume_access.pc = 0x2010;
   consume_access.atomic_op = AtomicOp::CONSUME;
-  plugin.onAmdgpuMemoryAccessRouted(consume_access);
+  plugin.onAmdgpuMemoryAccessRouted(consume_access, consume, wave);
 
   const std::array<const char *, 7> other_ffm_silent_memory{"ds_load_tr4_b64",
                                                             "ds_load_tr6_b96",
@@ -1642,7 +1642,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
       silent_access.decoded_space = DecodedMemorySpace::GLOBAL;
       silent_access.route = MemoryRoute::GLOBAL;
     }
-    plugin.onAmdgpuMemoryAccessRouted(silent_access);
+    plugin.onAmdgpuMemoryAccessRouted(silent_access, silent, wave);
   }
 
   SyntheticInstruction tr16("ds_load_tr16_b128", ds_words, MEMORY_OP);
@@ -1656,7 +1656,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   tr16_access.request_lane_mask = 0xFFFF'FFFF;
   tr16_access.architectural_exec_lane_mask = 0x3;
   tr16_access.secondary_addresses = {};
-  plugin.onAmdgpuMemoryAccessRouted(tr16_access);
+  plugin.onAmdgpuMemoryAccessRouted(tr16_access, tr16, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -1741,7 +1741,7 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   first.scratch_lane_mask = 0x4;
   first.addresses = first_effective_addresses;
   first.pre_routing_addresses = first_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(first);
+  plugin.onAmdgpuMemoryAccessRouted(first, first_global, wave);
 
   SyntheticInstruction first_local("flat_load_dword", words, MEMORY_OP);
   plugin.onAmdgpuBeforeExecuteInstruction(0x2204, first_local, wave);
@@ -1764,7 +1764,7 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   second.scratch_lane_mask = 0x2;
   second.addresses = effective_addresses;
   second.pre_routing_addresses = original_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(second);
+  plugin.onAmdgpuMemoryAccessRouted(second, first_local, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -1836,7 +1836,7 @@ TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   access.flat_dds_lane_mask = 1;
   access.addresses = effective_addresses;
   access.pre_routing_addresses = original_addresses;
-  plugin.onAmdgpuMemoryAccessRouted(access);
+  plugin.onAmdgpuMemoryAccessRouted(access, load, wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
   SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -1912,7 +1912,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     access.flat_dds_lane_mask = 1;
     access.addresses = effective_addresses;
     access.pre_routing_addresses = original_addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -2001,7 +2001,7 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
     access.valid_lane_mask = 1;
     access.request_lane_mask = 1;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
   }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
@@ -2079,7 +2079,7 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
     access.addresses = addresses;
     access.element_lane_masks =
         std::span<const uint64_t>(test.element_lane_masks).first(test.elements);
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, instruction, wave);
   }
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
@@ -2155,7 +2155,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
     access.request_lane_mask = 1;
     access.scratch_lane_mask = 1;
     access.addresses = addresses;
-    plugin.onAmdgpuMemoryAccessRouted(access);
+    plugin.onAmdgpuMemoryAccessRouted(access, atomic, wave);
 
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -2563,7 +2563,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
           std::ranges::fill(destination, 0x100000);
           return true;
         });
-    plugin.onAmdgpuTensorDmaMemoryAccess(access);
+    plugin.onAmdgpuTensorDmaMemoryAccess(access, wave);
 
     plugin.onAmdgpuWavefrontHalted(wave);
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
@@ -3100,7 +3100,7 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     memory_access.valid_lane_mask = 1;
     memory_access.request_lane_mask = 1;
     memory_access.addresses = global_addresses;
-    plugin.onAmdgpuMemoryAccessRouted(memory_access, wave);
+    plugin.onAmdgpuMemoryAccessRouted(memory_access, global, wave);
 
     SyntheticInstruction tensor("tensor_load_to_lds", kTensorEncoding, MEMORY_OP);
     plugin.onAmdgpuBeforeExecuteInstruction(kTensorPc, tensor, wave, kTensorFetch);
