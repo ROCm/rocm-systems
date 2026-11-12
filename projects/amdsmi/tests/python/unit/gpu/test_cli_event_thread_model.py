@@ -667,8 +667,8 @@ class TestEventRealThreads(unittest.TestCase):
             os.close(write_fd)
 
         feeder = threading.Thread(target=_feed)
-        feeder.start()
         start = time.monotonic()
+        feeder.start()
         try:
             with mock.patch.object(sys, "stdin", real_stdin):
                 self._run_with_timeout(commands, _build_event_args([0]))

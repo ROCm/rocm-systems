@@ -1649,6 +1649,70 @@ pub fn amdsmi_get_gpu_cache_info(
     Ok(info)
 }
 
+/// Get the GPU caches of the device with the specified processor handle, one entry per kind of cache.
+///
+/// Unlike [`amdsmi_get_gpu_cache_info`], which holds at most `AMDSMI_MAX_CACHE_TYPES` entries,
+/// this returns every cache kind. Each entry also reports the cache line size and the range of
+/// Compute Units sharing an instance.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the caches are being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiGpuCacheEntryT>>` - Returns `Ok(Vec<AmdsmiGpuCacheEntryT>)` containing one [`AmdsmiGpuCacheEntryT`] per cache kind if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example processor_handle, assuming the number of processors is greater than zero
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     // Retrieve the GPU caches
+///     match amdsmi_get_gpu_cache_entries(processor_handle) {
+///         Ok(caches) => println!("GPU Caches: {:?}", caches),
+///         Err(e) => panic!("Failed to get GPU caches: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_cache_entries` call fails.
+pub fn amdsmi_get_gpu_cache_entries(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<Vec<AmdsmiGpuCacheEntryT>> {
+    let mut num_caches = 0;
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cache_entries(
+        processor_handle,
+        &mut num_caches,
+        std::ptr::null_mut()
+    ));
+
+    let mut caches = Vec::with_capacity(num_caches as usize);
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cache_entries(
+        processor_handle,
+        &mut num_caches,
+        caches.as_mut_ptr()
+    ));
+
+    unsafe {
+        caches.set_len(num_caches as usize);
+    }
+
+    Ok(caches)
+}
+
 /// Get the voltage metric of the device with the specified processor handle, sensor type, and metric.
 ///
 /// Given a processor handle `processor_handle`, a sensor type `sensor_type`, and a voltage metric type `metric`,

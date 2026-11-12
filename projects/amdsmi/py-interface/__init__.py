@@ -124,6 +124,7 @@ from .amdsmi_interface import amdsmi_get_gpu_kfd_info
 from .amdsmi_interface import amdsmi_get_power_cap_info
 from .amdsmi_interface import amdsmi_get_gpu_vram_info
 from .amdsmi_interface import amdsmi_get_gpu_cache_info
+from .amdsmi_interface import amdsmi_get_gpu_cache_entries
 from .amdsmi_interface import amdsmi_get_gpu_xcd_counter
 from .amdsmi_interface import amdsmi_get_gpu_revision
 

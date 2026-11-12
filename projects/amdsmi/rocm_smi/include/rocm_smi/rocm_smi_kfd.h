@@ -21,6 +21,17 @@ namespace amd::smi {
 constexpr auto kInvalidNumaNode = std::numeric_limits<uint32_t>::max();
 constexpr auto kInvalidNumaNodeWeight = std::numeric_limits<uint64_t>::max();
 
+// One cache kind of a KFD node, folded from KFD's per-instance cache records.
+struct KFDCacheEntry {
+  uint32_t level;
+  uint32_t type;  // KFD cache "type" bits (HSA_CACHE_TYPE_*)
+  uint32_t size_kb;
+  uint32_t line_size;  // bytes
+  uint32_t min_cu_shared;
+  uint32_t max_cu_shared;
+  uint32_t num_instances;
+};
+
 class KFDNode {
  public:
   explicit KFDNode(uint32_t node_ind) : node_indx_(node_ind) {}
@@ -49,6 +60,8 @@ class KFDNode {
   int get_used_memory(uint64_t* used);
   int get_used_memory_orig(uint64_t* used);
 
+  // Get cache info from kfd; one entry per cache kind, no limit on the count.
+  int get_cache_entries(std::vector<KFDCacheEntry>* entries);
   // Get cache info from kfd
   int get_cache_info(rsmi_gpu_cache_info_t* info);
 
@@ -94,6 +107,9 @@ int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 
 int read_node_properties(uint32_t node, std::string property_name, uint64_t* val);
 int get_gpu_id(uint32_t node, uint64_t* gpu_id);
+
+// Cache kinds of the GPU at rocm_smi device index dv_ind.
+rsmi_status_t GetDevCacheEntries(uint32_t dv_ind, std::vector<KFDCacheEntry>* entries);
 
 // Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);

@@ -19,6 +19,83 @@ from amdsmi import amdsmi_exception, amdsmi_interface
 AMD_VENDOR_DISPLAY_NAME = "Advanced Micro Devices, Inc. [AMD/ATI]"
 
 
+def _cache_acronyms(cache_info_list):
+    """CACHE_ACRONYM for each entry of amdsmi_get_gpu_cache_entries().
+
+    KFD flags the vector L1D (TCP), scalar L1D (SQC) and GL1 alike, lists them in
+    the order vector L1D, L1I, scalar L1D, GL1, and gives the scalar L1D the same
+    CU sharing as the L1I, since both sit in the SQC. The scalar L1D is the data
+    cache no larger than the L1I that shares like it, preferring the first one
+    after it, then the
+    closest one before it other than the first data cache; failing that, the
+    first data cache after the L1I unless it is shared far more widely than the
+    L1I. Other data caches are vL1D before the L1I and GL1 after it.
+    """
+    level1 = [cache.get("cache_level") == 1 for cache in cache_info_list]
+    inst = [
+        is_l1 and "INST_CACHE" in cache.get("cache_properties", [])
+        for is_l1, cache in zip(level1, cache_info_list)
+    ]
+    data = [
+        is_l1 and not is_inst and "DATA_CACHE" in cache.get("cache_properties", [])
+        for is_l1, is_inst, cache in zip(level1, inst, cache_info_list)
+    ]
+
+    def sharing(cache):
+        return (
+            cache.get("min_num_cu_shared"),
+            cache.get("max_num_cu_shared"),
+            cache.get("num_cache_instance"),
+        )
+
+    acronyms = [
+        "L1I" if inst[i] else f"L{cache.get('cache_level')}"
+        for i, cache in enumerate(cache_info_list)
+    ]
+    if not any(inst):
+        return ["L1D" if data[i] else acronym for i, acronym in enumerate(acronyms)]
+
+    first_inst = inst.index(True)
+    inst_sharing = {sharing(cache) for i, cache in enumerate(cache_info_list) if inst[i]}
+    inst_max_shared = max(
+        cache.get("max_num_cu_shared", 0) for i, cache in enumerate(cache_info_list) if inst[i]
+    )
+    inst_max_size = max(
+        cache.get("cache_size", 0) for i, cache in enumerate(cache_info_list) if inst[i]
+    )
+    after = [i for i in range(first_inst + 1, len(cache_info_list)) if data[i]]
+    before = [i for i in range(first_inst) if data[i]]
+
+    def fits_sqc(i):
+        return cache_info_list[i].get("cache_size", 0) <= inst_max_size
+
+    # The first data cache is the vector L1D, which shares like the L1I when an
+    # SQC serves one CU, so a match before the L1I needs another data cache ahead
+    # of it.
+    scalar = next(
+        (
+            i
+            for i in after + before[:0:-1]
+            if fits_sqc(i) and sharing(cache_info_list[i]) in inst_sharing
+        ),
+        None,
+    )
+    if (
+        scalar is None
+        and after
+        and fits_sqc(after[0])
+        and cache_info_list[after[0]].get("max_num_cu_shared", 0) <= 2 * inst_max_shared
+    ):
+        scalar = after[0]
+
+    for i in after + before:
+        if i == scalar:
+            acronyms[i] = "sL1D"
+        else:
+            acronyms[i] = "vL1D" if i < first_inst else "GL1"
+    return acronyms
+
+
 class StaticCommands:
     def static_cpu(self, args, multiple_devices=False, cpu=None, interface_ver=None):
         """Get Static information for target cpu
@@ -1109,32 +1186,30 @@ class StaticCommands:
             static_dict["vram"] = vram_info_dict
         if args.cache:
             try:
-                cache_info_list = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)["cache"]
+                cache_info_list = amdsmi_interface.amdsmi_get_gpu_cache_entries(args.gpu)["cache"]
                 logging.debug(f"cache_info dictionary = {cache_info_list}")
 
+                cache_acronyms = _cache_acronyms(cache_info_list)
                 for index, cache_info in enumerate(cache_info_list):
-                    # Label each entry with a cache-type acronym from level +
-                    # DATA/INST flags (L1D/L1I/L2/L3, else L<level>).
-                    cache_level = cache_info.get("cache_level")
-                    cache_properties = cache_info.get("cache_properties", [])
-                    if cache_level == 1 and "INST_CACHE" in cache_properties:
-                        cache_acronym = "L1I"
-                    elif cache_level == 1 and "DATA_CACHE" in cache_properties:
-                        cache_acronym = "L1D"
-                    else:
-                        cache_acronym = f"L{cache_level}"
-
+                    cache_acronym = cache_acronyms[index]
                     new_cache_info = {"cache": index, "cache_acronym": cache_acronym}
                     new_cache_info.update(cache_info)
                     # Aggregate size across all instances (per-instance size x count).
                     new_cache_info["total_cache_size"] = (
                         cache_info["cache_size"] * cache_info["num_cache_instance"]
                     )
+                    # The library reports 0 for values the driver does not provide
+                    # (e.g. line sizes some GPUs leave unset, or minimum sharing
+                    # under WSL); show those as N/A instead of 0.
+                    for unreported_key in ("cache_line_size", "min_num_cu_shared"):
+                        if new_cache_info.get(unreported_key) == 0:
+                            new_cache_info[unreported_key] = "N/A"
                     cache_info_list[index] = new_cache_info
 
                 logging.debug(f"[after update] cache_info_list = {cache_info_list}")
 
                 cache_size_unit = "KB"
+                cache_line_size_unit = "B"
                 if self.logger.is_human_readable_format():
                     cache_info_dict_format = {}
                     for cache_dict in cache_info_list:
@@ -1149,6 +1224,11 @@ class StaticCommands:
                             f"{cache_info_dict_format[cache_index]['cache_size']} {cache_size_unit}"
                         )
                         cache_info_dict_format[cache_index]["cache_size"] = cache_size
+
+                        # Add cache_line_size unit
+                        line_size = cache_dict["cache_line_size"]
+                        if line_size != "N/A":
+                            cache_dict["cache_line_size"] = f"{line_size} {cache_line_size_unit}"
 
                         # Add total_cache_size unit
                         total_size = cache_dict["total_cache_size"]
@@ -1173,6 +1253,11 @@ class StaticCommands:
                             "value": cache_dict["total_cache_size"],
                             "unit": cache_size_unit,
                         }
+                        if cache_dict["cache_line_size"] != "N/A":
+                            cache_dict["cache_line_size"] = {
+                                "value": cache_dict["cache_line_size"],
+                                "unit": cache_line_size_unit,
+                            }
             except amdsmi_exception.AmdSmiLibraryException as e:
                 cache_info_list = "N/A"
                 logging.debug(
