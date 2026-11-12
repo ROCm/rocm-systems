@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <queue>
 #include <span>
@@ -102,6 +103,12 @@ public:
   /// failures are returned synchronously and leave no retained instruction.
   VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf);
 
+  /// @brief Issue an instruction and preserve ownership after synchronous completion.
+  /// @details A non-null instruction on return has completed writeback and released
+  /// its counters for the same wave-slot occupant. Retry and deferred completion
+  /// transfer ownership to the pipeline; failures and stale generations destroy it.
+  VmAccessOutcome issue_deferred(std::unique_ptr<Instruction> &inst, Wavefront &wf);
+
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
@@ -142,17 +149,18 @@ protected:
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
   void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
-  VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
+  VmAccessOutcome issue_impl(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                             bool retain_unavailable);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   bool cancel_wait_check_issue(const PipelineEntry &entry);
-  VmAccessOutcome complete_entry(PipelineEntry entry);
+  VmAccessOutcome complete_entry(PipelineEntry entry, std::unique_ptr<Instruction> &inst);
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
-                               uint64_t wave_generation) {
+  void finish_completed_access(std::unique_ptr<Instruction> &inst, Wavefront &wf,
+                               const WaitCounterTokens &counters, uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
-      delete inst;
+      inst.reset();
       return;
     }
     const auto *state = inst->data();
@@ -160,12 +168,17 @@ protected:
         inst->data_as<VectorMemState>()->address_range_violation_lanes)
       wf.record_rdna2_memory_violation();
     release_wait_counters(wf, counters);
+    // Releasing the final counter can retire an ENDING wave. A replacement
+    // dispatch must not receive the completed instruction's ownership.
+    if (wf.dispatch_generation() != wave_generation) {
+      inst.reset();
+      return;
+    }
     if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
         inst->data_as<VectorMemState>()->flat_memory_violation)
       wf.complete_flat_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
-    delete inst;
   }
 
   [[nodiscard]] MemoryIngressAdmission

@@ -22,7 +22,8 @@ namespace rocjitsu {
 namespace rdna4 {
 
 void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -45,7 +46,8 @@ void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
@@ -88,7 +90,8 @@ void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
@@ -111,7 +114,8 @@ void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
