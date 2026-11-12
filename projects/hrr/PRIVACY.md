@@ -28,8 +28,10 @@ environment HRR is tested on is listed in the README under
   log, and opens no network connection.
 - **Archive content transparency.** This page and the notice described under
   [Sharing an archive](#sharing-an-archive) say what an archive may contain.
-- **Local filesystem access control.** The directories capture creates are 0700
-  and its files 0600; an output directory that already exists keeps its own mode. See
+- **Local filesystem access control.** Capture creates the output directory 0700, every
+  directory under it 0700 and every file 0600. An output directory that already exists
+  keeps its own mode, and missing parent directories above it are created with the default
+  mode (0777 minus the umask). See
   [How the archive is protected on disk](#how-the-archive-is-protected-on-disk).
 - **Secure replay handling.** Replay treats an archive as untrusted input, within the limits
   described under
@@ -84,17 +86,12 @@ machine and GPU that hold no data you would not hand to that person. A container
 reasonable boundary. `hrr-playback --info` reads the archive without loading any code and
 needs no GPU.
 
-## Capture modes
+## Capture
 
 Capture is disabled by default on AMD platforms at present (see the [README](README.md)).
 Where it is built in, it is armed by `HIP_HRR_CAPTURE_OUTPUT` and records only with the
-consent of the user who runs the process (see [Consent](#consent)). Today there is one
-mode, and it records **contents**: everything in the tables below.
-
-[AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) adds a
-**metadata-only** mode as the default and moves contents behind a second variable. The
-"Mode" column states which mode records each item once that task has landed. Until then,
-every capture is a contents capture.
+consent of the user who runs the process (see [Consent](#consent)). Capture records everything
+in the tables below ([AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880)).
 
 ## What an archive contains
 
@@ -102,23 +99,23 @@ A `hipExtModuleLaunchKernel` also stores the start and stop events the runtime
 marked internally. Those appear as `hipEventRecord` calls the application did
 not make.
 
-| Item | Where | Mode | Removed or reduced by |
-|---|---|---|---|
-| Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | both | — kept, replay needs it |
-| Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
-| Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
-| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | both | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
-| Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
-| Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
-| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
-| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | contents | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
-| Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
-| Marker that capture is running: the boot id and the process start time in clock ticks since boot. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
+| Item | Where | Removed or reduced by |
+|---|---|---|
+| Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | — kept, replay needs it |
+| Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | — kept, triage names the failing kernel |
+| Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | — kept |
+| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
+| Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | — kept, replay needs it |
+| Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | — kept |
+| Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | — kept |
+| Kernel argument bytes | `events.bin` | — kept |
+| Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | — kept |
+| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | — kept |
+| Whole fat binary bundles, including targets HIP never loads | `blobs/` | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
+| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
+| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
+| Framework allocator layout, when a region producer ran beside capture | `regions/` | — kept, written only by an opt-in producer |
+| Marker that capture is running: the boot id and the process start time in clock ticks since boot. A normal exit removes it; a process that crashes or is killed leaves it | `active` | — kept, region producers read it |
 
 The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `event_count`,
 `blob_count`, the HIP and comgr versions, `capture_consent` (where the consent came from,
@@ -152,13 +149,11 @@ for example a compiler cache path under the user's home directory, is recorded w
 Memory that never crossed a HIP call is not recorded, and neither is a failed call, apart
 from the exceptions listed in [skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md).
 
-## What no mode can promise
+## How sensitive an archive is
 
-A metadata-only archive with identifiers blanked still names every kernel the workload
-ran, which describes the model and the serving stack, and still records every size and
-address. It holds no buffer contents and no code, so it cannot reproduce a fault that
-depends on values, and it cannot be replayed in full. A contents archive is as sensitive
-as the data the workload handled: where it may go has to be agreed before it is sent.
+An archive is as sensitive as the data the workload handled, including any passwords,
+keys and session tokens that were in its host buffers: where it may go has to be agreed
+before it is sent.
 
 ## Sharing an archive
 
@@ -183,8 +178,10 @@ serving stack can still hold its clients' prompts, as listed above.
 
 ## How the archive is protected on disk
 
-The archive is readable only by the user who captured it: the directories capture creates
-are 0700 and its files 0600. An output directory that already exists keeps its own mode.
+The archive is readable only by the user who captured it. Capture creates the output
+directory 0700, every directory under it 0700 and every file 0600. An output directory that
+already exists keeps its own mode, and missing parent directories above it are created with
+the default mode (0777 minus the umask).
 [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
 write go through the directory descriptors capture checked.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878), still open, is to keep
