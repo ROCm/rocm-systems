@@ -5,6 +5,7 @@
 #pragma once
 #include "common/internal.h"
 #include "mfma/layout.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #if defined(__AVX2__)
 #include <immintrin.h>
 #endif

@@ -7,6 +7,7 @@
 #include "benchmark/ordering.h"
 #include "benchmark/sampling.h"
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <algorithm>
 #include <cstdio>

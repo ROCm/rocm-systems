@@ -6,8 +6,7 @@
 // can differ by architecture, and CPU SIMD implementations share these contracts.
 // Internal helpers; not part of the public C API.
 
-#ifndef RJ_ARITH_FLOAT_ENCODING_H_
-#define RJ_ARITH_FLOAT_ENCODING_H_
+#pragma once
 
 #include "common/bits.h"
 #include "common/validation.h"
@@ -126,5 +125,3 @@ template <bool Bf8, bool Fnuz = false> inline float fp8_to_float(uint8_t bits) {
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
-
-#endif
