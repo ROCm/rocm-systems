@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -45,6 +47,7 @@ public:
         const reader_types::event_filter_t&   filter) override
     {
         require_no_filter(filter);
+        if(track->category == reader_types::track_kind_t::pmc_memory) return {};
         const auto& held = m_source.track_rows(*track);
         std::array<std::size_t, pytorch_source::k_type_slots> next_id{};
         for(std::size_t slot = 0; slot < next_id.size(); ++slot)
@@ -68,11 +71,24 @@ public:
     }
 
     reader_types::counter_timeline_event_list_t counter_events_for_track(
-        const reader_types::track_info_ptr_t& /*track*/,
-        const reader_types::event_filter_t& filter) override
+        const reader_types::track_info_ptr_t& track,
+        const reader_types::event_filter_t&   filter) override
     {
         require_no_filter(filter);
-        return {};
+        if(track->category != reader_types::track_kind_t::pmc_memory) return {};
+        const auto* points = m_source.m_catalog->memory_activity_points(track->id);
+        if(points == nullptr) return {};
+        reader_types::counter_timeline_event_list_t events;
+        events.reserve(points->size());
+        for(const auto& point : *points)
+        {
+            events.push_back(
+                reader_types::counter_timeline_event_t{ .unique_identifier = {},
+                                                        .timestamp         = point.start,
+                                                        .value             = point.value,
+                                                        .track             = track });
+        }
+        return events;
     }
 
     std::optional<std::pair<size_t, size_t>> event_id_span(
@@ -195,8 +211,10 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         }
         m_tracks.push_back(std::move(held));
     }
-    m_events = std::move(store.events);
-    m_args   = std::move(store.args);
+    m_events       = std::move(store.events);
+    m_args         = std::move(store.args);
+    m_memory       = std::move(store.memory);
+    m_cpu_agent_id = store.cpu_agent_id;
 
     for(std::size_t track = 0; track < m_tracks.size(); ++track)
     {
@@ -214,6 +232,101 @@ pytorch_source::load_catalog(common::thread_pool& /*workers*/,
         if(a.type != b.type) return a.type < b.type;
         return a.first_id < b.first_id;
     });
+
+    add_memory_tracks();
+    m_catalog->publish_memory_activity_pmc_infos();
+}
+
+std::uint64_t
+pytorch_source::agent_of(const memory_sample_t& sample) const
+{
+    if(sample.device_type == 0) return m_cpu_agent_id;
+    return sample.device_id >= 0 ? static_cast<std::uint64_t>(sample.device_id) + 1 : 0;
+}
+
+const memory_sample_t*
+pytorch_source::sample_of(std::uint32_t event) const
+{
+    const auto it =
+        std::lower_bound(m_memory.begin(),
+                         m_memory.end(),
+                         event,
+                         [](const memory_sample_t& sample, std::uint32_t wanted) {
+                             return sample.event < wanted;
+                         });
+    return it != m_memory.end() && it->event == event ? &*it : nullptr;
+}
+
+// Each agent with memory events gets two series. The totals are read from the file's
+// "Total Allocated" and "Total Reserved", never summed from the events: a trace starts
+// mid-run, so a sum from zero would be wrong.
+void
+pytorch_source::add_memory_tracks()
+{
+    struct series_t
+    {
+        reader_types::track_info_ptr_t       owner;
+        std::vector<memory_activity_point_t> allocated;
+        std::vector<memory_activity_point_t> reserved;
+    };
+    std::map<std::uint64_t, series_t> by_agent;
+    const auto                        slot =
+        static_cast<std::size_t>(reader_types::event_type_t::memory_allocate);
+    for(std::size_t track = 0; track < m_tracks.size(); ++track)
+    {
+        const auto& held = m_tracks[track];
+        const auto& run  = held.by_type.at(slot);
+        for(std::size_t index = 0; index < run.rows.size(); ++index)
+        {
+            const auto& row    = held.rows[run.rows[index]];
+            const auto* sample = sample_of(row.event);
+            if(sample == nullptr) continue;
+            const auto agent = agent_of(*sample);
+            if(agent == 0) continue;
+            auto& series = by_agent[agent];
+            if(!series.owner) series.owner = m_catalog->tracks[track];
+            const std::uint64_t id = run.first_id + index;
+            if(sample->allocated >= 0)
+            {
+                series.allocated.push_back(
+                    { id, row.start, row.end, static_cast<double>(sample->allocated) });
+            }
+            if(sample->reserved >= 0)
+            {
+                series.reserved.push_back(
+                    { id, row.start, row.end, static_cast<double>(sample->reserved) });
+            }
+        }
+    }
+
+    for(auto& [agent, series] : by_agent)
+    {
+        for(auto* points : { &series.allocated, &series.reserved })
+        {
+            if(points->empty()) continue;
+            auto track = std::make_shared<reader_types::track_info_t>();
+            track->id  = m_catalog->tracks.size();
+            track->name =
+                points == &series.allocated ? "ALLOCATED MEMORY" : "RESERVED MEMORY";
+            track->category    = reader_types::track_kind_t::pmc_memory;
+            track->agent_id    = agent;
+            track->event_count = points->size();
+            track->start_ts    = std::numeric_limits<std::size_t>::max();
+            double low         = points->front().value;
+            double high        = low;
+            for(const auto& point : *points)
+            {
+                track->start_ts = std::min<std::size_t>(track->start_ts, point.start);
+                track->end_ts   = std::max<std::size_t>(track->end_ts, point.end);
+                low             = std::min(low, point.value);
+                high            = std::max(high, point.value);
+            }
+            track->value_range  = reader_types::value_range_t{ low, high };
+            track->node_info    = series.owner->node_info;
+            track->process_info = series.owner->process_info;
+            m_catalog->add_memory_activity_track(std::move(track), std::move(*points));
+        }
+    }
 }
 
 void
@@ -259,10 +372,27 @@ pytorch_source::histogram(const histogram_grid_t& grid)
         std::uint64_t start_ts;
         std::uint64_t end_ts;
     };
+    struct sample_t
+    {
+        std::uint64_t timestamp;
+        double        value;
+    };
     return build_histogram(
         *m_catalog,
         grid,
         [this](const reader_types::track_info_ptr_t& track, const histogram_grid_t& on) {
+            if(track->category == reader_types::track_kind_t::pmc_memory)
+            {
+                std::vector<sample_t> samples;
+                if(const auto* points = m_catalog->memory_activity_points(track->id))
+                {
+                    for(const auto& point : *points)
+                    {
+                        samples.push_back({ point.start, point.value });
+                    }
+                }
+                return accumulate_samples(samples, on);
+            }
             const ph_event_list_t events = m_reader->events(track, 0, 0);
             std::vector<span_t>   spans;
             spans.reserve(events.list_size);

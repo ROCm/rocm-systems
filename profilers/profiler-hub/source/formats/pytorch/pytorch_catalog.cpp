@@ -42,6 +42,21 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
             agent_by_id.emplace(source.agent_id, nullptr);
         }
     }
+    // A memory event names its device: a GPU is an agent like the stream tracks' ones,
+    // and CPU memory (device type 0) gets a CPU agent.
+    bool cpu_memory = false;
+    for(const auto& sample : store.memory)
+    {
+        if(sample.device_type == 0)
+        {
+            cpu_memory = true;
+        }
+        else if(sample.device_id >= 0)
+        {
+            agent_by_id.emplace(static_cast<std::uint64_t>(sample.device_id) + 1,
+                                nullptr);
+        }
+    }
     for(auto& [pid, process] : process_by_pid)
     {
         process       = std::make_shared<reader_types::process_info_t>();
@@ -69,6 +84,19 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
         agent->node_info         = node;
         catalog.agents.push_back(agent);
         catalog.agents_by_id.emplace(agent_id, agent);
+    }
+    if(cpu_memory)
+    {
+        auto agent            = std::make_shared<reader_types::agent_info_t>();
+        agent->id             = agent_by_id.empty() ? 1 : agent_by_id.rbegin()->first + 1;
+        agent->agent_type     = "CPU";
+        agent->type_index     = 0;
+        agent->absolute_index = 0;
+        agent->name           = "CPU 0";
+        agent->node_info      = node;
+        store.cpu_agent_id    = agent->id;
+        catalog.agents.push_back(agent);
+        catalog.agents_by_id.emplace(agent->id, agent);
     }
 
     for(const auto& source : store.tracks)

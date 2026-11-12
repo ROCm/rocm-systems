@@ -83,15 +83,23 @@ private:
     [[nodiscard]] const track_rows_t& track_rows(
         const reader_types::track_info_t& track) const;
 
+    // The agent a memory event is on: the CPU agent, a GPU's, or 0 when its device is
+    // unknown.
+    [[nodiscard]] std::uint64_t          agent_of(const memory_sample_t& sample) const;
+    [[nodiscard]] const memory_sample_t* sample_of(std::uint32_t event) const;
+    void                                 add_memory_tracks();
+
     std::string                       m_path;
     std::shared_ptr<reader_catalog_t> m_catalog;
     row_seam                          m_seam;
     std::vector<track_rows_t>         m_tracks;  // by track id
     std::vector<event_t>          m_events;  // file order; store_row_t::event indexes it
     std::string                   m_args;    // the args text of m_events
-    std::vector<std::string_view> m_names;   // by name id
-    std::vector<std::string_view> m_cats;    // by category index
-    std::vector<run_t>            m_runs;    // by type, then first id
+    std::vector<memory_sample_t>  m_memory;  // by event index
+    std::uint64_t                 m_cpu_agent_id{};
+    std::vector<std::string_view> m_names;  // by name id
+    std::vector<std::string_view> m_cats;   // by category index
+    std::vector<run_t>            m_runs;   // by type, then first id
     cached_track_reader*          m_reader{};
 };
 

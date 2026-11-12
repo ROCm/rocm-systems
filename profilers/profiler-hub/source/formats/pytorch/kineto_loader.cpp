@@ -536,13 +536,14 @@ public:
 private:
     struct current_t
     {
-        std::string  name, cat, args_name;
-        char         ph     = '\0';
-        bool         has_ts = false, has_dur = false;
-        std::int64_t ts_ns = 0, dur_ns = 0;
-        std::int64_t pid = 0, tid = 0, stream = -1, device = -1;
-        std::int64_t corr = -1, ext = -1;
-        bool         has_args = false;
+        std::string     name, cat, args_name;
+        char            ph     = '\0';
+        bool            has_ts = false, has_dur = false;
+        std::int64_t    ts_ns = 0, dur_ns = 0;
+        std::int64_t    pid = 0, tid = 0, stream = -1, device = -1;
+        std::int64_t    corr = -1, ext = -1;
+        bool            has_args = false;
+        memory_sample_t memory;
     };
 
     void close_text()
@@ -604,6 +605,30 @@ private:
             {
                 m_cur.device = i;
             }
+            else if(m_k4 == "Addr")
+            {
+                m_cur.memory.address = static_cast<std::uint64_t>(i);
+            }
+            else if(m_k4 == "Bytes")
+            {
+                m_cur.memory.bytes = i;
+            }
+            else if(m_k4 == "Device Id")
+            {
+                m_cur.memory.device_id = i;
+            }
+            else if(m_k4 == "Device Type")
+            {
+                m_cur.memory.device_type = i;
+            }
+            else if(m_k4 == "Total Allocated")
+            {
+                m_cur.memory.allocated = i;
+            }
+            else if(m_k4 == "Total Reserved")
+            {
+                m_cur.memory.reserved = i;
+            }
         }
         else if(m_depth == 3 && m_in_device && m_k3 == "id")
         {
@@ -660,6 +685,34 @@ private:
         m_t.link_by_correlation = m_cur.corr >= 0;
     }
 
+    std::uint32_t add_event(phase_t phase)
+    {
+        event_t e{};
+        e.name_id = intern(m_name_ids, m_t.names, m_cur.name);
+        e.cat_id  = intern(m_cat_ids, m_t.cats, m_cur.cat);
+        if(m_t.cat_classes.size() < m_t.cats.size())
+        {
+            m_t.cat_classes.push_back(classify_category(m_cur.cat));
+        }
+        e.pid    = m_cur.pid;
+        e.tid    = m_cur.tid;
+        e.stream = m_cur.stream;
+        e.device = m_cur.device;
+        e.ts_ns  = m_cur.ts_ns;
+        e.dur_ns = m_cur.dur_ns;
+        e.corr   = m_cur.corr;
+        e.ext    = m_cur.ext;
+        e.phase  = phase;
+        if(m_cur.has_args && m_args_text.size() > 2)
+        {
+            e.args_off = m_t.args.size();
+            e.args_len = static_cast<std::uint32_t>(m_args_text.size());
+            m_t.args.append(m_args_text);
+        }
+        m_t.events.push_back(e);
+        return static_cast<std::uint32_t>(m_t.events.size() - 1);
+    }
+
     void finish_event()
     {
         auto& d = m_t.diag;
@@ -675,30 +728,21 @@ private:
                     ++d.bad_events;
                     return;
                 }
-                event_t e{};
-                e.name_id = intern(m_name_ids, m_t.names, m_cur.name);
-                e.cat_id  = intern(m_cat_ids, m_t.cats, m_cur.cat);
-                if(m_t.cat_classes.size() < m_t.cats.size())
-                {
-                    m_t.cat_classes.push_back(classify_category(m_cur.cat));
-                }
-                e.pid    = m_cur.pid;
-                e.tid    = m_cur.tid;
-                e.stream = m_cur.stream;
-                e.device = m_cur.device;
-                e.ts_ns  = m_cur.ts_ns;
-                e.dur_ns = m_cur.dur_ns;
-                e.corr   = m_cur.corr;
-                e.ext    = m_cur.ext;
-                if(m_cur.has_args && m_args_text.size() > 2)
-                {
-                    e.args_off = m_t.args.size();
-                    e.args_len = static_cast<std::uint32_t>(m_args_text.size());
-                    m_t.args.append(m_args_text);
-                }
-                m_t.events.push_back(e);
+                add_event(phase_t::complete);
                 break;
             }
+            case 'i':
+                if(m_cur.name == "[memory]" && m_cur.has_ts)
+                {
+                    ++d.memory_events;
+                    m_cur.memory.event = add_event(phase_t::memory);
+                    m_t.memory.push_back(m_cur.memory);
+                }
+                else
+                {
+                    ++d.other_events;
+                }
+                break;
             case 's': ++d.flow_s; break;
             case 'f': ++d.flow_f; break;
             case 'M':
