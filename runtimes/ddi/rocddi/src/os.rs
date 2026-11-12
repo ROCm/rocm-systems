@@ -25,4 +25,4 @@ pub(crate) use platform::{
 };
 
 #[cfg(target_os = "linux")]
-pub(crate) use platform::process_identity::ProcessIdentity;
+pub(crate) use platform::process_identity::{ProcessIdentity, note_runtime_image};
