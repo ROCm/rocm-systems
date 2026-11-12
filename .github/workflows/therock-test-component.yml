@@ -41,8 +41,9 @@ jobs:
     continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
     container:
       # If the component has specified an alternate image, honor that option.
-      # Otherwise use the default image.
-      image: >-
+      # Otherwise use the default image. The default is digest-pinned;
+      # alternates come from TheRock's test configuration.
+      image: >- # zizmor: ignore[unpinned-images]
         ${{ inputs.platform == 'linux' &&
             (fromJSON(inputs.component).container_image || inputs.default_container_image)
             || null
@@ -73,6 +74,7 @@ jobs:
           ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools
           path: "prejob"
+          persist-credentials: false
 
       - name: Pre-job cleanup processes on Windows
         if: ${{ runner.os == 'Windows' }}
@@ -89,8 +91,10 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
+          persist-credentials: false
 
       - name: Run setup test environment workflow
+        # TheRock's action, from the TheRock checkout at the workspace root.
         uses: './.github/actions/setup_test_environment'
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
@@ -108,9 +112,11 @@ jobs:
 
       - name: Setup Additional Requirements
         if: ${{ fromJSON(inputs.component).additional_requirements_files != '' }}
+        env:
+          REQUIREMENTS_FILES: ${{ join(fromJSON(inputs.component).additional_requirements_files, ',') }}
         run: |
           python ./build_tools/install_additional_requirements.py \
-          --requirements-files=${{ join(fromJSON(inputs.component).additional_requirements_files, ',') }}
+          --requirements-files="${REQUIREMENTS_FILES}"
 
       - name: Set thread limits
         if: ${{ runner.os == 'Linux' }}
@@ -134,12 +140,14 @@ jobs:
           # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
+          INPUTS_AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          TEST_SCRIPT: ${{ fromJSON(inputs.component).test_script }}
         run: |
-          if [[ "${{ inputs.amdgpu_families }}" == "gfx125X-dcgpu" ]]; then
-            python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
-              bash -c '${{ fromJSON(inputs.component).test_script }}'
+          if [[ "${INPUTS_AMDGPU_FAMILIES}" == "gfx125X-dcgpu" ]]; then
+            python ./build_tools/memory_monitor.py --phase "Test ${TEST_COMPONENT}" -- \
+              bash -c "${TEST_SCRIPT}"
           else
-            ${{ fromJSON(inputs.component).test_script }}
+            eval "${TEST_SCRIPT}"
           fi
 
       # GitHub's 'Complete job' step is unaware of launched executables
