@@ -10,7 +10,6 @@ import os
 import re
 import select
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -57,7 +56,9 @@ NATIVE_DISPATCH_PREFIX = "dispatch"
 NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 PROCFS_ROOT = Path("/proc")
-_MAX_TARGET_SYMLINKS = 40
+ROOT_DIR = Path("/")
+SDK_ATTACH_LIBRARY = "librocprofiler-sdk-attach.so"
+SDK_TOOL_LIBRARY = "rocprofiler-sdk/librocprofiler-sdk-tool.so"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 # Panel id of block 4, Roofline
@@ -226,271 +227,49 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     return resolved
 
 
-def is_library_missing_in_target(pid: Union[int, str], library_path: str) -> bool:
-    """Return whether a library is confirmed absent from a target's mount view."""
-    if not Path(library_path).is_absolute():
-        return False
-
-    # Only reject a path proven absent. Restricted procfs access, or a symlink
-    # walk that cannot be completed, must not hide a library the target can see.
-    status, mode, _resolved = _lookup_in_target_root(_target_root(pid), library_path)
-    if status == "missing":
-        return True
-    if status != "present" or mode is None:
-        return False
-    return not stat.S_ISREG(mode)
-
-
-def find_loaded_library_directories(
-    pid: Union[int, str], library_name: str
-) -> list[str]:
-    """Return mapped library directories as seen by the target process."""
-    maps_path = PROCFS_ROOT / _pid_component(pid) / "maps"
-    directories: list[str] = []
+def attach_target_root(attach_pid: Optional[str]) -> Path:
+    """Return the root directory of the attach target, or / if it shares ours."""
+    if attach_pid is None:
+        return ROOT_DIR
+    target_root = PROCFS_ROOT / attach_pid / "root"
     try:
-        with maps_path.open(encoding="utf-8", errors="replace") as maps_file:
-            for line in maps_file:
-                directory = _mapped_library_directory(line, library_name)
-                if directory is None or directory in directories:
-                    continue
-                directories.append(directory)
-    except OSError:
-        return []
-    return directories
-
-
-def find_loaded_library_directory(
-    pid: Union[int, str], library_name: str
-) -> Optional[str]:
-    """Find the first mapped library directory as seen by the target process."""
-    directories = find_loaded_library_directories(pid, library_name)
-    if not directories:
-        return None
-    return directories[0]
-
-
-def find_target_library_from_loaded_library(
-    pid: Union[int, str],
-    library_name: str,
-    loaded_library_name: str,
-) -> Optional[str]:
-    """Find a target library relative to another library mapped by the target."""
-    for loaded_directory in find_loaded_library_directories(pid, loaded_library_name):
-        target_library = _target_visible_library(pid, library_name, loaded_directory)
-        if target_library is not None:
-            return target_library
-    return None
-
-
-def _mapped_library_directory(maps_line: str, library_name: str) -> Optional[str]:
-    path_start = maps_line.find("/")
-    if path_start < 0:
-        return None
-    mapped_path = maps_line[path_start:].rstrip("\n")
-    if mapped_path.endswith(" (deleted)"):
-        return None
-    mapped_library = Path(mapped_path)
-    if not mapped_library.name.startswith(library_name):
-        return None
-    return str(mapped_library.parent)
-
-
-def _target_visible_library(
-    pid: Union[int, str], library_name: str, loaded_directory: str
-) -> Optional[str]:
-    target_root = _target_root(pid)
-    target_directory = Path(loaded_directory)
-    candidate_paths = (
-        target_directory / "rocprofiler-sdk" / library_name,
-        target_directory / library_name,
-    )
-    for candidate_path in candidate_paths:
-        visible_library = _regular_library_in_target(target_root, str(candidate_path))
-        if visible_library is not None:
-            return visible_library
-    return None
-
-
-def _regular_library_in_target(target_root: Path, absolute_path: str) -> Optional[str]:
-    """Return a target-visible library path, including a versioned fallback."""
-    status, mode, _resolved = _lookup_in_target_root(target_root, absolute_path)
-    if status == "present" and mode is not None and stat.S_ISREG(mode):
-        return absolute_path
-    if status != "missing":
-        return None
-
-    parent = Path(absolute_path).parent
-    names = _directory_names_in_target(target_root, str(parent))
-    if not names:
-        return None
-    selected = _highest_versioned_name(Path(absolute_path).name, names)
-    if selected is None:
-        return None
-    versioned_path = str(parent / selected)
-    status, mode, _resolved = _lookup_in_target_root(target_root, versioned_path)
-    if status == "present" and mode is not None and stat.S_ISREG(mode):
-        return versioned_path
-    return None
-
-
-def _directory_names_in_target(
-    target_root: Path, absolute_directory: str
-) -> Optional[list[str]]:
-    """List one directory inside the target, or None when the walk is blocked."""
-    status, mode, resolved = _lookup_in_target_root(target_root, absolute_directory)
-    if status == "indeterminate":
-        return None
-    if (
-        status != "present"
-        or mode is None
-        or resolved is None
-        or not stat.S_ISDIR(mode)
-    ):
-        return []
-    try:
-        return [entry.name for entry in resolved.iterdir()]
+        shares_root_dir = target_root.samefile(ROOT_DIR)
     except OSError as error:
-        if error.errno in (errno.ENOENT, errno.ENOTDIR):
-            return []
-        return None
+        console_error(
+            f"Cannot read the root directory of process {attach_pid}: {error}"
+        )
+        return target_root
+    return ROOT_DIR if shares_root_dir else target_root
 
 
-def _highest_versioned_name(library_name: str, names: list[str]) -> Optional[str]:
-    """Pick the highest numeric libname.so.N sibling."""
-    prefix = f"{library_name}."
-    version_tuples: list[tuple[list[int], str]] = []
-    for name in names:
-        if not name.startswith(prefix):
-            continue
-        suffix = name[len(library_name) :]
-        if not suffix.startswith("."):
-            continue
-        parts = suffix.split(".")[1:]
-        if not parts or not all(part.isdigit() for part in parts):
-            continue
-        version_tuples.append(([int(part) for part in parts], name))
-    if not version_tuples:
-        return None
-
-    max_version_len = max(len(version_parts) for version_parts, _name in version_tuples)
-    best_name = version_tuples[0][1]
-    best_numeric = -1
-    for version_parts, name in version_tuples:
-        numeric = version_to_numeric(version_parts, max_version_len)
-        if numeric > best_numeric:
-            best_numeric = numeric
-            best_name = name
-    return best_name
+def to_local_path(target_path: str, target_root: Path) -> Path:
+    """Return where a path that the target process sees is on this machine."""
+    return target_root / Path(target_path).relative_to(ROOT_DIR)
 
 
-def _lookup_in_target_root(
-    target_root: Path, absolute_path: str
-) -> tuple[str, Optional[int], Optional[Path]]:
-    """Resolve an absolute path without leaving the target root.
+def to_target_path(local_path: Path, target_root: Path) -> str:
+    """Return how the target process sees a path under its root directory."""
+    return str(ROOT_DIR / local_path.relative_to(target_root))
 
-    /proc/<pid>/root changes the starting directory, but an absolute symlink
-    is still followed from the host root. This walk restarts those links at
-    the target root, keeps relative links in their directory, and refuses to
-    climb above the target root.
+
+def find_attach_tool_library(attach_pid: str) -> Optional[str]:
+    """Return the SDK tool library of the ROCm that the attach target runs.
+
+    The path is the one the target sees, so it also works for a target in a
+    container.
     """
-    if not absolute_path.startswith("/"):
-        return "indeterminate", None, None
-
-    current = target_root
-    current_mode: Optional[int] = None
-    remaining = _path_components(absolute_path)
-    followed_links = 0
-    while remaining:
-        component = remaining.pop(0)
-        if component in ("", "."):
-            continue
-        if component == "..":
-            if current != target_root:
-                current = current.parent
-                current_mode = None
-            continue
-        candidate = current / component
-        try:
-            info = os.lstat(candidate)
-        except OSError as error:
-            if error.errno in (errno.ENOENT, errno.ENOTDIR):
-                return "missing", None, None
-            return "indeterminate", None, None
-        if stat.S_ISLNK(info.st_mode):
-            followed_links += 1
-            if followed_links > _MAX_TARGET_SYMLINKS:
-                return "indeterminate", None, None
-            try:
-                link_text = os.readlink(candidate)
-            except OSError as error:
-                if error.errno in (errno.ENOENT, errno.ENOTDIR):
-                    return "missing", None, None
-                return "indeterminate", None, None
-            if link_text.startswith("/"):
-                current = target_root
-                current_mode = None
-            remaining = _path_components(link_text) + remaining
-            continue
-        if remaining and not stat.S_ISDIR(info.st_mode):
-            return "missing", None, None
-        current = candidate
-        current_mode = info.st_mode
-
-    if current_mode is None:
-        try:
-            current_mode = os.lstat(current).st_mode
-        except OSError as error:
-            if error.errno in (errno.ENOENT, errno.ENOTDIR):
-                return "missing", None, None
-            return "indeterminate", None, None
-        if stat.S_ISLNK(current_mode):
-            return "indeterminate", None, None
-    return "present", current_mode, current
-
-
-def _path_components(path_text: str) -> list[str]:
-    return [part for part in Path(path_text).parts if part not in ("/", "")]
-
-
-def resolve_attach_tool_library(
-    pid: Union[int, str], configured_library_path: str
-) -> Optional[str]:
-    """Resolve the SDK tool library to a path visible to the attach target."""
-    if not is_library_missing_in_target(pid, configured_library_path):
-        return configured_library_path
-
-    target_library = find_target_library_from_loaded_library(
-        pid,
-        _unversioned_library_name(configured_library_path),
-        "librocprofiler-register.so",
+    attach_library_dir = _find_mapped_library_directory(
+        _read_process_maps(attach_pid), SDK_ATTACH_LIBRARY
     )
-    if target_library is not None:
-        console_debug(f"Resolved live attach tool from process {pid}: {target_library}")
-    return target_library
-
-
-def _target_root(pid: Union[int, str]) -> Path:
-    return PROCFS_ROOT / _pid_component(pid) / "root"
-
-
-def _unversioned_library_name(library_path: str) -> str:
-    library_name = Path(library_path).name
-    shared_object_suffix = ".so"
-    suffix_position = library_name.find(shared_object_suffix)
-    if suffix_position < 0:
-        return library_name
-    suffix_end = suffix_position + len(shared_object_suffix)
-    return library_name[:suffix_end]
-
-
-def _pid_component(pid: Union[int, str]) -> str:
-    pid_string = str(pid)
-    is_ascii_integer = pid_string and all(
-        "0" <= character <= "9" for character in pid_string
+    if attach_library_dir is None:
+        return None
+    target_root = attach_target_root(attach_pid)
+    tool_path = resolve_rocm_library_path(
+        str(to_local_path(f"{attach_library_dir}/{SDK_TOOL_LIBRARY}", target_root))
     )
-    if not is_ascii_integer or int(pid_string) <= 0:
-        raise ValueError(f"Invalid process id: {pid!r}")
-    return pid_string
+    if tool_path is None or not Path(tool_path).is_file():
+        return None
+    return to_target_path(Path(tool_path), target_root)
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
@@ -673,7 +452,9 @@ def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> N
             os.environ.clear()
             os.environ.update(original_env)
 
-    with temporary_env(new_env):
+    with _attach_output_in_target(
+        new_env, options["ROCPROF_ATTACH_PID"]
+    ) as attach_env, temporary_env(attach_env):
         libname = options["ROCPROF_ATTACH_LIBRARY"]
 
         try:
@@ -1359,7 +1140,29 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
+@contextmanager
+def temporary_rocprofiler_metrics_path(
+    sdk_config: Dict[str, Any], attach_pid: Optional[str] = None
+) -> Generator[str, None, None]:
+    """Yield a counter definitions directory that the profiled process can read.
+
+    With attach_pid, the directory is in the target's /tmp and owned by the
+    target's user. It is deleted on exit, also when profiling fails.
+    """
+    target_root = attach_target_root(attach_pid)
+    metrics_path = create_temp_rocprofiler_metrics_path(sdk_config, target_root)
+    local_metrics_path = to_local_path(metrics_path, target_root)
+    try:
+        if attach_pid is not None:
+            _chown_to_process_owner(local_metrics_path, attach_pid)
+        yield metrics_path
+    finally:
+        shutil.rmtree(local_metrics_path, ignore_errors=True)
+
+
+def create_temp_rocprofiler_metrics_path(
+    sdk_config: Dict[str, Any], target_root: Path = ROOT_DIR
+) -> str:
     """
     Create temporary directory with rocprofiler metrics config files.
 
@@ -1369,12 +1172,14 @@ def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
 
     Args:
         sdk_config: The rocprofiler-sdk configuration dictionary.
+        target_root: Root directory of the profiled process.
 
     Returns:
-        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var).
+        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var),
+        as the profiled process sees it.
     """
     tmpfile_parent = Path(
-        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir="/tmp")
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=target_root / "tmp")
     )
 
     # counter_defs.yaml is for backward compatibility with previous versions of sdk
@@ -1397,7 +1202,7 @@ def create_temp_rocprofiler_metrics_path(sdk_config: Dict[str, Any]) -> str:
     with open(tmpfile_path_new, "w", encoding="utf-8") as tmpfile:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
-    return str(tmpfile_parent)
+    return to_target_path(tmpfile_parent, target_root)
 
 
 def reconfigure_stdio_utf8() -> None:
@@ -1680,3 +1485,77 @@ def _format_listed_table(
         show_index=False,
     )
     return f"{table_id} {metric_details[table_id][0]}\n{table}"
+
+
+def _read_process_maps(pid: str) -> List[str]:
+    """Return the lines of /proc/<pid>/maps."""
+    maps_path = PROCFS_ROOT / pid / "maps"
+    try:
+        return maps_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as error:
+        console_error(f"Cannot read the memory map of process {pid}: {error}")
+        return []
+
+
+def _find_mapped_library_directory(
+    maps_lines: List[str], library_name: str
+) -> Optional[str]:
+    """Return the directory of the first mapped file named library_name*."""
+    for line in maps_lines:
+        path_start = line.find("/")
+        if path_start < 0 or line.endswith(" (deleted)"):
+            continue
+        mapped_path = Path(line[path_start:])
+        if mapped_path.name.startswith(library_name):
+            return str(mapped_path.parent)
+    return None
+
+
+def _chown_to_process_owner(directory: Path, pid: str) -> None:
+    """Give a directory and its files to the user that runs process pid."""
+    process_owner = (PROCFS_ROOT / pid).stat()
+    for owned_path in [directory, *directory.iterdir()]:
+        os.chown(owned_path, process_owner.st_uid, process_owner.st_gid)
+
+
+@contextmanager
+def _attach_output_in_target(
+    new_env: Dict[str, str], attach_pid: Optional[str]
+) -> Generator[Dict[str, str], None, None]:
+    """Yield the attach environment, with the output in the target's /tmp if needed.
+
+    A target in a container cannot write to our output directory. Its output
+    goes to a folder in its own /tmp, which is copied back after detach and
+    always deleted.
+    """
+    target_root = attach_target_root(attach_pid)
+    if target_root == ROOT_DIR:
+        yield new_env
+        return
+    staging_path = Path(
+        tempfile.mkdtemp(
+            prefix=f"rocprof_compute_attach_{attach_pid}_", dir=target_root / "tmp"
+        )
+    )
+    try:
+        _chown_to_process_owner(staging_path, attach_pid)
+        console_debug(f"Process {attach_pid} writes its output to {staging_path}")
+        yield {
+            **new_env,
+            "ROCPROF_OUTPUT_PATH": to_target_path(staging_path, target_root),
+        }
+        _copy_attach_output(
+            staging_path, Path(new_env["ROCPROF_OUTPUT_PATH"]), attach_pid
+        )
+    finally:
+        shutil.rmtree(staging_path, ignore_errors=True)
+
+
+def _copy_attach_output(staging_path: Path, output_path: Path, pid: str) -> None:
+    """Copy the attach target's output from its /tmp into our output directory."""
+    if not staging_path.is_dir():
+        console_error(
+            f"Process {pid} exited before its profiling output could be copied."
+        )
+        return
+    shutil.copytree(staging_path, output_path, dirs_exist_ok=True)

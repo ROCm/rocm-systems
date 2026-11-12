@@ -361,7 +361,7 @@ def test_attach_library_resolution_with_fallback():
         "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path"
     )
     attach_tool_target = (
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_attach_tool_library"
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library"
     )
     new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
     old_lib = output_dir / "librocprofv3-attach.so"
@@ -399,39 +399,24 @@ def test_attach_library_resolution_with_fallback():
     common.clean_output_dir(True, str(output_dir))
 
 
-@pytest.mark.parametrize(
-    "resolved_tool",
-    [
-        pytest.param(
-            "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
-            id="configured_path_visible",
-        ),
-        pytest.param(
-            "/container/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
-            id="target_install_fallback",
-        ),
-    ],
-)
-def test_attach_tool_library_uses_target_visible_path(
-    tmp_path, monkeypatch, resolved_tool
-):
-    """Attach options pass the resolved target-visible SDK tool path."""
-    configured_tool = "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
+    """Attach passes the SDK tool library of the ROCm that the target runs."""
+    target_tool = "/opt/rocm-9.9.9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     attach_library = tmp_path / "librocprofiler-sdk-rocattach.so"
     attach_library.touch()
     args = _make_sanitize_args(
         ["/bin/true"],
-        rocprofiler_sdk_tool_path=configured_tool,
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
         output_directory=str(tmp_path),
-        attach_pid=42,
+        attach_pid="42",
         kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
-    resolve_attach_tool = Mock(return_value=resolved_tool)
+    find_tool = Mock(return_value=target_tool)
     monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_attach_tool_library",
-        resolve_attach_tool,
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library",
+        find_tool,
     )
     monkeypatch.setattr(
         "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
@@ -440,69 +425,28 @@ def test_attach_tool_library_uses_target_visible_path(
 
     options = profiler.get_profiler_options()
 
-    assert options["ROCPROF_ATTACH_TOOL_LIBRARY"] == resolved_tool
-    resolve_attach_tool.assert_called_once_with(42, configured_tool)
+    assert options["ROCPROF_ATTACH_TOOL_LIBRARY"] == target_tool
+    find_tool.assert_called_once_with("42")
 
 
-def test_attach_tool_library_errors_when_target_has_no_tool(tmp_path, monkeypatch):
-    """Attach stops before resolving the host agent when no target tool exists."""
+def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatch):
+    """Attach stops before attaching when the target's ROCm has no tool library."""
     args = _make_sanitize_args(
         ["/bin/true"],
-        rocprofiler_sdk_tool_path=(
-            "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-        ),
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
         output_directory=str(tmp_path),
-        attach_pid=42,
+        attach_pid="42",
         kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
-    mock_rocm_path_resolver = Mock()
     monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_attach_tool_library",
-        lambda _pid, _path: None,
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
-        mock_rocm_path_resolver,
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library",
+        lambda _pid: None,
     )
 
     with pytest.raises(SystemExit):
         profiler.get_profiler_options()
-
-    mock_rocm_path_resolver.assert_not_called()
-
-
-def test_attach_native_tool_errors_when_missing_in_target(tmp_path, monkeypatch):
-    """Attach rejects a native tool that the target mount cannot load."""
-    configured_tool = "/host/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-    args = _make_sanitize_args(
-        ["/bin/true"],
-        rocprofiler_sdk_tool_path=configured_tool,
-        output_directory=str(tmp_path),
-        attach_pid=42,
-        kokkos_trace=False,
-    )
-    args.remaining = "-- /bin/true"
-    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
-    monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_attach_tool_library",
-        lambda _pid, _path: configured_tool,
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.is_library_missing_in_target",
-        lambda _pid, _path: True,
-    )
-    mock_rocm_path_resolver = Mock()
-    monkeypatch.setattr(
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
-        mock_rocm_path_resolver,
-    )
-
-    with pytest.raises(SystemExit):
-        profiler.get_profiler_options(native_tool_path="/host/native-tool.so")
-
-    mock_rocm_path_resolver.assert_not_called()
 
 
 def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypatch):

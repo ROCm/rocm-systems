@@ -5,6 +5,7 @@
 
 import gzip
 import os
+from contextlib import contextmanager
 from unittest import mock
 
 import pandas as pd
@@ -44,6 +45,12 @@ OUTDATED_FIRMWARE_TAIL = [
 # =============================================================================
 # RUN_PROF TESTS
 # =============================================================================
+
+
+@contextmanager
+def stub_metrics_path(sdk_config, attach_pid=None):
+    """Stand in for temporary_rocprofiler_metrics_path without writing to /tmp."""
+    yield "/metrics_path"
 
 
 def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
@@ -86,6 +93,48 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     assert captured["env"]["ROCPROF_COUNTER_COLLECTION"] == "1"
     assert captured["env"]["ROCPROF_COUNTERS"] == "pmc: SQ_WAVES"
     assert captured["env"]["ROCPROF_AGENT_INDEX"] == "absolute"
+
+
+def test_run_prof_live_attach_gives_counter_definitions_to_target(
+    tmp_path, monkeypatch
+):
+    """run_prof writes counter definitions for the attach target and passes their
+    path, as the target sees it, to the attach."""
+    fname = tmp_path / "pmc_perf_test.yaml"
+    fname.write_text("jobs:\n  - pmc:\n    - SQ_WAVES\n")
+    workload_dir = str(tmp_path / "workload")
+    profiler_options = {
+        "ROCPROF_ATTACH_PID": "42",
+        "ROCPROF_OUTPUT_PATH": workload_dir,
+        "ROCPROF_COUNTER_COLLECTION": "1",
+    }
+
+    captured = {}
+
+    @contextmanager
+    def fake_metrics_path(sdk_config, attach_pid=None):
+        captured["attach_pid"] = attach_pid
+        yield "/tmp/target_metrics"
+
+    def fake_attach(new_env, options):
+        captured["metrics_path"] = new_env["ROCPROFILER_METRICS_PATH"]
+
+    monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr("utils.utils_profile.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr(
+        "utils.utils_profile.temporary_rocprofiler_metrics_path", fake_metrics_path
+    )
+    monkeypatch.setattr("utils.utils_profile.perform_attach_detach", fake_attach)
+    monkeypatch.setattr(
+        "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
+    )
+    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
+
+    utils_profile.run_prof(str(fname), profiler_options, workload_dir)
+
+    assert captured == {"attach_pid": "42", "metrics_path": "/tmp/target_metrics"}
 
 
 def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
@@ -281,9 +330,10 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
 
     captured_config = {}
 
-    def fake_metrics_path(sdk_config):
+    @contextmanager
+    def fake_metrics_path(sdk_config, attach_pid=None):
         captured_config["sdk_config"] = sdk_config
-        return str(tmp_path / "metrics_path")
+        yield str(tmp_path / "metrics_path")
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
@@ -291,7 +341,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.create_temp_rocprofiler_metrics_path", fake_metrics_path
+        "utils.utils_profile.temporary_rocprofiler_metrics_path", fake_metrics_path
     )
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None
@@ -474,8 +524,7 @@ def test_run_prof_rocprofv3_builds_command_and_env(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr("utils.utils_profile.capture_subprocess_output", fake_capture)
     monkeypatch.setattr(
-        "utils.utils_profile.create_temp_rocprofiler_metrics_path",
-        lambda sdk_config: str(tmp_path / "metrics_path"),
+        "utils.utils_profile.temporary_rocprofiler_metrics_path", stub_metrics_path
     )
     monkeypatch.setattr(
         "utils.utils_profile.rocpd_data.convert_dbs_to_csv", lambda *a, **k: None

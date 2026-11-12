@@ -30,10 +30,10 @@ from utils.utils_common import (
     NATIVE_DISPATCH_PREFIX,
     NATIVE_KERNEL_SYMBOLS_PREFIX,
     capture_subprocess_output,
-    create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
     parse_pmc_perf,
     perform_attach_detach,
+    temporary_rocprofiler_metrics_path,
 )
 from vendored import yaml
 
@@ -72,6 +72,13 @@ def is_live_attach(
         isinstance(profiler_options, dict)
         and profiler_options.get("ROCPROF_ATTACH_PID") is not None
     )
+
+
+def live_attach_pid(profiler_options: ProfilerOptions) -> Optional[str]:
+    """Return the rocprofiler-sdk attach target's process ID, if any."""
+    if not isinstance(profiler_options, dict):
+        return None
+    return profiler_options.get("ROCPROF_ATTACH_PID")
 
 
 def pc_sampling_unit(method: str) -> str:
@@ -245,48 +252,51 @@ def run_prof(
                 sdk_config["rocprofiler-sdk"]["counters"].extend(
                     yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
                 )
-    # Set counter definitions
-    new_env["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
-        sdk_config
-    )
-    console_debug(
-        "Adding env var for counter definitions: "
-        f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-    )
-
     time_1 = time.time()
 
     output_path = Path(workload_dir + "/out/pmc_1")
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if get_rocprof_cmd() == "rocprofiler-sdk":
-        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
-        for key, value in options.items():
-            new_env[key] = value
-        # Log only the os.environ delta to avoid leaking secrets in shared logs.
-        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
-        console_debug(f"rocprof sdk env vars: {env_delta}")
-
-        if is_live_attach(profiler_options):
-            perform_attach_detach(new_env, options)
-        else:
-            if app_cmd is None:
-                console_error(
-                    "APP_CMD, the workload's executable must be provided "
-                    "when not in live attach mode"
-                )
-
-            console_debug(f"rocprof sdk user provided command: {app_cmd}")
-            success, output = capture_subprocess_output(
-                app_cmd, new_env=new_env, profileMode=True
-            )
-    else:
-        # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
-        # profile the app
-        success, output = capture_subprocess_output(
-            [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
+    with temporary_rocprofiler_metrics_path(
+        sdk_config, live_attach_pid(profiler_options)
+    ) as metrics_path:
+        # Set counter definitions
+        new_env["ROCPROFILER_METRICS_PATH"] = metrics_path
+        console_debug(
+            "Adding env var for counter definitions: "
+            f"ROCPROFILER_METRICS_PATH={metrics_path}"
         )
+
+        if get_rocprof_cmd() == "rocprofiler-sdk":
+            app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
+            for key, value in options.items():
+                new_env[key] = value
+            # Log only the os.environ delta to avoid leaking secrets in shared logs.
+            env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
+            console_debug(f"rocprof sdk env vars: {env_delta}")
+
+            if is_live_attach(profiler_options):
+                perform_attach_detach(new_env, options)
+            else:
+                if app_cmd is None:
+                    console_error(
+                        "APP_CMD, the workload's executable must be provided "
+                        "when not in live attach mode"
+                    )
+
+                console_debug(f"rocprof sdk user provided command: {app_cmd}")
+                success, output = capture_subprocess_output(
+                    app_cmd, new_env=new_env, profileMode=True
+                )
+        else:
+            # print in readable format using shlex
+            console_debug(
+                f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}"
+            )
+            # profile the app
+            success, output = capture_subprocess_output(
+                [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
+            )
 
     time_2 = time.time()
     console_debug(
@@ -302,10 +312,6 @@ def run_prof(
             shutil.copytree(
                 pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
             )
-
-    # Delete counter definition temporary directory
-    if new_env.get("ROCPROFILER_METRICS_PATH"):
-        shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if (not is_live_attach(profiler_options)) and (not success):
         for line in output.splitlines():
