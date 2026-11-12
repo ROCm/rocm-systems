@@ -1099,7 +1099,8 @@ TEST(TrampolineBuilderEmit, EntrySnapshotArgumentSourceFailurePropagates) {
   for (const ProbeArgSource source :
        {ProbeArgSource::EntrySgpr, ProbeArgSource::EntryVgprLane0, ProbeArgSource::EntryTtmp}) {
     SCOPED_TRACE(static_cast<int>(source));
-    TrampolinePlan plan = make_probe_plan();
+    TrampolinePlan plan = make_probe_plan(
+        source == ProbeArgSource::EntryTtmp ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA2);
     plan.entry_storage_base = 20;
     plan.entry_register_captures = {
         {.source_index = 0,
@@ -1127,7 +1128,7 @@ TEST(TrampolineBuilderPlan, RejectsInvalidAndDuplicateEntryTtmpCaptures) {
   for (const std::vector<EntryRegisterCapture> &captures :
        {std::vector<EntryRegisterCapture>{{16, 22, RegClass::TTMP}},
         std::vector<EntryRegisterCapture>{{9, 22, RegClass::TTMP}, {9, 23, RegClass::TTMP}}}) {
-    TrampolinePlan plan = make_probe_plan();
+    TrampolinePlan plan = make_probe_plan(ROCJITSU_CODE_ARCH_CDNA5);
     plan.entry_storage_base = 20;
     plan.entry_register_captures = captures;
     plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9}};
@@ -1135,6 +1136,40 @@ TEST(TrampolineBuilderPlan, RejectsInvalidAndDuplicateEntryTtmpCaptures) {
     EXPECT_FALSE(
         TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error));
     EXPECT_EQ(error, "entry register capture is outside the framework-owned register run");
+  }
+}
+
+TEST(TrampolineBuilderPlan, RejectsEntryTtmpCapturesWithoutUnprivilegedReads) {
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+        ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    TrampolinePlan plan = make_probe_plan(arch);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 9, .sgpr = 22, .source_class = RegClass::TTMP}};
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 9}};
+    std::string error;
+    EXPECT_FALSE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error));
+    EXPECT_NE(error.find("unprivileged TTMP reads"), std::string::npos) << error;
+  }
+}
+
+TEST(TrampolineBuilderPlan, EntryTtmpCapturesSupportUserReadableTargets) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    TrampolinePlan plan = make_probe_plan(arch);
+    plan.entry_storage_base = 20;
+    plan.entry_register_captures = {
+        {.source_index = 15, .sgpr = 22, .source_class = RegClass::TTMP}};
+    plan.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 15}};
+    std::string error;
+    ASSERT_TRUE(
+        TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}), {}, &error))
+        << error;
+    EXPECT_TRUE(TrampolineBuilder::emit_probe_call(plan, &error).has_value()) << error;
   }
 }
 
