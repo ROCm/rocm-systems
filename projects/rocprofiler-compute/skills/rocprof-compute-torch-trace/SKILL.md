@@ -35,10 +35,12 @@ full requirement list is in the Torch trace section of
 rocprof-compute profile \
     --experimental \
     --trace-ml-api torch \
-    --no-roof \
+    --speed-of-light \
     --name <workload_name> \
     -- python <script.py> <args>
 ```
+
+On ROCm 10.2 and earlier, use `-b sol` instead of `--speed-of-light`.
 
 For Triton kernels launched through Triton's Python runtime (`@triton.jit`):
 

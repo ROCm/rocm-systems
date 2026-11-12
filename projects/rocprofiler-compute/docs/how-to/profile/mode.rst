@@ -206,8 +206,8 @@ Notice the two main stages in ROCm Compute Profiler's **default** profiling rout
 1. The first stage collects all the counters needed for ROCm Compute Profiler analysis
    (omitting any filters you have provided).
 
-2. The second stage collects data for the roofline analysis (this stage is
-   skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
+2. The second stage runs the roofline benchmark to measure the roofline ceilings
+   (skipped when ``-b`` or ``--set`` selects blocks that do not include block 4).
 
 At the end of profiling, you can find all resulting ``csv`` files in a
 :ref:`SoC <def-soc>`-specific target directory; for
@@ -1180,6 +1180,7 @@ process, which exits normally and writes its counter data. For example:
    $ VLLM_ENABLE_V1_MULTIPROCESSING=0 \
        rocprof-compute profile \
        --iteration-multiplexing \
+       --speed-of-light \
        --name vllm-offline -- \
        python offline_inference.py
 
