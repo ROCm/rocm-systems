@@ -1115,6 +1115,42 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
   }
 }
 
+TEST(ArithBridgeTest, Gfx12ExceptionalOperandsUpdateUserFlags) {
+  for (const bool report : {true, false}) {
+    BridgeFixture fixture(
+        false, 32,
+        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status"));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_mode_raw(0xf0);
+    auto check = [&](std::array<uint32_t, 2> words, uint32_t lhs, uint32_t rhs, uint32_t causes) {
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, lhs);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, rhs);
+      fixture.cu->write_vgpr(fixture.base() + 1, 1, 0);
+      fixture.cu->write_vgpr(fixture.base() + 2, 1, 0);
+      for (uint64_t exec : {1u, 2u}) {
+        fixture.wave->set_exec(exec);
+        fixture.wave->set_trapsts(0x40);
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.wave->trapsts(), 0x40u | (report && exec == 1 ? causes : 0u))
+            << instruction.value()->mnemonic();
+      }
+    };
+    check({0xd5080000, 0x00020501}, 0, 0x7f800000, 1);             // MUL of zero and infinity
+    check({0xd5030000, 0x00020501}, 0x7f7fffff, 0x7f7fffff, 0x28); // ADD overflows
+    check({0xd5150000, 0x00020501}, 0x7f800010, 0, 1);             // MIN_NUM with sNaN
+    check({0xd7650000, 0x00020501}, 0x7fc12345, 0xff800010, 1);    // MINIMUM with mixed NaNs
+    check({0xd4128008, 0x00020501}, 0x7fc12345, 0, 1);             // signaling CMP
+    for (uint32_t mode : {0u, 0x10u, 0x20u, 0x30u, 0x31u, 0x32u, 0x33u}) {
+      fixture.wave->set_mode_raw(mode);
+      check({0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28); // dual MUL in slot X
+      check({0xca060104, 0x00020501}, 0x7f7fffff, 0x40000000, 0x28); // dual MUL in slot Y
+    }
+  }
+}
+
 TEST(ArithBridgeTest, CompatibilityMulRetainsLegacyStatus) {
   for (bool rdna3 : {false, true}) {
     for (uint32_t lanes : {32u, 64u}) {
@@ -1376,25 +1412,33 @@ TEST(ArithBridgeTest, DppCarryDoesNotRestoreSuppressedDestinationBits) {
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     fixture.wave->set_exec(0xffffffffU);
     auto base = fixture.wave->sgpr_alloc().base;
-    fixture.cu->write_sgpr(base + 4, ~0U);
-    for (unsigned lane = 0; lane < 32; ++lane)
+    for (unsigned lane = 0; lane < 32; ++lane) {
       fixture.cu->write_vgpr(fixture.base(), lane, ~0U);
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, 1);
+    }
     rdna4::Vop3SdstEncVopDpp16MachineInst raw{};
     raw.encoding = 0x35;
     raw.op = gfx11 ? rdna3::kVAddCoU32Vop3SdstEnc : rdna4::kVAddCoU32Vop3SdstEnc;
     raw.vdst = 2;
     raw.sdst = 4;
     raw.src0 = SRC_DPP;
-    raw.src1 = 129;
     raw.dpp_ctrl = dpp::ROW_SHL1;
     raw.fi = 1;
     raw.row_mask = raw.bank_mask = 0xf;
-    auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
-    auto instruction = fixture.decoder->decode_window(words);
-    ASSERT_TRUE(instruction.succeeded());
-    ASSERT_TRUE(
-        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
-    EXPECT_EQ(fixture.cu->read_sgpr(base + 4), 0x7fff7fffU);
+    for (auto src1 : {257, 129}) { // v1 and inline constant 1
+      raw.src1 = src1;
+      auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
+      auto instruction = fixture.decoder->decode_window(words);
+      if (gfx11 && src1 == 129) {
+        EXPECT_FALSE(instruction.succeeded());
+        continue;
+      }
+      ASSERT_TRUE(instruction.succeeded());
+      fixture.cu->write_sgpr(base + 4, ~0U);
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_sgpr(base + 4), 0x7fff7fffU);
+    }
   }
 }
 
@@ -8968,9 +9012,7 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               BridgeFixture fixture(rdna3, lanes, policy);
               ASSERT_FALSE(::testing::Test::HasFatalFailure());
               const uint32_t base = fixture.wave->sgpr_alloc().base;
-              // Alternate zero, high-only and mixed EXEC. Wave32 retains raw
-              // high state; B64 operations still calculate SCC from the whole
-              // result.
+              // Alternate zero, high-only and mixed EXEC to exercise the width of SCC.
               const uint64_t old_exec = op % 3 == 0   ? 0
                                         : op % 3 == 1 ? 0xa55a123400000000ULL
                                                       : 0x876543210f0ff0f0ULL;
@@ -9035,10 +9077,8 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
                 expected = uint32_t(expected);
               const uint64_t saved = op >= 10 ? expected : wide ? old_exec : uint32_t(old_exec);
               uint64_t expected_raw = expected;
-              if (!wide && lanes == 32) {
-                const uint64_t high = old_exec & 0xffffffff00000000ULL;
-                expected_raw |= high;
-              }
+              if (!wide)
+                expected_raw |= old_exec & 0xffffffff00000000ULL;
               EXPECT_EQ(fixture.wave->exec_raw(), expected_raw);
               EXPECT_EQ(fixture.wave->read_scc(), expected != 0);
               std::vector<uint32_t> reads{base};

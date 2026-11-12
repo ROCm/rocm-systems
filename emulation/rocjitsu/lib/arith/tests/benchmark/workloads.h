@@ -34,6 +34,9 @@ public:
   uint32_t initial_d[kRegisters][64] = {};
   uint32_t *d[kRegisters];
   const uint32_t *a[kRegisters], *b[kRegisters], *c[kRegisters], *index[kRegisters];
+  // E8M0 scales of one, shared by A/B outside the timed arithmetic.
+  uint32_t scale_data[2][64];
+  const uint32_t *scale[2];
   uint32_t status = 0, condition32 = 0, literal = 0;
   uint64_t condition64 = 0;
   int wave = 32;

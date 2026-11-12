@@ -2425,6 +2425,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &host_builder_error);
   if (host_endpgm.failed())
     return leave_unchanged();
+  if (guest_arch_ != host_arch_ && (!encoding_translate_ || !legalization_lookup_)) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "no instruction translator for this guest and host architecture pair");
+    return leave_unchanged();
+  }
 
   if (is_gfx1250_b0_to_a0())
     decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
