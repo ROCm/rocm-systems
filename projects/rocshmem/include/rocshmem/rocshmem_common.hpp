@@ -118,7 +118,12 @@ constexpr size_t ROCSHMEM_BARRIER_SYNC_SIZE = 256;
 constexpr size_t ROCSHMEM_REDUCE_SYNC_SIZE = 256;
 // Internally calls sync function, which matches barrier implementation
 constexpr size_t ROCSHMEM_BCAST_SYNC_SIZE = ROCSHMEM_BARRIER_SYNC_SIZE;
-constexpr size_t ROCSHMEM_ALLTOALL_SYNC_SIZE = ROCSHMEM_BARRIER_SYNC_SIZE + 1;
+// The alltoall/fcollect thread-puts fast paths double-buffer their pSync
+// slots (2 slots per PE) so a fast PE starting its next call can't
+// collide with a slow peer still reading the previous one. Allocate for
+// the worst case (every PE in a BARRIER_SYNC_SIZE-sized team), plus the
+// extra slot the single-buffered algorithms use.
+constexpr size_t ROCSHMEM_ALLTOALL_SYNC_SIZE = 2 * ROCSHMEM_BARRIER_SYNC_SIZE + 1;
 constexpr size_t ROCSHMEM_FCOLLECT_SYNC_SIZE = ROCSHMEM_ALLTOALL_SYNC_SIZE;
 constexpr size_t ROCSHMEM_SYNC_VALUE = 0;
 
