@@ -30,7 +30,7 @@ def context(arch, name, dst, src, *, is_vop3=False, enc_name=""):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna5'])
 def test_mullit_loose_policy_and_modifiers(arch):
     assert 'V_MULLIT_F32' in FLOAT_NAMES
     body = gen_mullit(
@@ -51,10 +51,10 @@ def test_mullit_loose_policy_and_modifiers(arch):
         'CLAMP',
     ):
         assert 'RJ_ARITH_ALU_' + modifier in body
-    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch == 'rdna4')
+    assert ('rj_arith_v_mullit_f32_w32_gfx12' in body) == (arch in ('rdna4', 'cdna5'))
     assert (
         gen_mullit(
-            context('cdna5', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
+            context('cdna2', 'V_MULLIT_F32', ['d'], ['a', 'b', 'c'], is_vop3=True)
         )
         is None
     )

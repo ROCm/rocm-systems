@@ -215,6 +215,12 @@ constexpr uint32_t RJ_ARITH_MIX_F16_A = 1U << 13;
 constexpr uint32_t RJ_ARITH_MIX_F16_B = 1U << 14;
 constexpr uint32_t RJ_ARITH_MIX_F16_C = 1U << 15;
 
+// Mixed BF16/FP32 FMA uses the same format-selector positions as mixed FP16.
+// These names apply to BF16 entry points; they select BF16 rather than FP32.
+constexpr uint32_t RJ_ARITH_MIX_BF16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_BF16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
+
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);
