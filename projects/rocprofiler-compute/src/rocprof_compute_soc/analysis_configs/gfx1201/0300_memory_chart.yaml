@@ -190,16 +190,16 @@ Panel Config:
     GL2 Hit Rate: >-
       Percentage of L2 lookups that hit.
     Memory Read Requests: >-
-      L2 read requests over EA destined for DRAM. Infinity Cache can serve
+      L2 read requests over EA destined for VRAM. Infinity Cache can serve
       them before they reach VRAM.
     Memory Write Requests: >-
-      L2 write requests over EA destined for DRAM. Infinity Cache can absorb
+      L2 write requests over EA destined for VRAM. Infinity Cache can absorb
       them before they reach VRAM.
     Memory Read Bandwidth: >-
-      Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity
+      Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity
       Cache hits are included, so this can exceed the VRAM bandwidth peak.
     Memory Write Bandwidth: >-
-      Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity
+      Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity
       Cache hits are included.
     Infinity Cache Hit Rate: >-
       Not available

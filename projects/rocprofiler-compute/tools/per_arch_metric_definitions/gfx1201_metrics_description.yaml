@@ -114,20 +114,20 @@ Memory chart - GL2 Cache (L2):
     unit: Percent
 Memory chart - L2 to Memory:
   Memory Read Requests:
-    plain: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach VRAM.
-    rst: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach VRAM.
+    plain: L2 read requests over EA destined for VRAM. Infinity Cache can serve them before they reach VRAM.
+    rst: L2 read requests over EA destined for VRAM. Infinity Cache can serve them before they reach VRAM.
     unit: Requests per Normalization Unit
   Memory Write Requests:
-    plain: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach VRAM.
-    rst: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach VRAM.
+    plain: L2 write requests over EA destined for VRAM. Infinity Cache can absorb them before they reach VRAM.
+    rst: L2 write requests over EA destined for VRAM. Infinity Cache can absorb them before they reach VRAM.
     unit: Requests per Normalization Unit
   Memory Read Bandwidth:
-    plain: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
-    rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    plain: Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    rst: Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
     unit: Bytes/s
   Memory Write Bandwidth:
-    plain: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
-    rst: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
+    plain: Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included.
+    rst: Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units. Infinity Cache hits are included.
     unit: Bytes/s
 Memory chart - Infinity Cache and VRAM:
   Infinity Cache Hit Rate:
