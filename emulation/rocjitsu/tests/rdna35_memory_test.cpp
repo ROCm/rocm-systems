@@ -71,7 +71,8 @@ protected:
     auto inst = std::move(decoded).value();
     ASSERT_TRUE(unit.execute_instruction(inst.get(), wave).succeeded()) << inst->mnemonic();
     ASSERT_NE(inst->data(), nullptr);
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(unit, inst.release(), wave), expected);
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(unit, std::move(inst), wave),
+              expected);
   }
 
   void write_vector(unsigned reg, uint32_t value, unsigned lane = 0) {
@@ -185,8 +186,7 @@ TEST_P(ReturningDsAtomicRouteTest, DirectRouteQualifiesReturningAtomicBeforeWrit
       ASSERT_NE(inst.value()->data(), nullptr);
       ASSERT_EQ(inst.value()->data_as<VectorMemState>()->lane_mask, 1u);
     }
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(
-                  *cu_, std::move(inst).value().release(), *wf_),
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst).value(), *wf_),
               VmAccessOutcome::Complete);
     EXPECT_EQ(wf_->lds().read32(address), dst < ordinary_vgprs ? 42u : 41u);
   }
@@ -269,7 +269,7 @@ TEST_P(Gfx11MemoryTest, SixBitBufferFormatControlsMemoryAndAddressDependencies) 
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
     ASSERT_NE(inst->data(), nullptr);
     EXPECT_EQ(inst->data_as<VectorMemState>()->lane_mask, uint64_t(bound));
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, inst.release(), *wf_),
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu_, std::move(inst), *wf_),
               VmAccessOutcome::Complete);
     EXPECT_EQ(read_vector(8), bound ? 0x11223344u : 0u);
   }

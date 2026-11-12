@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
+#include "util/result.h"
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -49,10 +50,11 @@ public:
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. Call before operand checks when the
   /// counter is known statically, or after routing for address-dependent FLAT.
-  void prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
+  /// Returns failure if the counter capacity or increment is invalid.
+  util::Result prepareForCounterIncrement(amdgpu::WaitCounterType, uint8_t increment = 1);
 
   /// Apply backpressure to every counter incremented by a resolved issue.
-  void prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
+  util::Result prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param instruction Complete captured encoding and PC of the producing instruction.

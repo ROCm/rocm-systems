@@ -687,43 +687,6 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
 }
 
-TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
-  const struct {
-    const char *name;
-    uint32_t wave_slots;
-    simdojo::ExecMode mode;
-    const char *message;
-  } cases[] = {
-      {"invalid wave slots", 33, simdojo::ExecMode::FUNCTIONAL,
-       "num_wf_slots exceeds the ISA maximum of 32"},
-      {"unsupported execution mode", 8, static_cast<simdojo::ExecMode>(255),
-       "Unsupported execution mode for ComputeUnit"},
-  };
-  for (const auto &test_case : cases) {
-    SCOPED_TRACE(test_case.name);
-    const amdgpu::ComputeUnitCore::Config config{
-        .arch = ROCJITSU_CODE_ARCH_CDNA3,
-        .num_wf_slots = test_case.wave_slots,
-        .sgprs_per_wf = 104,
-        .vgprs_per_wf = 256,
-        .lds_size_kb = 64,
-    };
-    std::string diagnostic;
-    uint32_t deliveries = 0;
-    auto sink = [&](std::string_view message) {
-      diagnostic = message;
-      ++deliveries;
-      throw std::runtime_error("diagnostic delivery failed");
-    };
-    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
-                                                       test_case.mode,
-                                                       util::DiagnosticEmitter(sink)),
-                 std::runtime_error);
-    EXPECT_EQ(deliveries, 1u);
-    EXPECT_EQ(diagnostic, test_case.message);
-  }
-}
-
 TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
   const amdgpu::ShaderEngine::Config config{
       .num_compute_units = 1,

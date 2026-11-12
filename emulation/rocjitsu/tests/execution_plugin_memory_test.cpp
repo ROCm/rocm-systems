@@ -837,8 +837,8 @@ TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   state->elem_size = 4;
   state->is_load = true;
   state->wait_counter_type = WaitCounterType::LGKMCNT;
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -905,8 +905,8 @@ TEST(RoutedMemoryObservationTest, AScalarBufferAccessOutOfRangeRequestsNothing) 
     state->atomic_op = atomic_op;
     state->load_dword_mask = load_dword_mask;
     state->memviol = memviol;
-    test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                   *wave);
+    test::ComputeUnitTestAccess::route_memory_inst(
+        *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
     ASSERT_EQ(plugin->accesses.size(), 1u);
     const auto &access = plugin->accesses.front();
@@ -959,7 +959,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   state->per_lane_addr[2] = kSharedBase + 0x28;
   state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_store_b32"), *wave);
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "flat_store_b32"), *wave);
 
   // What the pre-routing hook was shown.
   ASSERT_EQ(plugin->before_tag.size(), 1u);
@@ -1035,7 +1035,7 @@ TEST(RoutedMemoryObservationTest, DecodedImageSampleReportsEveryFilteredTexelOnc
   ASSERT_TRUE(decoded.succeeded());
   auto inst = std::move(decoded).value();
   ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wave);
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
   EXPECT_TRUE(access.addresses.empty());
@@ -1106,7 +1106,7 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *instruction, *wave);
   cu->track_memory_wait(*instruction, *wave);
   ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
-  ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, instruction.release(), *wave),
+  ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(instruction), *wave),
             VmAccessOutcome::Complete);
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1181,7 +1181,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   ASSERT_NE(scoreboard, nullptr);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
-  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave),
+  EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load), *wave),
             VmAccessOutcome::Faulted);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
@@ -1243,7 +1243,7 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
       state->per_lane_addr[lane] = lane == global_lane ? 0x2000 : kSharedBase + 0x20 + lane * 4;
     auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
     ASSERT_NE(load, nullptr);
-    test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
+    test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load), *wave);
 
     ASSERT_EQ(plugin->accesses.size(), 1u);
     const auto &access = plugin->accesses.front();
@@ -1293,7 +1293,7 @@ TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture
   state->lane_mask = 1;
   state->per_lane_addr[0] = kSharedBase + 0x20;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "global_load_b32"), *wave);
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "global_load_b32"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1373,8 +1373,8 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
   state->ds2_active = true;
   state->ds2_per_lane_addr[0] = 0x80;
   state->ds2_store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size * 2);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1424,7 +1424,7 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
   uint32_t increment = 3;
   std::memcpy(state->store_data.data(), &increment, sizeof(increment));
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "flat_atomic_add"), *wave);
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "flat_atomic_add"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1470,7 +1470,7 @@ TEST(RoutedMemoryObservationTest, DedicatedScratchIsDistinctFromFlatScratch) {
   state->per_lane_addr[0] = 0x9800;
   state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "scratch_store_dword"), *wave);
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "scratch_store_dword"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1503,7 +1503,7 @@ TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
   state->scratch_addr_stride = 256;
   state->per_lane_addr[0] = 0xA000;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, new TestMemoryInstruction(std::move(state), "buffer_load_dword"), *wave);
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "buffer_load_dword"), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_EQ(plugin->accesses.front().decoded_space, DecodedMemorySpace::GLOBAL);
@@ -1533,8 +1533,8 @@ TEST(RoutedMemoryObservationTest, TheLaneCountIsTheWavefrontsOwn) {
   state->lane_mask = 0b11;
   state->per_lane_addr[0] = 0x10;
   state->per_lane_addr[1] = 0x14;
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1564,8 +1564,8 @@ TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFill
   state->exec_mask = ~uint64_t{0};
   state->lane_mask = ~uint64_t{0};
   state->transpose = static_cast<uint8_t>(TransposeKind::WMMA_TR_B8);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_EQ(plugin->accesses.front().active_lane_mask, ~uint64_t{0});
@@ -1595,8 +1595,8 @@ TEST(RoutedMemoryObservationTest, TheTransposeRequestMaskUsesTheWavefrontsWidth)
   state->exec_mask = ~uint64_t{0};
   state->lane_mask = ~uint64_t{0};
   state->transpose = static_cast<uint8_t>(TransposeKind::WMMA_TR_B8);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_EQ(plugin->accesses.front().request_lane_mask, 0xFFFF'FFFFu)
@@ -1628,8 +1628,8 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
   state->request_force_l1_bypass = true;
   state->lds_dst = true;
   state->per_lane_addr[0] = 0xC000;
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1661,8 +1661,8 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
   state->lane_mask = 0b1;
   state->per_lane_addr[0] = 0x20;
   ASSERT_FALSE(state->ds2_active);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_TRUE(plugin->accesses.front().secondary_addresses.empty());
@@ -1705,8 +1705,8 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   state->exec_mask = 0b1;
   state->lane_mask = 0b1;
   state->per_lane_addr[0] = 0x40;
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
   EXPECT_TRUE(quiet->accesses.empty()) << "the observation was built for a plugin that declined it";
   // The pre-routing hook is not gated, so it still fired.
   EXPECT_EQ(quiet->before_tag.size(), 1u);
@@ -1750,8 +1750,8 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
   // GCC reads that pairing of Instruction's own operator new with the plain
   // ::operator delete its operator delete falls through to as a mismatch.
   auto state = std::make_unique<UnroutedState>();
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, new TestMemoryInstruction(std::move(state)),
-                                                 *wave);
+  test::ComputeUnitTestAccess::route_memory_inst(
+      *cu, std::make_unique<TestMemoryInstruction>(std::move(state)), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1864,7 +1864,7 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
             if (obligation.wait_counter_type() == WaitCounterType::EXPCNT)
               exports += obligation.counter_increment();
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-          test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wf);
+          test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wf);
           ASSERT_EQ(observer->accesses.size(), 1u);
           const auto &counters = observer->accesses.front().issued_counters;
           const bool result = load || returns;
