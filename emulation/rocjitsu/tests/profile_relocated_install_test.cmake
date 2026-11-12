@@ -57,7 +57,7 @@ if(NOT _result EQUAL 0)
     )
 endif()
 
-if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 6 \\| 31")
+if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 0 \\| 25")
     message(
         FATAL_ERROR
         "relocated profile lookup used the wrong config:\n${_output}"
