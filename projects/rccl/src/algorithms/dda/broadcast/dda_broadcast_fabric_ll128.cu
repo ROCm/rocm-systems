@@ -40,7 +40,7 @@ using dda::common::kDdaMaxNranks;
 
 unsigned ddaLL128BcThreads() {
   const int64_t u = rcclParamDdaLL128BcThreads();
-  if (u >= kDdaLL128Warp && u <= 1024 && (u % kDdaLL128Warp) == 0)
+  if (u >= kDdaLL128Warp && u <= kDdaBcMaxThreads && (u % kDdaLL128Warp) == 0)
     return (unsigned)u;
   return kDdaLL128BcDefaultThreads;
 }
