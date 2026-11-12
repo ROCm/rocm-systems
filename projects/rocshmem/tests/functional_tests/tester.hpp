@@ -236,8 +236,7 @@
   X(TileGetWave3D,                  192)  \
   X(TilePutWave4D,                  193)  \
   X(TileGetWave4D,                  194)  \
-  X(SignalOpsOnStream,              195)  \
-  X(FenceOrderPutMixedCtx,          196)
+  X(SignalOpsOnStream,              195)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

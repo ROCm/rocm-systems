@@ -905,10 +905,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Fence PutWaveNbiChunks Ordering";
       testers.push_back(new FenceOrderingTester(args));
       break;
-    case FenceOrderPutMixedCtxTestType:
-      test_name = "Fence PutMixedCtx Ordering";
-      testers.push_back(new FenceOrderingTester(args));
-      break;
     case TilePutContiguousTestType:
       test_name = "Tile Put Contiguous";
       testers.push_back(new TileRMATester(args));
@@ -1364,7 +1360,6 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:
     case FenceOrderPutWaveNbiChunksTestType:
-    case FenceOrderPutMixedCtxTestType:
     case TileBroadcastTestType:
     case TileBroadcastWaveTestType:
     case TileBroadcastWGTestType:

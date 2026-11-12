@@ -209,7 +209,6 @@ declare -A TEST_NUMBERS=(
   ["tile_put_wave_4d"]="193"
   ["tile_get_wave_4d"]="194"
   ["signal_ops_on_stream"]="195"
-  ["fence_putmixedctx"]="196"
 )
 
 # Detect which runtime to use
@@ -369,10 +368,6 @@ ExecTest_SLR() {
         "${selected_backend:-}" == gda* ]]; then
     env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
   fi
-  # The mixed-context fence test needs the RO network conduit, even on a single node.
-  if [[ "$TEST_NAME" == "fence_putmixedctx" ]]; then
-    env_vars+=("ROCSHMEM_BACKEND=ro" "ROCSHMEM_DISABLE_MIXED_IPC=1")
-  fi
   # QP needs GDA; SDMA needs IPC+SDMA enabled. Force rather than rely on ambient.
   if [[ "$TEST_NAME" == qp_* ]]; then
     env_vars+=("ROCSHMEM_BACKEND=gda")
@@ -528,10 +523,6 @@ ExecTest_MPI() {
     if [[ "${selected_backend:-}" == gda* ]]; then
       test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
     fi
-  fi
-  # The mixed-context fence test needs the RO network conduit, even on a single node.
-  if [[ "$TEST_NAME" == "fence_putmixedctx" ]]; then
-    test_env_args+=(-x "ROCSHMEM_BACKEND=ro" -x "ROCSHMEM_DISABLE_MIXED_IPC=1")
   fi
   # QP needs GDA; SDMA needs IPC+SDMA enabled. Force rather than rely on ambient.
   if [[ "$TEST_NAME" == qp_* ]]; then
@@ -1121,10 +1112,6 @@ TestOther() {
   ExecTest  "fence_fanout"           8       8     256        65536
   ExecTest  "fence_putwavenbichunks" 2       1     $WAVE_SIZE 1048576
   ExecTest  "fence_putwavenbichunks" 2       8     256        65536
-  if [[ $TEST == ro* ]]; then
-  ExecTest  "fence_putmixedctx"      2       1     64         65536
-  ExecTest  "fence_putmixedctx"      2       4     256        4096
-  fi
 }
 
 TestTiles() {

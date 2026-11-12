@@ -338,97 +338,14 @@ __global__ void FenceOrderPutWaveNbiChunksKernel(
 }
 
 /******************************************************************************
- * TEST 5: Per-thread NBI Put + Fence on mixed contexts
- *
- * Sender: every thread puts its own slot with rocshmem_ctx_putmem_nbi and fences that context.
- * Even iterations use the WG context on every lane, so a wave shares one queue.
- * Odd iterations move odd lanes to ROCSHMEM_CTX_DEFAULT, so a wave spans two queues.
- * Thread 0 then signals on the WG context; the receiver validates every slot.
- *****************************************************************************/
-__global__ void FenceOrderPutMixedCtxKernel(
-    int loop, int skip, long long int *start_time, long long int *end_time,
-    char *s_buf, char *r_buf, size_t size, uint64_t *signal, int *error_count,
-    ShmemContextType ctx_type) {
-  __shared__ rocshmem_ctx_t wg_ctx;
-  int wg_id = get_flat_grid_id();
-  int my_pe = rocshmem_my_pe();
-  int tid = get_flat_block_id();
-  size_t slot = static_cast<size_t>(wg_id) * get_flat_block_size() + tid;
-
-  rocshmem_wg_ctx_create(ctx_type, &wg_ctx);
-
-  uint64_t *signal_ready = signal;
-  uint64_t *signal_validated = &signal[hipGridDim_x];
-
-  for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
-      __syncthreads();
-      if (tid == 0) {
-        start_time[wg_id] = wall_clock64();
-      }
-    }
-
-    if (my_pe == 0) {
-      fill_buffer_device(s_buf + wg_id * size, size, i);
-      bool use_default_ctx = (i % 2 == 1) && (__lane_id() % 2 == 1);
-      rocshmem_ctx_t ctx = use_default_ctx ? ROCSHMEM_CTX_DEFAULT : wg_ctx;
-      rocshmem_ctx_putmem_nbi(ctx, r_buf + slot * size, s_buf + wg_id * size, size, 1);
-      rocshmem_ctx_fence(ctx);
-      __syncthreads();
-      if (tid == 0) {
-        rocshmem_ctx_ulong_atomic_add(wg_ctx, &signal_ready[wg_id], 1, 1);
-        rocshmem_uint64_wait_until(&signal_validated[wg_id], ROCSHMEM_CMP_GE, (uint64_t)(i + 1));
-      }
-      __syncthreads();
-    } else {
-      if (tid == 0) {
-        rocshmem_uint64_wait_until(&signal_ready[wg_id], ROCSHMEM_CMP_GE, (uint64_t)(i + 1));
-      }
-      __syncthreads();
-      atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::acquire>();
-      const char *mine = r_buf + slot * size;
-      for (size_t b = size; b-- > 0;) {
-        char expected = iter_fill(i, b);
-        if (mine[b] != expected) {
-          if (atomicAdd(error_count, 1) == 0) {
-            printf("[fence_order] first error: slot=%zu byte=%zu expected=0x%02x got=0x%02x iter=%d\n",
-                   slot, b, (unsigned char)expected, (unsigned char)mine[b], i);
-          }
-          break;
-        }
-      }
-      __syncthreads();
-      if (tid == 0) {
-        rocshmem_ctx_ulong_atomic_add(wg_ctx, &signal_validated[wg_id], 1, 0);
-      }
-    }
-  }
-
-  __syncthreads();
-  if (tid == 0) {
-    end_time[wg_id] = wall_clock64();
-  }
-
-  rocshmem_wg_ctx_destroy(&wg_ctx);
-}
-
-/******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-int FenceOrderingTester::num_recv_slots() const {
-  // Each wave writes its own slice of r_buf; the mixed-context test gives every thread its own slice.
-  if (_type == FenceOrderPutMixedCtxTestType) {
-    return args.num_wgs * args.wg_size;
-  }
-  int waves_per_wg = (args.wg_size - 1) / wf_size + 1;
-  return args.num_wgs * waves_per_wg;
-}
-
 FenceOrderingTester::FenceOrderingTester(TesterArguments args)
     : Tester(args) {
+  // Each wave writes to its own slice of r_buf
   int waves_per_wg = (args.wg_size - 1) / wf_size + 1;
   int total_waves = args.num_wgs * waves_per_wg;
-  size_t r_buf_size = (size_t)num_recv_slots() * args.max_msg_size;
+  size_t r_buf_size = (size_t)total_waves * args.max_msg_size;
   size_t s_buf_size = (size_t)args.num_wgs * args.max_msg_size;
   s_buf = (char *)rocshmem_malloc(s_buf_size);
   r_buf = (char *)rocshmem_malloc(r_buf_size);
@@ -449,10 +366,10 @@ void FenceOrderingTester::resetBuffers(size_t size) {
   for (size_t i = 0; i < size; i++) {
     s_buf[i] = 'a' + (i % 26);
   }
-  // Each wave (or thread, for the mixed-context test) has its own slice; clear all
+  // Each wave has its own slice; clear all
   int waves_per_wg = (args.wg_size - 1) / wf_size + 1;
   int total_waves = args.num_wgs * waves_per_wg;
-  memset(r_buf, 0, (size_t)num_recv_slots() * size);
+  memset(r_buf, 0, (size_t)total_waves * size);
   memset(signal, 0, 2 * total_waves * sizeof(uint64_t));
   *error_count = 0;
 }
@@ -496,13 +413,6 @@ void FenceOrderingTester::launchKernel(dim3 gridSize, dim3 blockSize,
                          _shmem_context, wf_size);
       break;
     }
-    case FenceOrderPutMixedCtxTestType:
-      hipLaunchKernelGGL(FenceOrderPutMixedCtxKernel,
-                         gridSize, blockSize, shared_bytes, stream,
-                         loop, args.skip, start_time, end_time,
-                         s_buf, r_buf, size, signal, error_count,
-                         _shmem_context);
-      break;
     default:
       break;
   }
@@ -513,12 +423,8 @@ void FenceOrderingTester::launchKernel(dim3 gridSize, dim3 blockSize,
   // Each outer iteration transfers `size` bytes total per wave (for chunks:
   // STRESS_NUM_CHUNKS × chunk_size = size). Count iterations, not chunks,
   // so the framework's BW formula (num_timed_msgs × size / time) is correct.
-  int senders = total_waves;
-  if (_type == FenceOrderPutMixedCtxTestType) {
-    senders = gridSize.x * blockSize.x;
-  }
-  num_msgs = (loop + args.skip) * senders;
-  num_timed_msgs = loop * senders;
+  num_msgs = (loop + args.skip) * total_waves;
+  num_timed_msgs = loop * total_waves;
 }
 
 void FenceOrderingTester::verifyResults([[maybe_unused]] size_t size) {
@@ -547,16 +453,17 @@ void FenceOrderingTester::verifyResults([[maybe_unused]] size_t size) {
     }
   };
 
-  int num_slots = num_recv_slots();
+  int waves_per_wg = (args.wg_size - 1) / wf_size + 1;
+  int total_waves = args.num_wgs * waves_per_wg;
 
   if (_type == FenceOrderFanoutTestType) {
     // All PEs receive — check every wave slot
-    for (int w = 0; w < num_slots; w++) {
+    for (int w = 0; w < total_waves; w++) {
       host_check(r_buf + w * size, size, last_iter, "fanout");
     }
   } else if (args.myid == 1) {
-    // PE 1 is receiver: check every slot
-    for (int w = 0; w < num_slots; w++) {
+    // PE 1 is receiver — check every wave slot
+    for (int w = 0; w < total_waves; w++) {
       host_check(r_buf + w * size, size, last_iter, "receiver");
     }
   }

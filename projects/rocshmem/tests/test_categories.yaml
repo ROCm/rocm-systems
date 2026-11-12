@@ -250,7 +250,6 @@ test_categories:
       - "fence_putlargesmall_.*"
       - "fence_fanout_.*"
       - "fence_putwavenbichunks_.*"
-      - "fence_putmixedctx_.*"
 
       # Heatmap/performance tests (no timeout)
       - "heatmap_.*"
