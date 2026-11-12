@@ -1047,13 +1047,11 @@ ComputeUnitCore::complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t 
 }
 
 void ComputeUnitCore::notify_barrier_complete(ExecutionPluginGroup &plugins,
-                                              const BarrierCompletion &completion,
+                                              BarrierCompletion &completion,
                                               const BarrierRound &round) {
   if (completion.members.empty())
     return;
-  std::vector<Wavefront *> members = completion.members;
-  plugins.onAmdgpuBarrierResolved(members, round.kind);
-  plugins.onAmdgpuBarrierRoundCompleted(members, round);
+  plugins.onAmdgpuBarrierRoundResolved(completion.members, round);
   for (auto *member : completion.woken)
     plugins.onAmdgpuBarrierWaitPassed(*member, round);
 }
@@ -1064,7 +1062,7 @@ void ComputeUnitCore::finish_barrier_round(BarrierCounter &barrier, uint32_t dis
   barrier.signal_count = 0;
   const BarrierRound round = barrier_round(completion_bit, named_barrier_id, barrier.generation);
   ++barrier.generation;
-  const BarrierCompletion completion =
+  BarrierCompletion completion =
       complete_barrier(dispatch_id, wg_id, completion_bit, round.generation, named_barrier_id);
   notify_barrier_complete(*plugin_group_, completion, round);
 }

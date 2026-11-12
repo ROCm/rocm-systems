@@ -244,9 +244,10 @@ following lifecycle:
 1. **RETIRED** — every other live wave of the workgroup has passed a barrier
    that orders the event (see Barriers below). The event is fully retired and,
    from the perspective of all threads in all wavefronts, the operation is
-   complete. A workgroup with a single wave has no other wave to
-   race with, so its LDS events are retired as soon as they are wave-complete,
-   without a barrier. They then leave the LDS lists that race checks scan, so
+   complete. A wave whose workgroup has no other live wave, because it is the
+   only wave or the others have ended, has no other wave to race with, so its
+   LDS events are retired as soon as they are wave-complete, without a
+   barrier. They then leave the LDS lists that race checks scan, so
    those checks do not slow down as completed events add up in long
    single-wave kernels. Retired events stay in the event registry until it
    trims them, and it trims only from the oldest event: an older event that is

@@ -27,6 +27,7 @@
 
 #include <gtest/gtest-spi.h>
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -2073,6 +2074,69 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
   group.onAmdgpuWorkgroupCompleted(1, 2);
   EXPECT_EQ(plugin_ptr->cold_callbacks, 1u);
   EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+}
+
+// Barrier signal and wait fire once per wave per round, on the thread running
+// the wave, so like its other execution hooks they take the callback lock only
+// when a plugin requires serial hot hooks. Round completion fires once per
+// round and always takes it.
+TEST(ExecutionPluginTest, BarrierSignalAndWaitLockOnlyForSerialHotHooks) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  std::array<amdgpu::Wavefront *, 1> members{wave};
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = amdgpu::kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  for (bool serial : {false, true}) {
+    SCOPED_TRACE(serial);
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    if (serial)
+      ASSERT_TRUE(group.add(std::make_unique<SerialHotHookPlugin>()));
+    else
+      ASSERT_TRUE(group.add(std::make_unique<ParallelSafePlugin>()));
+    ASSERT_EQ(group.requires_serial_hot_hooks(), serial);
+    const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+    group.onAmdgpuBarrierSignaled(*wave, round);
+    group.onAmdgpuBarrierWaitPassed(*wave, round);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              before + (serial ? 2 : 0));
+
+    group.onAmdgpuBarrierRoundCompleted(members, round);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              before + (serial ? 3 : 1));
+  }
+}
+
+// The simulator reports a completed round through both completion hooks, the
+// resolve first, under one acquisition of the callback lock.
+TEST(ExecutionPluginTest, BarrierRoundResolvedTakesTheCallbackLockOnce) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  std::array<amdgpu::Wavefront *, 1> members{wave};
+  const BarrierRound round{.kind = BarrierKind::Named,
+                           .completion_bit = amdgpu::kNamedBarrierBit,
+                           .named_id = 2,
+                           .generation = 5};
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<OrderingPlugin>();
+  auto *plugin_ptr = plugin.get();
+  ASSERT_TRUE(group.add(std::move(plugin)));
+  const uint64_t before = test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
+
+  group.onAmdgpuBarrierRoundResolved(members, round);
+
+  EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group), before + 1);
+  ASSERT_EQ(plugin_ptr->events.size(), 2u);
+  EXPECT_EQ(plugin_ptr->events[0].kind, HookEvent::BARRIER_RESOLVED);
+  EXPECT_EQ(plugin_ptr->events[0].barrier_kind, BarrierKind::Named);
+  EXPECT_EQ(plugin_ptr->events[1].kind, HookEvent::BARRIER_ROUND_COMPLETED);
+  EXPECT_EQ(plugin_ptr->events[1].barrier_round, round);
 }
 
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {

@@ -858,6 +858,27 @@ void RaceDetectorPlugin::onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf,
 
 void RaceDetectorPlugin::onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wavefronts,
                                                        const BarrierRound &round) {
+  const bool wholeWorkgroup = round.kind == BarrierKind::Workgroup;
+  if (round.kind != BarrierKind::Cluster) {
+    // Workgroup and named rounds notify the waves of one workgroup, and so of
+    // one detector. At most 32 waves: a workgroup has at most 1024 work-items
+    // (CDNA5 ISA 2.2), and waves are at least 32 wide.
+    std::array<WaveId, 64> waves;
+    size_t count = 0;
+    RaceDetector *detector = nullptr;
+    for (auto *wf : wavefronts) {
+      auto *s = get_state(wf);
+      assert(s && s->race_state);
+      assert(!detector || detector == s->race_state->getDetector());
+      assert(count < waves.size());
+      detector = s->race_state->getDetector();
+      waves[count++] = s->race_state->getWaveId();
+    }
+    if (detector)
+      detector->barrierRoundCompleted(roundId(round), std::span(waves.data(), count),
+                                      wholeWorkgroup);
+    return;
+  }
   // A cluster round's members span workgroups, and so detectors. Each detector
   // orders only its own waves; ordering between workgroups is not modeled.
   std::vector<std::pair<RaceDetector *, std::vector<WaveId>>> members;
@@ -871,8 +892,7 @@ void RaceDetectorPlugin::onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefro
     it->second.push_back(s->race_state->getWaveId());
   }
   for (auto &[detector, waves] : members)
-    detector->barrierRoundCompleted(roundId(round), waves,
-                                    /*wholeWorkgroup=*/round.kind == BarrierKind::Workgroup);
+    detector->barrierRoundCompleted(roundId(round), waves, wholeWorkgroup);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf,

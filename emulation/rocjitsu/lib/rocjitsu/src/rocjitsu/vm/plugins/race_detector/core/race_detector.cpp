@@ -28,6 +28,12 @@ RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workg
     acquired(WaveId{i}, WaveId{i}) = 1;
   exitClock_.assign(nWaves, 0);
   ended_.assign(nWaves, false);
+  // Round membership is a bit per wave. A workgroup has at most 1024
+  // work-items, so at most 32 wave32 waves (CDNA5 ISA 2.2).
+  assert(nWaves <= 64);
+  // With no other wave, nothing holds back retirement.
+  covered_.assign(nWaves, nWaves == 1 ? std::numeric_limits<uint32_t>::max() : 0);
+  atCoverage_.assign(nWaves, nWaves - 1);
 }
 
 WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
@@ -76,11 +82,32 @@ void joinClock(std::span<uint32_t> into, std::span<const uint32_t> from) {
 
 } // namespace
 
+RaceDetector::BarrierRoundState *RaceDetector::findRound(BarrierRoundId round) {
+  for (BarrierRoundState &state : rounds_)
+    if (state.open && state.id == round)
+      return &state;
+  return nullptr;
+}
+
 RaceDetector::BarrierRoundState &RaceDetector::roundState(BarrierRoundId round) {
-  auto [it, inserted] = rounds_.try_emplace(round);
-  if (inserted)
-    it->second.clock.assign(waveCount(), 0);
-  return it->second;
+  if (BarrierRoundState *state = findRound(round))
+    return *state;
+  // Reuse a closed slot, and its clock's storage, before adding one.
+  auto slot = std::ranges::find_if(rounds_, [](const BarrierRoundState &s) { return !s.open; });
+  if (slot == rounds_.end())
+    slot = rounds_.insert(rounds_.end(), BarrierRoundState{});
+  slot->id = round;
+  slot->open = true;
+  slot->completed = false;
+  slot->awaiting = 0;
+  slot->clock.assign(waveCount(), 0);
+  ++openRounds_;
+  return *slot;
+}
+
+void RaceDetector::closeRound(BarrierRoundState &state) {
+  state.open = false;
+  --openRounds_;
 }
 
 void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round) {
@@ -98,29 +125,21 @@ void RaceDetector::barrierRoundCompleted(BarrierRoundId round, std::span<const W
   if (wholeWorkgroup)
     joinClock(state.clock, exitClock_);
   state.completed = true;
-  state.awaiting.assign(waveCount(), false);
-  bool anyAwaiting = false;
-  for (WaveId member : members) {
-    if (!ended_[member.value]) {
-      state.awaiting[member.value] = true;
-      anyAwaiting = true;
-    }
-  }
-  if (!anyAwaiting)
-    rounds_.erase(round);
+  state.awaiting = 0;
+  for (WaveId member : members)
+    if (!ended_[member.value])
+      state.awaiting |= uint64_t{1} << member.value;
+  if (state.awaiting == 0)
+    closeRound(state);
 }
 
 void RaceDetector::barrierWaitPassed(WaveId wave, BarrierRoundId round) {
-  if (auto it = rounds_.find(round); it != rounds_.end() && it->second.completed) {
-    const auto row =
-        std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
-    joinClock(row, it->second.clock);
-  }
+  if (BarrierRoundState *state = findRound(round); state && state->completed)
+    acquire(wave, state->clock);
   // The wave's completion bit is now clear. It never waits for another round
   // of this barrier that has already completed: one that completed while the
   // bit was set left the bit unchanged (CDNA5 ISA 5.6.1).
   stopAwaiting(wave, round.barrier);
-  retireOrdered();
 }
 
 void RaceDetector::waveEnded(WaveId wave) {
@@ -129,32 +148,59 @@ void RaceDetector::waveEnded(WaveId wave) {
       std::span(acquired_).subspan(static_cast<size_t>(wave.value) * waveCount(), waveCount());
   joinClock(exitClock_, row);
   stopAwaiting(wave, std::nullopt);
-  retireOrdered();
+  // The ended wave no longer holds back any other wave's retirement.
+  for (int owner = 0; owner < waveCount(); ++owner)
+    if (owner != wave.value && acquired(wave, WaveId{owner}) == covered_[owner])
+      leaveCoverageMinimum(wave, WaveId{owner});
 }
 
 void RaceDetector::stopAwaiting(WaveId wave, std::optional<uint8_t> barrier) {
-  for (auto it = rounds_.begin(); it != rounds_.end();) {
-    BarrierRoundState &state = it->second;
-    if (!state.completed || (barrier && it->first.barrier != *barrier)) {
-      ++it;
+  const uint64_t bit = uint64_t{1} << wave.value;
+  for (BarrierRoundState &state : rounds_) {
+    if (!state.open || !state.completed || (barrier && state.id.barrier != *barrier) ||
+        (state.awaiting & bit) == 0)
       continue;
-    }
-    state.awaiting[wave.value] = false;
-    if (std::ranges::none_of(state.awaiting, [](bool awaiting) { return awaiting; }))
-      it = rounds_.erase(it);
-    else
-      ++it;
+    state.awaiting &= ~bit;
+    if (state.awaiting == 0)
+      closeRound(state);
   }
 }
 
-void RaceDetector::retireOrdered() {
+void RaceDetector::acquire(WaveId accessor, std::span<const uint32_t> clock) {
   for (int owner = 0; owner < waveCount(); ++owner) {
-    uint32_t covered = std::numeric_limits<uint32_t>::max();
-    for (int accessor = 0; accessor < waveCount(); ++accessor)
-      if (accessor != owner && !ended_[accessor])
-        covered = std::min(covered, acquired(WaveId{accessor}, WaveId{owner}));
-    waveRaceStates[owner].retireReleasedThrough(covered);
+    uint32_t &entry = acquired(accessor, WaveId{owner});
+    if (clock[owner] <= entry)
+      continue;
+    const bool wasAtCoverage = owner != accessor.value && entry == covered_[owner];
+    entry = clock[owner];
+    if (wasAtCoverage)
+      leaveCoverageMinimum(accessor, WaveId{owner});
   }
+}
+
+void RaceDetector::leaveCoverageMinimum(WaveId /*accessor*/, WaveId owner) {
+  // Coverage can rise only when the last wave at the minimum leaves it.
+  if (--atCoverage_[owner.value] == 0)
+    recomputeCoverage(owner);
+}
+
+void RaceDetector::recomputeCoverage(WaveId owner) {
+  uint32_t covered = std::numeric_limits<uint32_t>::max();
+  int atCoverage = 0;
+  for (int accessor = 0; accessor < waveCount(); ++accessor) {
+    if (accessor == owner.value || ended_[accessor])
+      continue;
+    const uint32_t entry = acquired(WaveId{accessor}, owner);
+    if (entry < covered) {
+      covered = entry;
+      atCoverage = 1;
+    } else if (entry == covered) {
+      ++atCoverage;
+    }
+  }
+  covered_[owner.value] = covered;
+  atCoverage_[owner.value] = atCoverage;
+  waveRaceStates[owner.value].retireReleasedThrough(covered);
 }
 
 bool RaceDetector::ordered(WaveId accessor, EventId eventId) const {

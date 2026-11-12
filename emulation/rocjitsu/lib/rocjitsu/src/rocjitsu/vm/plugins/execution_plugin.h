@@ -393,7 +393,8 @@ public:
   /// the completing signal precedes onAmdgpuBarrierRoundCompleted(). On
   /// targets with a single s_barrier instruction it fires for each member when
   /// the barrier resolves.
-  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  /// Fires once per wave per round. May run concurrently across simulation
+  /// partitions unless requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBarrierSignaled(const amdgpu::Wavefront & /*wf*/,
                                        const BarrierRound & /*round*/) {}
 
@@ -406,7 +407,8 @@ public:
   /// Called when a wave passes s_barrier_wait. `round` is the round whose
   /// completion released it. Fires after onAmdgpuBarrierRoundCompleted() for
   /// that round.
-  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  /// Fires once per wave per round. May run concurrently across simulation
+  /// partitions unless requires_serial_hot_hooks() returns true.
   virtual void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront & /*wf*/,
                                          const BarrierRound & /*round*/) {}
 

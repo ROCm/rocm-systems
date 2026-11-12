@@ -552,8 +552,11 @@ public:
     });
   }
 
+  // Signal and wait are per-wave hooks, delivered on the thread executing the
+  // wave like its other execution hooks, so they serialize only for plugins
+  // that require serial hot hooks.
   void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) {
-    dispatch_with_plugin_lock([&]() {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuBarrierSignaled(wf, round);
     });
@@ -567,8 +570,21 @@ public:
     });
   }
 
-  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+  /// Report a completed round through onAmdgpuBarrierResolved(), then
+  /// onAmdgpuBarrierRoundCompleted(), under one acquisition of the callback
+  /// lock.
+  void onAmdgpuBarrierRoundResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                    const BarrierRound &round) {
     dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, round.kind);
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuBarrierRoundCompleted(wavefronts, round);
+    });
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) {
+    dispatch_with_optional_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onAmdgpuBarrierWaitPassed(wf, round);
     });

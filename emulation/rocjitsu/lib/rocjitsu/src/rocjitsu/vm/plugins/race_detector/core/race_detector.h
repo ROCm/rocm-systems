@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -29,9 +29,9 @@ namespace rocjitsu::plugins::race_detector {
 ///      wait-counter obligations.
 ///   3. retireEvent() — removes from live lists, decrements byte counts,
 ///      marks RETIRED. A completed LDS event is retired once every other live
-///      wave has acquired it through a barrier (see Barrier ordering). In a
-///      single-wave workgroup there is no other wave, so an LDS event is
-///      retired as soon as it completes.
+///      wave has acquired it through a barrier (see Barrier ordering). When
+///      no other wave of the workgroup is live, an LDS event is retired as
+///      soon as it completes.
 ///
 /// Barrier ordering: a barrier orders an access before it only if the issuing
 /// wave completed the access before its own signal, and orders an access after
@@ -137,9 +137,11 @@ public:
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 
-  /// Whether the workgroup has a single wave, so that no other wave can race
-  /// with an event its own wave has completed.
-  bool hasSingleWave() const { return waveRaceStates.size() == 1; }
+  /// Whether every other wave of the workgroup has ended, or there is none,
+  /// so that no other wave can race with an event `wave` completes.
+  bool isOnlyLiveWave(WaveId wave) const {
+    return covered_[wave.value] == std::numeric_limits<uint32_t>::max();
+  }
 
   // -- Barrier ordering --
 
@@ -160,15 +162,19 @@ public:
   void waveEnded(WaveId wave);
 
   /// Rounds that have not completed, or that a member has yet to wait for.
-  size_t openBarrierRounds() const { return rounds_.size(); }
+  size_t openBarrierRounds() const { return openRounds_; }
 
 private:
+  /// A slot for one round. Closed slots keep their storage for reuse, since a
+  /// workgroup typically has one or two rounds open at a time.
   struct BarrierRoundState {
+    BarrierRoundId id;
+    bool open = false;
+    bool completed = false;
+    /// Bit per member that has not yet passed the round's wait.
+    uint64_t awaiting = 0;
     /// Per wave, the highest epoch released into the round.
     std::vector<uint32_t> clock;
-    /// Members that have not yet passed the round's wait.
-    std::vector<bool> awaiting;
-    bool completed = false;
   };
 
   int waveCount() const { return static_cast<int>(waveRaceStates.size()); }
@@ -186,15 +192,26 @@ private:
   /// access.
   bool ordered(WaveId accessor, EventId) const;
 
+  BarrierRoundState *findRound(BarrierRoundId round);
+  /// The open slot for `round`, opening one if needed.
   BarrierRoundState &roundState(BarrierRoundId round);
+  void closeRound(BarrierRoundState &state);
 
   /// `wave` will not wait for any completed round of `barrier`, or of any
   /// barrier when `barrier` is empty. Rounds no member waits for are dropped.
   void stopAwaiting(WaveId wave, std::optional<uint8_t> barrier);
 
-  /// Retire each wave's completed events that every other live wave has
-  /// acquired.
-  void retireOrdered();
+  /// Raise `accessor`'s acquired epoch of each owner to at least `clock`'s,
+  /// retiring the events that every other live wave has now acquired.
+  void acquire(WaveId accessor, std::span<const uint32_t> clock);
+
+  /// `owner`'s events that `accessor` held back at the coverage minimum may
+  /// now be retirable: `accessor` raised its entry or stopped counting.
+  void leaveCoverageMinimum(WaveId accessor, WaveId owner);
+
+  /// Recompute `owner`'s coverage from the live waves and retire what it
+  /// covers.
+  void recomputeCoverage(WaveId owner);
 
   struct LdsChunkCounts {
     int bytes = 0;
@@ -239,10 +256,16 @@ private:
 
   /// waveCount() x waveCount() vector clock, row-major by acquiring wave.
   std::vector<uint32_t> acquired_;
+  /// Per owner, the lowest epoch of it that every other live wave has
+  /// acquired; its completed events up to that epoch are retired.
+  std::vector<uint32_t> covered_;
+  /// Per owner, how many other live waves have acquired exactly covered_.
+  std::vector<int> atCoverage_;
   /// The join of the clocks of the waves that ended.
   std::vector<uint32_t> exitClock_;
   std::vector<bool> ended_;
-  std::map<BarrierRoundId, BarrierRoundState> rounds_;
+  std::vector<BarrierRoundState> rounds_;
+  size_t openRounds_ = 0;
 };
 
 } // namespace rocjitsu::plugins::race_detector

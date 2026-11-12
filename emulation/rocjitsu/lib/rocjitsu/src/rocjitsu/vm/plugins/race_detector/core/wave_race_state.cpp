@@ -265,9 +265,9 @@ void WaveRaceState::satisfyOldestCounterObligations(int count, amdgpu::WaitCount
         // immediately. Only keep non-trimmable events for later retirement;
         // otherwise a later barrier could try to retire stale EventIds. A
         // completed LDS event is kept only so that other waves can still race
-        // with it, so a single-wave workgroup retires it now.
+        // with it, so it is retired now when no other wave is live.
         if (!detector->events().isTrimmable(eventId)) {
-          if (detector->hasSingleWave())
+          if (detector->isOnlyLiveWave(waveId))
             detector->retireEvent(eventId);
           else
             barrierPendingEvents.push_back(eventId);

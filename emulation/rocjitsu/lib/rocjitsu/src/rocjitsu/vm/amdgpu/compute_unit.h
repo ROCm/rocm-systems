@@ -1901,11 +1901,10 @@ protected:
   /// release the members waiting on it. Plugins are not notified.
   BarrierCompletion complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t completion_bit,
                                      uint64_t generation, uint32_t named_barrier_id = 0);
-  /// Report a completed round: onAmdgpuBarrierResolved(), then
-  /// onAmdgpuBarrierRoundCompleted(), then onAmdgpuBarrierWaitPassed() for each
-  /// woken member.
-  static void notify_barrier_complete(ExecutionPluginGroup &plugins,
-                                      const BarrierCompletion &completion,
+  /// Report a completed round: onAmdgpuBarrierResolved() and
+  /// onAmdgpuBarrierRoundCompleted() under one plugin lock, then
+  /// onAmdgpuBarrierWaitPassed() for each woken member.
+  static void notify_barrier_complete(ExecutionPluginGroup &plugins, BarrierCompletion &completion,
                                       const BarrierRound &round);
   /// Complete the current round of `barrier`, advance its generation and
   /// report the round.
