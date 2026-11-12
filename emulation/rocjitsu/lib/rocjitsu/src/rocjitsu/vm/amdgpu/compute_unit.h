@@ -436,13 +436,41 @@ public:
     bool debug_enabled = false;
   };
 
+  // KFD's built-in controls look up the wave's process. Other frontends
+  // may bind state directly, including for a wave with no process identity.
+  enum class WaveHandlerOwner { External, KfdProcess };
+
   /// @brief Resolve the KFD trap handler for a wave's process and GPU.
   using TrapHandlerResolver = std::function<std::optional<TrapHandlerConfig>(const Wavefront &wf)>;
-  void set_trap_handler_resolver(TrapHandlerResolver cb) { trap_handler_resolver_ = std::move(cb); }
+  void set_trap_handler_resolver(TrapHandlerResolver cb,
+                                 WaveHandlerOwner owner = WaveHandlerOwner::External) {
+    external_trap_resolver_ = cb && owner == WaveHandlerOwner::External;
+    trap_handler_resolver_ = std::move(cb);
+  }
 
-  /// @brief Handle an architected scalar message issued by trap-handler code.
+  using TrapAddressUpdater = std::function<bool(const Wavefront &, bool, uint64_t, uint64_t)>;
+  void set_trap_address_updater(TrapAddressUpdater update,
+                                WaveHandlerOwner owner = WaveHandlerOwner::External) {
+    external_trap_updater_ = update && owner == WaveHandlerOwner::External;
+    trap_address_updater_ = std::move(update);
+  }
+
+  /// Query the trap addresses and handler policy for this wave.
+  [[nodiscard]] std::optional<TrapHandlerConfig> trap_handler_config(const Wavefront &wf) const {
+    return trap_handler_resolver_ ? trap_handler_resolver_(wf) : std::nullopt;
+  }
+
+  using DoorbellResolver = std::function<std::optional<uint32_t>(const Wavefront &)>;
+  void set_doorbell_resolver(DoorbellResolver resolver) {
+    doorbell_resolver_ = std::move(resolver);
+  }
+
   using SendmsgHandler = std::function<bool(Wavefront &wf, uint32_t message)>;
-  void set_sendmsg_handler(SendmsgHandler cb) { sendmsg_handler_ = std::move(cb); }
+  void set_sendmsg_handler(SendmsgHandler cb, WaveHandlerOwner owner = WaveHandlerOwner::External) {
+    external_sendmsg_handler_ = cb && owner == WaveHandlerOwner::External;
+    sendmsg_handler_ = std::move(cb);
+  }
+  /// Deliver a scalar message with its issuing wave and live M0/EXEC payload.
   bool handle_sendmsg(Wavefront &wf, uint32_t message) {
     return sendmsg_handler_ && sendmsg_handler_(wf, message);
   }
@@ -602,13 +630,19 @@ public:
   /// @brief Return the device-global GWS store this CU participates in.
   GwsDevice &gws_device() { return *gws_device_; }
 
-  bool has_registered_workgroups() const { return !active_wgs_.empty(); }
-
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                        uint32_t num_named_barriers = 0);
+
+  struct Rdna4CheckpointGroup {
+    uint32_t dispatch_id, wg_id, live_members;
+    uint8_t workgroup_signals, trap_signals;
+    bool multiwave;
+  };
+  std::vector<Rdna4CheckpointGroup> rdna4_checkpoint_groups() const;
+  void restore_rdna4_checkpoint_group(const Rdna4CheckpointGroup &group);
 
   /// @brief Initialize a named barrier's member count and clear its signals.
   void named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
@@ -1012,9 +1046,20 @@ public:
     return false;
   }
 
-  /// @brief Return the current round-robin scheduling index.
-  /// @returns Index of the next wavefront slot to schedule.
+  /// @brief CU steps elapsed, also exposed by the shader cycle register.
   uint64_t cycle_count() const { return cycle_counter_; }
+
+  /// Shader-visible model time, continuous across a checkpoint restore even
+  /// though the new simulation engine starts its event queue at tick zero.
+  uint64_t model_realtime_timestamp() const {
+    const auto *sim = engine();
+    return model_realtime_origin_ + (sim ? sim->global_time() : 0);
+  }
+
+  /// Restore before dispatching recorded waves so their ready cycles share this epoch.
+  void restore_cycle_count(uint64_t count) { cycle_counter_ = count; }
+
+  void restore_model_realtime(uint64_t timestamp) { model_realtime_origin_ = timestamp; }
 
   /// @brief Return the physical SGPR allocation block size per wavefront.
   uint32_t sgpr_allocation_block_size() const { return config_.sgprs_per_wf; }
@@ -1627,6 +1672,7 @@ protected:
   /// under @ref wave_state_mutex_, including checkpoint placement and slot reuse.
   /// Waits and debugger stops remain active; only HALTED slots leave the range.
   uint32_t active_slot_limit_ = 0;
+  friend class ::rocjitsu::config::Gfx10CheckpointScheduler;
   friend class Wavefront;
   // Low/high halves count active/runnable waves. Publish both in one update
   // so a pause or retirement cannot expose half of an activity transition.
@@ -1691,6 +1737,8 @@ protected:
     QueueExceptionDeliveryPolicy delivery_policy;
   };
 
+  bool enter_trap_handler(Wavefront &wave, uint32_t trap_id);
+  void deliver_memory_trap(Wavefront &wave);
   void enter_trap_handler(Wavefront &wave, const TrapHandlerConfig &config, uint32_t trap_id,
                           uint64_t saved_pc);
   /// @brief Offer an architectural data fault to its owner, otherwise cancel it.
@@ -1740,6 +1788,7 @@ protected:
   std::function<void()> notification_flush_hook_for_testing_;
   std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
   uint64_t cycle_counter_ = 0;
+  uint64_t model_realtime_origin_ = 0;
 
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
@@ -1767,7 +1816,12 @@ protected:
   std::function<void()> on_idle_;       ///< Callback invoked when CU becomes idle.
   std::function<void()> on_pool_ready_; ///< Callback that wakes the CP-owned pool driver.
   TrapHandlerResolver trap_handler_resolver_;
+  TrapAddressUpdater trap_address_updater_;
+  DoorbellResolver doorbell_resolver_;
   SendmsgHandler sendmsg_handler_;
+  bool external_trap_resolver_ = false;
+  bool external_trap_updater_ = false;
+  bool external_sendmsg_handler_ = false;
   QueueExceptionHandler queue_exception_handler_;
   TrapCompletionHandler trap_completion_handler_;
   SingleStepHandler single_step_handler_;
@@ -1979,6 +2033,10 @@ inline bool InstructionComputeUnitView::debug_active() const { return raw_cu().d
 inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
   return raw_cu().cus_per_shader_array();
 }
+inline uint32_t InstructionComputeUnitView::shader_array_id() const {
+  auto &cu = raw_cu();
+  return cu.cus_per_shader_array_ ? cu.shader_engine_cu_index_ / cu.cus_per_shader_array_ : 0;
+}
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
 }
@@ -2003,12 +2061,19 @@ inline simdojo::ComponentID InstructionComputeUnitView::id() const { return raw_
 inline simdojo::SimulationEngine *InstructionComputeUnitView::engine() const {
   return raw_cu().engine();
 }
+inline std::pair<uint64_t, uint64_t> InstructionComputeUnitView::trap_addresses() const {
+  const auto &resolve = raw_cu().trap_handler_resolver_;
+  const auto config = resolve ? resolve(raw_wavefront()) : std::nullopt;
+  return config ? std::pair{config->tba, config->tma} : std::pair<uint64_t, uint64_t>{};
+}
+inline uint64_t InstructionComputeUnitView::cycle_count() const { return raw_cu().cycle_count(); }
 inline void InstructionComputeUnitView::request_functional_yield() {
   raw_cu().request_functional_yield();
 }
-inline bool InstructionComputeUnitView::handle_sendmsg(Wavefront &wf, uint32_t message) {
-  return raw_cu().handle_sendmsg(wf, message);
+inline uint64_t InstructionComputeUnitView::shader_cycles() const {
+  return raw_cu().cycle_counter_;
 }
+
 inline void InstructionComputeUnitView::notify_trap_complete(Wavefront &wf) {
   raw_cu().notify_trap_complete(wf);
 }

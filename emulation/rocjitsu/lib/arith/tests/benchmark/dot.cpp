@@ -4,6 +4,7 @@
 // DOT workload registration across supported CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 namespace rocjitsu::arith::test {
 

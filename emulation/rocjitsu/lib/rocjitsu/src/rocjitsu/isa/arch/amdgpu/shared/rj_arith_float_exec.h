@@ -52,6 +52,37 @@ inline void execute_pseudo_scalar(Wavefront &wave, PseudoScalarFunction function
   wave.raise_alu_causes(causes);
 }
 
+// Widen the staged SDWA byte before applying the inherited integer destination
+// placement. Capture every source lane before writing an overlapping destination.
+template <typename Inst>
+inline void execute_fp8_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                   Unary64Function wave64, const Operand &destination,
+                                   const Operand &source) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec(), 1);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  const uint64_t flags = wave.cu().arithmetic_flags();
+  int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                   : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
 // Translate guest FP32 rounding, denormal, IEEE and architecture-specific clamp controls.
 inline uint64_t float32_flags(const Wavefront &wave, uint64_t flags, bool rdna3) {
   flags |= uint64_t(wave.fp_round_mode_f32()) << 24;

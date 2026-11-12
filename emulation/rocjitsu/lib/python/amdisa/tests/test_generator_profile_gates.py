@@ -4494,9 +4494,9 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
                 bridge = (
                     generated_root.parents[1] / 'shared/rj_arith_float_exec.h'
                 ).read_text()
-                begin = bridge.index('inline void execute_pseudo_scalar(')
-                end = bridge.index('inline uint64_t float32_flags(', begin)
-                adapter = bridge[begin:end]
+                adapter = _generated_function_body(
+                    bridge, 'inline void execute_pseudo_scalar('
+                )
                 assert 'wave.exec()' not in adapter
                 assert 'registers.read_scalar(source)' in adapter
                 assert 'registers.write_scalar(destination, result)' in adapter
@@ -7580,25 +7580,15 @@ def test_generated_cdna_64bit_input_dpp_is_row_only(
     assert 'amdgpu::dpp::ROW_SELECT_MAX' in decode_body
 
 
-def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
+def test_shared_execute_preflight_excludes_arch_specific_fp8_calls():
     specs = _parse_cdna_specs('cdna3', 'cdna4')
     plan = CrossIsaAnalyzer().analyze(specs)
-
     variants = _collect_shared_execute_body_variants(specs, plan)
-    unshared = _unshared_execute_keys_from_variants(variants)
-
-    fp8_cvt_keys = {
-        ('v_cvt_f32_fp8', 'ENC_VOP1'),
-        ('v_cvt_f32_fp8', 'ENC_VOP3'),
-        ('v_cvt_f32_bf8', 'ENC_VOP1'),
-        ('v_cvt_f32_bf8', 'ENC_VOP3'),
-    }
-    assert fp8_cvt_keys <= unshared
-
-    vop1_fp8_variants = variants[('v_cvt_f32_fp8', 'ENC_VOP1')]
-    assert 'util::fp8_e4m3_fnuz_to_f32' in vop1_fp8_variants['cdna3'][2]
-    assert 'util::fp8_e4m3_to_f32' in vop1_fp8_variants['cdna4'][2]
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in vop1_fp8_variants['cdna4'][2]
+    # rj-arith calls stay ISA-local before shared-body comparison. The generated
+    # output test below checks that each architecture calls its own format API.
+    for mnemonic in ('v_cvt_f32_fp8', 'v_cvt_f32_bf8'):
+        for encoding in ('ENC_VOP1', 'ENC_VOP3'):
+            assert (mnemonic, encoding) not in variants
 
 
 def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
@@ -7621,7 +7611,7 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
 
     assert 'inline void execute_v_cvt_f32_fp8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' not in shared
 
     cdna3_fp8_body = _generated_method_body(
         cdna3_vop1, 'VCvtF32Fp8Vop1', 'VCvtF32Bf8Vop1'
@@ -7630,9 +7620,9 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
         cdna4_vop1, 'VCvtF32Fp8Vop1', 'VCvtF32Bf8Vop1'
     )
 
-    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_fp8_body
-    assert 'util::fp8_e4m3_to_f32' in cdna4_fp8_body
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_fp8_body
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' in cdna3_fp8_body
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx950' in cdna4_fp8_body
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' not in cdna4_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna3_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna4_fp8_body
 
@@ -7644,14 +7634,14 @@ def test_cdna3_generated_cvt_and_mfma_use_same_fnuz_format(
     cdna3_vop3 = (amdgpu_generated_root / 'cdna3' / 'vop3_exec.cpp').read_text()
     cdna3_vop3p = (amdgpu_generated_root / 'cdna3' / 'vop3p_exec.cpp').read_text()
 
-    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_vop1
-    assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop1
-    assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_vop3
-    assert 'util::bf8_e5m2_fnuz_to_f32' in cdna3_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' in cdna3_vop3
-    assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' in cdna3_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_sr_mode' in cdna3_vop3
-    assert 'util::f32_to_bf8_e5m2_fnuz_sr_mode' in cdna3_vop3
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' in cdna3_vop1
+    assert 'rj_arith_v_cvt_f32_bf8_w64_gfx942' in cdna3_vop1
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' in cdna3_vop3
+    assert 'rj_arith_v_cvt_f32_bf8_w64_gfx942' in cdna3_vop3
+    assert 'rj_arith_v_cvt_pk_fp8_f32_w64_gfx942' in cdna3_vop3
+    assert 'rj_arith_v_cvt_pk_bf8_f32_w64_gfx942' in cdna3_vop3
+    assert 'rj_arith_v_cvt_sr_fp8_f32_w64_gfx942' in cdna3_vop3
+    assert 'rj_arith_v_cvt_sr_bf8_f32_w64_gfx942' in cdna3_vop3
     assert 'amdgpu::smfmac_read_fp8_fnuz' in cdna3_vop3p
     assert 'amdgpu::smfmac_read_bf8_fnuz' in cdna3_vop3p
 
@@ -7668,22 +7658,22 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
-    # CDNA4 keeps util's OCP helpers; see fp8_formats.fp8_policy.
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
+    # CDNA4 selects sign-preserving OCP widening rather than gfx942 FNUZ.
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx950' in cdna4_vop1
+    assert 'rj_arith_v_cvt_f32_bf8_w64_gfx950' in cdna4_vop1
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx950' in cdna4_vop3
+    assert 'rj_arith_v_cvt_f32_bf8_w64_gfx950' in cdna4_vop3
+    assert 'rj_arith_v_cvt_pk_fp8_f32_w64_gfx950' in cdna4_vop3
+    assert 'rj_arith_v_cvt_pk_bf8_f32_w64_gfx950' in cdna4_vop3
+    assert 'rj_arith_v_cvt_sr_fp8_f32_w64_gfx950' in cdna4_vop3
+    assert 'rj_arith_v_cvt_sr_bf8_f32_w64_gfx950' in cdna4_vop3
     assert 'amdgpu::conversion::decode_fp8' not in cdna4_vop1 + cdna4_vop3
     assert 'amdgpu::conversion_to_fp8' not in cdna4_vop3
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_fnuz_rne_mode' not in cdna4_vop3
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' not in shared
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' not in cdna4_vop1
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx942' not in cdna4_vop3
+    assert 'rj_arith_v_cvt_pk_fp8_f32_w64_gfx942' not in cdna4_vop3
+    assert 'rj_arith_v_cvt_pk_bf8_f32_w64_gfx942' not in cdna4_vop3
 
 
 def test_generated_pseudo_scalar_users_include_dependency(
@@ -7842,23 +7832,16 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF32Fp8Vop3', 'VCvtF32Bf8Vop3')
 
     assert 'amdgpu::vop3_opsel(inst_)' in body
-    assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
-    assert 'util::fp8_e5m3_to_f32' in body
-    assert 'util::fp8_e4m3_to_f32' in body
-    # The local SIMD probe binds an instruction alias; scalar execution still
-    # reads the encoding member directly.
-    assert 'auto &inst = *this;' in body
-    assert 'amdgpu::try_execute_words_simd<1, false, false, 0>' in body
-    assert 'amdgpu::vop3_opsel(inst.inst_)' in body
-    assert 'amdgpu::vop3_fp8_decode_e5m3(inst_)' not in body
+    assert 'rj_arith_v_cvt_f32_fp8_w64_gfx1250' in body
+    assert 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in body
+    assert 'execute_unary32' in body
 
     body = _generated_method_body(gfx1250_vop3_cvt, 'VCvtF16Fp8Vop3', 'VCvtF16Bf8Vop3')
-    body_words = ' '.join(body.split())
-
-    assert '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert '>> (((opsel & 0x2u) >> 1) * 8u)' in body_words
-    assert '((amdgpu::vop3_opsel(inst_) & 0x1u) << 1)' not in body
+    assert 'const unsigned selector = amdgpu::vop3_opsel(inst_);' in body
+    assert '((selector & 1) << 1) | ((selector & 2) >> 1)' in body
+    assert 'rj_arith_v_cvt_f16_fp8_w64' in body
+    assert 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in body
+    assert 'source_bytes, (selector & 8) ? 0xC : 0x3' in body
 
 
 def test_gfx1250_generated_operand_rejects_reserved_scalar_source_selectors(
