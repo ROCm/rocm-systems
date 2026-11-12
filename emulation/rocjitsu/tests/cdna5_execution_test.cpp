@@ -87,7 +87,7 @@ public:
   void execute_and_route(std::unique_ptr<Instruction> instruction, amdgpu::Wavefront &wave) {
     EXPECT_TRUE(execute_instruction(instruction.get(), wave).succeeded());
     if (instruction->is_memory_op())
-      route_memory_inst(instruction.release(), wave);
+      route_memory_inst(std::move(instruction), wave);
   }
 };
 
@@ -511,10 +511,14 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
                static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX)},
       TestCase{cdna5::kVAddMaxI32Vop3, static_cast<uint32_t>(INT32_MAX), 1u,
                static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX), false},
+      TestCase{cdna5::kVAddMaxI32Vop3, 0xfffffffeu, 0xfffffffdu, UINT32_MAX, 0u},
+      TestCase{cdna5::kVAddMaxI32Vop3, 0xfffffffeu, 0xfffffffdu, UINT32_MAX, UINT32_MAX, false},
+      TestCase{cdna5::kVAddMinI32Vop3, 1u, 1u, UINT32_MAX, 0u},
+      TestCase{cdna5::kVAddMinI32Vop3, 1u, 1u, UINT32_MAX, UINT32_MAX, false},
       TestCase{cdna5::kVAddMaxU32Vop3, UINT32_MAX, 1u, 0u, UINT32_MAX},
       TestCase{cdna5::kVAddMaxU32Vop3, UINT32_MAX, 1u, 0u, UINT32_MAX, false},
       TestCase{cdna5::kVAddMinI32Vop3, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(-1),
-               static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MIN)},
+               static_cast<uint32_t>(INT32_MAX), 0u},
       TestCase{cdna5::kVAddMinI32Vop3, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(-1),
                static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MIN), false},
       TestCase{cdna5::kVAddMinU32Vop3, UINT32_MAX, 1u, UINT32_MAX, UINT32_MAX},
@@ -550,6 +554,34 @@ TEST(Gfx1250ExecutionTest, Vop3IntegerMultiplyAccumulateClampSaturatesExactResul
       ASSERT_NE(inst, nullptr);
       inst->execute(*inst, wf);
       EXPECT_EQ(cu->read_vgpr(base + 3, 0), test.expected) << "scalar " << scalar;
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, LshlAddU64DecodesLowThreeShiftBits) {
+  ForceScalarGuard guard;
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(UINT32_MAX);
+  const uint32_t base = wf->vgpr_alloc().base;
+  const auto words = cdna5::build_vop3(cdna5::kVLshlAddU64Vop3,
+                                       {.vdst = 2, .src0 = 129, .src1 = 256, .src2 = 128});
+  cdna5::VLshlAddU64Vop3 inst(words.data()); // v_lshl_add_u64 v[2:3], 1, v0, 0
+  constexpr std::array<uint32_t, 8> kResults{1, 2, 4, 8, 16, 1, 1, 1};
+  for (bool scalar : {false, true}) {
+    util::set_force_scalar_for_testing(scalar);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      cu->write_vgpr(base, lane, lane);
+      cu->write_vgpr(base + 2, lane, UINT32_MAX);
+      cu->write_vgpr(base + 3, lane, UINT32_MAX);
+    }
+    inst.execute_impl(*wf);
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+      EXPECT_EQ(cu->read_vgpr(base + 2, lane), kResults[lane % kResults.size()]) << lane;
+      EXPECT_EQ(cu->read_vgpr(base + 3, lane), 0u) << lane;
     }
   }
 }
@@ -793,7 +825,7 @@ TEST(Gfx1250ExecutionTest, Vop3PackedIntegerClampSaturatesSelectedHalves) {
   }
 }
 
-TEST(Gfx1250ExecutionTest, Vop3PackedMadClampSaturatesSelectedHalves) {
+TEST(Gfx1250ExecutionTest, Vop3PackedTernaryIntegerClampUsesSelectedHalves) {
   ForceScalarGuard guard;
   struct TestCase {
     uint16_t opcode;
@@ -816,7 +848,19 @@ TEST(Gfx1250ExecutionTest, Vop3PackedMadClampSaturatesSelectedHalves) {
                1u, false},
       TestCase{cdna5::kVPkMadU16Vop3p, 0x0001ffffu, 0x00020002u, 0x00000000u, 0x0002fffeu, 0u, 3u,
                1u, false},
+      TestCase{cdna5::kVPkMin3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0x00000001u, 0u, 3u,
+               1u},
+      TestCase{cdna5::kVPkMax3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0x00000005u, 0u, 3u,
+               1u},
+      TestCase{cdna5::kVPkMin3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0xfffa0001u, 0u, 3u,
+               1u, false},
+      TestCase{cdna5::kVPkMax3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0xfffd0005u, 0u, 3u,
+               1u, false},
       // Non-default selectors force scalar fallback and verify half selection.
+      TestCase{cdna5::kVPkMin3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0x00010000u, 7u, 0u,
+               0u},
+      TestCase{cdna5::kVPkMax3I16Vop3p, 0xfffc0002u, 0xfffd0001u, 0xfffa0005u, 0x00050000u, 7u, 0u,
+               0u},
       TestCase{cdna5::kVPkMadI16Vop3p, 0x7fff8000u, 0x00020002u, 0x00000000u, 0x80007fffu, 7u, 0u,
                0u},
       TestCase{cdna5::kVPkMadU16Vop3p, 0xffff0001u, 0x00020002u, 0x00010000u, 0x0002ffffu, 3u, 0u,
@@ -5676,6 +5720,51 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   }
 }
 
+// Selected BF16 halves and source modifiers survive overlapping destination storage.
+TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
+  for (const uint16_t opcode :
+       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
+    for (bool clamp : {false, true}) {
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
+                                                     .neg_hi = 1,
+                                                     .opsel = 5,
+                                                     .opsel_hi_2 = 1,
+                                                     .clamp = uint8_t(clamp),
+                                                     .src0 = 256,
+                                                     .src1 = 257,
+                                                     .src2 = 258,
+                                                     .opsel_hi = 3,
+                                                     .neg = 1});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x80000001U);
+      wf->set_trapsts(0x80000000U);
+      const auto base = wf->vgpr_alloc().base;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        cu->write_vgpr(base, lane, 0xc0003f80U);
+        cu->write_vgpr(base + 1, lane, 0x40404000U);
+        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
+      }
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
+      const uint32_t half = clamp ? 0 : 0xc040U;
+      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
+                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
+                                                                     : (half << 16) | 0x3f80U;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
+      }
+      EXPECT_EQ(wf->trapsts(), 0x80000000U);
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {
   struct TestCase {
     uint32_t src0;
@@ -5942,15 +6031,139 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       for (uint32_t lane = 0; lane < 32; ++lane)
         cu.write_vgpr(base + kAcc + reg, lane, 0);
 
-    amdgpu::exec_swmmac_i32(cu, 16, 16, 128, 8, base + kAcc, base + kA, base + kB, base + kAcc,
-                            base + kIndex, 32, 0, amdgpu::extract_u8, amdgpu::extract_u8, false);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const auto words = cdna5::build_vop3p(
+        cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+        {.vdst = kAcc, .src0 = 256 + kA, .src1 = 256 + kB, .src2 = 256 + kIndex});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
 
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
-        const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+        const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
         EXPECT_EQ(cu.read_vgpr(base + kAcc + out.reg, out.lane), expected[row * 16 + col])
             << "row=" << row << " col=" << col;
       }
+  }
+}
+
+// Independent source signs and CLAMP must survive decoded control forwarding.
+TEST(Gfx1250ExecutionTest, SwmmacIu8K128SignsAndClamp) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto &cu = *sim.cu();
+  const auto base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (uint8_t signs : {0, 1, 2}) {
+    for (uint8_t clamp : {0, 1}) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          cu.write_vgpr(base + reg, lane, 0x80808080U);
+          cu.write_vgpr(base + 40 + reg, lane, signs ? 0 : INT32_MAX);
+        }
+        for (uint32_t reg = 16; reg < 32; ++reg)
+          cu.write_vgpr(base + reg, lane, 0xffffffffU);
+        for (uint32_t reg = 56; reg < 58; ++reg)
+          cu.write_vgpr(base + reg, lane, 0x44444444U);
+      }
+      const auto words = cdna5::build_vop3p(
+          cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+          {.vdst = 40, .clamp = clamp, .src0 = 256, .src1 = 272, .src2 = 312, .neg = signs});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+      const uint32_t expected = signs == 1   ? uint32_t(-2088960)
+                                : signs == 2 ? uint32_t(-8192)
+                                : clamp      ? uint32_t(INT32_MAX)
+                                             : uint32_t(INT32_MAX) + 2088960U;
+      EXPECT_EQ(cu.read_vgpr(base + 40, 0), expected);
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, PermlaneIdxGenReturnsByteOffsetsWithinEachGroup) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf(16);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  constexpr uint32_t kExec = 0x55555555;
+  wf->set_exec(kExec);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const auto words =
+      cdna5::build_vop3(cdna5::kVPermlaneIdxGenB32Vop3, {.vdst = 1, .src0 = 256, .src1 = 4});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  // The 16 active lanes select indices 48 through 63, exercising all six index bits.
+  constexpr uint32_t kFirstIndex = 48;
+  for (uint32_t width : {8u, 16u, 32u, 128u}) {
+    write_wave_sgpr(*cu, *wf, 4, width);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      cu->write_vgpr(base, lane, 0xc0 | (kFirstIndex + lane / 2));
+      cu->write_vgpr(base + 1, lane, 0xdeadbeef);
+    }
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      const uint32_t group_base = (lane / width) * width;
+      const uint32_t group_index = (kFirstIndex + lane / 2) % width;
+      const uint32_t byte_offset = (group_base + group_index) * 4;
+      EXPECT_EQ(cu->read_vgpr(base + 1, lane), kExec & (1u << lane) ? byte_offset : 0xdeadbeef)
+          << "width=" << width << " lane=" << lane;
+    }
+  }
+}
+
+TEST(Gfx1250ExecutionTest, PermlaneShufflesSelectSourceAtGroupBoundaries) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = sim.dispatch_scratch_wf(16);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 32; ++lane)
+    cu->write_vgpr(base, lane, 1000 + lane);
+
+  struct Case {
+    uint16_t opcode;
+    uint32_t width, selector, lane, source;
+  };
+  constexpr Case cases[] = {
+      {cdna5::kVPermlaneUpB32Vop3, 8, 1, 8, 8},
+      {cdna5::kVPermlaneUpB32Vop3, 8, 1, 9, 8},
+      {cdna5::kVPermlaneUpB32Vop3, 16, 2, 16, 16},
+      {cdna5::kVPermlaneUpB32Vop3, 16, 2, 18, 16},
+      {cdna5::kVPermlaneDownB32Vop3, 8, 8, 0, 0},
+      {cdna5::kVPermlaneDownB32Vop3, 8, 8, 23, 23},
+      {cdna5::kVPermlaneDownB32Vop3, 16, 3, 12, 15},
+      {cdna5::kVPermlaneDownB32Vop3, 16, 3, 13, 13},
+      {cdna5::kVPermlaneDownB32Vop3, 16, 0xffffffff, 5, 5},
+      {cdna5::kVPermlaneXorB32Vop3, 16, 3, 16, 19},
+      {cdna5::kVPermlaneXorB32Vop3, 16, 16, 5, 5},
+      {cdna5::kVPermlaneXorB32Vop3, 16, 16, 21, 5}, // A lower group is readable.
+      {cdna5::kVPermlaneXorB32Vop3, 16, 32, 21, 21},
+  };
+  for (const auto &test : cases) {
+    const auto words = cdna5::build_vop3(
+        test.opcode,
+        {.vdst = 1, .src0 = 256, .src1 = 4, .src2 = static_cast<uint16_t>(128 + test.width)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    SCOPED_TRACE(inst->mnemonic());
+    wf->set_exec(1u << test.lane);
+    write_wave_sgpr(*cu, *wf, 4, test.selector);
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      cu->write_vgpr(base + 1, lane, 0xdeadbeef);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      EXPECT_EQ(cu->read_vgpr(base + 1, lane), lane == test.lane ? 1000 + test.source : 0xdeadbeef)
+          << "width=" << test.width << " lane=" << lane << " selector=" << test.selector;
   }
 }
 
@@ -6743,6 +6956,41 @@ TEST(Gfx1250ExecutionTest, QsadAndMqsadUseFourSlidingWindowsAndMaskedReferenceBy
   EXPECT_EQ(read(13), UINT32_MAX);
   EXPECT_EQ(read(14), UINT32_MAX);
   EXPECT_EQ(read(15), UINT32_MAX);
+}
+
+// gfx1250 inherits rocjitsu's gfx12 MULLIT model, including guest MODE and OMOD order.
+TEST(Gfx1250ExecutionTest, MullitRetainsGuestRoundingAndFlushRules) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  constexpr struct {
+    uint32_t a, b, c, expected, mode;
+    uint8_t omod;
+  } cases[] = {
+      {0x2d1d4000, 0x49032148, 0x44630000, 0x36a11862, 3 | (3 << 4), 0},
+      {0x3f800000, 0x3f800000, 1, 0xff7fffff, 2 << 4, 0},
+      {0x00c00000, 0x3f000000, 0x3f800000, 0, 3 << 4, 1},
+      {0x7f80002a, 0x3f800000, 0x3f800000, 0x7fc0002a, 3 << 4, 0},
+  };
+  for (const auto &sample : cases) {
+    wf->set_mode_raw(sample.mode);
+    wf->set_exec(1);
+    cu->write_vgpr(base, 0, sample.a);
+    cu->write_vgpr(base + 1, 0, sample.b);
+    cu->write_vgpr(base + 2, 0, sample.c);
+    cu->write_vgpr(base, 1, 0xdeadbeef);
+    auto words =
+        cdna5::build_vop3(cdna5::kVMullitF32Vop3,
+                          {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 258, .omod = sample.omod});
+    cdna5::VMullitF32Vop3 inst(words.data());
+    inst.execute_impl(*wf);
+    ASSERT_FALSE(wf->instruction_execution_failed());
+    EXPECT_EQ(cu->read_vgpr(base, 0), sample.expected);
+    EXPECT_EQ(cu->read_vgpr(base, 1), 0xdeadbeef);
+  }
 }
 
 TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRules) {

@@ -22,6 +22,42 @@ THE SOFTWARE.
 
 #include "rocjpeg_decoder.h"
 
+namespace {
+// Makes device_id the calling thread's current HIP device for the lifetime of the object, then restores the
+// previous one, so the library's HIP work runs on the decoder's device without changing the caller's state.
+class ScopedHipDevice {
+public:
+    explicit ScopedHipDevice(int device_id) {
+        if (hipGetDevice(&previous_device_id_) != hipSuccess) {
+            failed_ = true;
+            ErrorLog(g_rocjpeg_logger, "Failed to query the current HIP device");
+            return;
+        }
+        if (previous_device_id_ != device_id) {
+            switched_ = hipSetDevice(device_id) == hipSuccess;
+            if (!switched_) {
+                failed_ = true;
+                ErrorLog(g_rocjpeg_logger, "Failed to set the current HIP device to " + ROCJPEG_TOSTR(device_id));
+            }
+        }
+    }
+    ~ScopedHipDevice() {
+        if (switched_ && hipSetDevice(previous_device_id_) != hipSuccess) {
+            ErrorLog(g_rocjpeg_logger, "Failed to restore the current HIP device to " + ROCJPEG_TOSTR(previous_device_id_));
+        }
+    }
+    ScopedHipDevice(const ScopedHipDevice &) = delete;
+    ScopedHipDevice &operator=(const ScopedHipDevice &) = delete;
+    // True if device_id could not be made current, so HIP work done now could run on another device.
+    bool Failed() const { return failed_; }
+
+private:
+    int previous_device_id_ = -1;
+    bool switched_ = false;
+    bool failed_ = false;
+};
+}  // namespace
+
 RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
     num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend}, initialized_{false} {}
 
@@ -358,8 +394,16 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
     // hip_stream_). A dedicated lock keeps two concurrent finalizations from interleaving
     // without holding mutex_ across the GPU work, so async submits can still proceed.
     std::lock_guard<std::mutex> finalize_lock(finalize_mutex_);
+    // FinalizeSubBatches creates its HIP interop imports and kernel parameter buffers on the calling thread's current
+    // device, which need not be device_id_ (for example on an application thread that never called hipSetDevice).
+    ScopedHipDevice device_guard(device_id_);
     int num_released = 0;
-    RocJpegStatus rocjpeg_status = FinalizeSubBatches(surface_ids, jpeg_stream_params, decode_params, destinations, batch_size, num_released);
+    // If device_id_ could not be made current, fail rather than finish on the wrong device. Going through the
+    // failure path below, instead of returning here, still releases every surface.
+    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_EXECUTION_FAILED;
+    if (!device_guard.Failed()) {
+        rocjpeg_status = FinalizeSubBatches(surface_ids, jpeg_stream_params, decode_params, destinations, batch_size, num_released);
+    }
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         // The failing sub-batch and every later one still hold their surfaces. Wait for any copy or kernel already
         // queued for them, then sync each surface (later sub-batches may still be decoding) and release it, so the
@@ -630,16 +674,26 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
+    if (batch_size <= 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid batch_size: " + ROCJPEG_TOSTR(batch_size));
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+
     std::vector<AsyncDecodeState> states(batch_size);
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        // Check every destination before taking any of them, so an invalid one does not leave the earlier ones
+        // removed from pending_decodes_ but never finished, which would leak their surfaces.
         for (int i = 0; i < batch_size; i++) {
-            auto it = pending_decodes_.find(&destinations[i]);
-            if (it == pending_decodes_.end()) {
+            if (pending_decodes_.count(&destinations[i]) == 0) {
                 ErrorLog(g_rocjpeg_logger, "No asynchronous decode is pending for destination at index " + ROCJPEG_TOSTR(i));
                 FunctionExitLog(g_rocjpeg_logger);
                 return ROCJPEG_STATUS_INVALID_PARAMETER;
             }
+        }
+        for (int i = 0; i < batch_size; i++) {
+            auto it = pending_decodes_.find(&destinations[i]);
             states[i] = std::move(it->second);
             pending_decodes_.erase(it);
         }

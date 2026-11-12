@@ -16,30 +16,22 @@
 
 #include <algorithm>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "../common/ScopedEnv.hpp"
-#include "fakes/graph_fakes.h"
-#include "fakes/param_redirect.h"
+#include "../common/TopoRailPlane.hpp"
 
-#include TOPO_CC_PATH
-
-#include "TopoScene.h"
+// Pulls in src/graph/topo.cc -- the code under test -- along with its fakes and
+// TopoScene.h, and carries the single definition of TopoSetNetDevsPolicy.
+#include "topo_include.cc"
 
 using namespace topo_scene;
 
 ncclResult_t ncclTopoGetXmlFromCpu(struct ncclXmlNode* cpuNode, struct ncclXml* xml);  // src/graph/xml.cc
-
-// The NETDEVS policy lives in this TU's statics; the other graph TUs set it through here.
-void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num) {
-  int unused;
-  ncclTopoGetNetDevsPolicy(nullptr, &unused);  // consume the call_once first
-  netDevsPolicy = policy;
-  netDevsPolicyNum = num;
-}
 
 namespace {
 
@@ -2402,6 +2394,95 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_FailuresAreReturned) {
   TopoFile("<system version=\"3\"/>");
   EXPECT_EQ(ncclInvalidUsage, GetSystem());
   EXPECT_EQ(nullptr, system_);
+}
+
+// --- topo_expl models: each loads with the CPU class a live host with its CPUID would get.
+
+struct TopoModelCpu {
+  const char* model;
+  int vendor;
+  int zen;  // NCCL_TOPO_UNDEF for non-AMD
+  bool rome;
+};
+
+const TopoModelCpu kTopoModelCpus[] = {
+  {"topo_8p_rome.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
+  {"topo_4p4h.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
+  {"topo_16p1h.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN12, true},
+  {"topo_8p_90a.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
+  {"topo_4p_942.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
+  {"topo_16p_gio-1s-1rp-cascade.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN34, true},
+  {"topo_8p_950.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
+  {"topo_8p_950_pcie.xml", NCCL_TOPO_CPU_VENDOR_AMD, NCCL_TOPO_CPU_MODEL_AMD_ZEN5, false},
+  {"topo_8p_942.xml", NCCL_TOPO_CPU_VENDOR_INTEL, NCCL_TOPO_UNDEF, false},
+  {"topo_4p1h.xml", NCCL_TOPO_CPU_VENDOR_INTEL, NCCL_TOPO_UNDEF, false},
+};
+
+std::vector<std::string> TopoExplModels() {
+  std::vector<std::string> models;
+  if (!std::filesystem::is_directory(TOPO_EXPL_MODELS_DIR)) return models;
+  for (const auto& entry : std::filesystem::directory_iterator(TOPO_EXPL_MODELS_DIR)) {
+    if (entry.path().extension() == ".xml") models.push_back(entry.path().filename().string());
+  }
+  std::sort(models.begin(), models.end());
+  return models;
+}
+
+// Loads a model as topo_expl does: rail/plane defaults for its NICs, loaded as the first host it records.
+// Reports the first <cpu>'s familyid/modelid.
+SystemPtr LoadTopoExplModel(const std::string& model, int* familyId = nullptr, int* modelId = nullptr) {
+  XmlPtr xml = NewXml(NCCL_GRAPH_XML_MAX_NODES);
+  const std::string path = std::string(TOPO_EXPL_MODELS_DIR) + "/" + model;
+  EXPECT_EQ(ncclSuccess, ncclTopoGetXmlFromFile(path.c_str(), xml.get(), 0)) << model;
+  EXPECT_EQ(ncclSuccess, RcclUnitTesting::fillMissingRailPlane(xml.get())) << model;
+  uint64_t localHostHash = 0;
+  for (int i = 0; i < xml->maxIndex; i++) {
+    ncclXmlNode* node = xml->nodes + i;
+    if (strcmp(node->name, "cpu") != 0) continue;
+    const char* hostHash;
+    EXPECT_EQ(ncclSuccess, xmlGetAttr(node, "host_hash", &hostHash));
+    if (hostHash) localHostHash = strtoull(hostHash, nullptr, 16);
+    if (familyId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "familyid", familyId, NCCL_TOPO_UNDEF));
+    if (modelId) EXPECT_EQ(ncclSuccess, xmlGetAttrIntDefault(node, "modelid", modelId, NCCL_TOPO_UNDEF));
+    break;
+  }
+  ncclTopoSystem* system = nullptr;
+  EXPECT_EQ(ncclSuccess, ncclTopoGetSystemFromXml(xml.get(), &system, localHostHash)) << model;
+  return SystemPtr(system);
+}
+
+TEST_F(TopoMicrotest, TopoExplModels_LoadWithTheCpuClassOfTheirCpuid) {
+  const std::vector<std::string> models = TopoExplModels();
+  if (models.empty()) GTEST_SKIP() << "no topo_expl models under " << TOPO_EXPL_MODELS_DIR;
+  for (const std::string& model : models) {
+    int familyId = NCCL_TOPO_UNDEF, modelId = NCCL_TOPO_UNDEF;
+    SystemPtr system = LoadTopoExplModel(model, &familyId, &modelId);
+    ASSERT_NE(nullptr, system) << model;
+    ASSERT_GT(system->nodes[CPU].count, 0) << model;
+    const ncclTopoNode* cpu = system->nodes[CPU].nodes;
+    if (cpu->cpu.vendor != NCCL_TOPO_CPU_VENDOR_AMD) {
+      EXPECT_FALSE(rcclTopoCpuIsRome(system.get())) << model;
+      continue;
+    }
+    const int zen = familyId == 0x1A ? NCCL_TOPO_CPU_MODEL_AMD_ZEN5 :
+                    familyId == 0x19 ? NCCL_TOPO_CPU_MODEL_AMD_ZEN34 :
+                                       NCCL_TOPO_CPU_MODEL_AMD_ZEN12;
+    const bool rome = (familyId == 0x17 && modelId >= 0x31) || familyId == 0x19;
+    EXPECT_EQ(zen, cpu->cpu.model) << model << " familyid " << familyId;
+    EXPECT_EQ(rome, rcclTopoCpuIsRome(system.get())) << model << " familyid " << familyId << " modelid " << modelId;
+  }
+}
+
+TEST_F(TopoMicrotest, TopoExplModels_KnownModelsKeepTheirCpuClass) {
+  if (TopoExplModels().empty()) GTEST_SKIP() << "no topo_expl models under " << TOPO_EXPL_MODELS_DIR;
+  for (const TopoModelCpu& c : kTopoModelCpus) {
+    SystemPtr system = LoadTopoExplModel(c.model);
+    ASSERT_NE(nullptr, system) << c.model;
+    const ncclTopoNode* cpu = system->nodes[CPU].nodes;
+    EXPECT_EQ(c.vendor, cpu->cpu.vendor) << c.model;
+    if (c.vendor == NCCL_TOPO_CPU_VENDOR_AMD) EXPECT_EQ(c.zen, cpu->cpu.model) << c.model;
+    EXPECT_EQ(c.rome, rcclTopoCpuIsRome(system.get())) << c.model;
+  }
 }
 
 }  // namespace

@@ -104,6 +104,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_pinned_host_test.cc
   hrr_va_placement_test.cc
   hrr_disk_space_test.cc
+  hrr_host_alloc_budget_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)

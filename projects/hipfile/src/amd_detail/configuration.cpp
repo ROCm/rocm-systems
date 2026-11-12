@@ -4,14 +4,51 @@
  */
 
 #include "configuration.h"
+#include "context.h"
 #include "environment.h"
 #include "hip.h"
 #include "hipfile-literals.h"
+#include "sys.h"
 
 #include <cstdio>
+#include <fcntl.h>
 #include <optional>
+#include <string_view>
+#include <system_error>
 
 using namespace hipFile;
+
+/* On WSL2, ROCr drives the GPU through librocdxg (/dev/dxg) instead of KFD.
+ * librocdxg does not implement AIS, so fastpath I/O fails with an error that
+ * is not eligible for fallback.
+ */
+static bool
+rocrUsesDxg() noexcept
+{
+    const char *detection{Context<Sys>::get()->getenv("HSA_ENABLE_DXG_DETECTION")};
+    if (detection && std::string_view{detection} == "0") {
+        return false;
+    }
+
+    try {
+        Context<Sys>::get()->statx(AT_FDCWD, "/dev/dxg", 0, 0);
+    }
+    catch (const std::system_error &e) {
+        // Only ENOENT/ENOTDIR prove /dev/dxg does not exist, i.e. ROCr is using KFD (allow fastpath).
+        if (e.code() == std::errc::no_such_file_or_directory || e.code() == std::errc::not_a_directory) {
+            return false;
+        }
+
+        // Any other error is unexpected and leaves us unable to tell, so fail safe, i.e. assume dxg
+        // (disable fastpath).
+        // TODO: replace with logging, e.g., hipfilelog(WARN, ...)
+        fprintf(stderr,
+                "hipFile: unable to check for /dev/dxg (%s); assuming ROCr is using dxg and disabling "
+                "the fastpath.\n",
+                e.code().message().c_str());
+    }
+    return true;
+}
 
 bool
 Configuration::fastpath() const noexcept
@@ -19,7 +56,8 @@ Configuration::fastpath() const noexcept
     static bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
     static bool readExists{!!getHipAmdFileReadPtr()};
     static bool writeExists{!!getHipAmdFileWritePtr()};
-    return readExists && writeExists && m_fastpath_override.value_or(fastpath_env);
+    static bool usesDxg{rocrUsesDxg()};
+    return readExists && writeExists && !usesDxg && m_fastpath_override.value_or(fastpath_env);
 }
 
 void
