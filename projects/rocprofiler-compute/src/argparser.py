@@ -144,20 +144,16 @@ def add_general_group(
     )
 
 
-def experimental_requested(argv: List[str]) -> bool:
-    """Return True if --experimental comes before the "--" that starts the workload."""
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("--experimental", action="store_true")
-    return parser.parse_known_args(argv)[0].experimental
-
-
 def build_parser(
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
-    experimental_enabled: bool = False,
+    argv: List[str],
 ) -> argparse.ArgumentParser:
-    """Return the rocprof-compute command-line parser."""
+    """Return the rocprof-compute command-line parser for argv."""
+    # Experimental options work only with --experimental before the workload's "--"
+    workload_start = argv.index("--") if "--" in argv else len(argv)
+    experimental_enabled = "--experimental" in argv[:workload_start]
     parser = argparse.ArgumentParser(
         description=(
             "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -167,7 +163,7 @@ def build_parser(
         formatter_class=lambda prog: CliHelpFormatter(prog, max_help_position=30),
         usage="rocprof-compute [mode] [options]",
     )
-    omniarg_parser(
+    _omniarg_parser(
         parser,
         rocprof_compute_home,
         supported_archs,
@@ -177,7 +173,7 @@ def build_parser(
     return parser
 
 
-def omniarg_parser(
+def _omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],

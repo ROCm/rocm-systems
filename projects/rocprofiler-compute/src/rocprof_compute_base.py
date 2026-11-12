@@ -12,11 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import (
-    build_parser,
-    experimental_requested,
-    warn_deprecated_options,
-)
+from argparser import build_parser, warn_deprecated_options
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -261,12 +257,11 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
 
     def parse_args(self) -> None:
-        # The help shows experimental options only when --experimental is given
         self.__parser = build_parser(
             config.rocprof_compute_home,
             self.__supported_archs,
             self.__version,
-            experimental_requested(sys.argv[1:]),
+            sys.argv[1:],
         )
         self.__args = self.__parser.parse_args()
         warn_deprecated_options(self.__args)

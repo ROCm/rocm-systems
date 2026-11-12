@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from common import SUPPORTED_ARCHS
 
-from argparser import CliHelpFormatter, build_parser, experimental_requested
+from argparser import CliHelpFormatter, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
@@ -20,12 +20,14 @@ VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
 
 def build_args(argv, experimental=False):
     """Parse argv with the rocprof-compute parser."""
-    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, experimental).parse_args(argv)
+    if experimental:
+        argv = ["--experimental", *argv]
+    return build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
 
 
 def help_text(home, argv, capsys):
     """Return the help output for argv with the given rocprof-compute home."""
-    parser = build_parser(home, SUPPORTED_ARCHS, VERSION)
+    parser = build_parser(home, SUPPORTED_ARCHS, VERSION, argv)
     with pytest.raises(SystemExit):
         parser.parse_args([*argv, "--help"])
     return capsys.readouterr().out
@@ -334,17 +336,20 @@ def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
     assert "may change in future releases" in caplog.text.lower()
 
 
-@pytest.mark.parametrize(
-    ("argv", "requested"),
-    [
-        (["--experimental", "profile", "-n", "test", "--", "./app"], True),
-        (["profile", "-n", "test", "--", "./app", "--experimental"], False),
-        (["--exp", "profile", "-n", "test", "--", "./app"], False),
-    ],
-    ids=["before_workload", "workload_option", "abbreviation"],
-)
-def test_experimental_requested(argv, requested):
-    assert experimental_requested(argv) is requested
+@pytest.mark.experimental_feature
+def test_experimental_option_works_with_experimental_before_workload():
+    argv = ["--experimental", "profile", "--pc-sampling", "-n", "test", "--", "./app"]
+    args = build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert args.pc_sampling
+
+
+@pytest.mark.experimental_feature
+def test_experimental_option_fails_with_experimental_in_workload(capsys):
+    argv = ["profile", "--pc-sampling", "-n", "test", "--", "./app", "--experimental"]
+    with pytest.raises(SystemExit) as exc:
+        build_parser(HOME, SUPPORTED_ARCHS, VERSION, argv).parse_args(argv)
+    assert exc.value.code == 2
+    assert "experimental feature" in capsys.readouterr().err.lower()
 
 
 @pytest.mark.experimental_feature
