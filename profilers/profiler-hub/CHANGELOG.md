@@ -28,15 +28,19 @@ downstream consumer of the library.
 ### Changed
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
-- **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
-  to `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
-  `#include <profiler-hub/storage.hpp>` becomes
+- Public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp` to
+  `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
   `#include <profiler-hub/cpp/storage.hpp>`). Groups the public C++ API
   headers under their own subdirectory, mirroring the language-scoped
   layout other public interfaces (e.g. a future C ABI) will use.
 - The installed `profiler-hub-config.cmake` now only looks up `fmt` and `spdlog`
   when the `static` component is requested, so shared-only consumers no longer get
   `fmt::fmt` / `spdlog::spdlog` imported into their project.
+
+### Deprecated
+
+- The old include paths `<prefix>/include/profiler-hub/*.hpp` still work via
+  forwarding headers and will be removed in a future release.
 
 ## [0.2.0] - 2026-09-02
 
