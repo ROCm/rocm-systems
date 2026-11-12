@@ -306,16 +306,11 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  // The host attaches over the GPU's direct link to its nearest CPU node, so read that link from
-  // the GPU side. With several CPU nodes the first need not be the one this GPU attaches to, and
-  // the thunk keeps at most one link per remote node, so a CPU node reporting both a fabric link
-  // and an xGMI link to the same GPU can surface only the former.
-  const auto host_link =
-      core::Runtime::runtime_singleton_->GetLinkInfo(node_id(), GetNearestCpuAgent()->node_id());
-  xgmi_cpu_gpu_ = (host_link.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
-
-  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
+  // Nearest CPU, not the first: with several CPU nodes the first may reach this GPU only over
+  // the fabric. The same link sets the xGMI host check and large BAR.
+  const auto link_info =
+      core::Runtime::runtime_singleton_->GetLinkInfo(GetNearestCpuAgent()->node_id(), node_id());
+  xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
 
   if (link_info.num_hop >= 1 && !properties_.Integrated) {
     large_bar_enabled_ = true;
