@@ -11,6 +11,7 @@ test_categories:
     description: "Smoke - host-only src/gin/gin_host.cc finalize micro-tests, sub-second."
     test_patterns:
       - "GinHostFinalizeTest.*"
+      - "GinHostSplitShareTest.*"
     exclude_windows:
       - "*"
     labels:
