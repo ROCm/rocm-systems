@@ -71,9 +71,15 @@ namespace fs     = ::rocprofiler::common::filesystem;
 // different installation whenever an older one is loaded first, for example from a
 // system ROCm earlier on LD_LIBRARY_PATH. This library would then read that
 // installation's versions.yml and reject the schema versions it writes itself.
+// The body is intentionally not empty so the linker cannot fold this into an empty
+// function that lives in a different shared object.
 void
 schema_path_anchor()
-{}
+{
+    static const char    _tag[] = "rocprofiler-sdk-rocpd-schema-anchor";
+    volatile const char* _keep  = _tag;
+    (void) _keep;
+}
 
 std::string
 get_install_path()
@@ -81,14 +87,26 @@ get_install_path()
     if(Dl_info dl_info = {}; dladdr(reinterpret_cast<void*>(&schema_path_anchor), &dl_info) != 0 &&
                              dl_info.dli_fname != nullptr)
     {
-        auto _share_path =
-            fs::path{dl_info.dli_fname}.lexically_normal().parent_path().parent_path() /
-            std::string{"share/rocprofiler-sdk-rocpd"};
+        // prefix/lib is the usual layout, but an installed library can sit one directory
+        // deeper (lib/<multiarch>). Walk up from the loaded file until versions.yml is
+        // found, and otherwise keep the historical prefix/lib location.
+        auto _dir        = fs::path{dl_info.dli_fname}.lexically_normal().parent_path();
+        auto _share_path = _dir.parent_path() / std::string{"share/rocprofiler-sdk-rocpd"};
+        for(int _level = 0; _level < 4 && !_dir.empty(); ++_level)
+        {
+            auto _candidate = _dir / std::string{"share/rocprofiler-sdk-rocpd"};
+            if(fs::exists(_candidate / "versions.yml"))
+            {
+                _share_path = _candidate;
+                break;
+            }
+            _dir = _dir.parent_path();
+        }
         ROCP_INFO << fmt::format("[rocprofiler-sdk-rocpd] resolved rocprofiler-sdk-rocpd SQL "
                                  "schema path as '{}' (dli_fname: {})",
                                  _share_path.string(),
                                  dl_info.dli_fname);
-        return _share_path;
+        return _share_path.string();
     }
 
     ROCP_CI_LOG(WARNING)

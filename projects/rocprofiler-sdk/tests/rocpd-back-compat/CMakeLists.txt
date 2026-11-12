@@ -101,7 +101,13 @@ endif()
 # Shared environment and output root
 # ---------------------------------------------------------------------------
 
-set(rocpd-back-compat-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+# Test Install Build configures this directory as its own project, so CMAKE_BINARY_DIR
+# does not contain the schema. The common helper records the directory that does.
+if(ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH)
+    set(rocpd-back-compat-schema-path "${ROCPROFILER_SDK_TESTS_ROCPD_SCHEMA_PATH}")
+else()
+    set(rocpd-back-compat-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+endif()
 # Prefer the configure-time Python's site-packages, but also put every
 # python*/site-packages under the build lib dir on PYTHONPATH. A mismatch between
 # Python3_EXECUTABLE and the directory that received the rocpd package (seen when the
