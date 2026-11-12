@@ -273,13 +273,13 @@ TEST_F(HipFileIoHipInit, spawnedThreadWriteRunsWithoutSegfault)
 
 // hipAmdFileRead/hipAmdFileWrite record their failures as the thread's last
 // HIP error. These tests use the default backends (fastpath with fallback).
-struct HipFileIoLastError : public testing::Test {
+struct HipFileIoHipErrors : public testing::Test {
 
     Tmpfile tmpfile;
     size_t  io_size;
     void   *device_buffer;
 
-    HipFileIoLastError() : tmpfile{test_env.ais_capable_dir}, io_size{1_MiB}, device_buffer{nullptr}
+    HipFileIoHipErrors() : tmpfile{test_env.ais_capable_dir}, io_size{1_MiB}, device_buffer{nullptr}
     {
     }
 
@@ -290,6 +290,7 @@ struct HipFileIoLastError : public testing::Test {
 
         ASSERT_EQ(0, ftruncate(tmpfile.fd, static_cast<off_t>(io_size)));
         ASSERT_EQ(hipSuccess, hipMalloc(&device_buffer, io_size));
+        // Clear any errors that might be set.
         (void)hipGetLastError();
     }
 
@@ -312,7 +313,7 @@ struct HipFileIoLastError : public testing::Test {
 
 // Whether the fastpath succeeds or falls back (e.g. no AIS ioctl), a
 // successful sync I/O must not leave an error behind.
-TEST_F(HipFileIoLastError, successfulSyncIoLeavesNoHipError)
+TEST_F(HipFileIoHipErrors, SuccessfulSyncIoLeavesNoHipError)
 {
     hipFileHandle_t handle{registerFd(tmpfile.fd)};
 
@@ -329,7 +330,7 @@ TEST_F(HipFileIoLastError, successfulSyncIoLeavesNoHipError)
 #if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
 // A fastpath failure that is not eligible for fallback (writing through a
 // read-only fd) is retrievable with hipPeekAtLastError().
-TEST_F(HipFileIoLastError, failedSyncIoRecordsHipError)
+TEST_F(HipFileIoHipErrors, FailedSyncIoRecordsHipError)
 {
     int fd{open(("/proc/self/fd/" + std::to_string(tmpfile.fd)).c_str(), O_RDONLY)};
     ASSERT_NE(-1, fd);
