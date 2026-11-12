@@ -7351,6 +7351,48 @@ TEST_F(DevrCommCreateInternalTest, ResourceWindow_CountedAtCreateAndReleasedWhen
   EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
 }
 
+// Once its registration owns the handle, the resource window's count comes back when the
+// registration is dropped: here the window's shadow allocation fails right after the obtain.
+TEST_F(DevrCommCreateInternalTest, ResourceWindow_ReleasedWithItsRegistrationWhenWindowCreateFails) {
+  std::memset(allocTracker, 0, sizeof(allocationTracker) * MAX_ALLOC_TRACK_NGPU);
+  ncclDevResourceRequirements res{};
+  res.bufferSize = 4096;
+  reqs.resourceRequirementsList = &res;
+  int lsaRank0 = 0;
+  comm->devrState.lsaRankList = &lsaRank0;
+  comm->devrState.bigSize = 1 << 20;  // room in the big space for symMemoryObtain
+
+  const auto kHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x77);
+  size_t createdSize = 0;
+  ScopedHook create(g_hipMemCreate, [&](hipMemGenericAllocationHandle_t* handle, size_t size,
+                                        const hipMemAllocationProp*, unsigned long long) {
+    *handle = kHandle;
+    createdSize = size;
+    return hipSuccess;
+  });
+  auto allocBeforeCreate = g_devrShadowPoolAlloc;
+  uint64_t countedAtWindowCreate = 0;
+  ScopedHook shadowAlloc(g_devrShadowPoolAlloc,
+                         [&](ncclShadowPool* pool, size_t size, void** dev, void** host, hipStream_t stream) {
+                           if (createdSize == 0) return allocBeforeCreate(pool, size, dev, host, stream);
+                           countedAtWindowCreate = allocTracker[comm->cudaDev].totalAllocSize;
+                           return ncclSystemError;
+                         });
+  int releases = 0;
+  ScopedHook release(g_hipMemRelease, [&](hipMemGenericAllocationHandle_t handle) {
+    if (handle == kHandle) releases++;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_GT(createdSize, 0u);
+  EXPECT_EQ(countedAtWindowCreate, createdSize);
+  EXPECT_EQ(releases, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAlloc, 0u);
+  EXPECT_EQ(allocTracker[comm->cudaDev].totalAllocSize, 0u);
+}
+
 // Branch: GIN connect fails. GIN must stay unlatched so the next create
 // reconnects; a latched retry would skip connect and reach ncclGinDevCommSetup
 // with ginCommCount still 0 (AICOMRCCL-2879).
