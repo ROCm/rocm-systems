@@ -151,28 +151,28 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
 }
 
 
+# gfx1201 does not ship these gfx1250 tables, so their section names stay off
+# the gfx1201 map.
+_GFX1201_OMITTED_TABLE_IDS = {306, 307, 901, 906, 1102, 1104, 1106, 1304}
+
 GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
-    **GFX1250_PANEL_ID_TO_SECTION,
-    306: "Memory chart - GL1 Cache (L1)",
-    307: "Memory chart - GL1-GL2 Interface",
+    table_id: section
+    for table_id, section in GFX1250_PANEL_ID_TO_SECTION.items()
+    if table_id not in _GFX1201_OMITTED_TABLE_IDS
+}
+GFX1201_PANEL_ID_TO_SECTION.update({
     308: "Memory chart - GL2 Cache (L2)",
     309: "Memory chart - L2 to Memory",
     310: "Memory chart - Workgroup Processors (WGPs)",
     311: "Memory chart - Infinity Cache and VRAM",
     602: "Wave Dispatch Statistics",
-    901: "GL0 Utilization",
     902: "GL0 Request Statistics",
     903: "GL0 Cache Performance",
-    906: "GL0-GL1 Interface",
     908: "GL0 Stalls",
-    1102: "GL1 Cache Utilization",
     1103: "GL1 Cache Request Statistics",
-    1104: "GL1 Cache Request Bandwidth",
-    1106: "GL1-GL2 Interface",
-    1304: "GL2 Cache Bandwidth",
     1310: "GL2 Cache Request Statistics",
     1311: "GL2 Cache Performance",
-}
+})
 
 
 def normalize_unit_for_docs(unit: str) -> str:
