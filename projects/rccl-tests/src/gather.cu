@@ -115,13 +115,16 @@ static constexpr int kGatherCtasSdma = 1;
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 // Every CTA runs its own LSA barrier, so small chunks are barrier-bound and fewer CTAs win.
 // Measured per rank on 8x MI300X (gfx942): 1 CTA up to 2 KiB, 2 up to 8 KiB, 4 up to
-// 32 KiB, 8 up to 512 KiB, 16 above. On 4x MI455X (gfx1250): 1 up to 8 KiB, 2 up to
-// 32 KiB, 8 above.
+// 32 KiB, 8 up to 512 KiB, 16 above. On 8x MI350X (gfx950): 2 up to 16 KiB, 16 above.
+// On 4x MI455X (gfx1250): 1 up to 8 KiB, 2 up to 32 KiB, 8 above.
 static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx942[] = {
   {2u << 10, 1},
   {8u << 10, 2},
   {32u << 10, 4},
   {512u << 10, 8},
+};
+static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx950[] = {
+  {16u << 10, 2},
 };
 static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx1250[] = {
   {8u << 10, 1},
@@ -129,6 +132,7 @@ static constexpr gin_sdma_allgather::LsaCtaStep kGatherLsaCtasGfx1250[] = {
 };
 static constexpr gin_sdma_allgather::ArchLsaCtaLadder kGatherLsaCtasByArch[] = {
   {"gfx942", kGatherLsaCtasGfx942, sizeof(kGatherLsaCtasGfx942) / sizeof(kGatherLsaCtasGfx942[0]), 16},
+  {"gfx950", kGatherLsaCtasGfx950, sizeof(kGatherLsaCtasGfx950) / sizeof(kGatherLsaCtasGfx950[0]), 16},
   {"gfx1250", kGatherLsaCtasGfx1250, sizeof(kGatherLsaCtasGfx1250) / sizeof(kGatherLsaCtasGfx1250[0]), 8},
 };
 #endif
@@ -174,7 +178,7 @@ __device__ void GatherLsaDirect(ncclWindow_t sendwin, size_t sendoffset, ncclWin
     // holds. Issuing all kUnroll loads before their stores keeps several remote stores
     // in flight per thread (about 2x LSA-tier bandwidth on gfx1250). The tail stays in
     // the batched loop: a plain one-load remainder loop is as slow as no unrolling.
-    // On gfx942 the copy is xGMI-bound and the unrolled loop is about 5% slower.
+    // On gfx942 and gfx950 the copy is xGMI-bound and the unrolled loop is 5 to 8% slower.
 #if defined(__gfx1250__) || defined(__gfx1250_strict__)
     constexpr int kUnroll = 8;
 #else
