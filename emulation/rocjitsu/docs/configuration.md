@@ -354,6 +354,8 @@ The optional top-level `arithmetic` object selects one semantics mode for
 instructions executed through rj-arith, regardless of GPU architecture.
 Instructions not yet migrated to rj-arith retain their existing implementations
 and do not use this setting.
+On RDNA2 this includes FP32 FMA/FMAC, FP64 FMA, FP16 add/subtract/multiply,
+and VOP3 floating-point comparisons.
 
 ```json
 "arithmetic": {
@@ -531,5 +533,11 @@ This is an inactivity timeout policy, not a deadlock diagnosis: a process that
 keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
 residency never releases a GWS wait. Barriers require an explicit GWS INIT;
 unsupported residency can exhaust the budget but cannot produce a successful
-rendezvous. Checkpoints containing GWS resource state are rejected because the
-format does not serialize the shared table.
+rendezvous. Before checkpointing, processes must release their GWS resource
+tables and any device GDS state that the checkpoint cannot serialize. Resident
+RDNA2 waves may be running or waiting at a workgroup barrier once their memory
+counters have drained. Checkpoints preserve CU-owned LDS. Release shared WGP LDS
+and process-backed scratch reservations before saving. Restoring an active RDNA2 wave
+requires its recorded process, memory and register allocations, and sticky
+exception flags. An older checkpoint taken after all RDNA2 waves retired can
+still be restored.

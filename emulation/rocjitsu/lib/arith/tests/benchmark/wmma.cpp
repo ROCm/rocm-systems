@@ -4,6 +4,7 @@
 // Dense and sparse matrix workload registration across CPU and semantics modes.
 
 #include "benchmark/workloads.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 namespace rocjitsu::arith::test {
 
@@ -77,6 +78,28 @@ void add_wmma(std::vector<Benchmark> &cases) {
   });
   add(cases, "wmma", "v_wmma_f16_16x16x128_bf8_bf8_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_wmma_f16_16x16x128_bf8_bf8_w32(flags, 0, r.d, r.a, r.b, r.c);
+  });
+  add(cases, "wmma", "v_wmma_f32_16x16x128_f8f6f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_f32_16x16x128_f8f6f4_w32(flags, 0, r.d, r.a, r.b, r.c);
+  });
+  add(cases, "wmma", "v_wmma_f32_32x16x128_f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_f32_32x16x128_f4_w32(flags, 0, r.d, r.a, r.b, r.c);
+  });
+  add(cases, "wmma", "v_wmma_scale_f32_16x16x128_f8f6f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_scale_f32_16x16x128_f8f6f4_w32(flags, 0, r.d, r.a, r.b, r.c, r.scale,
+                                                          r.scale);
+  });
+  add(cases, "wmma", "v_wmma_scale16_f32_16x16x128_f8f6f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_scale16_f32_16x16x128_f8f6f4_w32(flags, 0, r.d, r.a, r.b, r.c, r.scale,
+                                                            r.scale);
+  });
+  add(cases, "wmma", "v_wmma_scale_f32_32x16x128_f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_scale_f32_32x16x128_f4_w32(flags, 0, r.d, r.a, r.b, r.c, r.scale,
+                                                      r.scale);
+  });
+  add(cases, "wmma", "v_wmma_scale16_f32_32x16x128_f4_w32", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_wmma_scale16_f32_32x16x128_f4_w32(flags, 0, r.d, r.a, r.b, r.c, r.scale,
+                                                        r.scale);
   });
 
   add_flag_variant(

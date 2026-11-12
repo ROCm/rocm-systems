@@ -16,6 +16,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/valu.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
@@ -115,6 +116,7 @@ enum class SimdFastPath : uint8_t {
   CVT_F64_TO_B32,
   CVT_B32_TO_F64,
   VOPD,
+  VOPC_COMPARE_STATUS,
 };
 
 namespace detail {
@@ -330,7 +332,7 @@ inline std::make_unsigned_t<T> vop3_integer_sub(std::make_unsigned_t<T> lhs,
                                       static_cast<Wide>(std::numeric_limits<T>::max()));
     return static_cast<U>(saturated);
   } else {
-    return lhs_bits < rhs_bits ? U{0} : static_cast<U>(lhs_bits - rhs_bits);
+    return static_cast<U>(std::max(lhs_bits, rhs_bits) - rhs_bits);
   }
 }
 
@@ -3441,6 +3443,168 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
   return false;
 }
 
+/// MAD/MAC produces the separately rounded F32 multiply and add, with
+/// denormal inputs and outputs flushed. The DX9 form makes 0*x positive zero.
+template <bool Legacy, typename T> inline T separately_rounded_mad_f32(T a, T b, T c) {
+  a = denormal::flush_value(a);
+  b = denormal::flush_value(b);
+  c = denormal::flush_value(c);
+  if constexpr (Legacy) {
+    if constexpr (std::is_same_v<T, float>) {
+      if (a == 0.0f || b == 0.0f) {
+        a = 0.0f;
+        b = 1.0f;
+      }
+    } else {
+      const auto zero = (a == T(0.0f)) || (b == T(0.0f));
+      util::stdx::where(zero, a) = T(0.0f);
+      util::stdx::where(zero, b) = T(1.0f);
+    }
+  }
+  if constexpr (std::is_same_v<T, float>) {
+    // Keep the rounded product even when the host permits FP contraction.
+    volatile float product = a * b;
+    return denormal::flush_value(denormal::flush_value(float(product)) + c);
+  } else {
+    return denormal::flush_value(denormal::flush_value(a * b) + c);
+  }
+}
+
+template <bool Legacy, typename Inst> inline void execute_cdna2_mad_f32(Inst &inst, Wavefront &wf) {
+  auto evaluate = [](auto a, auto b, auto c) {
+    return separately_rounded_mad_f32<Legacy>(a, b, c);
+  };
+  if constexpr (requires { inst.src2; }) {
+    if (try_execute_ternary_vop3_fp_simd<true>(inst, wf, evaluate))
+      return;
+  } else if (try_execute_fmac_vop3_fp_simd<true>(inst, wf, evaluate)) {
+    return;
+  }
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
+  auto output = output_modifier_policy<fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
+  RegisterAccess regs(wf);
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const auto read = [&](const auto &operand, unsigned index) {
+      const float raw = std::bit_cast<float>(regs.read_lane(operand, lane));
+      return source_modifier::apply_to_float(raw, index, inst.inst_.abs, inst.inst_.neg);
+    };
+    const float addend = [&] {
+      if constexpr (requires { inst.src2; })
+        return read(inst.src2, 2);
+      else
+        return std::bit_cast<float>(regs.read_lane(inst.vdst, lane));
+    }();
+    const float result = evaluate(read(inst.src0, 0), read(inst.src1, 1), addend);
+    regs.write_lane(
+        inst.vdst, lane,
+        output_modifier::apply<fp_format::F32>(std::bit_cast<uint32_t>(result), output));
+  }
+}
+
+/// Evaluate two separately rounded half operations. A signed zero addend
+/// preserves the sign of the product in the multiply step.
+template <typename T> inline T cdna2_mad_f16(T a, T b, T c, const Wavefront &wf) {
+  const auto rounded_fma = [&](T x, T y, T z) -> T {
+    const auto round = wf.fp_round_mode_f16_f64();
+    const bool quiet = fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode());
+    if constexpr (std::is_same_v<T, uint32_t>)
+      return fp_mode::fma_f16(x, y, z, false, false, false, false, false, false, round, 0, 0, false,
+                              wf.fp16_ovfl(), false, quiet);
+    else
+      return fma_f16_mode_simd(x, y, z, false, false, false, false, false, false, round, 0, 0,
+                               false, wf.fp16_ovfl(), false, quiet);
+  };
+  const T product = rounded_fma(a, b, (a ^ b) & T(0x8000u));
+  return rounded_fma(product, T(0x3c00u), c);
+}
+
+template <typename Inst> inline void execute_cdna2_mad_f16(Inst &inst, Wavefront &wf) {
+  constexpr bool has_src2 = requires { inst.src2; };
+  const uint32_t opsel = vop3_opsel(inst.inst_);
+  auto output = output_modifier_policy<fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
+  const auto evaluate = [&](auto a, auto b, auto c) {
+    a = source_modifier::apply<fp_format::F16>(a, 0, inst.inst_.abs, inst.inst_.neg);
+    b = source_modifier::apply<fp_format::F16>(b, 1, inst.inst_.abs, inst.inst_.neg);
+    if constexpr (has_src2)
+      c = source_modifier::apply<fp_format::F16>(c, 2, inst.inst_.abs, inst.inst_.neg);
+    return output_modifier::apply<fp_format::F16>(cdna2_mad_f16(a, b, c, wf), output);
+  };
+  if constexpr (has_src2) {
+    if (try_execute_ternary_vop3_true16_simd<uint32_t>(inst, wf, evaluate))
+      return;
+  }
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const auto a = read_vop3_true16_src(inst.src0, wf, lane, opsel, 0);
+    const auto b = read_vop3_true16_src(inst.src1, wf, lane, opsel, 1);
+    const auto c = [&] {
+      if constexpr (has_src2)
+        return read_vop3_true16_src(inst.src2, wf, lane, opsel, 2);
+      else
+        return (RegisterAccess(wf).read_lane(inst.vdst, lane) >> ((opsel & 8u) ? 16u : 0u)) &
+               0xffffu;
+    }();
+    write_vop3_true16_dst(inst.vdst, wf, lane, opsel, evaluate(a, b, c), true);
+  }
+}
+
+enum class MadVop2 { Accumulate, MultiplyLiteral, AddLiteral };
+
+/// E32 MAC reads the old destination. MADMK and MADAK instead use the literal
+/// in its encoded multiplier or addend position.
+template <MadVop2 Form, bool Half, typename Inst>
+inline void execute_cdna2_mad_vop2(Inst &inst, Wavefront &wf) {
+  using T = std::conditional_t<Half, uint32_t, float>;
+  constexpr bool accumulate = Form == MadVop2::Accumulate;
+  RegisterAccess regs(wf);
+  const T k = [&] {
+    if constexpr (!accumulate)
+      return std::bit_cast<T>(regs.read_scalar(inst.simm32));
+    return T{};
+  }();
+  const auto mad = [&](auto a, auto b, auto c) {
+    if constexpr (Half)
+      return cdna2_mad_f16(a, b, c, wf);
+    else
+      return separately_rounded_mad_f32<false>(a, b, c);
+  };
+  const auto evaluate = [&](auto a, auto b, auto d, auto literal) {
+    if constexpr (Form == MadVop2::MultiplyLiteral)
+      return mad(a, literal, b);
+    else if constexpr (Form == MadVop2::AddLiteral)
+      return mad(a, b, literal);
+    else
+      return mad(a, b, d);
+  };
+  const auto round = Half ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32();
+  if constexpr (accumulate) {
+    if (try_execute_ternary_vop2_acc_simd<T, !Half>(inst, wf, util::native<T>(k), evaluate, round))
+      return;
+  } else if (try_execute_ternary_vop2_simd<T, !Half>(inst, wf, util::native<T>(k), evaluate,
+                                                     round)) {
+    return;
+  }
+  fp_mode::ScopedEnvironment environment(round);
+  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const T a = std::bit_cast<T>(regs.read_lane(inst.src0, lane));
+    const T b = std::bit_cast<T>(regs.read_lane(inst.vsrc1, lane));
+    T dst{};
+    if constexpr (accumulate)
+      dst = std::bit_cast<T>(regs.read_lane(inst.vdst, lane));
+    constexpr auto format = Half ? sdwa::ResultFormat::F16 : sdwa::ResultFormat::F32;
+    sdwa::write_lane<format>(inst, wf, inst.vdst, lane,
+                             std::bit_cast<uint32_t>(evaluate(a, b, dst, k)));
+  }
+}
+
 /// @brief MODE-aware VOP3 F16 destination-accumulate FMA SIMD fast path.
 template <bool True16, typename Inst>
   requires(util::has_stdx_simd)
@@ -4034,7 +4198,7 @@ inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<f
 /// branches live outside the chunk loop and feed into the same `a*b+c`
 /// inner kernel regardless of fetch shape, keeping the SIMD path branch-
 /// predictable on every chunk.
-template <FmaMixDst DstMode, bool Fused = false, typename Inst>
+template <FmaMixDst DstMode, bool Fused = false, bool NarrowF32 = false, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &inst, Wavefront &wf) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
@@ -4093,7 +4257,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
     F c = load_src(src2, base, inst.inst_.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (abs >> 2) & 1u,
                    (neg >> 2) & 1u);
     F r;
-    // Fused results reach here only from the F32 branch, inside its environment.
+    // A fused F32 intermediate is evaluated under the guest F32 environment.
     if constexpr (Fused)
       r = fma_f32_simd_unscoped(a, b, c, wf);
     else
@@ -4113,13 +4277,17 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
         return true;
     }
   } else {
+    // GFX908 narrows the rounded F32 FMA result to F16.
+    std::optional<fp_mode::ScopedEnvironment> environment;
+    if constexpr (NarrowF32)
+      environment.emplace(wf.fp_round_mode_f32());
     auto dst = regs.write_operand(inst.vdst, exec, DstMode == FmaMixDst::F16_LO ? 0x3 : 0xc);
     for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
       const uint64_t chunk = (exec >> base) & chunk_full;
       if (chunk == 0)
         continue;
       U h;
-      if constexpr (Fused) {
+      if constexpr (Fused && !NarrowF32) {
         const F a =
             load_src(src0, base, inst.inst_.src0, op_sel_hi & 1u, op_sel & 1u, abs & 1u, neg & 1u);
         const F b =
@@ -4140,7 +4308,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
   return true;
 }
 
-template <FmaMixDst DstMode, bool Fused = false, typename Inst>
+template <FmaMixDst DstMode, bool Fused = false, bool NarrowF32 = false, typename Inst>
 [[nodiscard]] bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
   return false;
 }
