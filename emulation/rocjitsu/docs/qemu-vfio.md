@@ -11,6 +11,13 @@ The repository provides the VFIO-user server and
 initramfs, AMDGPU package, ROCm runtime, or rocBLAS payload. Those inputs must
 come from one mutually compatible public release or nightly. Record their
 versions and SHA-256 digests when publishing a result.
+The [pod guest payload recipe](../tests/guest/README.md) pins the external
+QEMU, libvfio-user, driver, kernel, and ROCm inputs used by the same-host
+peer/RCCL gates. It also distinguishes the zero-patch final driver module
+from earlier diagnostic patch runs.
+The [four-node VFIO pod controller](../scripts/run-rccl-pod-vfio.py) uses
+`configs/gfx1250_mi455x_kmd_4node_2gpu_if.json` to launch the mixed local
+peer and inter-node NET workload described by that recipe.
 
 ## Host prerequisites
 

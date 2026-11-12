@@ -351,6 +351,21 @@ ComputeUnitCore::~ComputeUnitCore() {
       gws_device_->notify_parked_wave_gone(*wave);
 }
 
+void ComputeUnitCore::report_unresolved_apertures(uint32_t identity, ProcessIdentityKind kind) {
+  bool guest_banks_programmed = false;
+  {
+    std::lock_guard lock(vmid_aperture_mutex_);
+    guest_banks_programmed = std::any_of(vmid_apertures_.begin(), vmid_apertures_.end(),
+                                         [](const auto &bank) { return bank.has_value(); });
+  }
+  if (!guest_banks_programmed ||
+      unresolved_aperture_reported_.exchange(true, std::memory_order_relaxed))
+    return;
+  util::Logger::warn(
+      std::format("{}: no unambiguous guest shader aperture for {} {} (retaining CU defaults)",
+                  full_path(), kind == ProcessIdentityKind::Vmid ? "VMID" : "PASID", identity));
+}
+
 template <GpuIsa Isa>
 static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
                                                              const ComputeUnitCore::Config &config,
@@ -2473,6 +2488,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return IssueOutcome::NotIssued;
     }
+    if (!using_retained_vm_access && !active->same_execution_root(*vm_access)) {
+      drain_async_window();
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked);
+      return IssueOutcome::NotIssued;
+    }
   }
   const bool vm_address_space = vm_access != nullptr;
   const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
@@ -2624,6 +2644,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
 
+  // A decoded instruction may publish memory through a cache, a translated
+  // access, or an async pipeline. NOP and ENDPGM create no new memory effect;
+  // all other instructions conservatively block completion rebinding.
+  if (active->needs_execution_effect_mark() && inst->mnemonic() != "s_nop" &&
+      inst->mnemonic() != "s_endpgm")
+    active->note_potential_execution_effect();
   auto *wait_state =
       config_.memory_wait_checks_enabled() ? active->memory_wait_scoreboard() : nullptr;
   if (wait_state) {
