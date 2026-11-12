@@ -7,8 +7,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201), including Radeon RX 9070. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical VRAM bandwidth are unavailable.
-
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 
 * Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
@@ -26,6 +24,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
+
+* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201), including Radeon RX 9070. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical VRAM bandwidth are unavailable.
 
 ### Changed
 
