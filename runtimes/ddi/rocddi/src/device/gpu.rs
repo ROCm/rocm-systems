@@ -12,7 +12,7 @@
 use crate::device::Device;
 use crate::driver::GpuDriverRef;
 use crate::memory::Allocation;
-use crate::topology::{CacheInfo, CacheKind, GpuInfo};
+use crate::topology::{CacheAssociations, CacheInfo, CacheKind, GpuInfo};
 use crate::{Error, ErrorKind};
 
 mod copy;
@@ -42,7 +42,10 @@ pub(crate) struct GpuResources {
 #[doc(hidden)]
 #[must_use]
 pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
-    cache.compute_unit_cache && matches!(cache.kind, CacheKind::Data | CacheKind::Other)
+    cache
+        .associations
+        .contains(CacheAssociations::GPU_COMPUTE_UNIT)
+        && matches!(cache.kind, CacheKind::Data | CacheKind::Other)
 }
 
 /// A borrowed GPU capability view of an activated [`Device`].

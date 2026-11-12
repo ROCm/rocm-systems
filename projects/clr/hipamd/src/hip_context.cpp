@@ -166,6 +166,7 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
 
   // Increment ref count for device primary context
   g_devices[device]->retain();
+  g_devices[device]->IncrementCtxCreateCount();
   g_devices[device]->setFlags(flags);
   tls.ctxt_stack_.push(g_devices[device]);
 
@@ -227,17 +228,25 @@ hipError_t hipCtxDestroy(hipCtx_t ctx) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  bool found = false;
+  for (unsigned int i = 0; i < g_devices.size(); i++) {
+    if (g_devices[i] == dev) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    HIP_RETURN(hipErrorInvalidContext);
+  }
+
+  if (!dev->DecrementCtxCreateCount()) {
+    HIP_RETURN(hipErrorInvalidContext);
+  }
+  dev->release();
+
   // Need to remove the ctx of calling thread if its the top one
   if (!tls.ctxt_stack_.empty() && tls.ctxt_stack_.top() == dev) {
     tls.ctxt_stack_.pop();
-  }
-
-  // Remove context from global context list
-  for (unsigned int i = 0; i < g_devices.size(); i++) {
-    if (g_devices[i] == dev) {
-      // Decrement ref count for device primary context
-      dev->release();
-    }
   }
 
   HIP_RETURN(hipSuccess);

@@ -91,9 +91,6 @@ constexpr int RJ_ARITH_ERROR_INVALID_FLAGS = 2;
 // Required faithful FP status reporting is unavailable.
 constexpr int RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS = 3;
 
-// A non-FP architectural side effect requested by a register operation is unavailable.
-constexpr int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
-
 // Names retain ISA mnemonics. Wave and architecture suffixes follow corresponding
 // Clang AMDGPU builtins where available, with wave width before architecture.
 // Vector APIs always identify wave width; scalar APIs omit it. Shared instruction
@@ -217,6 +214,12 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 constexpr uint32_t RJ_ARITH_MIX_F16_A = 1U << 13;
 constexpr uint32_t RJ_ARITH_MIX_F16_B = 1U << 14;
 constexpr uint32_t RJ_ARITH_MIX_F16_C = 1U << 15;
+
+// Mixed BF16/FP32 FMA uses the same format-selector positions as mixed FP16.
+// These names apply to BF16 entry points; they select BF16 rather than FP32.
+constexpr uint32_t RJ_ARITH_MIX_BF16_A = 1U << 13;
+constexpr uint32_t RJ_ARITH_MIX_BF16_B = 1U << 14;
+constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
 
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.

@@ -74,9 +74,17 @@ struct RaceWavefrontState : WavefrontState {
   /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
+  struct LdsOperandRead {
+    uint32_t address;
+    uint32_t bytes;
+    uint32_t lane;
+  };
+  std::optional<LdsOperandRead> lds_operand_read;
 };
 
-class RaceDetectorPlugin : public ExecutionPlugin {
+class RaceDetectorPlugin : public ExecutionPlugin,
+                           public AmdgpuTrapEntryObserver,
+                           public AmdgpuImplicitMemoryWaitObserver {
 public:
   /// @param config_json Plugin configuration object as a JSON string (unused;
   ///        this plugin takes no configuration). May be null.
@@ -106,6 +114,10 @@ public:
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
 
+  bool observes_lds_direct_reads() const override { return true; }
+  void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                             uint32_t lane) override;
+
   /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
   void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
                                const amdgpu::Wavefront &wf) override;
@@ -127,7 +139,11 @@ public:
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
+
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override;
 
   std::string getSummary() const;
 

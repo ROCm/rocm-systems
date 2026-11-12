@@ -198,6 +198,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= XCNT_DRAIN;
+  flags_ |= SOFTWARE_TRAP;
   flags_ |= WRITES_PC;
 }
 

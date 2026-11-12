@@ -12,9 +12,12 @@
 // there is a duplicate symbol at link time rather than an unused one.
 
 #include <cstdlib>
+#include <functional>
 
 #include "fail_loud.h"
+#include "signature-drift.h"
 #include "utils.h"
+#include "utils_fakes.h"
 
 // Per-thread wait signal referenced by the inline MPSC-callback drain helpers
 // in utils.h.
@@ -47,11 +50,17 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id)
     return ncclSuccess;
 }
 
-ncclResult_t getBusId(int /*cudaDev*/, int64_t* busId)
+static ncclResult_t DefaultGetBusId(int /*cudaDev*/, int64_t* busId)
 {
     if (busId) *busId = 0;
     return ncclSuccess;
 }
+std::function<ncclResult_t(int, int64_t*)> g_getBusId = DefaultGetBusId;
+ASSERT_HOOK_MATCHES_PROD(g_getBusId, getBusId);
+
+ncclResult_t getBusId(int cudaDev, int64_t* busId) { return g_getBusId(cudaDev, busId); }
+
+void ResetUtilsFakes() { g_getBusId = DefaultGetBusId; }
 
 // ncclMemoryStackConstruct is inline and leaves bumper == end == 0, so the first
 // ncclMemoryStackAlloc on a constructed stack always lands here, and callers
