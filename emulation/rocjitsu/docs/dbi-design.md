@@ -116,7 +116,7 @@ the instruction; addressing and storage must be valid at the observation point.
 |---|---|
 | Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
 | Allocated storage | Required VGPRs and scratch must remain available. Unproven `s_alloc_vgpr` or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet. |
-| Register hazards | MFMA/SMFMAC anchors are rejected. On CDNA5, callable `AfterInst` is conservatively rejected throughout code objects containing matrix or transcendental producers until the required VALU spacing can be proven. |
+| Register hazards | Callable `AfterInst` is conservatively rejected throughout code objects containing MFMA/SMFMAC, or CDNA5 matrix or transcendental producers, until the required register dependency spacing can be proven. |
 
 Inherited GPR indexing, VSKIP, and storage availability also constrain callable
 `BeforeInst` and `KernelExit` observations on targets that support those states.

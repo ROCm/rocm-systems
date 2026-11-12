@@ -60,6 +60,13 @@ rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arc
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
+bool may_require_cdna5_valu_spacing(const Instruction &inst) {
+  // MATRIX_REGISTER_ACCESSES describes lane semantics, not every matrix family.
+  // Scaled WMMA pairs need the same admission boundary despite lacking the flag.
+  return (inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental() ||
+         inst.mnemonic().starts_with("v_wmma_") || inst.mnemonic().starts_with("v_swmmac_");
+}
+
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
 bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
@@ -242,20 +249,23 @@ bool static_pc_returns_to_entry(const BasicBlock &block,
                                       tail[0]->src_loc() + tail[0]->size(), pair->index, kernels);
 }
 
-// Hidden but bounded return edges cannot invalidate storage if no instruction
-// anywhere in the closed text changes it. Unknown/external transfers still fail.
-bool storage_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
-                                         std::span<const KernelDescriptorInfo> kernels,
-                                         std::span<const uint8_t> text, rj_code_arch_t arch) {
+// Hidden but bounded return edges preserve initial state if no instruction in
+// the closed text changes it. Unknown/external transfers still fail.
+bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
+                                                std::span<const KernelDescriptorInfo> kernels,
+                                                std::span<const uint8_t> text, rj_code_arch_t arch,
+                                                CallableState state) {
   std::unordered_set<const Instruction *> known_returns;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic() == "s_alloc_vgpr" || deallocates_vgprs(inst, arch) ||
-          inst.mnemonic().starts_with("s_rfe"))
+      if (inst.mnemonic().starts_with("s_rfe"))
         return false;
-      if ((inst.flags() & INDIRECT_CALL) &&
-          (&inst != block->terminator() || block->call_edges().empty()))
+      if (inst.flags() & INDIRECT_CALL) {
+        if (&inst != block->terminator() || block->call_edges().empty())
+          return false;
+      } else if (callable_state_write(inst, text, arch, state) != StateWrite::Unchanged) {
         return false;
+      }
     }
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
       if (edge.callee == nullptr ||
@@ -263,7 +273,7 @@ bool storage_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBl
                               [&](const KernelDescriptorInfo &kernel) {
                                 return kernel.entry_text_offset == edge.callee->start_offset();
                               }) ||
-          (!callee_preserves_state(edge, text, arch, CallableState::UnavailableStorage) &&
+          (!callee_preserves_state(edge, text, arch, state) &&
            !callee_returns_to_entry(edge, kernels)))
         return false;
       known_returns.insert(edge.callee->terminator());
@@ -653,9 +663,9 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   }
   // CDNA5 ISA 5.7.2 / 7.12.1 require independent VALUs for co-execution hazards;
   // scalar waits do not provide that spacing before argument copies or spills.
-  // Reject whole families conservatively; these flags are not latency classes.
+  // Reject whole families conservatively, without inferring a latency class.
   if (pt.kind == InstrumentationKind::AfterInst && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      ((anchor.flags() & MATRIX_REGISTER_ACCESSES) != 0 || anchor.is_transcendental())) {
+      may_require_cdna5_valu_spacing(anchor)) {
     fail("AfterInst requires proven VALU spacing for CDNA5 matrix or transcendental anchors");
     return std::nullopt;
   }
@@ -1186,9 +1196,9 @@ public:
         work.push_back(block.get());
       for (const Instruction &inst : block->instructions()) {
         states_.try_emplace(&inst);
+        has_mfma_producer_ |= inst.is_mfma();
         has_cdna5_producer_ |=
-            arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-            ((inst.flags() & MATRIX_REGISTER_ACCESSES) != 0 || inst.is_transcendental());
+            arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(inst);
       }
     }
     while (!work.empty()) {
@@ -1208,6 +1218,7 @@ public:
     }
   }
 
+  [[nodiscard]] bool has_mfma_producer() const { return has_mfma_producer_; }
   [[nodiscard]] bool has_cdna5_producer() const { return has_cdna5_producer_; }
 
   [[nodiscard]] bool may_be_unsafe(const Instruction &anchor, bool after,
@@ -1229,6 +1240,7 @@ private:
     uint8_t outgoing = 0;
   };
   std::unordered_map<const Instruction *, PointState> states_;
+  bool has_mfma_producer_ = false;
   bool has_cdna5_producer_ = false;
 
   static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
@@ -1253,19 +1265,22 @@ private:
             known_returns.insert(edge.callee->terminator());
       }
     }
-    // MODE completeness constrains AfterInst; storage completeness constrains
-    // every ordinary observation. Preserve the closed-text storage exception.
+    // Unknown transfers can introduce incoming MODE/storage state at every
+    // ordinary observation. Bounded closed text can preserve its initial state.
     const bool storage = state == CallableState::UnavailableStorage;
     bool incomplete = false;
+    bool missing_fallthrough = false;
     for (const BasicBlock *block : reachable) {
       const BasicBlock::SuccessorIssue issue = block->successor_issue();
-      if (storage && issue == BasicBlock::SuccessorIssue::MissingFallthrough)
+      if (issue == BasicBlock::SuccessorIssue::MissingFallthrough) {
+        missing_fallthrough = true;
         continue;
+      }
       incomplete |=
           issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
     }
-    const bool closed_storage =
-        storage && incomplete && storage_is_preserved_in_closed_text(blocks, kernels, text, arch);
+    const bool closed_state = incomplete && callable_state_is_preserved_in_closed_text(
+                                                blocks, kernels, text, arch, state);
 
     // Each bit denotes a possible incoming state; zero has no proven source.
     // Constant writes seed the worklist even inside cycles. Ordinary edges join
@@ -1316,8 +1331,10 @@ private:
       const auto unsafe = [&](uint8_t value, bool after) {
         if (!is_reachable)
           return true;
-        if (incomplete && (storage || after))
-          return !closed_storage;
+        // Falling off the original text cannot enter an earlier observation.
+        // Retain the existing stricter AfterInst MODE completeness boundary.
+        if (incomplete || (!storage && after && missing_fallthrough))
+          return !closed_state || (!storage && after);
         return value == 0 || (value & kUnsafe) != 0;
       };
       for (const Instruction &inst : block->instructions()) {
@@ -1709,6 +1726,12 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including
         // unreachable producers and helper bodies rather than guessing ownership.
+        if (pt.kind == InstrumentationKind::AfterInst &&
+            callable_state_analysis_->has_mfma_producer()) {
+          out.errors.emplace_back("AfterInst requires proven MFMA register spacing in a code "
+                                  "object containing MFMA or SMFMAC producers");
+          continue;
+        }
         if (pt.kind == InstrumentationKind::AfterInst &&
             callable_state_analysis_->has_cdna5_producer()) {
           out.errors.emplace_back("AfterInst requires proven VALU spacing in a CDNA5 code object "
