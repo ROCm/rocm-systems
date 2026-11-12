@@ -60,20 +60,19 @@ class TestCliEmptySectionNA(unittest.TestCase):
     # happily when the line lands in column 0.
     def test_empty_nested_dict_renders_na(self):
         # The AI-NIC case: a NIC whose RDMA driver is absent reports no devices.
-        output = self._render({"ai_nic": 0, "rdma_devices": {}})
-        self.assertEqual(output, "AI_NIC: 0\n    RDMA_DEVICES: N/A\n")
+        output = self._render({"nic": 0, "rdma_devices": {}})
+        self.assertEqual(output, "NIC: 0\n    RDMA_DEVICES: N/A\n")
 
     def test_populated_nested_dict_still_nests(self):
-        output = self._render({"ai_nic": 0, "rdma_devices": {"rdma_device_0": {"name": "ionic_0"}}})
+        output = self._render({"nic": 0, "rdma_devices": {"rdma_device_0": {"name": "ionic_0"}}})
         self.assertEqual(
-            output,
-            "AI_NIC: 0\n    RDMA_DEVICES:\n        RDMA_DEVICE_0:\n            NAME: ionic_0\n",
+            output, "NIC: 0\n    RDMA_DEVICES:\n        RDMA_DEVICE_0:\n            NAME: ionic_0\n"
         )
 
     def test_empty_dict_nested_inside_a_populated_section(self):
-        output = self._render({"ai_nic": 0, "asic": {"vendor_name": "AMD", "ports": {}}})
+        output = self._render({"nic": 0, "asic": {"vendor_name": "AMD", "ports": {}}})
         self.assertEqual(
-            output, "AI_NIC: 0\n    ASIC:\n        VENDOR_NAME: AMD\n        PORTS: N/A\n"
+            output, "NIC: 0\n    ASIC:\n        VENDOR_NAME: AMD\n        PORTS: N/A\n"
         )
 
     def test_empty_list_still_renders_na(self):
@@ -91,3 +90,9 @@ class TestCliEmptySectionNA(unittest.TestCase):
 
     def test_empty_payload_renders_nothing(self):
         self.assertEqual(self._render({}), "")
+
+    def test_nic_store_keys_the_device_as_nic_in_json(self):
+        self.logger.format = self.logger.LoggerFormat.json.value
+        self.logger.output = {}
+        self.logger._store_ainic_output_amdsmi(nic_id=3, argument="values", data={"type": "AINIC"})
+        self.assertEqual(self.logger.output, {"nic": 3, "type": "AINIC"})

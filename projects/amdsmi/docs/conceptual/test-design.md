@@ -74,6 +74,15 @@ tests/amd_smi_test/
 │   │       ├── cper_fatal.cper
 │   │       ├── cper_mixed.cper
 │   │       └── cper_uncorrected.cper
+│   ├── nic/
+│   │   ├── nic_unit_fixture.h       # The one NicUnit fixture; swaps the discovery getters for tests
+│   │   ├── nic_transport_test.cc    # Permanent-address parser, and SmiNicPort over an injected fake transport
+│   │   ├── nic_type_test.cc         # NIC type enum values and the amdsmi_nic_asic_info_t layout pins
+│   │   ├── rdma_status_test.cc      # Which getter statuses drop a NIC and which are tolerated
+│   │   ├── nic_socket_test.cc       # A socket frees the NIC processors it holds
+│   │   ├── nic_rdma_resolver_test.cc # Flat RDMA port index to (port, IB device, RDMA port)
+│   │   ├── nic_stats_copy_test.cc   # Statistics array copy, two-call protocol and scope mapping
+│   │   └── nic_driver_stats_test.cc # ethtool -S read: retry on a changing count, headroom, errno
 │   └── system/
 │       └── lib_loader_test.cc       # Library loader soname fallback (no hardware; uses libm)
 │
@@ -138,10 +147,16 @@ tests/amd_smi_test/
     │   └── power/
     │       └── placeholder_test.cc  # Stub — CPU power C++ tests added here
     ├── nic/
+    │   ├── nic_handles.h            # Shared helper: the NIC handles of every socket
     │   ├── discovery/
     │   │   └── placeholder_test.cc  # Stub — NIC/switch discovery C++ tests added here
-    │   └── identity/
-    │       └── placeholder_test.cc  # Stub — NIC/switch identity C++ tests added here
+    │   ├── identity/
+    │   │   ├── nic_type_read{.h,_test.cc}  # NIC type through the getter and the asic info
+    │   │   └── placeholder_test.cc  # Stub — NIC/switch identity C++ tests added here
+    │   ├── telemetry/
+    │   │   └── telemetry_read{.h,_test.cc} # Telemetry and firmware info; skips firmware when unsupported
+    │   └── transport/
+    │       └── nic_transport_read_test.cc  # Transport reads on a live port; GTEST_SKIP without a NIC
     └── ifoe/
         ├── fabric/
         │   └── fabric_read{.h,_test.cc}   # IFoE fabric link reads
@@ -165,7 +180,7 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 | Component | Suggested feature subdirectories |
 | :--- | :--- |
 | `cpu/` | `clock/`, `dimm/`, `energy/`, `hsmp/`, `identity/`, `power/`, `thermal/` |
-| `nic/` | `discovery/`, `identity/` |
+| `nic/` | `discovery/`, `identity/`, `telemetry/`, `transport/` |
 | `ifoe/` | `fabric/`, `identity/` |
 
 ### Naming conventions
@@ -193,7 +208,7 @@ names lets a feature line up across both suites. Adapt them as the APIs warrant.
 `System` (see [Component taxonomy](#component-taxonomy)). Functional suites always carry a `ReadOnly`
 or `ReadWrite` operation suffix; unit suites omit it. Only combinations that have tests are
 registered — currently `GpuFunctionalReadOnly`, `GpuFunctionalReadWrite`, `SystemFunctionalReadOnly`,
-`IfoeFunctionalReadOnly`, `GpuUnit`, `NicUnit`, and `SystemUnit`. This keeps component, type, and operation
+`NicFunctionalReadOnly`, `IfoeFunctionalReadOnly`, `GpuUnit`, `NicUnit`, and `SystemUnit`. This keeps component, type, and operation
 independently filterable via `--gtest_filter` wildcards.
 
 ### Mocked unit tests and fixtures
@@ -234,6 +249,28 @@ replaying committed byte blobs instead of faking the interface that produced the
 
 Fixtures should be static, sanitized blobs so the tests stay deterministic and **run on any
 machine regardless of GPU** (see `mock_cper/README.md` for provenance).
+
+### Standalone NIC suites (`tests/nic/`)
+
+The NIC library (`amdsminic`) also has C++ suites that are not part of `amdsmitst`. Each
+`test_nic_*_suite.cpp` is its own executable that reports through the shared `nic_check.h` harness,
+links `amdsminic` directly, and needs no hardware or root. They cover what a GTest fixture would only wrap: sysfs
+and VPD parsing against temporary trees, the discovery plugins, the statistics tables, and the
+debug-log masking.
+
+| Suite | Covers |
+| :--- | :--- |
+| `test_nic_telemetry_suite` | temperature, health and port split decoding |
+| `test_nic_discovery_suite` | vendor plugins, driver binding, VPD identity and its cache |
+| `test_nic_stats_suite` | per-vendor counter tiers, FEC merge, sysfs error handling |
+| `test_nic_log_suite` | debug-log seam, value masking, sysfs reads including large counters |
+| `test_nic_vpd_suite` | PCI VPD tag walk, truncation safety, ASCII-only output |
+| `test_nic_check_suite` | the `nic_check.h` harness itself: counting, PASS and FAIL lines, exit code |
+
+CMake registers all six with `add_test()` (run `ctest -R nic`) and installs them beside
+`amdsmitst`; CI does not run them yet. `tests/nic/build_tests.sh` is a separate manual build,
+without CMake, against an existing `libamdsminic.a`. It builds all six suites plus the tools that
+need a live interface (`test_nic_transport_suite`, `benchmark_nic_transport`, `probe_devlink_*`).
 
 ### CMake integration
 
@@ -372,7 +409,8 @@ tests/python/
 │   │   ├── test_apu_metrics.py            # APU metrics interface helpers (unit conversions, N/A parity)
 │   │   └── test_cli_metric_partition.py   # amd-smi metric --partition clock assembly (mock-based, stubs amdsmi)
 │   └── system/
-│       └── test_bdf.py                # BDF string parsing and formatting
+│       ├── test_bdf.py                # BDF string parsing and formatting
+│       └── test_*nic*.py              # NIC CLI and interface behavior against a stubbed amdsmi (list, metric, init, selection, type, statistics)
 │
 ├── functional/                        # Requires live hardware
 │   ├── __init__.py
@@ -401,12 +439,8 @@ tests/python/
 │   │   ├── test_power.py              # socket_power, power_cap get/set, boostlimit set
 │   │   ├── test_thermal.py            # socket_temperature, prochot_status
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
-│   ├── nic/
-│   │   ├── test_discovery.py          # NIC and switch BDF/device discovery (live enumeration)
-│   │   └── test_identity.py           # NIC and switch BDF and device ID reads
 │   ├── ifoe/
-│   │   ├── test_discovery.py          # IFoE endpoint enumeration
-│   │   └── test_identity.py           # IFoE endpoint BDF and device ID reads
+│   │   └── test_fabric_lazy_init.py   # UALoE fabric query resolves without hanging (needs the package's __init__.py to be discovered)
 │   └── system/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
