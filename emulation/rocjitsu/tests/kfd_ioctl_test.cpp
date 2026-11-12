@@ -13509,6 +13509,7 @@ TEST_F(KfdIoctlTest, DriverScratchGrantRevokesBeforeFreeUnmapsBacking) {
   EXPECT_EQ(free_result, 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   using rocjitsu::amdgpu::VmAccessOutcome;
   constexpr size_t kPage = 4096;
@@ -13615,6 +13616,7 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   std::byte value{};
   EXPECT_EQ(access->read(userptr.va_addr, std::span(&value, 1)), VmAccessOutcome::Faulted);
 }
+#endif
 
 TEST_F(KfdIoctlTest, NewSvmHostGrantClaimsOnlyItsFreedUserptrSpan) {
   using rocjitsu::amdgpu::VmAccessOutcome;
