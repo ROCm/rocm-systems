@@ -154,7 +154,7 @@ class MemChart:
         """Text width a block wants, before columns are evened out."""
         widths = [len(block.title) + 2, _MIN_TEXT_WIDTH]
         widths += [
-            len(item.title) + 1 + _VALUE_RESERVE[self._unit(item.metric).kind]
+            len(item.title) + 1 + _VALUE_RESERVE[self._unit(item.metric_id).kind]
             for item in block.items
         ]
         widths += [
@@ -175,9 +175,9 @@ class MemChart:
         for block in self.layout.top_level_blocks():
             width = panel_width if block in self.panels else self._needed_width(block)
             self._assign_width(block, width, widths)
-        for block in self.layout.blocks():
-            for sub in (*block.above, *block.below):
-                widths[sub.id] = max(len(sub.title), _MIN_TEXT_WIDTH)
+        for block in (self.layout.above, self.layout.below):
+            if block is not None:
+                widths[block.id] = max(len(block.title), _MIN_TEXT_WIDTH)
         return widths
 
     def _fit_scope_labels(self) -> None:
@@ -217,14 +217,16 @@ class MemChart:
         for item in block.items:
             if lines and not compact:
                 lines.append("")
-            shown = self._shown(item.metric)
+            shown = self._shown(item.metric_id)
             color = COLORS["util"] if compact else COLORS[item.category]
             if len(item.title) + 1 + len(shown) > width:
                 lines += [item.title, _colored(shown, color)]
             else:
                 lines.append(f"{item.title} {_colored(shown, color)}")
             if item.bar:
-                lines.append(f"[dim]{progress_bar(self.values.get(item.metric))}[/dim]")
+                lines.append(
+                    f"[dim]{progress_bar(self.values.get(item.metric_id))}[/dim]"
+                )
         for row in self.stalls[block.id]:
             if lines:
                 lines.append("")
@@ -251,7 +253,7 @@ class MemChart:
         segments: dict[Optional[str], list[LayoutArrow]] = defaultdict(list)
         for arrow in self.layout.arrows:
             source, target = self.blocks[arrow.source], self.blocks[arrow.target]
-            if target.position == "grid" and source.column == column:
+            if target.row == 0 and source.column == column:
                 segments[self._anchor(arrow)].append(arrow)
         return segments
 
@@ -275,7 +277,7 @@ class MemChart:
             if arrow.style == "inline":
                 widths.append(label_width + 3 + _VALUE_RESERVE["count"])
             else:
-                widths += [len(arrow.title), len(self._shown(arrow.metric))]
+                widths += [len(arrow.title), len(self._shown(arrow.metric_id))]
             if arrow.group:
                 widths.append(len(arrow.group))
         return max(widths) + 1
@@ -294,7 +296,7 @@ class MemChart:
                 lines.append("")
             group = arrow.group
             if arrow.style == "inline":
-                shown = self._shown(arrow.metric)
+                shown = self._shown(arrow.metric_id)
                 value_width = _VALUE_RESERVE["count"]
                 lines.append(
                     _colored(
@@ -303,7 +305,7 @@ class MemChart:
                 )
             else:
                 lines.append(_colored(arrow.title, color))
-                lines.append(_colored(self._shown(arrow.metric), color))
+                lines.append(_colored(self._shown(arrow.metric_id), color))
             lines.append(_colored(_arrow_line(arrow.direction, width - 1), color))
         return lines
 
@@ -430,26 +432,26 @@ class MemChart:
         """Left edge of a column block."""
         return sum(self._column_widths()[: 2 * self.blocks[block_id].column])
 
-    def _attached(self, host: LayoutBlock, sub: LayoutBlock, above: bool) -> Group:
-        """A block drawn above or below *host*, joined by a connector."""
-        x = self._column_left_edge(host.id)
+    def _attached(self, block: LayoutBlock, above: bool) -> Group:
+        """A block drawn above or below the grid, joined to it by a connector."""
+        x = self._column_left_edge(block.id)
         panel = Table.grid(padding=0)
         panel.add_column(width=x)
         panel.add_column()
         panel.add_row(
             "",
             Panel(
-                f"[dim]{sub.title}[/dim]",
+                f"[dim]{block.title}[/dim]",
                 border_style=COLORS["block"],
-                width=self.text_width[sub.id] + _PANEL_FRAME,
+                width=self.text_width[block.id] + _PANEL_FRAME,
                 height=3,
             ),
         )
-        arrows = [a for a in self.layout.arrows if a.target == sub.id]
+        arrows = [a for a in self.layout.arrows if a.target == block.id]
         label_width = max((len(a.title) for a in arrows), default=0)
         lines = [
             _colored(
-                f"||  {a.title:<{label_width}}  {self._shown(a.metric)}",
+                f"||  {a.title:<{label_width}}  {self._shown(a.metric_id)}",
                 COLORS[a.category],
             )
             for a in arrows
@@ -488,13 +490,12 @@ class MemChart:
             grid.add_column(width=width, no_wrap=True)
         grid.add_row(*(cell for cell, _ in kept))
 
-        hosts = list(self.layout.top_level_blocks())
         sections: list[RenderableType] = [f"[bold]{chart_title}[/bold]"]
-        sections += [self._attached(h, sub, True) for h in hosts for sub in h.above]
+        if self.layout.above is not None:
+            sections.append(self._attached(self.layout.above, above=True))
         sections += [self._scope_bar(sum(widths)), "", grid]
-        for host in hosts:
-            for sub in host.below:
-                sections += ["", self._attached(host, sub, False)]
+        if self.layout.below is not None:
+            sections += ["", self._attached(self.layout.below, above=False)]
 
         categories = {a.category for a in self.layout.arrows}
         categories |= {item.category for b in self.layout.blocks() for item in b.items}

@@ -1459,6 +1459,22 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipLaunchHostFunc_spt_fn = hip::hipLaunchHostFunc_spt;
   ptrDispatchTable->hipGetStreamDeviceId_fn = hip::hipGetStreamDeviceId;
   ptrDispatchTable->hipDrvGraphAddMemsetNode_fn = hip::hipDrvGraphAddMemsetNode;
+  ptrDispatchTable->hipGraphAddExternalSemaphoresWaitNode_fn =
+      hip::hipGraphAddExternalSemaphoresWaitNode;
+  ptrDispatchTable->hipGraphAddExternalSemaphoresSignalNode_fn =
+      hip::hipGraphAddExternalSemaphoresSignalNode;
+  ptrDispatchTable->hipGraphExternalSemaphoresSignalNodeSetParams_fn =
+      hip::hipGraphExternalSemaphoresSignalNodeSetParams;
+  ptrDispatchTable->hipGraphExternalSemaphoresWaitNodeSetParams_fn =
+      hip::hipGraphExternalSemaphoresWaitNodeSetParams;
+  ptrDispatchTable->hipGraphExternalSemaphoresSignalNodeGetParams_fn =
+      hip::hipGraphExternalSemaphoresSignalNodeGetParams;
+  ptrDispatchTable->hipGraphExternalSemaphoresWaitNodeGetParams_fn =
+      hip::hipGraphExternalSemaphoresWaitNodeGetParams;
+  ptrDispatchTable->hipGraphExecExternalSemaphoresSignalNodeSetParams_fn =
+      hip::hipGraphExecExternalSemaphoresSignalNodeSetParams;
+  ptrDispatchTable->hipGraphExecExternalSemaphoresWaitNodeSetParams_fn =
+      hip::hipGraphExecExternalSemaphoresWaitNodeSetParams;
   ptrDispatchTable->hipGetDevicePropertiesR0000_fn = hip::hipGetDevicePropertiesR0000;
   ptrDispatchTable->hipGetDriverEntryPoint_fn = hip::hipGetDriverEntryPoint;
   ptrDispatchTable->hipGetDriverEntryPoint_spt_fn = hip::hipGetDriverEntryPoint_spt;

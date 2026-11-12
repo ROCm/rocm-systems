@@ -59,6 +59,9 @@ public:
 
   std::string name() const override { return "staged_src"; }
   bool simd_capable() const override { return true; }
+  bool execution_backend_available() const override {
+    return !delegate() || delegate()->execution_backend_available();
+  }
 
   void set_lane(uint32_t lane, uint32_t value) { lo_[lane] = value; }
   void set_lane64(uint32_t lane, uint64_t value) {
@@ -495,10 +498,12 @@ inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_
 }
 
 /// Apply the DPP16 extension's floating source modifiers after permutation.
-/// Stage an unpermuted second source only when it has a modifier.
+/// Stage an unpermuted second source only when it has a modifier, observing
+/// only its consumed lanes (within EXEC).
 inline void apply_source_modifiers(const Operand &source, std::optional<StagedOperand> &storage,
                                    amdgpu::Wavefront &wf, uint64_t sign, SourceModifiers modifiers,
-                                   uint32_t source_index) {
+                                   uint32_t source_index, uint64_t source_lanes = ~uint64_t{0}) {
+  source_lanes &= wf.exec();
   const bool absolute = modifiers.absolute & (1u << source_index);
   const bool negate = modifiers.negate & (1u << source_index);
   if (!absolute && !negate)
@@ -507,17 +512,17 @@ inline void apply_source_modifiers(const Operand &source, std::optional<StagedOp
     RegisterAccess regs(wf);
     storage.emplace(source, static_cast<int>(wf.wf_size()));
     if (source.size_bits_ > 32) {
-      const auto values = regs.read_operand64(source, wf.exec());
+      const auto values = regs.read_operand64(source, source_lanes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane64(lane, values.lane(lane));
     } else if (!source.simd_capable()) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        if (wf.exec() & (uint64_t{1} << lane))
+        if (source_lanes & (uint64_t{1} << lane))
           storage->set_lane(lane, regs.read_lane(source, lane));
     } else {
       const uint8_t bytes = source.size_bits_ == 16 ? ExecutionPlugin::kLowHalfByteMask
                                                     : ExecutionPlugin::kFullByteMask;
-      const auto values = regs.read_operand(source, wf.exec(), bytes);
+      const auto values = regs.read_operand(source, source_lanes, bytes);
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
         storage->set_lane(lane, values.lane(lane));
     }

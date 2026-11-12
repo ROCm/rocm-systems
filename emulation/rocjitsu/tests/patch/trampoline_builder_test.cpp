@@ -1436,6 +1436,55 @@ TEST(TrampolineBuilderEmit, Cdna2M0RestoreIsPaddedBeforeTheOriginal) {
   EXPECT_EQ(decode_sop1_sdst(w[index - 2]), maybe_scalar_operand_m0.value());
 }
 
+// The caller knows M0=0, so s2 is the MOVRELS source in its supplied live set.
+// Keep this concrete reader hazard covered without claiming that the generic
+// Instrumentor can prove an unknown M0-displaced register alias.
+TEST(TrampolineBuilderEmit, MovrelsM0RestorePadsToOneWaitState) {
+  constexpr uint32_t kMovrelsS1S2 = 0xbe812a02u;
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    TrampolinePlan plan = {.arch = arch,
+                           .anchor_offset = 0x1000,
+                           .original_size = 4,
+                           .trampoline_offset = 0x2000,
+                           .return_target = 0x1004,
+                           .original_words = {kMovrelsS1S2},
+                           .before_items = {},
+                           .after_items = {},
+                           .probe_args = {},
+                           .argument_moves = {},
+                           .argument_copy_temp = std::nullopt,
+                           .entry_storage_base = std::nullopt,
+                           .entry_vgpr_captures = {},
+                           .register_saves = {},
+                           .preserve_m0 = true,
+                           .special_state_saves = {},
+                           .builder_clobbers = {},
+                           .probe_target_offset = 0x3000,
+                           .vgpr_spills = {},
+                           .sgpr_spills = {},
+                           .acc_spills = {}};
+    std::string error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, kProbeAbi, make_sgpr_set({2}),
+                                                   /*probe_body_clobbers=*/{}, &error))
+        << error;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
+    ASSERT_TRUE(bytes) << error;
+    const std::vector<uint32_t> &words = bytes->trampoline_words;
+    const size_t original = bytes->original_byte_offset / sizeof(uint32_t);
+    ASSERT_GE(original, 2u);
+    ASSERT_LT(original, words.size());
+    EXPECT_EQ(words[original], kMovrelsS1S2);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    const util::FailureOr<uint32_t> mov = sop1_op_mov_b32(arch);
+    const util::FailureOr<uint16_t> m0 = scalar_operand_m0(arch);
+    ASSERT_TRUE(nop.succeeded() && mov.succeeded() && m0.succeeded());
+    EXPECT_EQ(words[original - 1], nop.value());
+    EXPECT_EQ(decode_sop1_op(words[original - 2]), mov.value());
+    EXPECT_EQ(decode_sop1_sdst(words[original - 2]), m0.value());
+  }
+}
+
 // The return branch (trailing word) targets anchor + original_size.
 TEST(TrampolineBuilderEmit, ReturnBranchTargetsAnchorPlusOriginalSize) {
   const TrampolinePlan plan = make_probe_plan();

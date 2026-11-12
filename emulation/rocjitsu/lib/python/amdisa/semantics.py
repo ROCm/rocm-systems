@@ -1612,7 +1612,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # 64-bit shift/add (VOP3-only)
     if name == 'V_LSHL_ADD_U64':
         return InstructionSemantics(
-            name, 'vector_ternary', operation='lshl_add', data_type='u64'
+            name, 'vector_ternary', operation='lshl_add_u64', data_type='u64'
         )
     if name == 'V_LSHLREV_B64':
         return InstructionSemantics(
@@ -2164,6 +2164,23 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 'scratch_load_lds',
                 elem_size=size,
                 num_elems=1,
+                sign_extend=signed,
+            )
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
+        if suffix in (
+            'UBYTE',
+            'SBYTE',
+            'USHORT',
+            'SSHORT',
+            'DWORD',
+        ):
+            size, count, signed = _FLAT_DATA_MAP[suffix]
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=size,
+                num_elems=count,
                 sign_extend=signed,
             )
     if upper == 'GLOBAL_INV':

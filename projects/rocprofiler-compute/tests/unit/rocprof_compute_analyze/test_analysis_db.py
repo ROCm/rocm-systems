@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
-from memory_chart.loader import Layouts
+from memory_chart.loader import LAYOUT_VERSION, Layouts
 from pc_sampling import (
     per_kernel_isa_export,
     per_source_line_export,
@@ -3707,14 +3707,14 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 # =============================================================================
 
 
-def test_run_analysis_stores_the_memory_chart_layout_file_unchanged(
+def test_run_analysis_stores_the_memory_chart_layout_file_with_its_version(
     db_session, tmp_path
 ):
     workload = run_memory_chart_workload(tmp_path, "gfx942")
     layout_file = Layouts.for_arch("gfx942").path
-    assert workload.memory_chart_layout_extdata == json.loads(
-        layout_file.read_text(encoding="utf-8")
-    )
+    expected = json.loads(layout_file.read_text(encoding="utf-8"))
+    expected["version"] = LAYOUT_VERSION
+    assert workload.memory_chart_layout_extdata == expected
 
 
 def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_path):

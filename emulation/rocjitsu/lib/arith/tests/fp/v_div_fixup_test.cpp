@@ -236,3 +236,56 @@ TEST(FpDivFixupF16, Rdna3OmodQualification) {
     }
   }
 }
+
+// gfx1201 captures: an OMOD overflow of a finite F16 quotient follows the guest rounding mode
+// unless FP16_OVFL saturates it to the largest finite value. Directed modes give the largest
+// finite value only when rounding toward zero for the result's sign.
+TEST(FpDivFixupF16Gfx12, OmodOverflowRounding) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    uint32_t p, b, c;
+    uint64_t flags;
+    uint32_t expected;
+  } cases[] = {
+      {0x7bff, 0x0001, 0x0001, 0, 0x7c00},
+      {0x7bff, 0x83ff, 0x0001, 0, 0xfc00},
+      {0x7bff, 0x0001, 0x0001, RJ_ARITH_FP_ROUND_ZERO, 0x7bff},
+      {0x7bff, 0x83ff, 0x0001, RJ_ARITH_FP_ROUND_ZERO, 0xfbff},
+      {0x7bff, 0x3c00, 0x0001, RJ_ARITH_FP_ROUND_ZERO, 0x7bff},
+      {0x7bff, 0xbc00, 0x3c00, RJ_ARITH_FP_ROUND_UP, 0xfbff},
+      {0x7bff, 0xbc00, 0x3c00, RJ_ARITH_FP_ROUND_DOWN, 0xfc00},
+      {0x7bff, 0x3c00, 0x3c00, RJ_ARITH_FP_ROUND_DOWN, 0x7bff},
+      {0x7bff, 0x3c00, 0x3c00, RJ_ARITH_FP_ROUND_UP, 0x7c00},
+      {0x7bff, 0x0001, 0x0001, RJ_ARITH_FP16_OVFL, 0x7bff},
+      {0x7bff, 0x83ff, 0x0001, RJ_ARITH_FP16_OVFL, 0xfbff},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      for (uint64_t omod : {uint64_t(RJ_ARITH_ALU_OMOD_2), uint64_t(RJ_ARITH_ALU_OMOD_4)}) {
+        SCOPED_TRACE(::testing::Message()
+                     << std::hex << cpu << '/' << sample.b << '/' << sample.flags << '/' << omod);
+        Registers<4, 64> r;
+        for (int lane = 0; lane < 64; ++lane) {
+          r.v[0][lane] = sample.p;
+          r.v[1][lane] = sample.b;
+          r.v[2][lane] = sample.c;
+        }
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | sample.flags;
+        // Check each wave size on its own destination writes.
+        for (bool wide : {false, true}) {
+          for (int lane = 0; lane < 64; ++lane) {
+            r.v[3][lane] = 0x1234;
+          }
+          ASSERT_EQ(wide ? rj_arith_v_div_fixup_f16_w64_gfx12(flags, ~0ULL, omod, r.v + 3, r.v,
+                                                              r.v + 1, r.v + 2, nullptr)
+                         : rj_arith_v_div_fixup_f16_w32_gfx12(flags, ~0U, omod, r.v + 3, r.v,
+                                                              r.v + 1, r.v + 2, nullptr),
+                    RJ_ARITH_SUCCESS);
+          for (int lane = 0; lane < (wide ? 64 : 32); ++lane) {
+            EXPECT_EQ(r.v[3][lane] & 0xffffU, sample.expected) << wide << '/' << lane;
+          }
+        }
+      }
+    }
+  }
+}
