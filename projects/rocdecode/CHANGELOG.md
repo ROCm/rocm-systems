@@ -8,6 +8,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
+* Fixed decoders and `rocDecGetDecoderCaps` on a GPU in DPX, TPX, QPX, or CPX mode using another partition of the GPU, or failing, when `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, or `CUDA_VISIBLE_DEVICES` selects the visible devices, or when a container has access to only some of the partitions. Each `device_id` now uses its own partition.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0
 

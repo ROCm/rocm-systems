@@ -24,6 +24,8 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
+#include <cstdio>
 #include <stdlib.h>
 
 #ifdef ROCDECODE_USE_DLOPEN_VA
@@ -918,8 +920,14 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
             }
         }
 
+        // Prefer the render node that the KFD topology reports for this device; pci_bus_id_buf still holds the
+        // PCI function. The card's render node plus the partition offset is the fallback for kernels whose
+        // topology doesn't tell the partitions of a GPU apart.
+        int kfd_render_minor = GetKfdRenderNodeMinor(pci_bus_id_buf, gpu_uuid);
         std::string drm_node;
-        if (render_node_id >= 0) {
+        if (kfd_render_minor >= 0) {
+            drm_node = "/dev/dri/renderD" + std::to_string(kfd_render_minor);
+        } else if (render_node_id >= 0) {
             drm_node = "/dev/dri/renderD" + std::to_string(render_node_id + offset);
         } else {
             drm_node = GetFirstAvailableDrmNode();
@@ -951,6 +959,8 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
             InfoLog(g_rocdec_logger, "Selected GPU UUID: " + gpu_uuid);
             InfoLog(g_rocdec_logger, "Selected GPU BDF: " + gpu_pci_bdf);
             InfoLog(g_rocdec_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
+            InfoLog(g_rocdec_logger, "KFD topology render node for " + std::string(pci_bus_id_buf) + ": " +
+                    (kfd_render_minor >= 0 ? "renderD" + std::to_string(kfd_render_minor) : std::string("none")));
             InfoLog(g_rocdec_logger, "Selected DRM node: " + drm_node);
         }
 
@@ -1526,8 +1536,8 @@ void VaContext::GetVisibleDevices(std::vector<int>& visible_devices_vetor) {
     }
     // Parse via a helper that copies before tokenising, so the std::getenv()
     // buffer (the process environment) is never modified (mutating it is UB).
+    // Keep the list order: HIP numbers the listed devices in that order.
     visible_devices_vetor = ParseVisibleDevicesCsv(visible_devices);
-    std::sort(visible_devices_vetor.begin(), visible_devices_vetor.end());
     FunctionExitLog(g_rocdec_logger);
 }
 
@@ -1679,6 +1689,74 @@ std::string VaContext::GetRenderNodeBusId(const std::string& render_node_name) {
         bus_id = bus_id.substr(0, dot_pos);
     }
     return bus_id;
+}
+
+/**
+ * @brief Returns the render node minor that the KFD topology reports for a HIP device, or -1.
+ *
+ * Each KFD GPU node, which on a partitioned GPU is one partition, reports its own render node. HIP builds the
+ * PCI bus ID of a device from its node's domain and location_id bits 15:0, and the UUID from the node's
+ * unique_id, so the match doesn't depend on how the devices are numbered. Kernels that keep the partition
+ * index outside location_id bits 15:0 give all partitions of a GPU the same PCI bus ID; the UUID then tells
+ * them apart, and -1 is returned if the partitions share it too.
+ */
+int VaContext::GetKfdRenderNodeMinor(const std::string& pci_bus_id, const std::string& gpu_uuid) {
+    unsigned int domain = 0, bus = 0, device = 0, function = 0;
+    if (std::sscanf(pci_bus_id.c_str(), "%x:%x:%x.%x", &domain, &bus, &device, &function) != 4) {
+        return -1;
+    }
+    const unsigned int location_id = (bus << 8) | (device << 3) | function;
+    const std::string nodes_path = "/sys/class/kfd/kfd/topology/nodes/";
+    DIR* dir = opendir(nodes_path.c_str());
+    if (dir == nullptr) {
+        return -1;
+    }
+    int bdf_matches = 0, bdf_render_minor = -1;
+    int uuid_matches = 0, uuid_render_minor = -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        std::ifstream properties_file(nodes_path + entry->d_name + "/properties");
+        std::string line, name;
+        unsigned long long value = 0, simd_count = 0, node_domain = 0, node_location_id = 0, unique_id = 0, render_minor = 0;
+        while (std::getline(properties_file, line)) {
+            std::istringstream fields(line);
+            if (!(fields >> name >> value)) {
+                continue;
+            }
+            if (name == "simd_count") {
+                simd_count = value;
+            } else if (name == "domain") {
+                node_domain = value;
+            } else if (name == "location_id") {
+                node_location_id = value;
+            } else if (name == "unique_id") {
+                unique_id = value;
+            } else if (name == "drm_render_minor") {
+                render_minor = value;
+            }
+        }
+        // Keep only GPU nodes that have a render node and this PCI bus ID.
+        if (simd_count == 0 || render_minor == 0 || render_minor > INT_MAX || node_domain != domain ||
+            (node_location_id & 0xFFFF) != location_id) {
+            continue;
+        }
+        bdf_matches++;
+        bdf_render_minor = static_cast<int>(render_minor);
+        char node_uuid[17];
+        std::snprintf(node_uuid, sizeof(node_uuid), "%016llx", unique_id);
+        if (unique_id != 0 && gpu_uuid == node_uuid) {
+            uuid_matches++;
+            uuid_render_minor = static_cast<int>(render_minor);
+        }
+    }
+    closedir(dir);
+    if (bdf_matches == 1) {
+        return bdf_render_minor;
+    }
+    return uuid_matches == 1 ? uuid_render_minor : -1;
 }
 
 std::string VaContext::GetFirstAvailableDrmNode() {

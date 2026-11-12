@@ -257,6 +257,10 @@ private:
     // Returns the lowercased PCI BDF (function suffix stripped) for a render node, or "" if not a PCI device.
     std::string GetRenderNodeBusId(const std::string& render_node_name);
 
+    // Returns the render node minor that the KFD topology reports for the device with the given PCI bus ID
+    // ("dddd:bb:dd.f") and UUID, or -1 if no single GPU node matches.
+    int GetKfdRenderNodeMinor(const std::string& pci_bus_id, const std::string& gpu_uuid);
+
     // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
     std::string GetFirstAvailableDrmNode();
 #else
