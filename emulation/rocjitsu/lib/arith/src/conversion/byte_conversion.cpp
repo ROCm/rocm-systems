@@ -523,3 +523,43 @@ int rj_arith_v_cvt_pk_u8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
   return rj_arith_v_cvt_pk_u8_f32_w64_gfx12(flags, exec_mask, instruction_flags, d, a, b, c,
                                             nullptr);
 }
+
+// Truncate and saturate A to a byte, selecting its position with B and retaining other bytes of C.
+// Preserve the inherited PKACCUM policy: modifiers and guest rounding/flushing are ignored.
+int rj_arith_v_cvt_pkaccum_u8_f32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate(
+          flags,
+          instruction_flags & ~uint64_t(RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A |
+                                        RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK),
+          RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  flags = (flags & ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) |
+          RJ_ARITH_FP_ROUND_ZERO;
+  return rj_arith_v_cvt_pk_u8_f32_w32_gfx12(flags, exec_mask, 0, d, a, b, c, trapsts);
+}
+
+// Truncate and saturate A to a byte, selecting its position with B and retaining other bytes of C.
+// Preserve the inherited PKACCUM policy: modifiers and guest rounding/flushing are ignored.
+int rj_arith_v_cvt_pkaccum_u8_f32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate(
+          flags,
+          instruction_flags & ~uint64_t(RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A |
+                                        RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK),
+          RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  flags = (flags & ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) |
+          RJ_ARITH_FP_ROUND_ZERO;
+  return rj_arith_v_cvt_pk_u8_f32_w64_gfx12(flags, exec_mask, 0, d, a, b, c, trapsts);
+}
