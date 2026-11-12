@@ -37,7 +37,7 @@ pub(crate) use instance::{
 #[cfg(target_os = "linux")]
 pub(crate) use instance::{KfdAccessTarget, KfdAllocation, KfdDeviceState};
 #[cfg(target_os = "linux")]
-pub(crate) use linux_kfd::KfdEventSubscription;
+pub(crate) use linux_kfd::{KfdEventSubscription, notification as kfd_notifications};
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")

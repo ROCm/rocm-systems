@@ -75,7 +75,7 @@ struct QueueEventSignal {
 /// Process-shared KFD event and mailbox backing queue event signals.
 pub(crate) struct QueueEventOwner {
     /// Native event owner retained through queue callback delivery.
-    event: crate::platform::event::SignalEvent,
+    event: rocddi::device::gpu::event::SignalEvent,
     /// Mailbox address written by device-visible signals.
     mailbox: usize,
     /// Native event ID paired with that mailbox.
