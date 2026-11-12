@@ -6605,18 +6605,6 @@ class CodeGenerator:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         execution = textwrap.dedent('''\
             namespace {
-            struct PkF32Words {
-              uint32_t lo;
-              uint32_t hi;
-            };
-
-            PkF32Words read_pk_f32_words(const Operand &operand, const amdgpu::Wavefront &wf, uint32_t lane) {
-              // CDNA5 ISA section 7.7.1: scalar sources supply one replicated DWORD.
-              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(
-                  operand, lane, amdgpu::ScalarPairMode::Replicate32);
-              return {pair.lo, pair.hi};
-            }
-
             struct PkU64Pair {
               uint64_t lo;
               uint64_t hi;
@@ -6758,45 +6746,7 @@ class CodeGenerator:
             )
             + '\n} // namespace'
         ).replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
-        execution += '\n' + (
-            'uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_half) {\n'
-            '  switch (src_selector) {\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_HALF:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_ONE:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_TWO:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_NEG_FOUR:\n'
-            '  case OpSelSrc::OPR_SRC_FLOAT_ONE_OVER_TWO_PI: {\n'
-            '    float value = std::bit_cast<float>(raw);\n'
-            '    return util::f32_to_f16(value);\n'
-            '  }\n'
-            '  default: {\n'
-            '    return static_cast<uint16_t>(high_half ? (raw >> 16) : raw);\n'
-            '  }\n'
-            '  }\n'
-            '}\n'
-            '\n'
-            'float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
-            '                              uint32_t src_selector, bool src_is_f16, bool high_half) {\n'
-            '  uint32_t raw = amdgpu::RegisterAccess(wf).read_operand(src, uint64_t{1} << lane, src.register_byte_mask()).lane(lane);\n'
-            '  if (!src_is_f16)\n'
-            '    return std::bit_cast<float>(raw);\n'
-            '  return util::f16_to_f32(read_fma_mix_f16_bits(raw, src_selector, high_half));\n'
-            '}\n'
-            '\n'
-            'float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,\n'
-            '                                   bool src_is_bf16, bool high_half) {\n'
-            '  uint32_t raw = amdgpu::RegisterAccess(wf).read_operand(src, uint64_t{1} << lane, src.register_byte_mask()).lane(lane);\n'
-            '  if (!src_is_bf16)\n'
-            '    return std::bit_cast<float>(raw);\n'
-            '  // CDNA5 inline BF16 sources retain the FP32 bits for OPSEL.\n'
-            '  return util::bf16_to_f32(static_cast<uint16_t>(high_half ? (raw >> 16) : raw));\n'
-            '}\n'
-            '} // namespace'
-        )
+        execution += '\n' + ('} // namespace')
         return _ImplOutputs(model=[model], execution=[execution])
 
     @staticmethod
@@ -7593,6 +7543,7 @@ class CodeGenerator:
                 half = str(precision == 'F16').lower()
                 return f'  amdgpu::execute_cdna2_mad_vop2<amdgpu::MadVop2::{form}, {half}>(*this, wf);'
         from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+        from amdisa.codegen.execute.rj_arith_packed_bf16 import gen_packed_bf16
 
         from amdisa.codegen.execute.rj_arith_graphics import gen_cube, gen_mullit
         from amdisa.codegen.execute.rj_arith_float import (
@@ -7601,6 +7552,7 @@ class CodeGenerator:
             gen_bit_pack,
             gen_fp8_widen,
             gen_fp8_narrow,
+            gen_float16_conversion,
             gen_conversion64,
             gen_conversion32,
             gen_conversion16,
@@ -7672,6 +7624,8 @@ class CodeGenerator:
         rj_arith_wide = gen_wide_integer(ctx)
         if rj_arith_wide is not None:
             return RjArithBody(rj_arith_wide)
+        from amdisa.codegen.execute.rj_arith_packed_f32 import gen_packed_f32
+
         from amdisa.codegen.execute.rj_arith_division import gen_division
 
         rj_arith_division = gen_division(ctx)
@@ -7687,9 +7641,11 @@ class CodeGenerator:
                 gen_widening_integer,
                 gen_integer16,
                 gen_vector32,
+                gen_packed_bf16,
                 gen_half_dot,
                 gen_float_dot32,
                 gen_packed_binary16,
+                gen_packed_f32,
                 gen_packed_fma16,
                 gen_mixed_fma,
                 gen_float_unary16,
@@ -7699,6 +7655,7 @@ class CodeGenerator:
                 gen_conversion32,
                 gen_conversion64,
                 gen_fp8_narrow,
+                gen_float16_conversion,
                 gen_fp8_widen,
                 gen_bit_pack,
                 gen_byte_nibble_conversion,
@@ -8340,8 +8297,9 @@ class CodeGenerator:
         if cls == 'tensor_load_to_lds':
             return (
                 '  if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {\n'
-                '    wf.report_instruction_execution_error(\n'
-                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    if (!wf.instruction_execution_failed())\n'
+                '      wf.report_instruction_execution_error(\n'
+                '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
                 '    return;\n'
                 '  }'
             )
@@ -8349,8 +8307,9 @@ class CodeGenerator:
         if cls == 'tensor_store_from_lds':
             return (
                 '  if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {\n'
-                '    wf.report_instruction_execution_error(\n'
-                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    if (!wf.instruction_execution_failed())\n'
+                '      wf.report_instruction_execution_error(\n'
+                '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
                 '    return;\n'
                 '  }'
             )
@@ -16909,27 +16868,56 @@ class CodeGenerator:
                     GFX10_LEGACY_FMA,
                     FP8_NARROW_NAMES,
                     FP8_WIDEN_NAMES,
+                    BIT_PACK_NAMES,
+                    BYTE_NIBBLE_CONVERSION_NAMES,
+                    FLOAT16_CONVERSION_NAMES,
+                    CONVERSION16_NAMES,
+                    CONVERSION32_NAMES,
+                    CONVERSION64_NAMES,
+                    NORMALIZED_NAMES,
+                    PACKED_CONVERSION_NAMES,
+                    MIXED_BF16_NAMES,
+                    DOT2_F32_NAMES,
+                    HALF_DOT_NAMES,
+                )
+                from amdisa.codegen.execute.rj_arith_packed_bf16 import (
+                    PACKED_BF16_NAMES,
                 )
 
-                if (
-                    self.isa_spec.arch_name in ('rdna2', 'rdna3', 'rdna4')
-                    and any(
-                        (i.name in FLOAT_NAMES | GFX10_LEGACY_FMA for i in all_insts)
-                    )
-                    or (
-                        self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
-                        and any((i.name in FP8_NARROW_NAMES for i in all_insts))
-                    )
-                ) or (
-                    self.isa_spec.arch_name in ('rdna2', 'rdna3', 'rdna4')
-                    and any(
-                        (i.name in FLOAT_NAMES | GFX10_LEGACY_FMA for i in all_insts)
-                    )
-                    or (
-                        self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
-                        and any((i.name in FP8_WIDEN_NAMES for i in all_insts))
-                    )
-                ):
+                float_names = FLOAT_NAMES | GFX10_LEGACY_FMA
+                if self.isa_spec.arch_name.startswith('cdna'):
+                    float_names |= BIT_PACK_NAMES | {'V_CVT_PKACCUM_U8_F32'}
+                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5'):
+                    float_names = FP8_NARROW_NAMES | FP8_WIDEN_NAMES
+                    if self.isa_spec.arch_name == 'cdna5':
+                        float_names |= (
+                            MIXED_BF16_NAMES
+                            | PACKED_BF16_NAMES
+                            | {
+                                'V_FMA_MIX_F32',
+                                'V_FMA_MIXLO_F16',
+                                'V_FMA_MIXHI_F16',
+                                'V_MULLIT_F32',
+                            }
+                        )
+                    else:
+                        float_names |= (
+                            DOT2_F32_NAMES
+                            | HALF_DOT_NAMES
+                            | {
+                                'V_MAD_MIX_F32',
+                                'V_MAD_MIXLO_F16',
+                                'V_MAD_MIXHI_F16',
+                            }
+                        )
+                if self.isa_spec.arch_name in (
+                    'rdna2',
+                    'rdna3',
+                    'rdna4',
+                    'cdna3',
+                    'cdna4',
+                    'cdna5',
+                ) and any(i.name in float_names for i in all_insts):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
@@ -16943,6 +16931,18 @@ class CodeGenerator:
                     INTEGER_DOT_NAMES,
                 )
                 from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
+
+                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
+                    i.name in ('V_PK_FMA_F32', 'V_PK_ADD_F32', 'V_PK_MUL_F32')
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_f32_exec.h',
+                            False,
+                        )
+                    )
+                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
 
                 has_rj_arith_scalar = self.isa_spec.arch_name in (
                     'rdna3',
@@ -16959,6 +16959,130 @@ class CodeGenerator:
                     or i.name in PACKED_INTEGER_NAMES
                     or i.name in INTEGER_DOT_NAMES
                     for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
+                if (
+                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                    and any((i.name in BYTE_NIBBLE_CONVERSION_NAMES for i in all_insts))
+                    or (
+                        self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                        and any((i.name in FLOAT_NAMES for i in all_insts))
+                        or (
+                            self.isa_spec.arch_name in ('cdna4', 'cdna5')
+                            and any(
+                                (i.name in FLOAT16_CONVERSION_NAMES for i in all_insts)
+                            )
+                        )
+                    )
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
+                    i.name in CONVERSION16_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
+                    i.name
+                    in CONVERSION32_NAMES | {'V_CVT_RPI_I32_F32', 'V_CVT_FLR_I32_F32'}
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if (
+                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                    and any((i.name in CONVERSION64_NAMES for i in all_insts))
+                    or (
+                        self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                        and any((i.name in FLOAT_NAMES for i in all_insts))
+                        or (
+                            self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                            and any(
+                                (
+                                    i.name.replace('_PKNORM_', '_PK_NORM_')
+                                    in NORMALIZED_NAMES
+                                    for i in all_insts
+                                )
+                            )
+                        )
+                    )
+                ) or (
+                    self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                    and any((i.name in FLOAT_NAMES for i in all_insts))
+                    or (
+                        self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                        and any(
+                            (
+                                i.name.replace('_PKRTZ_', '_PK_RTZ_')
+                                in PACKED_CONVERSION_NAMES
+                                for i in all_insts
+                            )
+                        )
+                    )
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_vector import (
+                    INTEGER_DOT_NAMES,
+                    INTEGER_PACK_NAMES,
+                    WIDEN16_NAMES,
+                )
+
+                if (
+                    self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                    and any((i.name in INTEGER_DOT_NAMES for i in all_insts))
+                ) or (
+                    self.isa_spec.arch_name == 'cdna5'
+                    and any(
+                        i.name in INTEGER_PACK_NAMES | WIDEN16_NAMES for i in all_insts
+                    )
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
+                from amdisa.codegen.execute.rj_arith_vector import (
+                    INTEGER_PACK_NAMES,
+                    WIDEN16_NAMES,
+                )
+
+                if (
+                    self.isa_spec.arch_name in ('cdna3', 'cdna4')
+                    and any(i.name in INTEGER_PACK_NAMES for i in all_insts)
+                ) or (
+                    self.isa_spec.arch_name == 'cdna5'
+                    and any(i.name in WIDEN16_NAMES for i in all_insts)
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
+                if (
+                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
+                    and any((i.name == 'V_SAT_PK_U8_I16' for i in all_insts))
+                    or (
+                        self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                        and any((i.name in INTEGER_DOT_NAMES for i in all_insts))
+                        or (
+                            self.isa_spec.arch_name == 'cdna5'
+                            and any(
+                                (i.name.startswith('V_SAT_PK4_') for i in all_insts)
+                            )
+                        )
+                    )
                 ):
                     cpp_includes.append(
                         (
@@ -16987,6 +17111,7 @@ class CodeGenerator:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if any(
                     'amdgpu::arith::exec_dense_fp_matrix<' in str(impl)
+                    or 'amdgpu::arith::exec_sparse_matrix<' in str(impl)
                     for impl in class_func_impls.model + class_func_impls.execution
                 ):
                     cpp_includes.append(

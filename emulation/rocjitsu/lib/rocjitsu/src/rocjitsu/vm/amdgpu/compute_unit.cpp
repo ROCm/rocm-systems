@@ -185,6 +185,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "instruction decode failure";
   case InstructionExecutionError::IllegalInstruction:
     return "illegal instruction";
+  case InstructionExecutionError::PluginFailure:
+    return "plugin failure";
   }
   return "unknown instruction execution error";
 }
@@ -225,14 +227,17 @@ std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
              : Decoder::create(default_isa_target_registry(), config.target);
 }
 
-std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding,
-                                                     uint64_t pc) const {
+util::FailureOr<std::string>
+ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                                         util::DiagnosticEmitter diagnostic) const {
   Instruction::ScopedHeapAllocation heap_allocation;
   util::StringDiagnostic error;
   auto decoded = decoder_->decode_window(encoding, pc, error.emitter());
-  if (decoded.failed())
-    throw std::logic_error(std::format("cannot disassemble captured instruction at PC {:#x}: {}",
-                                       pc, error.message()));
+  if (decoded.failed()) {
+    diagnostic.emit() << std::format("cannot disassemble captured instruction at PC {:#x}: {}", pc,
+                                     error.message());
+    return util::Result::failure();
+  }
   return decoded.value()->disassemble();
 }
 
@@ -349,6 +354,21 @@ ComputeUnitCore::~ComputeUnitCore() {
   for (const auto &wave : wfs_)
     if (wave && wave->state() == WfState::GWS_WAIT)
       gws_device_->notify_parked_wave_gone(*wave);
+}
+
+void ComputeUnitCore::report_unresolved_apertures(uint32_t identity, ProcessIdentityKind kind) {
+  bool guest_banks_programmed = false;
+  {
+    std::lock_guard lock(vmid_aperture_mutex_);
+    guest_banks_programmed = std::any_of(vmid_apertures_.begin(), vmid_apertures_.end(),
+                                         [](const auto &bank) { return bank.has_value(); });
+  }
+  if (!guest_banks_programmed ||
+      unresolved_aperture_reported_.exchange(true, std::memory_order_relaxed))
+    return;
+  util::Logger::warn(
+      std::format("{}: no unambiguous guest shader aperture for {} {} (retaining CU defaults)",
+                  full_path(), kind == ProcessIdentityKind::Vmid ? "VMID" : "PASID", identity));
 }
 
 template <GpuIsa Isa>
@@ -1426,14 +1446,15 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
   }
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
+                                                   Wavefront &wf) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
     qualify_cdna4_memory_destination(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
     qualify_gfx11_memory(*inst, wf);
   if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
     nullify_unallocated_memory_result(*inst, wf);
-  return route_prepared_memory_inst(inst, wf);
+  return route_prepared_memory_inst(std::move(inst), wf);
 }
 
 // Only gfx1250 partitions the shared aperture into local and distributed LDS.
@@ -1453,9 +1474,12 @@ static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemSt
          shared_offset % state.elem_size != 0;
 }
 
-VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(Instruction *inst, Wavefront &wf) {
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
+                                                            Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  if (wf.instruction_execution_failed())
+    return VmAccessOutcome::Malformed;
   const bool observe_routed_access =
       observes_memory_routing_ && plugin_group_->observes_memory_routing(wf);
   const uint8_t decoded_route_tag = inst->data()->tag();
@@ -1584,16 +1608,17 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(Instruction *inst, W
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
+  if (wf.instruction_execution_failed())
+    return VmAccessOutcome::Malformed;
 
   switch (route_tag) {
   case SCALAR_MEM:
-    return scalar_mem_pipeline_.issue_deferred(inst, wf);
+    return scalar_mem_pipeline_.issue_deferred(inst.release(), wf);
   case LOCAL_MEM:
-    return local_mem_pipeline_.issue_deferred(inst, wf);
+    return local_mem_pipeline_.issue_deferred(inst.release(), wf);
   case GLOBAL_MEM:
-    return global_mem_pipeline_.issue_deferred(inst, wf);
+    return global_mem_pipeline_.issue_deferred(inst.release(), wf);
   default:
-    delete inst;
     return VmAccessOutcome::Malformed;
   }
 }
@@ -2473,6 +2498,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       handle_terminal_vm_fault(*active, VmAccessOutcome::Faulted);
       return IssueOutcome::NotIssued;
     }
+    if (!using_retained_vm_access && !active->same_execution_root(*vm_access)) {
+      drain_async_window();
+      handle_terminal_vm_fault(*active, VmAccessOutcome::Revoked);
+      return IssueOutcome::NotIssued;
+    }
   }
   const bool vm_address_space = vm_access != nullptr;
   const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
@@ -2561,16 +2591,23 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
+  const uint64_t instruction_pc = active->pc;
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
+  const std::string_view instruction_mnemonic = inst->mnemonic();
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
     }
-    fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(),
+    if (active->instruction_execution_error_detail())
+      execution_failure_detail_ = active->instruction_execution_error_detail();
+    active->pc = instruction_pc;
+    const std::string_view preserved_mnemonic = active->instruction_execution_error_mnemonic();
+    fail_wave_instruction(*active,
+                          preserved_mnemonic.empty() ? instruction_mnemonic : preserved_mnemonic,
+                          instruction_pc, active->instruction_execution_error(),
                           // Taken before reporting, so a throwing failure handler
                           // cannot leave it for the next instruction.
                           std::exchange(execution_failure_detail_, {}));
@@ -2624,6 +2661,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     }
   }
 
+  // A decoded instruction may publish memory through a cache, a translated
+  // access, or an async pipeline. NOP and ENDPGM create no new memory effect;
+  // all other instructions conservatively block completion rebinding.
+  if (active->needs_execution_effect_mark() && inst->mnemonic() != "s_nop" &&
+      inst->mnemonic() != "s_endpgm")
+    active->note_potential_execution_effect();
   auto *wait_state =
       config_.memory_wait_checks_enabled() ? active->memory_wait_scoreboard() : nullptr;
   if (wait_state) {
@@ -2677,6 +2720,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         active->clear_setreg_vgpr_msb_hazard();
         if (observes_async_instruction_issued_)
           plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
+        if (active->instruction_execution_failed()) [[unlikely]] {
+          fail_current_instruction();
+          return IssueOutcome::Issued;
+        }
         active->pc += inst_size;
         record_gws_instruction_progress(active->process_id());
         return IssueOutcome::Issued;
@@ -2731,6 +2778,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
       plugin_group_->onAmdgpuBeforeExecuteInstruction(
           active->pc, *inst, *active,
           std::span(words).first(std::max<size_t>(kFirstFetchWords, inst_size / 4)));
+    if (active->instruction_execution_failed()) [[unlikely]] {
+      fail_current_instruction();
+      return false;
+    }
+    return true;
   };
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
@@ -2743,13 +2795,16 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     // A trap stalled on older memory has not issued yet. Deliver the before
     // hook and end the setreg hazard slot only when the instruction proceeds.
     const auto begin_trap = [&] {
-      observe_before_execute();
+      if (!observe_before_execute())
+        return false;
       active->clear_setreg_vgpr_msb_hazard();
+      return true;
     };
     const uint32_t trap_id =
         code_end ? 0u : words[0] & (active->uses_separate_trap_ctrl() ? 0xFu : 0xFFu);
     if (enters_trap) {
-      begin_trap();
+      if (!begin_trap())
+        return IssueOutcome::Issued;
       if (wait_state)
         wait_state->clear();
       WaitFields drained{};
@@ -2758,13 +2813,24 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
                            WaitCounterKind::Async, WaitCounterKind::Tensor, WaitCounterKind::Km})
         drained[static_cast<size_t>(counter)] = 0;
       plugin_group_->onAmdgpuImplicitMemoryWait(*active, drained);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return IssueOutcome::Issued;
+      }
       const auto saved_pc = active->pc;
       enter_trap_handler(*active, *trap_config, trap_id, saved_pc);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return IssueOutcome::Issued;
+      }
       if (software_trap && observes_after_execute_instruction_)
         plugin_group_->onAmdgpuAfterExecuteInstruction(saved_pc, *inst, *active);
+      if (active->instruction_execution_failed()) [[unlikely]]
+        fail_current_instruction();
       return IssueOutcome::Issued;
     }
-    begin_trap();
+    if (!begin_trap())
+      return IssueOutcome::Issued;
     if (code_end) {
       const bool delivered =
           !active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active);
@@ -2779,7 +2845,8 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     return IssueOutcome::Issued;
   }
 
-  observe_before_execute();
+  if (!observe_before_execute())
+    return IssueOutcome::Issued;
 
   if (!gfx10 && (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL))) {
     auto mn = std::string_view(inst->mnemonic());
@@ -2838,6 +2905,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
 
   if (observes_after_execute_instruction_)
     plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (active->instruction_execution_failed()) [[unlikely]] {
+    fail_current_instruction();
+    return IssueOutcome::Issued;
+  }
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -3073,7 +3144,11 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         auto *d = inst->data_as<VectorMemState>();
         d->issue_pc = active->pc;
       }
-      const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value().release(), *active);
+      const VmAccessOutcome memory_outcome = route_memory_inst(std::move(decoded.value()), *active);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return IssueOutcome::Issued;
+      }
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();

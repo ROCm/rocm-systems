@@ -423,6 +423,7 @@ public:
 
   TensorDmaDescriptor desc;
   std::optional<GpuVmAccess> access;
+  VmTransferToken transfer_token;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
@@ -894,7 +895,8 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
   constexpr size_t kCopyBufferBytes = 256;
   constexpr uint64_t kPageBytes = IdentityAddressSpaceTranslator::kPageSize;
   const auto &first = state.elements[state.next_element];
-  if ((!state.access && wf.process_id() != 0) || !first.in_bounds || first.completed_bytes != 0)
+  if (state.transfer_token.pending() || (!state.access && wf.process_id() != 0) ||
+      !first.in_bounds || first.completed_bytes != 0)
     return 0;
   const size_t size = state.desc.elem_size;
   size_t count = 1;
@@ -945,7 +947,8 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable)
     return state.outcome;
 
-  if (state.access && !state.access->info().ready && state.next_element == 0 &&
+  if (state.access && !state.transfer_token.pending() && !state.access->info().ready &&
+      state.next_element == 0 &&
       (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
@@ -973,12 +976,12 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
             element.global_address,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(element.bytes.data()),
                                        size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       } else {
         outcome = state.access->read(
             element.global_address,
             std::span<std::byte>(reinterpret_cast<std::byte *>(element.bytes.data()), size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       }
     } else if (state.store_from_lds) {
       outcome = wf.write_gpu_memory(element.global_address,
@@ -1070,6 +1073,8 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
     // Only a fresh instruction reaches this block: a deferred transfer resumes
     // from its retained state, so each instruction is reported once.
     report_issued_tensor_dma(wf, *state);
+    if (wf.instruction_execution_failed()) [[unlikely]]
+      return util::Result::failure();
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();
@@ -1094,6 +1099,8 @@ inline VmAccessOutcome resume_tensor_dma(Instruction &inst, Wavefront &wf) {
   tensor_dma_detail::TensorDmaState &state = *inst.data_as<tensor_dma_detail::TensorDmaState>();
   state.outcome = tensor_dma_detail::resume_tensor_dma_state(state, wf);
   tensor_dma_detail::report_completed_tensor_dma(inst, wf, state);
+  if (wf.instruction_execution_failed()) [[unlikely]]
+    return VmAccessOutcome::Malformed;
   return state.outcome;
 }
 
