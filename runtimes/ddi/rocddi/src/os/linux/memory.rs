@@ -237,6 +237,10 @@ impl HostAllocation {
         }))
     }
 
+    pub(crate) fn is_remappable(&self) -> bool {
+        self.source.is_some()
+    }
+
     pub(crate) fn source(&self) -> Option<&File> {
         self.source.as_ref()
     }
@@ -296,6 +300,29 @@ impl Drop for HostAllocation {
             }
         }
     }
+}
+
+pub(crate) fn host_memory_capabilities()
+-> Result<crate::memory::host::HostMemoryCapabilities, Error> {
+    use crate::memory::constraints::AllocationLimits;
+    use crate::memory::host::{HostMemoryCapabilities, HostReservationCapabilities};
+    let page = host_page_size()?;
+    Ok(HostMemoryCapabilities {
+        allocation: AllocationLimits {
+            alignment: page,
+            granularity: page,
+            maximum_size: isize::MAX as u64,
+        },
+        remappable_backing: true,
+        reservation: Some(HostReservationCapabilities {
+            reservation_granularity: page,
+            mapping_granularity: page,
+            maximum_size: (isize::MAX as u64) & !(page - 1),
+            maximum_alignment: 1_u64 << (usize::BITS - 2),
+            minimum_address: page,
+            maximum_address: usize::MAX as u64,
+        }),
+    })
 }
 
 #[cfg(test)]
