@@ -73,12 +73,15 @@ typedef struct rj_code_inst_t rj_code_inst_t;
 typedef struct rj_code_decoder_t rj_code_decoder_t;
 
 /// @brief Create a decoder for the architecture specified by @p arch.
+///
+/// @details Allocation failure in rj_code_decoder_create,
+/// rj_code_decoder_create_for_target, or rj_code_decoder_decode terminates the
+/// calling process; these calls do not return ROCJITSU_STATUS_OUT_OF_RESOURCES.
 /// @param[in] arch Architecture to create a decoder for.
 /// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
 /// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p arch is invalid or @p decoder is NULL.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not bind @p arch.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_decoder_t **decoder);
 
@@ -89,7 +92,6 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_create(rj_code_arch_t arch, rj_code_de
 /// on any failure when @p decoder itself is non-NULL.
 /// @retval ROCJITSU_STATUS_SUCCESS Decoder was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if an argument is NULL or empty.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR if this component did not include @p target_id.
 RJ_API_EXPORT rj_status_t rj_code_decoder_create_for_target(const char *target_id,
                                                             rj_code_decoder_t **decoder);
@@ -122,7 +124,6 @@ RJ_API_EXPORT void rj_code_decoder_destroy(rj_code_decoder_t *decoder);
 /// @param[out] inst Pointer to the newly decoded instruction object.
 /// @retval ROCJITSU_STATUS_SUCCESS Instruction was decoded successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Allocation failed.
 /// @retval ROCJITSU_STATUS_ERROR Decoding failed.
 RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                                  const rj_code_binary_inst_t *binary_inst,

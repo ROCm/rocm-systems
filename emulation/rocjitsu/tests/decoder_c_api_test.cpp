@@ -135,6 +135,26 @@ TEST(DecoderCApiTest, StandaloneInstructionIgnoresAmbientDecoderPool) {
   rj_code_inst_destroy(instruction);
 }
 
+TEST(DecoderCApiTest, RejectedInstructionRestoresAmbientAllocator) {
+  auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(pooled_decoder, nullptr);
+  pooled_decoder->enable_pool();
+  const rocjitsu::Instruction::AllocFn alloc_fn = rocjitsu::Instruction::alloc_fn_;
+  const rocjitsu::Instruction::DeallocFn dealloc_fn = rocjitsu::Instruction::dealloc_fn_;
+  const void *pool = rocjitsu::Instruction::alloc_pool_;
+  ASSERT_NE(pool, nullptr);
+
+  rj_code_decoder_t *decoder = nullptr;
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
+  auto *instruction = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
+  EXPECT_EQ(rj_code_decoder_decode(decoder, &kCdnaSEndpgm, &instruction), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(instruction, nullptr);
+  EXPECT_EQ(rocjitsu::Instruction::alloc_fn_, alloc_fn);
+  EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
+  EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, pool);
+  rj_code_decoder_destroy(decoder);
+}
+
 TEST(DecoderCApiTest, HeapAllocationScopeForgetsDestroyedPool) {
   auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_NE(pooled_decoder, nullptr);
