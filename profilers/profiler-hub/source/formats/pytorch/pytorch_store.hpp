@@ -56,6 +56,7 @@ struct pytorch_store_t
     std::map<std::int64_t, std::string>                          device_names;
     std::map<std::int64_t, std::string>
                   device_json;  // each deviceProperties entry as text
+    std::string   host_name;
     std::uint64_t parse_ms{};
     std::uint64_t derive_ms{};
     load_diag_t   diag{};
