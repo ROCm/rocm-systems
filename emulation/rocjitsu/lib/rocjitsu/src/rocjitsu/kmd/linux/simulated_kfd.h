@@ -474,6 +474,9 @@ public:
   [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
                                 bool sealed_ram = false);
 
+  /// Publish the explicitly nonresident DRM reservations to texture fetches.
+  void publish_prt_ranges(amdgpu::PrtRanges ranges);
+
   /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
   /// @retval true the range was unmapped.
   /// @retval false the local process is gone, so nothing was unmapped.
@@ -631,7 +634,8 @@ private:
 
   std::optional<amdgpu::ComputeUnitCore::TrapHandlerConfig>
   resolve_trap_handler(const amdgpu::Wavefront &wf, uint32_t gpu_ordinal);
-  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message);
+  std::optional<uint32_t> wave_doorbell_id(const amdgpu::Wavefront &wave);
+  bool on_wave_sendmsg(amdgpu::Wavefront &wf, uint32_t message, const amdgpu::InterruptSink &sink);
   void on_wave_trap_complete(amdgpu::Wavefront &wf);
   uint64_t debugger_queue_exception_mask(const std::shared_ptr<KfdProcess> &proc, uint32_t queue_id,
                                          uint64_t exception_mask,
@@ -714,8 +718,7 @@ private:
   /// @details Sets TRAPSTS.xnack_error and uses the issuing PC for XNACK mode.
   /// Returns true when an owner claims the wave; otherwise CU cancellation applies.
   /// @param issue_pc Address of the memory instruction that caused the fault.
-  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t addr, bool is_write,
-                                uint64_t issue_pc);
+  bool on_wave_memory_violation(amdgpu::Wavefront &wf, uint64_t issue_pc, uint64_t exception);
 
   /// @brief Toggle per-access debugger checks on every compute unit.
   void set_debug_active_on_all_cus(bool active);
@@ -766,9 +769,8 @@ private:
   void clear_completed_debug_queues(KfdProcess *proc, const uint32_t *queue_ids,
                                     uint32_t num_queues);
   /// @brief Compute the LDS/scratch/GPUVM apertures for a GPU ordinal.
-  /// @details Each further ordinal shifts the per-GPU LDS/scratch windows by
-  /// @ref kApertureStride. Shared by
-  /// AMDKFD_IOC_GET_PROCESS_APERTURES_NEW and the debug device snapshot.
+  /// @details Shared by queue setup, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, and
+  /// the debug device snapshot.
   kfd_process_device_apertures gpu_apertures(uint32_t ordinal) const;
   int set_xnack_mode_ioctl(KfdProcess &proc, void *arg);
   int get_tile_config_ioctl(void *arg);
@@ -913,8 +915,7 @@ private:
   /// single-primary-fd local path.
   uint32_t local_process_id_ = 0;
 
-  /// @brief Per-ordinal shift applied to the LDS and scratch aperture windows
-  /// so each GPU in a multi-GPU process gets a distinct range.
+  /// @brief Per-ordinal shift used on profiles with distinct aperture windows.
   static constexpr uint64_t kApertureStride = 0x10000000000ULL;
 
   /// @brief IPC handle store for cross-process memory sharing.

@@ -6,7 +6,7 @@
 
 #include "common/simd.h"
 #include "dot/x86_64/half_conversion_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_dot.h"
 
 #include <immintrin.h>
 #include <stdint.h>

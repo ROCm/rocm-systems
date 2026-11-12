@@ -4,10 +4,10 @@
 // FP32 narrowing to FP8/BF8 with nearest or seeded stochastic rounding.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "conversion/fp8_narrow_impl.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <stdint.h>
 

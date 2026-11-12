@@ -5,6 +5,7 @@
 // Decodes packed factors once, reuses them across FP32 FMA accumulation, and
 // buffers results before stores to support overlapping source/destination VGPRs.
 
+#include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/fp8.h"
 #include "wmma/layout.h"
@@ -45,6 +46,7 @@ void wmma(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b
         _mm256_castsi256_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[reg] + lane)));
     auto high = _mm256_castsi256_ps(
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[reg] + lane + 8)));
+    RJ_ARITH_UNROLL(16)
     for (int k = 0; k < 16; ++k) {
       auto x = _mm256_set1_ps(left[k][row]);
       low = _mm256_fmadd_ps(x, _mm256_load_ps(right[k]), low);
