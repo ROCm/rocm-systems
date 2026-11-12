@@ -4,6 +4,7 @@
 /// @file vector16_inline_constant_test.cpp
 /// @brief Decoded 16-bit source carriers, delegated reads and destination windows.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/machine_insts.h"
@@ -98,9 +99,9 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("vector16_inline", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu_, "vector16_inline", config, &memory_, &cache_));
     decoder_ = Decoder::create(config.arch);
-    ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);
     wave_ = cu_->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave_, nullptr);
@@ -491,6 +492,10 @@ protected:
       auto decode_dpp = [&]<typename Raw>() {
         Raw raw = std::bit_cast<Raw>(words);
         raw.src0 = amdgpu::SRC_DPP;
+        // GFX11.0 DPP requires a VGPR in SRC1. v1 contains zero on every lane;
+        // the inline or scalar accumulator being tested is independently in SRC2.
+        if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3)
+          raw.src1 = 257;
         raw.vsrc0 = 1;
         raw.dpp_ctrl = amdgpu::dpp::ROW_MIRROR;
         raw.bound_ctrl = 1;

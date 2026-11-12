@@ -14,10 +14,10 @@ use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities,
-    GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind, MemoryLinkInfo, MemoryLinkType,
-    MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind, PciInfo, SourceKind, TopologyCache,
-    TopologySnapshot,
+    CacheAssociations, CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo,
+    GpuQueueCapabilities, GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind,
+    MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind,
+    PciInfo, SourceKind, TopologyCache, TopologyGraphSnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -269,6 +269,13 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
         (false, true) => CacheKind::Instruction,
         (false, false) => CacheKind::Other,
     };
+    let mut associations = CacheAssociations::NONE;
+    if native_kind & (1 << 2) != 0 {
+        associations |= CacheAssociations::CPU;
+    }
+    if native_kind & (1 << 3) != 0 {
+        associations |= CacheAssociations::GPU_COMPUTE_UNIT;
+    }
     // KFD reports cache capacity in KiB; driver facts use bytes.
     Ok((
         CacheInfo {
@@ -276,8 +283,7 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
             size_bytes: u64::from(properties.u32("size")?) * 1024,
             line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
             kind,
-            cpu_cache: native_kind & (1 << 2) != 0,
-            compute_unit_cache: native_kind & (1 << 3) != 0,
+            associations,
         },
         properties
             .optional_u32("persisting_cache_size_max")?
@@ -565,11 +571,11 @@ pub(super) fn enumerate(
     Ok(())
 }
 
-pub(super) fn contribute_topology(
+pub(super) fn contribute_topology_graph(
     root: &str,
     drm: &str,
     driver_instance: DriverInstanceId,
-    snapshot: &mut TopologySnapshot,
+    snapshot: &mut TopologyGraphSnapshot,
 ) -> Result<(), Error> {
     let discovered = read_all(root, drm, driver_instance, true)?;
     let source = snapshot.add_source(
@@ -1359,9 +1365,10 @@ mod tests {
         super::probe_endpoint(root, drm, DriverInstanceId::TEST, id)
     }
 
-    fn topology(root: &str, drm: &str) -> TopologySnapshot {
-        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot()).unwrap();
-        super::contribute_topology(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
+    fn topology_graph_snapshot(root: &str, drm: &str) -> TopologyGraphSnapshot {
+        let mut snapshot =
+            TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot()).unwrap();
+        super::contribute_topology_graph(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
         snapshot
     }
 
@@ -1457,7 +1464,7 @@ mod tests {
         let gpu = endpoint.gpu().unwrap();
         assert_eq!(gpu.memory_bus_width_bits, 384);
         assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let gpu_node = snapshot
             .nodes
             .iter()
@@ -1738,7 +1745,7 @@ mod tests {
         .unwrap();
 
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
@@ -1825,7 +1832,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let host = snapshot
             .nodes
             .iter()
@@ -1838,7 +1845,7 @@ mod tests {
             .unwrap();
         assert!(snapshot.caches.iter().any(|cache| {
             cache.node == host.id
-                && cache.info.cpu_cache
+                && cache.info.associations.contains(CacheAssociations::CPU)
                 && cache.info.level == 3
                 && cache.info.size_bytes == 512 * 1024
         }));
@@ -1880,7 +1887,7 @@ mod tests {
         )
         .unwrap();
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let first = snapshot
             .endpoints
             .iter()
@@ -1905,7 +1912,7 @@ mod tests {
         let contents = std::fs::read_to_string(&properties).unwrap();
         std::fs::write(
             &properties,
-            contents.replace("caches_count 0", "caches_count 4"),
+            contents.replace("caches_count 0", "caches_count 5"),
         )
         .unwrap();
         for (ordinal, level, size, kind) in [
@@ -1913,6 +1920,7 @@ mod tests {
             (1, 1, 32, 10),
             (0, 1, 32, 9),
             (2, 3, 8192, 5),
+            (4, 2, 128, 13),
         ] {
             let directory = fixture.0.join(format!("topology/nodes/1/caches/{ordinal}"));
             std::fs::create_dir_all(&directory).unwrap();
@@ -1925,7 +1933,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert!(snapshot.memory_locations.iter().any(|location| {
             location.kind == MemoryLocationKind::DeviceLocal
@@ -1936,13 +1944,19 @@ mod tests {
             .caches_for_endpoint(endpoint)
             .copied()
             .collect::<Vec<_>>();
-        assert_eq!(caches.len(), 4);
+        assert_eq!(caches.len(), 5);
         assert_eq!(caches[0].level, 1);
         assert_eq!(caches[0].size_bytes, 32_768);
         assert!(crate::device::gpu::is_compute_data_cache(&caches[0]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[1]));
         assert!(!crate::device::gpu::is_compute_data_cache(&caches[2]));
         assert!(crate::device::gpu::is_compute_data_cache(&caches[3]));
+        assert_eq!(caches[2].associations, CacheAssociations::CPU);
+        assert_eq!(
+            caches[4].associations,
+            CacheAssociations::CPU | CacheAssociations::GPU_COMPUTE_UNIT
+        );
+        assert!(crate::device::gpu::is_compute_data_cache(&caches[4]));
         assert_eq!(caches[3].level, 2);
         assert_eq!(caches[3].size_bytes, 262_144);
         assert_eq!(caches[3].line_size_bytes, Some(64));

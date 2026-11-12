@@ -10,7 +10,7 @@
 
 name: TheRock Multi-Arch Nightly CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 73aaa3386ad8d276fa51f1b474e3140c9493ea5a.
+# TheRock ref: pinned to ROCm/TheRock commit 7c309dbaf02d53ff108e401e5f723f00353e17e4.
 
 # =============================================================================
 # TEMPORARY: MI455 (gfx125X) bringup configuration
@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     with:
       build_variant: "release"
       # Limit GPU families for nightly CI: gfx94X, gfx950, gfx125X (Linux + build/only) and gfx1151 (Windows)
@@ -49,12 +49,8 @@ jobs:
       pr_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
-      # TEMPORARY: disabled until ROCm/TheRock#9650 is resolved. The native
-      # MSI build runs on self-hosted Windows runners that lack the dotnet SDK
-      # needed to install WiX.
-      build_native_windows: false
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # event_name tells TheRock's skip filter this is a scheduled/manual run
@@ -99,7 +95,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -111,7 +107,7 @@ jobs:
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     permissions:
       contents: read
       id-token: write
@@ -124,17 +120,18 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers full test run in downstream workflow
       changed_projects: ''
       repository: ROCm/TheRock
-      ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+      ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
     permissions:
       contents: read
       id-token: write
@@ -152,7 +149,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
+          ref: 7c309dbaf02d53ff108e401e5f723f00353e17e4 # 2026-11-10
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

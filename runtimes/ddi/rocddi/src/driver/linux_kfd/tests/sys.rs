@@ -704,7 +704,7 @@ fn unsupported_exception_type_is_rejected_before_the_ioctl() {
 #[test]
 fn forked_endpoint_rejects_native_work() {
     let mut kfd = endpoint(Arc::new(|_| panic!("child reached ioctl")));
-    kfd.process = std::process::id().wrapping_add(1);
+    kfd.process = crate::os::ProcessIdentity::with_pid_for_test(std::process::id().wrapping_add(1));
     assert_eq!(
         kfd.version().unwrap_err().kind(),
         io::ErrorKind::Unsupported

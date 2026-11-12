@@ -6,11 +6,11 @@
 # matrix does not launch all_reduce_perf: it does not build under
 # ENABLE_ROCSHMEM_GIN.
 #
-# Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
-# (rocshmem.env, written by device-api.sbatch from projects/rccl/ext/rocshmem),
-# and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR, RCCL_TESTS_DIR).
+# Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), and rccl.env
+# (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR, RCCL_TESTS_DIR). GIN librccl.so is
+# self-contained, so no rocSHMEM install is needed.
 # Build paths come from the environment (device-api.sbatch exports them) or,
-# when run standalone, from $WORKDIR/.ci-out/{rocm,ompi,rocshmem,rccl}.env.
+# when run standalone, from $WORKDIR/.ci-out/{rocm,ompi,rccl}.env.
 # librccl.so comes from RCCL_INSTALL_PREFIX/lib when that is set, else
 # projects/rccl/build/release. RCCL_TESTS_BIN_DIR defaults to rccl-tests/build.
 #
@@ -30,7 +30,7 @@
 # adds its debug_env to every run.
 #
 # Environment overrides:
-#   ROCM_PATH / MPI_HOME / ROCSHMEM_INSTALL_DIR / RCCL_INSTALL_PREFIX
+#   ROCM_PATH / MPI_HOME / RCCL_INSTALL_PREFIX
 #                          Else read from matching .ci-out/*.env fragments
 #   RCCL_TESTS_BIN_DIR     rccl-tests build directory (default: rccl-tests/build;
 #                          device-api.sbatch writes it to .ci-out/rccl.env)
@@ -62,7 +62,7 @@ CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 # Keep an already-exported RCCL_TESTS_BIN_DIR: device-api.sbatch sets it per
 # matrix (install.sh non-GIN build vs cmake GIN build) and rccl.env would clobber it.
 _saved_tests_bin_dir="${RCCL_TESTS_BIN_DIR-}"
-for frag in rocm ompi rocshmem rccl; do
+for frag in rocm ompi rccl; do
   env_file="${WORKDIR}/.ci-out/${frag}.env"
   # shellcheck source=/dev/null  # runtime fragment written by the build stages
   [[ -f "${env_file}" ]] && source "${env_file}"
@@ -103,7 +103,7 @@ fi
 cd "${RCCL_TESTS_DIR}"
 
 export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
-export LD_LIBRARY_PATH="${RCCL_LIB_DIR}${ROCSHMEM_INSTALL_DIR:+:${ROCSHMEM_INSTALL_DIR}/lib}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${RCCL_LIB_DIR}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
 PERF_DIR="${RCCL_TESTS_BIN_DIR:-${RCCL_TESTS_DIR}/build}"
 # alltoall_perf is built for both matrices. Fall back to all_reduce_perf, which

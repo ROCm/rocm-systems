@@ -25,7 +25,7 @@ namespace rocjitsu::plugins::race_detector {
 struct MarkedInstruction {
   InstructionSnapshot instruction;
   int wave;
-  int lane; // -1 for scalar
+  int lane; // -1 for no lane: a scalar access or a tensor DMA transfer.
 };
 
 /// Retains the last N pushed values. Elements are never default-constructed.
@@ -74,9 +74,17 @@ struct RaceWavefrontState : WavefrontState {
   /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
   WaveRaceState *race_state = nullptr;
+  struct LdsOperandRead {
+    uint32_t address;
+    uint32_t bytes;
+    uint32_t lane;
+  };
+  std::optional<LdsOperandRead> lds_operand_read;
 };
 
-class RaceDetectorPlugin : public ExecutionPlugin {
+class RaceDetectorPlugin : public ExecutionPlugin,
+                           public AmdgpuTrapEntryObserver,
+                           public AmdgpuImplicitMemoryWaitObserver {
 public:
   /// @param config_json Plugin configuration object as a JSON string (unused;
   ///        this plugin takes no configuration). May be null.
@@ -85,6 +93,10 @@ public:
 
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
+  bool observes_tensor_dma_issue() const override { return true; }
+  /// Skip waves without race state, including slots between a halt and the
+  /// next workgroup dispatch, when other plugins may read their registers.
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
@@ -92,8 +104,23 @@ public:
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
 
+  /// Release the workgroup's detector. Reported races are still counted.
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
+
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
+
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
+
+  bool observes_lds_direct_reads() const override { return true; }
+  void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                             uint32_t lane) override;
+
+  /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
@@ -112,9 +139,16 @@ public:
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
+
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override;
 
   std::string getSummary() const;
+
+  /// Number of workgroups whose detector state is still held.
+  size_t retainedWorkgroupCount() const;
 
 private:
   struct WorkgroupKey {
@@ -136,8 +170,9 @@ private:
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
   }
+  void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 
-  std::mutex dispatch_mutex_;
+  mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
   std::mutex report_mutex_;

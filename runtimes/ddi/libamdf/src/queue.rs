@@ -115,6 +115,15 @@ struct Mapping {
 }
 
 impl Queue {
+    fn require_current_process(&self) -> Result<(), u64> {
+        #[cfg(test)]
+        if matches!(self.native, NativeQueue::Fixture(_)) {
+            return Ok(());
+        }
+        // SAFETY: A live queue borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+
     fn observe_loss(&self) {
         #[cfg(test)]
         if matches!(self.native, NativeQueue::Fixture(_)) {
@@ -469,6 +478,7 @@ pub(crate) unsafe extern "C" fn create(
         output_pointer(out)?;
         let create_info = input(create_info, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
@@ -587,6 +597,7 @@ pub(crate) unsafe extern "C" fn map(
     crate::support::boundary(|| unsafe {
         output_pointer(out)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let host = producer.is_null();
         let peer = if host || producer.cast::<Device>() == queue.device {
@@ -673,6 +684,7 @@ pub(crate) unsafe extern "C" fn mapping_info(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_user_queue_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
+        (*mapping.queue).require_current_process()?;
         if let Some(counter) = mapping.producer_queues {
             unregister(&*counter);
         }
@@ -689,6 +701,7 @@ pub(crate) unsafe extern "C" fn status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         out.publish(queue.sample()?);
         Ok(())
     })
@@ -703,6 +716,7 @@ pub(crate) unsafe extern "C" fn wait(
     crate::support::boundary(|| unsafe {
         let start = Instant::now();
         let queue = object(pointer.cast::<Queue>())?;
+        queue.require_current_process()?;
         wait_consumed(queue, target, timeout, poll, start)
     })
 }
@@ -711,6 +725,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
     crate::support::boundary(|| {
         unsafe {
             let queue = object(pointer.cast::<Queue>())?;
+            queue.require_current_process()?;
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }

@@ -4,7 +4,7 @@
 // Tests for FP64 rounding to integral values and FRACT.
 
 #include "fp/loose_unary_f64.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <algorithm>
 #include <cmath>
@@ -243,6 +243,37 @@ TEST(FpCeilF64, InputDenormalControls) {
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(read_fp(r.v + 2, 0, 64), 0U);
       EXPECT_EQ(status, 0x80000000U);
+    }
+  }
+}
+
+// Captured gfx1201 FRACT witnesses distinguish subtraction rounding; overflow
+// checks isolate the output scaling shared by integral operations.
+TEST(FpRoundF64, DirectedRounding) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t rounding :
+         {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+      Registers<4, 32> r;
+      const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | rounding;
+      write_fp(r.v, 0, 64, 0xbce254ae32fc7a4fULL);
+      ASSERT_EQ(rj_arith_v_fract_f64_w32_gfx12(flags, 1, 0, r.v + 2, r.v, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 2, 0, 64),
+                rounding == RJ_ARITH_FP_ROUND_DOWN || rounding == RJ_ARITH_FP_ROUND_ZERO
+                    ? 0x3fefffffffffffedULL
+                    : 0x3fefffffffffffeeULL);
+      write_fp(r.v, 0, 64, 0xbff0000000000000ULL);
+      ASSERT_EQ(rj_arith_v_fract_f64_w32_gfx12(flags, 1, 0, r.v + 2, r.v, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 2, 0, 64), 0ULL);
+      write_fp(r.v, 0, 64, 0x7fefffffffffffffULL);
+      ASSERT_EQ(rj_arith_v_ceil_f64_w32_gfx12(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(read_fp(r.v + 2, 0, 64),
+                rounding == RJ_ARITH_FP_ROUND_DOWN || rounding == RJ_ARITH_FP_ROUND_ZERO
+                    ? 0x7fefffffffffffffULL
+                    : 0x7ff0000000000000ULL);
     }
   }
 }

@@ -242,8 +242,7 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
-    // Complete deferred allocations before publishing a resident tag. A failing
-    // new_handler must leave the cache empty and safe to retry.
+    // Complete deferred allocations before publishing a resident tag.
     tags_.materialize();
     data_.materialize();
     uint32_t set = set_index(addr);
@@ -353,6 +352,29 @@ public:
         }
         if (!vmid)
           touched_sets_[s] = 0;
+      }
+    }
+  }
+
+  /// @brief Invalidate clean cache lines, preserving unpublished dirty state.
+  /// @details The caller must exclude concurrent accesses during this traversal.
+  void invalidate_clean() {
+    invalidate_clean_if([](const CacheTag &) { return true; });
+  }
+
+  /// Invalidate clean lines matching a controller's maintenance policy.
+  /// The caller must exclude concurrent accesses during this traversal.
+  template <typename Predicate> void invalidate_clean_if(Predicate matches) {
+    for (uint32_t set = 0; set < NumSets; ++set) {
+      if (!touched_sets_[set])
+        continue;
+      for (uint32_t way = 0; way < Associativity; ++way) {
+        CacheTag &tag = tag_at(set, way);
+        if (tag.valid && !tag.dirty && matches(tag)) {
+          tag.coherence_epoch = 0;
+          tag.valid = false;
+          tag.coherence = CoherenceState::INVALID;
+        }
       }
     }
   }
@@ -609,7 +631,7 @@ private:
           return ptr;
         std::new_handler handler = std::get_new_handler();
         if (!handler)
-          throw std::bad_alloc();
+          std::abort();
         handler();
       }
     }
