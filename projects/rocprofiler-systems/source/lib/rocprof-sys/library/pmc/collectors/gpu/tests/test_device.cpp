@@ -4,6 +4,7 @@
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "mock_gpu_backend.hpp"
 #include <cstdint>
+#include <cstring>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -2019,6 +2020,181 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
     const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
+}
+
+namespace
+{
+void
+expect_metrics_equal(const metrics& got, const metrics& expected)
+{
+    EXPECT_EQ(0, std::memcmp(&got, &expected, sizeof(got)));
+}
+}  // namespace
+
+// get_metrics copies a field only when that bit is enabled. Compare the whole
+// struct so a field that was not requested cannot pass unnoticed.
+TEST_F(DeviceTest, enabled_bit_copies_only_power_activity_or_clock)
+{
+    metrics raw      = CreateValidMetrics();
+    raw.memory_usage = raw.xgmi.data_acc.read[0];
+
+    EXPECT_CALL(*mock_backend, get_metrics()).WillRepeatedly([&raw] { return raw; });
+    EXPECT_CALL(*mock_backend, get_memory_usage()).WillRepeatedly([&raw] {
+        return raw.memory_usage;
+    });
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature()).WillRepeatedly([&raw] {
+        return raw.hotspot_temperature;
+    });
+    EXPECT_CALL(*mock_backend, get_edge_temperature()).WillRepeatedly([&raw] {
+        return raw.edge_temperature;
+    });
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+    expect_metrics_equal(dev.get_metrics({}, 0), metrics{});
+
+    enabled_metrics mask{};
+    metrics         expected{};
+
+    mask.bits.current_socket_power = 1;
+    expected.current_socket_power  = raw.current_socket_power;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                           = {};
+    expected                       = {};
+    mask.bits.average_socket_power = 1;
+    expected.average_socket_power  = raw.average_socket_power;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                   = {};
+    expected               = {};
+    mask.bits.gfx_activity = 1;
+    expected.gfx_activity  = raw.gfx_activity;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                   = {};
+    expected               = {};
+    mask.bits.umc_activity = 1;
+    expected.umc_activity  = raw.umc_activity;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                  = {};
+    expected              = {};
+    mask.bits.mm_activity = 1;
+    expected.mm_activity  = raw.mm_activity;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                   = {};
+    expected               = {};
+    mask.bits.gfx_clock    = 1;
+    expected.gfx_clock_mhz = raw.gfx_clock_mhz;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                   = {};
+    expected               = {};
+    mask.bits.mem_clock    = 1;
+    expected.mem_clock_mhz = raw.mem_clock_mhz;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+}
+
+TEST_F(DeviceTest, enabled_bit_copies_only_codec_link_memory_or_temperature)
+{
+    metrics raw      = CreateValidMetrics();
+    raw.memory_usage = raw.xgmi.data_acc.read[0];
+
+    EXPECT_CALL(*mock_backend, get_metrics()).WillRepeatedly([&raw] { return raw; });
+    EXPECT_CALL(*mock_backend, get_memory_usage()).WillRepeatedly([&raw] {
+        return raw.memory_usage;
+    });
+    EXPECT_CALL(*mock_backend, get_hotspot_temperature()).WillRepeatedly([&raw] {
+        return raw.hotspot_temperature;
+    });
+    EXPECT_CALL(*mock_backend, get_edge_temperature()).WillRepeatedly([&raw] {
+        return raw.edge_temperature;
+    });
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+    enabled_metrics     mask{};
+    metrics             expected{};
+
+    mask.bits.vcn_busy = 1;
+    for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
+    {
+        expected.xcp_stats[xcp].vcn_busy = raw.xcp_stats[xcp].vcn_busy;
+    }
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                = {};
+    expected            = {};
+    mask.bits.jpeg_busy = 1;
+    for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
+    {
+        expected.xcp_stats[xcp].jpeg_busy = raw.xcp_stats[xcp].jpeg_busy;
+    }
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask           = {};
+    expected       = {};
+    mask.bits.xgmi = 1;
+    expected.xgmi  = raw.xgmi;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask           = {};
+    expected       = {};
+    mask.bits.pcie = 1;
+    expected.pcie  = raw.pcie;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                   = {};
+    expected               = {};
+    mask.bits.memory_usage = 1;
+    expected.memory_usage  = raw.memory_usage;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                          = {};
+    expected                      = {};
+    mask.bits.hotspot_temperature = 1;
+    expected.hotspot_temperature  = raw.hotspot_temperature;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                       = {};
+    expected                   = {};
+    mask.bits.edge_temperature = 1;
+    expected.edge_temperature  = raw.edge_temperature;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+}
+
+// Device-level activity stays unsupported while the per-XCP busy counters are
+// valid, so this uses a second device built from sentinel busy values.
+TEST_F(DeviceTest, enabled_bit_copies_only_device_codec_activity)
+{
+    metrics    raw         = CreateValidMetrics();
+    const auto vcn_sample  = static_cast<std::uint16_t>(raw.gfx_activity);
+    const auto jpeg_sample = static_cast<std::uint16_t>(raw.mm_activity);
+    raw                    = CreateSentinelMetrics();
+    raw.vcn_activity[0]    = vcn_sample;
+    raw.jpeg_activity[0]   = jpeg_sample;
+
+    EXPECT_CALL(*mock_backend, get_metrics()).WillRepeatedly([&raw] { return raw; });
+    EXPECT_CALL(*mock_backend, get_memory_usage())
+        .Times(AnyNumber())
+        .WillRepeatedly(Throw(std::runtime_error("not supported")));
+    SetupSDMAExpectations(mock_backend);
+
+    device<MockBackend> dev(mock_backend, test_index);
+    enabled_metrics     mask{};
+    metrics             expected{};
+
+    mask.bits.vcn_activity = 1;
+    expected.vcn_activity  = raw.vcn_activity;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
+
+    mask                    = {};
+    expected                = {};
+    mask.bits.jpeg_activity = 1;
+    expected.jpeg_activity  = raw.jpeg_activity;
+    expect_metrics_equal(dev.get_metrics(mask, 0), expected);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu::testing
