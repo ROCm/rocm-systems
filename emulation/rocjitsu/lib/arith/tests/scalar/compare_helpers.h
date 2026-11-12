@@ -10,7 +10,7 @@
 #include "common/integer.h"
 #include "common/semantics.h"
 #include "compare/floating_point.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include "scalar/integer_helpers.h"
 
 #include <cmath>

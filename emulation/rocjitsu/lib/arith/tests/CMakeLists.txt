@@ -20,9 +20,13 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
-rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
-rj_arith_add_test(rj_arith_mfma_half_test mfma/mfma_half_test.cpp)
+rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
+rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
+rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
+rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
 
 # One explicit source, executable and arithmetic test per instruction.
@@ -215,6 +219,13 @@ if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage.cmake
     )
 endif()
+
+rj_arith_add_test(rj_arith_mfma_mixed_test mfma/mfma_mixed_test.cpp)
+
+rj_arith_add_test(rj_arith_wmma_gfx1250_mixed_test wmma/gfx1250_mixed_test.cpp)
+rj_arith_add_test(rj_arith_smfmac_float_test mfma/smfmac_float_test.cpp)
+
+rj_arith_add_test(rj_arith_swmmac_gfx1250_float_test wmma/gfx1250_sparse_float_test.cpp)
 
 # Related comparison predicates share a binary; every entry point has its own test.
 foreach(

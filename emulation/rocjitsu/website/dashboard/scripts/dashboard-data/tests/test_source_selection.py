@@ -30,6 +30,7 @@ def resolve(
     event='workflow_dispatch',
     workflow_ref=None,
     ref_type='branch',
+    event_payload=None,
 ):
     workflow = yaml.safe_load(WORKFLOW.read_text())
     step = next(
@@ -37,6 +38,7 @@ def resolve(
         for s in workflow['jobs']['source-metadata']['steps']
         if s.get('id') == 'resolve'
     )
+    minimum_source = workflow['env']['MIN_BENCHMARK_SOURCE_COMMIT']
     # gh is the network boundary only; run the real resolver, git validation and jq.
     gh = tmp_path / 'gh'
     gh.write_text(
@@ -52,6 +54,8 @@ def resolve(
         'print(data)\n'
     )
     gh.chmod(0o755)
+    event_file = tmp_path / 'event.json'
+    event_file.write_text(json.dumps(event_payload or {}))
     output = tmp_path / 'output'
     calls = tmp_path / 'calls'
     api = {
@@ -60,6 +64,12 @@ def resolve(
         },
         f'repos/{REPO}/compare/{SOURCE}...{TIP}': {
             'merge_base_commit': {'sha': SOURCE}
+        },
+        **{
+            f'repos/{REPO}/compare/{minimum_source}...{source}': {
+                'merge_base_commit': {'sha': minimum_source}
+            }
+            for source in (SOURCE, TIP, WORKFLOW_SHA)
         },
         **(responses or {}),
     }
@@ -70,11 +80,13 @@ def resolve(
             'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'],
             'GITHUB_REPOSITORY': REPO,
             'GITHUB_EVENT_NAME': event,
+            'GITHUB_EVENT_PATH': str(event_file),
             'GITHUB_REF': (
                 workflow_ref if workflow_ref is not None else f'refs/heads/{branch}'
             ),
             'GITHUB_REF_TYPE': ref_type,
             'GITHUB_SHA': WORKFLOW_SHA,
+            'MIN_BENCHMARK_SOURCE_COMMIT': minimum_source,
             'REQUESTED_SOURCE_COMMIT': commit,
             'REQUESTED_PULL_REQUEST': pr,
             'GITHUB_OUTPUT': str(output),
@@ -98,10 +110,30 @@ def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert values['source_branch'] == 'develop'
     assert values['source_sha'] == SOURCE != WORKFLOW_SHA
-    assert calls == [
+    assert calls[:-1] == [
         f'repos/{REPO}/git/ref/heads/develop',
         f'repos/{REPO}/compare/{SOURCE}...{TIP}',
     ]
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls[-1] == f'repos/{REPO}/compare/{minimum_source}...{SOURCE}'
+
+
+def test_manual_source_below_compatibility_floor_rejects(tmp_path):
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    result, _, _ = resolve(
+        tmp_path,
+        responses={
+            f'repos/{REPO}/compare/{minimum_source}...{SOURCE}': {
+                'merge_base_commit': {'sha': SOURCE}
+            },
+        },
+    )
+    assert result.returncode != 0
+    assert '--cpu-thread-budget' in result.stderr
 
 
 def side_responses(**pr_changes):
@@ -122,6 +154,30 @@ def side_responses(**pr_changes):
             'merge_base_commit': {'sha': SOURCE}
         },
     }
+
+
+def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(tmp_path):
+    result, values, calls = resolve(
+        tmp_path,
+        event='pull_request',
+        workflow_ref='refs/pull/42/merge',
+        commit='',
+        event_payload={
+            'number': 42,
+            'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
+        },
+        responses=side_responses(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert values == {
+        'source_branch': 'feature/source',
+        'source_sha': SOURCE,
+        'base_branch': 'develop',
+        'base_sha': 'f' * 40,
+        'pull_request_number': '42',
+        'pull_request_url': f'https://github.com/{REPO}/pull/42',
+    }
+    assert not any('/git/ref/heads/feature' in call for call in calls)
 
 
 def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):
@@ -220,7 +276,10 @@ def test_push_uses_event_sha_without_resolving_a_later_branch_tip(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert values == {'source_branch': 'develop', 'source_sha': WORKFLOW_SHA}
-    assert calls == []
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls == [f'repos/{REPO}/compare/{minimum_source}...{WORKFLOW_SHA}']
 
 
 def test_blank_commit_freezes_selected_tip_once(tmp_path):

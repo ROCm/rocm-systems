@@ -6,6 +6,8 @@
 #pragma once
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "mfma/nan_fma.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/gfx1250_backends.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -42,24 +44,6 @@ inline float gfx1250_read_c(const uint32_t *const *c, int row, int col, uint64_t
   }
 }
 
-// Preserve the legacy BF16F32 NaN priority: A, then B, then accumulator.
-inline float gfx1250_nan_fma(float a, float b, float c) {
-  float result = __builtin_fmaf(a, b, c);
-  if ((as_bits(result) & 0x7fffffffU) <= 0x7f800000U) {
-    return result;
-  }
-  if ((as_bits(a) & 0x7fffffffU) > 0x7f800000U) {
-    return as_float(as_bits(a) | 0x00400000U);
-  }
-  if ((as_bits(b) & 0x7fffffffU) > 0x7f800000U) {
-    return as_float(as_bits(b) | 0x00400000U);
-  }
-  if ((as_bits(c) & 0x7fffffffU) > 0x7f800000U) {
-    return as_float(as_bits(c) | 0x00400000U);
-  }
-  return as_float(0xffc00000U);
-}
-
 // Repair only NaN mixed-result elements, before destination stores can
 // overwrite their inputs.
 inline float gfx1250_repair_nan(float value, const float *left, const float *right, int row,
@@ -69,15 +53,16 @@ inline float gfx1250_repair_nan(float value, const float *left, const float *rig
   }
   float dot = 0.0f;
   for (int k = 0; k < 32; ++k) {
-    dot = gfx1250_nan_fma(left[gfx1250_half_index(row, k)], right[gfx1250_half_index(col, k)], dot);
+    dot = matrix_nan_fma(left[gfx1250_half_index(row, k)], right[gfx1250_half_index(col, k)], dot);
   }
-  return gfx1250_nan_fma(dot, 1.0f, initial);
+  return matrix_nan_fma(dot, 1.0f, initial);
 }
 
 // Pack once with RNE in Loose; Compatibility retains legacy BF16 truncation.
 // Every source read, including NaN repair, must precede this publication step.
 template <Wmma1250Form Form>
-inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float result[16][16]) {
+inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float result[16][16],
+                                 bool saturate_f16 = false) {
   const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
   constexpr bool packed = Form != Wmma1250Form::F32F16 && Form != Wmma1250Form::F32Bf16;
   for (int reg = 0; reg < (packed ? 4 : 8); ++reg) {
@@ -86,11 +71,11 @@ inline void gfx1250_write_result(uint64_t flags, uint32_t *const *d, const float
       if constexpr (packed) {
         auto narrow = [&](float x) {
           if constexpr (Form == Wmma1250Form::F16) {
-            // Follow the WMMA-specific CDNA5 §7.12 rule in Loose; legacy
-            // ignored the bit.
-            uint16_t value = float_to_f16(x, !compatibility && (flags & RJ_ARITH_FP16_OVFL));
+            // FP8 output retains its legacy saturation policy in Compatibility.
+            const bool saturate = saturate_f16 || (!compatibility && (flags & RJ_ARITH_FP16_OVFL));
+            uint16_t value = float_to_f16(x, saturate);
             // The WMMA saturation rule also applies to an infinite accumulator.
-            if (!compatibility && (flags & RJ_ARITH_FP16_OVFL) && (value & 0x7fffU) == 0x7c00U) {
+            if (saturate && (value & 0x7fffU) == 0x7c00U) {
               value = uint16_t((value & 0x8000U) | 0x7bffU);
             }
             return value;

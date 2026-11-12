@@ -8,8 +8,8 @@
 #pragma once
 
 #include "common/bits.h"
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 

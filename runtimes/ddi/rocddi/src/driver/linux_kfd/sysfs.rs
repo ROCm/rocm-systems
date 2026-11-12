@@ -17,7 +17,7 @@ use crate::topology::{
     CacheAssociations, CacheInfo, CacheKind, CpuNodeInfo, Endpoint, EndpointKind, GpuInfo,
     GpuQueueCapabilities, GpuSdmaDialect, GpuTargetProfile, MemoryBank, MemoryBankKind,
     MemoryLinkInfo, MemoryLinkType, MemoryLocation, MemoryLocationKind, NativeNodeId, NodeKind,
-    PciInfo, SourceKind, TopologyCache, TopologySnapshot,
+    PciInfo, SourceKind, TopologyCache, TopologyGraphSnapshot,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -571,11 +571,11 @@ pub(super) fn enumerate(
     Ok(())
 }
 
-pub(super) fn contribute_topology(
+pub(super) fn contribute_topology_graph(
     root: &str,
     drm: &str,
     driver_instance: DriverInstanceId,
-    snapshot: &mut TopologySnapshot,
+    snapshot: &mut TopologyGraphSnapshot,
 ) -> Result<(), Error> {
     let discovered = read_all(root, drm, driver_instance, true)?;
     let source = snapshot.add_source(
@@ -1365,9 +1365,10 @@ mod tests {
         super::probe_endpoint(root, drm, DriverInstanceId::TEST, id)
     }
 
-    fn topology(root: &str, drm: &str) -> TopologySnapshot {
-        let mut snapshot = TopologySnapshot::new(crate::topology::host::snapshot()).unwrap();
-        super::contribute_topology(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
+    fn topology_graph_snapshot(root: &str, drm: &str) -> TopologyGraphSnapshot {
+        let mut snapshot =
+            TopologyGraphSnapshot::new(crate::topology::host::graph_snapshot()).unwrap();
+        super::contribute_topology_graph(root, drm, DriverInstanceId::TEST, &mut snapshot).unwrap();
         snapshot
     }
 
@@ -1463,7 +1464,7 @@ mod tests {
         let gpu = endpoint.gpu().unwrap();
         assert_eq!(gpu.memory_bus_width_bits, 384);
         assert_eq!(gpu.maximum_memory_clock_mhz, 1400);
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let gpu_node = snapshot
             .nodes
             .iter()
@@ -1744,7 +1745,7 @@ mod tests {
         .unwrap();
 
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert_eq!(snapshot.sources.last().unwrap().generation, Some(1));
         assert!(snapshot.nodes.iter().any(|node| {
@@ -1831,7 +1832,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let host = snapshot
             .nodes
             .iter()
@@ -1886,7 +1887,7 @@ mod tests {
         )
         .unwrap();
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let first = snapshot
             .endpoints
             .iter()
@@ -1932,7 +1933,7 @@ mod tests {
             .unwrap();
         }
         let (root, drm) = fixture.roots();
-        let snapshot = topology(&root, &drm);
+        let snapshot = topology_graph_snapshot(&root, &drm);
         let endpoint = &snapshot.endpoints[0];
         assert!(snapshot.memory_locations.iter().any(|location| {
             location.kind == MemoryLocationKind::DeviceLocal
