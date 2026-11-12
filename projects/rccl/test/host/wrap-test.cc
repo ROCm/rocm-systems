@@ -1637,6 +1637,37 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_FlagTuneScalesLl128Buffer
       });
 }
 
+TEST(WrapMicrotestIsolated, ScaleCollLl128BuffSize_Gfx1250) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ScaleCollLl128BuffSize_Gfx1250",
+      []() {
+        // gfx1250 default: 120 words/thread * 256 threads * 8 steps * 8 bytes.
+        constexpr int kGfx1250Ll128BuffSize = 1966080;
+        struct Case {
+          const char* arch;
+          int nNodes, nRanks;
+        };
+        for (const Case& c : {Case{"gfx1250", 1, 4}, Case{"gfx1250", 1, 8}, Case{"gfx1250", 2, 16},
+                              Case{"gfx1250-strict", 1, 8}}) {
+          ncclComm* comm = MakeRemoteFlushComm(c.arch, c.nNodes, c.nRanks, /*gdrFlushFlag=*/false);
+          comm->buffSizes[NCCL_PROTO_LL128] = kGfx1250Ll128BuffSize;
+          comm->p2pLl128BuffSize = kGfx1250Ll128BuffSize;
+          comm->topo->ll128Enabled = true;
+          rcclScaleCollLl128BuffSize(comm);
+          EXPECT_EQ(4 * kGfx1250Ll128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << c.arch << " " << c.nRanks;
+          EXPECT_EQ(kGfx1250Ll128BuffSize, comm->p2pLl128BuffSize) << c.arch << ", send/recv keeps the default";
+          DeleteCommWithArch(comm);
+        }
+        ncclComm* comm = MakeRemoteFlushComm("gfx1250", 1, 8, /*gdrFlushFlag=*/false);
+        comm->buffSizes[NCCL_PROTO_LL128] = kGfx1250Ll128BuffSize;
+        comm->p2pLl128BuffSize = kGfx1250Ll128BuffSize;
+        comm->topo->ll128Enabled = false;
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(kGfx1250Ll128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "LL128 disabled";
+        DeleteCommWithArch(comm);
+      });
+}
+
 TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceScatterLimit",
