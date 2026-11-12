@@ -53,9 +53,12 @@ struct pytorch_store_t
     std::vector<std::string>                                     cats;
     std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
     std::map<std::int64_t, std::string>                          process_names;
-    std::uint64_t                                                parse_ms{};
-    std::uint64_t                                                derive_ms{};
-    load_diag_t                                                  diag{};
+    std::map<std::int64_t, std::string>                          device_names;
+    std::map<std::int64_t, std::string>
+                  device_json;  // each deviceProperties entry as text
+    std::uint64_t parse_ms{};
+    std::uint64_t derive_ms{};
+    load_diag_t   diag{};
 };
 
 // @p cancelled is polled while the file is read; see load_kineto.

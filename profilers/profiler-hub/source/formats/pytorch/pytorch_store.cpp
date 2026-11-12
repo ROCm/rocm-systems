@@ -192,6 +192,8 @@ load_store(const std::string& path, std::function<bool()> cancelled)
     store.cats          = std::move(trace.cats);
     store.thread_names  = std::move(trace.thread_names);
     store.process_names = std::move(trace.process_names);
+    store.device_names  = std::move(trace.device_names);
+    store.device_json   = std::move(trace.device_json);
     store.diag          = trace.diag;
     store.derive_ms     = common::elapsed_ms(t_derive);
     return store;

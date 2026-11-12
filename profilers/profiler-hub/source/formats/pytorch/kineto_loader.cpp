@@ -472,13 +472,15 @@ public:
             m_in_device = true;
             m_dev_id    = -1;
             m_dev_name.clear();
+            m_text.begin(m_dev_text);
+            m_text.open('{');
         }
         return true;
     }
 
     bool end_object()
     {
-        close_text();
+        if(close_text() && m_in_event) m_cur.has_args = true;
         if(m_depth == 3 && m_in_event)
         {
             finish_event();
@@ -546,13 +548,14 @@ private:
         memory_sample_t memory;
     };
 
-    void close_text()
+    // True when the value being re-serialised just ended.
+    bool close_text()
     {
-        if(!m_text.active()) return;
+        if(!m_text.active()) return false;
         m_text.close();
-        if(!m_text.complete()) return;
+        if(!m_text.complete()) return false;
         m_text.end();
-        m_cur.has_args = true;
+        return true;
     }
 
     bool at_time_key() const
@@ -762,7 +765,9 @@ private:
 
     void finish_device()
     {
-        if(m_dev_id >= 0) m_t.device_names[m_dev_id] = m_dev_name;
+        if(m_dev_id < 0) return;
+        m_t.device_names[m_dev_id] = m_dev_name;
+        m_t.device_json[m_dev_id]  = m_dev_text;
     }
 
     loaded_trace_t& m_t;
@@ -779,6 +784,7 @@ private:
     bool                                           m_key_decided = false;
     json_text_t                                    m_text;
     std::string                                    m_args_text;
+    std::string                                    m_dev_text;
     std::unordered_map<std::string, std::int64_t>  m_lane_ids;
     std::int64_t m_next_lane = std::numeric_limits<std::int32_t>::max();
 };
