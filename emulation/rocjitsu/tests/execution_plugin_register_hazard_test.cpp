@@ -67,7 +67,8 @@ public:
     hazards.push_back(hazard);
     phases.emplace_back(hazard.consumer_pc, "hazard");
   }
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, Wavefront &,
+                                        std::span<const uint32_t>) override {
     phases.emplace_back(pc, "before");
     if (before)
       before(pc);
@@ -815,7 +816,7 @@ TEST(RegisterHazardPluginTest, CounterOnlyIssuesParticipateInLdsPartialWaits) {
       state->dst_reg_base = wave->vgpr_alloc().base + 4;
       state->wait_counter_type = WaitCounterType::VMCNT;
       TestMemoryInstruction instruction(std::move(state));
-      h.fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, instruction, *wave);
+      h.fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, instruction, *wave, {});
       h.fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave);
       wave->pc += 4;
     }

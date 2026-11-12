@@ -418,8 +418,8 @@ public:
       : ExecutionPlugin("concurrent-dispatch-fuzz-observer"), address_space_(address_space),
         memory_(memory), workgroups_(scenario.workgroups), barrier_(scenario.barrier) {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     instructions_.fetch_add(1, std::memory_order_relaxed);
   }
 

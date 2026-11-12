@@ -38,7 +38,8 @@ public:
   bool supports_async_instructions() const override { return false; }
 
   IssueRecorder() : ExecutionPlugin("vskip_recorder") {}
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &,
+                                        std::span<const uint32_t>) override {
     issued.emplace_back(inst.mnemonic());
   }
   std::vector<std::string> issued;

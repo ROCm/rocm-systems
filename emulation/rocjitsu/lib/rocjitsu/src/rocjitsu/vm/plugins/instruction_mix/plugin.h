@@ -98,8 +98,8 @@ public:
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override;
 
   static InstructionFamily classify(const Instruction &inst);
   static std::string_view family_name(InstructionFamily family);

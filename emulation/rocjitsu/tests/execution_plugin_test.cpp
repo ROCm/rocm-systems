@@ -28,6 +28,7 @@
 
 #include <gtest/gtest-spi.h>
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -41,8 +42,10 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <span>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
 
 #if defined(__linux__)
 #include <unistd.h>
@@ -103,8 +106,8 @@ public:
 
   ParallelColdHookRecorder() : ExecutionPlugin("parallel_cold_hook_recorder"), startup_(2) {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       hot_hook_threads_.insert(std::this_thread::get_id());
@@ -1377,7 +1380,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_lshlrev_b64", encoding);
-      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
       group.onAmdgpuWavefrontHalted(wf);
     }
     group.onAmdgpuDispatchExecutionEnd(1);
@@ -1427,7 +1430,7 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
       wf.set_dispatch_id(1);
       group.onAmdgpuWavefrontDispatched(wf);
       EncodedTestInstruction inst("v_mov_b32_e32", /*encoding_id=*/63, /*opcode=*/1, size);
-      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+      group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
       group.onAmdgpuWavefrontHalted(wf);
     }
     group.onAmdgpuDispatchExecutionEnd(1);
@@ -1470,7 +1473,7 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
     wf.set_dispatch_id(dispatch_id);
     group.onAmdgpuWavefrontDispatched(wf);
     InstructionMixTestInstruction inst(dispatch_id == 1 ? "s_nop" : "v_add_f32");
-    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
     group.onAmdgpuWavefrontHalted(wf);
   }
   group.onAmdgpuDispatchExecutionEnd(1);
@@ -1527,7 +1530,7 @@ TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
   {
     std::string transient_mnemonic = "global_load_dwordx4_transient_storage";
     InstructionMixTestInstruction inst(transient_mnemonic, MEMORY_OP);
-    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf);
+    group.onAmdgpuBeforeExecuteInstruction(0, inst, wf, {});
     // Scribble over the characters the view pointed at, then release them.
     transient_mnemonic.assign(transient_mnemonic.size(), 'X');
     transient_mnemonic = std::string();
@@ -1551,7 +1554,8 @@ public:
 
   explicit AsyncEventPlugin(std::string name = "async-events") : ExecutionPlugin(std::move(name)) {}
   bool supports_async_instructions() const override { return true; }
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     if (inst.mnemonic() == "s_set_vgpr_msb")
       hazard_before_set_vgpr = wf.setreg_vgpr_msb_hazard();
   }
@@ -1888,7 +1892,8 @@ TEST(ExecutionPluginTest, InterestsAreInheritedAndCanBeExplicitlyDisabled) {
     explicit BeforeObserver(std::string name) : ExecutionPlugin(std::move(name)) {}
     bool observes_before_execute_instruction() const override { return true; }
     bool supports_async_instructions() const override { return false; }
-    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &,
+                                          std::span<const uint32_t>) override {
       ++before;
     }
     // An override alone must not enable this hook.
@@ -1922,7 +1927,7 @@ TEST(ExecutionPluginTest, InterestsAreInheritedAndCanBeExplicitlyDisabled) {
   expect_hot_hook_interests(group, {"before"});
   EXPECT_FALSE(group.supports_async_instructions());
   Instruction instruction("s_nop", nullptr);
-  group.onAmdgpuBeforeExecuteInstruction(0, instruction, *wave);
+  group.onAmdgpuBeforeExecuteInstruction(0, instruction, *wave, {});
   group.onAmdgpuAfterExecuteInstruction(0, instruction, *wave);
   EXPECT_EQ(inherited_ptr->before, 1u);
   EXPECT_EQ(disabled_ptr->before, 0u);
@@ -1997,7 +2002,11 @@ TEST(ExecutionPluginTest, HotHookPolicyComesFromContainedPlugins) {
   EXPECT_TRUE(group.requires_serial_hot_hooks());
 }
 
-TEST(ExecutionPluginTest, MemoryHooksPreserveContextAndWaveSelection) {
+TEST(ExecutionPluginTest, HooksPreserveContextAndWaveSelection) {
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPlugin::onAmdgpuBeforeExecuteInstruction)>);
+  static_assert(std::is_member_function_pointer_v<
+                decltype(&ExecutionPluginGroup::onAmdgpuBeforeExecuteInstruction)>);
   static_assert(
       std::is_member_function_pointer_v<decltype(&ExecutionPlugin::onAmdgpuMemoryAccessRouted)>);
   static_assert(std::is_member_function_pointer_v<
@@ -2009,11 +2018,21 @@ TEST(ExecutionPluginTest, MemoryHooksPreserveContextAndWaveSelection) {
 
   class ContextObserver : public ExecutionPlugin {
   public:
-    ContextObserver() : ExecutionPlugin("memory_context") {}
+    ContextObserver() : ExecutionPlugin("context") {}
+    bool observes_before_execute_instruction() const override { return true; }
     bool observes_memory_routing() const override { return true; }
     bool observes_tensor_dma_memory_access() const override { return true; }
     bool observes_hot_hooks_for_wavefront(const Wavefront *wf) const override {
       return wf == selected;
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, Wavefront &wf,
+                                          std::span<const uint32_t> fetch_window) override {
+      EXPECT_EQ(&wf, selected);
+      EXPECT_EQ(pc, expected_pc);
+      EXPECT_EQ(&inst, expected_instruction);
+      EXPECT_EQ(fetch_window.data(), expected_fetch.data());
+      EXPECT_EQ(fetch_window.size(), expected_fetch.size());
+      ++before_calls;
     }
     void onAmdgpuMemoryAccessRouted(const MemoryAccessObservation &access, const Instruction &inst,
                                     Wavefront &wf) override {
@@ -2032,6 +2051,10 @@ TEST(ExecutionPluginTest, MemoryHooksPreserveContextAndWaveSelection) {
     const MemoryAccessObservation *memory = nullptr;
     const TensorDmaMemoryAccessObservation *tensor = nullptr;
     const Instruction *instruction = nullptr;
+    uint64_t expected_pc = 0;
+    const Instruction *expected_instruction = nullptr;
+    std::span<const uint32_t> expected_fetch;
+    unsigned before_calls = 0;
     unsigned memory_calls = 0;
     unsigned tensor_calls = 0;
   };
@@ -2051,16 +2074,27 @@ TEST(ExecutionPluginTest, MemoryHooksPreserveContextAndWaveSelection) {
     ASSERT_NE(wave, nullptr);
   }
   observer->selected = waves.front();
-  Instruction instruction("memory_context", nullptr);
+  Instruction instruction("context", nullptr);
   const MemoryAccessObservation memory;
   const TensorDmaMemoryAccessObservation tensor;
+  constexpr uint64_t pc = 0x5000;
+  const std::array<uint32_t, 5> fetch_words{0x11111111, 0x22222222, 0x33333333, 0x44444444,
+                                            0x55555555};
+  const std::span<const uint32_t> fetch_window(fetch_words);
+  observer->expected_pc = pc;
+  observer->expected_instruction = &instruction;
   for (const bool cached : {false, true}) {
     for (auto *wave : waves) {
       if (cached)
         group.onAmdgpuWavefrontDispatched(*wave);
+      for (const auto window : {std::span<const uint32_t>{}, fetch_window.first(4), fetch_window}) {
+        observer->expected_fetch = window;
+        group.onAmdgpuBeforeExecuteInstruction(pc, instruction, *wave, window);
+      }
       group.onAmdgpuMemoryAccessRouted(memory, instruction, *wave);
       group.onAmdgpuTensorDmaMemoryAccess(tensor, *wave);
     }
+    EXPECT_EQ(observer->before_calls, cached ? 6u : 3u);
     EXPECT_EQ(observer->memory_calls, cached ? 2u : 1u);
     EXPECT_EQ(observer->tensor_calls, cached ? 2u : 1u);
     EXPECT_EQ(observer->memory, &memory);

@@ -182,8 +182,8 @@ public:
 
   bool observes_before_execute_instruction() const override { return true; }
   bool observes_async_instruction_issued() const override { return true; }
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     ++stats_.executed;
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &, amdgpu::Wavefront &) override {

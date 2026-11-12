@@ -53,8 +53,8 @@ public:
 
   MemoryLifecyclePlugin() : ExecutionPlugin("vm-memory-lifecycle") {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     if (inst.mnemonic() == kMnemonic)
       ++before_count;
   }
@@ -84,8 +84,8 @@ public:
 
   InvalidAtomicOperationPlugin() : ExecutionPlugin("invalid-atomic-operation") {}
 
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &,
-                                        amdgpu::Wavefront &) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &, amdgpu::Wavefront &,
+                                        std::span<const uint32_t>) override {
     if (pc == successor_pc)
       ++successor_executions;
   }
@@ -343,8 +343,8 @@ public:
   bool supports_async_instructions() const override { return false; }
 
   InstructionVmPlugin() : ExecutionPlugin("instruction-vm") {}
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &wf) override {
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &wf,
+                                        std::span<const uint32_t>) override {
     if (before_instruction)
       before_instruction(wf);
   }

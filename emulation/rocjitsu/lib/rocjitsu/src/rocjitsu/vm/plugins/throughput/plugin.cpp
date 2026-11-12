@@ -125,7 +125,8 @@ void ThroughputPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 }
 
 void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
-                                                        amdgpu::Wavefront &wf) {
+                                                        amdgpu::Wavefront &wf,
+                                                        std::span<const uint32_t>) {
   auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
   const InstructionFamily family = count_instruction(*state, inst);
   state->active_family = family;

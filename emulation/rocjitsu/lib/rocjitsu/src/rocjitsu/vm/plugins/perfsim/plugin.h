@@ -49,8 +49,6 @@ public:
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
-  void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
-                                        amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                                         std::span<const uint32_t> fetch_window) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
@@ -60,8 +58,6 @@ public:
 
 private:
   void retire_wavefront(amdgpu::Wavefront &wf, bool cancelled);
-  void record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
-                          std::span<const uint32_t> fetch_window);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;
