@@ -4,13 +4,11 @@
 """Unit tests for rocprof_compute_base.py."""
 
 import argparse
-import signal
 from unittest.mock import Mock
 
 import common
 import pytest
 
-import rocprof_compute_base
 from rocprof_compute_base import RocProfCompute
 
 MODULE = "rocprof_compute_base"
@@ -164,11 +162,3 @@ def test_validate_list_option_exclusions(monkeypatch, options, named_option):
     with pytest.raises(SystemExit):
         rocprof_compute_with_args(args)._validate_list_option_exclusions()
     assert named_option in error.call_args.args[0]
-
-
-def test_sigterm_exits_so_cleanup_runs():
-    """SIGTERM raises SystemExit, so finally blocks clean up temporary folders."""
-    with pytest.raises(SystemExit) as exit_info:
-        rocprof_compute_base._exit_on_sigterm(signal.SIGTERM, None)
-
-    assert exit_info.value.code == 128 + signal.SIGTERM

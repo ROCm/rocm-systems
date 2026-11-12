@@ -3,7 +3,6 @@
 
 import argparse
 import csv
-import ctypes
 import errno
 import io
 import os
@@ -15,14 +14,11 @@ import sys
 import tempfile
 import textwrap
 import threading
-import time
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     Any,
     Dict,
-    Generator,
     Iterator,
     List,
     Mapping,
@@ -55,10 +51,6 @@ NATIVE_COUNTERS_PREFIX = "counters"
 NATIVE_DISPATCH_PREFIX = "dispatch"
 NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
-PROCFS_ROOT = Path("/proc")
-ROOT_DIR = Path("/")
-SDK_ATTACH_LIBRARY = "librocprofiler-sdk-attach.so"
-SDK_TOOL_LIBRARY = "rocprofiler-sdk/librocprofiler-sdk-tool.so"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 # Panel id of block 4, Roofline
@@ -227,54 +219,6 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     return resolved
 
 
-def attach_target_root(attach_pid: Optional[str]) -> Path:
-    """Return the root directory of the attach target.
-
-    Return / if the target uses the same root directory as this process.
-    """
-    if attach_pid is None:
-        return ROOT_DIR
-    target_root = PROCFS_ROOT / attach_pid / "root"
-    try:
-        shares_root_dir = target_root.samefile(ROOT_DIR)
-    except OSError as error:
-        console_error(
-            f"Cannot read the root directory of process {attach_pid}: {error}"
-        )
-        return target_root
-    return ROOT_DIR if shares_root_dir else target_root
-
-
-def to_local_path(target_path: str, target_root: Path) -> Path:
-    """Convert a path in the view of the target to a path on this machine."""
-    return target_root / Path(target_path).relative_to(ROOT_DIR)
-
-
-def to_target_path(local_path: Path, target_root: Path) -> str:
-    """Convert a path under the target root to a path in the view of the target."""
-    return str(ROOT_DIR / local_path.relative_to(target_root))
-
-
-def find_attach_tool_library(attach_pid: str) -> Optional[str]:
-    """Return the SDK tool library from the ROCm installation of the attach target.
-
-    The path is in the view of the target, so it also works for a target in a
-    container.
-    """
-    attach_library_dir = _find_mapped_library_directory(
-        _read_process_maps(attach_pid), SDK_ATTACH_LIBRARY
-    )
-    if attach_library_dir is None:
-        return None
-    target_root = attach_target_root(attach_pid)
-    tool_path = resolve_rocm_library_path(
-        str(to_local_path(f"{attach_library_dir}/{SDK_TOOL_LIBRARY}", target_root))
-    )
-    if tool_path is None or not Path(tool_path).is_file():
-        return None
-    return to_target_path(Path(tool_path), target_root)
-
-
 def is_tcc_channel_counter(counter: str) -> bool:
     return counter.startswith("TCC") and counter.endswith("]")
 
@@ -439,110 +383,6 @@ def detect_rocprof(args: argparse.Namespace) -> str:
         console_debug(f"rocprof_cmd is {get_rocprof_cmd()}")
         console_debug(f"ROC Profiler: {rocprof_path}")
     return get_rocprof_cmd()
-
-
-def perform_attach_detach(new_env: Dict[str, str], options: Dict[str, Any]) -> None:
-    @contextmanager
-    def temporary_env(env_vars: Dict[str, str]) -> Generator[None, None, None]:
-        """
-        Temporarily change the environment variable of this application.
-        """
-        original_env = os.environ.copy()
-        os.environ.update({k: str(v) for k, v in env_vars.items()})
-        try:
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(original_env)
-
-    with _attach_output_in_target(
-        new_env, options["ROCPROF_ATTACH_PID"]
-    ) as attach_env, temporary_env(attach_env):
-        libname = options["ROCPROF_ATTACH_LIBRARY"]
-
-        try:
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-        except Exception as e:
-            console_error(f"Error loading {libname}: {e}")
-
-        # Set argument and return types for live attach functions
-        try:
-            # new live attach API
-            c_lib.rocattach_attach.restype = ctypes.c_int
-            c_lib.rocattach_attach.argtypes = [ctypes.c_int]
-            c_lib.rocattach_detach.restype = ctypes.c_int
-            c_lib.rocattach_detach.argtypes = [ctypes.c_int]
-        except Exception as e:
-            console_debug(
-                "Error setting new live attach API argument "
-                f"types: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach.restype = ctypes.c_int
-                c_lib.attach.argtypes = [ctypes.c_uint]
-                c_lib.detach.restype = ctypes.c_int
-                c_lib.detach.argtypes = [ctypes.c_uint]
-            except Exception as e:
-                console_error(f"Error setting live attach function argument types: {e}")
-
-        pid = options["ROCPROF_ATTACH_PID"]
-        if pid is None:
-            console_error("Live attach mode requires a process ID (ROCPROF_ATTACH_PID)")
-
-        try:
-            # new live attach API
-            attach_status = c_lib.rocattach_attach(int(pid))
-            if attach_status != 0:
-                console_error(
-                    f"Error attaching to process {pid}, "
-                    f"rocattach_attach returned {attach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                "Error attaching with latest live attach "
-                f"API: {e}, trying legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.attach(int(pid))
-            except Exception as e:
-                console_error(f"Error attaching to process {pid}: {e}")
-
-        duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-        if duration is None:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                "Press Enter to detach...\033[0m"
-            )
-            input()
-        else:
-            console_log(
-                f"\033[93mAttach to process with ID {pid} is successful, "
-                f"detach will happen in {duration} milliseconds...\033[0m"
-            )
-            time.sleep(int(duration) / 1000)
-
-        try:
-            # new live attach API
-            detach_status = c_lib.rocattach_detach(int(pid))
-            if detach_status != 0:
-                console_error(
-                    f"Error detaching from process {pid}, "
-                    f"rocattach_detach returned {detach_status}"
-                )
-        except Exception as e:
-            console_debug(
-                f"Error detaching with latest live attach API: {e}, "
-                "trying detach with legacy live attach API"
-            )
-            try:
-                # old live attach API
-                c_lib.detach(int(pid))
-            except Exception as e:
-                console_error(f"Error detaching from process {pid}: {e}")
 
 
 def capture_subprocess_output(
@@ -1143,47 +983,17 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
-@contextmanager
-def temporary_rocprofiler_metrics_path(
-    sdk_config: Dict[str, Any], attach_pid: Optional[str] = None
-) -> Generator[str, None, None]:
-    """Yield a directory with counter definitions for the profiled process.
-
-    With attach_pid, the directory is in the /tmp of the target, and the user
-    of the target owns it. The directory is deleted on exit, also when
-    profiling fails.
-    """
-    target_root = attach_target_root(attach_pid)
-    metrics_path = create_temp_rocprofiler_metrics_path(sdk_config, target_root)
-    local_metrics_path = to_local_path(metrics_path, target_root)
-    try:
-        if attach_pid is not None:
-            _chown_to_process_owner(local_metrics_path, attach_pid)
-        yield metrics_path
-    finally:
-        shutil.rmtree(local_metrics_path, ignore_errors=True)
-
-
 def create_temp_rocprofiler_metrics_path(
-    sdk_config: Dict[str, Any], target_root: Path = ROOT_DIR
+    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
 ) -> str:
-    """
-    Create temporary directory with rocprofiler metrics config files.
+    """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    Writes two config files:
-    - counter_defs.yaml: For backward compatibility (excludes firmware restrictions)
-    - config.yaml: Current version with full config
-
-    Args:
-        sdk_config: The rocprofiler-sdk configuration dictionary.
-        target_root: Root directory of the profiled process.
-
-    Returns:
-        Path to the temporary directory (for ROCPROFILER_METRICS_PATH env var),
-        in the view of the profiled process.
+    The directory is created in parent_dir. It holds config.yaml with the full
+    config, and counter_defs.yaml without firmware restrictions for older
+    rocprofiler-sdk versions. Return the path of the directory.
     """
     tmpfile_parent = Path(
-        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=target_root / "tmp")
+        tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )
 
     # counter_defs.yaml is for backward compatibility with previous versions of sdk
@@ -1206,7 +1016,7 @@ def create_temp_rocprofiler_metrics_path(
     with open(tmpfile_path_new, "w", encoding="utf-8") as tmpfile:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
-    return to_target_path(tmpfile_parent, target_root)
+    return str(tmpfile_parent)
 
 
 def reconfigure_stdio_utf8() -> None:
@@ -1489,75 +1299,3 @@ def _format_listed_table(
         show_index=False,
     )
     return f"{table_id} {metric_details[table_id][0]}\n{table}"
-
-
-def _read_process_maps(pid: str) -> List[str]:
-    """Return the lines of /proc/<pid>/maps."""
-    maps_path = PROCFS_ROOT / pid / "maps"
-    try:
-        return maps_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as error:
-        console_error(f"Cannot read the memory map of process {pid}: {error}")
-        return []
-
-
-def _find_mapped_library_directory(
-    maps_lines: List[str], library_name: str
-) -> Optional[str]:
-    """Return the directory of the first mapped file that starts with library_name."""
-    for line in maps_lines:
-        path_start = line.find("/")
-        if path_start < 0 or line.endswith(" (deleted)"):
-            continue
-        mapped_path = Path(line[path_start:])
-        if mapped_path.name.startswith(library_name):
-            return str(mapped_path.parent)
-    return None
-
-
-def _chown_to_process_owner(directory: Path, pid: str) -> None:
-    """Change the owner of a directory and its files to the owner of process pid."""
-    process_owner = (PROCFS_ROOT / pid).stat()
-    for owned_path in [directory, *directory.iterdir()]:
-        os.chown(owned_path, process_owner.st_uid, process_owner.st_gid)
-
-
-@contextmanager
-def _attach_output_in_target(
-    new_env: Dict[str, str], attach_pid: Optional[str]
-) -> Generator[Dict[str, str], None, None]:
-    """Yield the environment for the attach.
-
-    A target in a container cannot write to our output directory. For such a
-    target, the output goes to a folder in its own /tmp. After detach, the
-    folder is copied to our output directory. The folder is always deleted.
-    """
-    target_root = attach_target_root(attach_pid)
-    if target_root == ROOT_DIR:
-        yield new_env
-        return
-    staging_path = Path(
-        tempfile.mkdtemp(
-            prefix=f"rocprof_compute_attach_{attach_pid}_", dir=target_root / "tmp"
-        )
-    )
-    try:
-        _chown_to_process_owner(staging_path, attach_pid)
-        console_debug(f"Process {attach_pid} writes its output to {staging_path}")
-        yield {
-            **new_env,
-            "ROCPROF_OUTPUT_PATH": to_target_path(staging_path, target_root),
-        }
-        _copy_attach_output(
-            staging_path, Path(new_env["ROCPROF_OUTPUT_PATH"]), attach_pid
-        )
-    finally:
-        shutil.rmtree(staging_path, ignore_errors=True)
-
-
-def _copy_attach_output(staging_path: Path, output_path: Path, pid: str) -> None:
-    """Copy the output of the attach target from its /tmp to our output directory."""
-    if not staging_path.is_dir():
-        console_error(f"Cannot copy the profiling output: process {pid} has exited.")
-        return
-    shutil.copytree(staging_path, output_path, dirs_exist_ok=True)

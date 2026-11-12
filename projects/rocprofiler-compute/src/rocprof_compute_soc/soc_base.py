@@ -5,6 +5,7 @@
 import argparse
 import functools
 import os
+import shutil
 from abc import abstractmethod
 from pathlib import Path
 from typing import (
@@ -38,12 +39,12 @@ from utils.utils_common import (
     add_counter_extra_config_input_yaml,
     canonical_config_arch,
     convert_metric_id_to_panel_info,
+    create_temp_rocprofiler_metrics_path,
     get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
     selects_roofline,
-    temporary_rocprofiler_metrics_path,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -634,16 +635,21 @@ class OmniSoC_Base:
             encoding="utf-8",
         ) as filename:
             sdk_config = yaml.safe_load(filename)
-        with temporary_rocprofiler_metrics_path(sdk_config) as metrics_path:
-            os.environ["ROCPROFILER_METRICS_PATH"] = metrics_path
-            counters = rocprofv3_avail_interface.get_counters(
-                args.rocprofiler_sdk_tool_path
-            )
+        os.environ["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
+            sdk_config
+        )
+
+        counters = rocprofv3_avail_interface.get_counters(
+            args.rocprofiler_sdk_tool_path
+        )
         rocprof_counters = {
             counter.name
             for counter in counters[list(counters.keys())[0]]
             if hasattr(counter, "block") or hasattr(counter, "expression")
         }
+        # Delete counter definition temporary directory
+        if os.environ.get("ROCPROFILER_METRICS_PATH"):
+            shutil.rmtree(os.environ["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
         # Reset env. var.
         if old_rocprofiler_metrics_path is None:
             del os.environ["ROCPROFILER_METRICS_PATH"]

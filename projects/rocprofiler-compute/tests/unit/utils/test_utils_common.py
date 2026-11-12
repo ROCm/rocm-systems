@@ -7,11 +7,9 @@ import builtins
 import io
 import logging
 import os
-import shutil
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -86,64 +84,6 @@ logging.trace = lambda *args, **kwargs: None
 # =============================================================================
 # VERSION UTILITIES TESTS
 # =============================================================================
-
-
-def make_container_target(tmp_path, monkeypatch):
-    """Create a fake /proc/42 for a target in a container. Return the target root."""
-    procfs_root = tmp_path / "proc"
-    target_root = procfs_root / "42" / "root"
-    (target_root / "tmp").mkdir(parents=True)
-    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
-    return target_root
-
-
-def make_shared_root_target(tmp_path, monkeypatch):
-    """Create a fake /proc/42 for a target with the same root directory as ours."""
-    procfs_root = tmp_path / "proc"
-    (procfs_root / "42").mkdir(parents=True)
-    (procfs_root / "42" / "root").symlink_to("/")
-    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
-
-
-def write_target_maps(lines):
-    """Write /proc/42/maps under the patched PROCFS_ROOT."""
-    maps_path = utils_common.PROCFS_ROOT / "42" / "maps"
-    maps_path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
-
-
-def make_fake_attach_library(target_root, attach_status=0, on_detach=None):
-    """Return a fake librocprofiler-sdk-rocattach.so.
-
-    On detach, it writes results.db to ROCPROF_OUTPUT_PATH. Then it calls
-    on_detach with the local path of that folder.
-    """
-    seen = {}
-
-    def rocattach_attach(pid):
-        return attach_status
-
-    def rocattach_detach(pid):
-        seen["output_path"] = os.environ["ROCPROF_OUTPUT_PATH"]
-        local_output = utils_common.to_local_path(seen["output_path"], target_root)
-        (local_output / "results.db").write_text("rows", encoding="utf-8")
-        if on_detach is not None:
-            on_detach(local_output)
-        return 0
-
-    library = SimpleNamespace(
-        rocattach_attach=rocattach_attach, rocattach_detach=rocattach_detach
-    )
-    return library, seen
-
-
-def run_attach(monkeypatch, attach_library, output_dir):
-    """Run perform_attach_detach on pid 42 with a fake attach library."""
-    monkeypatch.setattr(utils_common.ctypes, "CDLL", lambda _name: attach_library)
-    monkeypatch.setattr(utils_common, "console_log", lambda *a, **k: None)
-    utils_common.perform_attach_detach(
-        {"ROCPROF_OUTPUT_PATH": str(output_dir), "ROCPROF_ATTACH_DURATION": "0"},
-        {"ROCPROF_ATTACH_LIBRARY": "librocattach.so", "ROCPROF_ATTACH_PID": "42"},
-    )
 
 
 def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
@@ -1074,151 +1014,16 @@ def test_resolve_rocm_library_path(tmp_path):
     assert resolve_rocm_library_path(str(missing)) == str(missing)
 
 
-def test_attach_target_root_without_attach_is_root_dir():
-    assert utils_common.attach_target_root(None) == Path("/")
-
-
-def test_attach_target_root_when_target_shares_root_dir(tmp_path, monkeypatch):
-    make_shared_root_target(tmp_path, monkeypatch)
-
-    assert utils_common.attach_target_root("42") == Path("/")
-
-
-def test_attach_target_root_for_target_in_container(tmp_path, monkeypatch):
-    target_root = make_container_target(tmp_path, monkeypatch)
-
-    assert utils_common.attach_target_root("42") == target_root
-
-
-def test_attach_target_root_errors_when_process_is_unreadable(tmp_path, monkeypatch):
-    monkeypatch.setattr(utils_common, "PROCFS_ROOT", tmp_path / "proc")
-
-    with pytest.raises(SystemExit):
-        utils_common.attach_target_root("42")
-
-
-def test_find_attach_tool_library_uses_target_rocm(tmp_path, monkeypatch):
-    """Use the tool library from the ROCm installation of the mapped attach library."""
-    target_root = make_container_target(tmp_path, monkeypatch)
-    write_target_maps([
-        "7f00-7f10 r-xp 00000000 08:01 1 /opt/old/lib/librocprofiler-sdk-attach.so.1"
-        " (deleted)",
-        "7f10-7f20 r-xp 00000000 08:01 2 /usr/lib/libc.so.6",
-        "7f20-7f30 r-xp 00000000 08:01 3 "
-        "/opt/rocm-9/lib/librocprofiler-sdk-attach.so.1",
-    ])
-    for rocm_dir in ("opt/old/lib", "opt/rocm-9/lib"):
-        tool_dir = target_root / rocm_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True)
-        (tool_dir / "librocprofiler-sdk-tool.so.1").touch()
-
-    assert utils_common.find_attach_tool_library("42") == (
-        "/opt/rocm-9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.1"
+def test_create_temp_rocprofiler_metrics_path_in_parent_dir(tmp_path):
+    metrics_path = Path(
+        utils_common.create_temp_rocprofiler_metrics_path(
+            {"rocprofiler-sdk": {"counters": []}}, tmp_path
+        )
     )
 
-
-def test_find_attach_tool_library_none_without_mapped_attach_library(
-    tmp_path, monkeypatch
-):
-    make_container_target(tmp_path, monkeypatch)
-    write_target_maps(["7f10-7f20 r-xp 00000000 08:01 2 /usr/lib/libc.so.6"])
-
-    assert utils_common.find_attach_tool_library("42") is None
-
-
-def test_find_attach_tool_library_none_when_target_rocm_lacks_tool(
-    tmp_path, monkeypatch
-):
-    target_root = make_container_target(tmp_path, monkeypatch)
-    write_target_maps([
-        "7f20-7f30 r-xp 00000000 08:01 3 /opt/rocm-9/lib/librocprofiler-sdk-attach.so"
-    ])
-    (target_root / "opt/rocm-9/lib").mkdir(parents=True)
-
-    assert utils_common.find_attach_tool_library("42") is None
-
-
-def test_temporary_rocprofiler_metrics_path_in_container_target(tmp_path, monkeypatch):
-    """Write counter definitions to the /tmp of the target, and delete them after."""
-    target_root = make_container_target(tmp_path, monkeypatch)
-
-    with utils_common.temporary_rocprofiler_metrics_path(
-        {"rocprofiler-sdk": {"counters": []}}, "42"
-    ) as metrics_path:
-        assert metrics_path.startswith("/tmp/rocprof_compute_sdk_config_")
-        local_metrics_path = utils_common.to_local_path(metrics_path, target_root)
-        assert (local_metrics_path / "config.yaml").is_file()
-
-    assert not local_metrics_path.exists()
-
-
-def test_temporary_rocprofiler_metrics_path_removed_when_profiling_fails():
-    with pytest.raises(RuntimeError):
-        with utils_common.temporary_rocprofiler_metrics_path({
-            "rocprofiler-sdk": {"counters": []}
-        }) as metrics_path:
-            raise RuntimeError("profiling failed")
-
-    assert not Path(metrics_path).exists()
-
-
-def test_perform_attach_detach_copies_output_from_container(tmp_path, monkeypatch):
-    """Copy the output of a target in a container back from its /tmp."""
-    target_root = make_container_target(tmp_path, monkeypatch)
-    output_dir = tmp_path / "workload"
-    output_dir.mkdir()
-    attach_library, seen = make_fake_attach_library(target_root)
-
-    run_attach(monkeypatch, attach_library, output_dir)
-
-    assert seen["output_path"].startswith("/tmp/rocprof_compute_attach_42_")
-    assert (output_dir / "results.db").read_text(encoding="utf-8") == "rows"
-    assert list((target_root / "tmp").iterdir()) == []
-
-
-def test_perform_attach_detach_removes_container_folder_when_attach_fails(
-    tmp_path, monkeypatch
-):
-    target_root = make_container_target(tmp_path, monkeypatch)
-    output_dir = tmp_path / "workload"
-    output_dir.mkdir()
-    attach_library, _seen = make_fake_attach_library(target_root, attach_status=1)
-
-    with pytest.raises(SystemExit):
-        run_attach(monkeypatch, attach_library, output_dir)
-
-    assert list((target_root / "tmp").iterdir()) == []
-    assert list(output_dir.iterdir()) == []
-
-
-def test_perform_attach_detach_errors_when_target_exits_before_copy(
-    tmp_path, monkeypatch
-):
-    target_root = make_container_target(tmp_path, monkeypatch)
-    output_dir = tmp_path / "workload"
-    output_dir.mkdir()
-    attach_library, _seen = make_fake_attach_library(
-        target_root, on_detach=shutil.rmtree
-    )
-
-    with pytest.raises(SystemExit):
-        run_attach(monkeypatch, attach_library, output_dir)
-
-    assert list(output_dir.iterdir()) == []
-
-
-def test_perform_attach_detach_writes_output_directly_for_shared_root(
-    tmp_path, monkeypatch
-):
-    make_shared_root_target(tmp_path, monkeypatch)
-    output_dir = tmp_path / "workload"
-    output_dir.mkdir()
-    attach_library, seen = make_fake_attach_library(Path("/"))
-
-    run_attach(monkeypatch, attach_library, output_dir)
-
-    assert seen["output_path"] == str(output_dir)
-    assert (output_dir / "results.db").is_file()
+    assert metrics_path.parent == tmp_path
+    assert (metrics_path / "config.yaml").is_file()
+    assert (metrics_path / "counter_defs.yaml").is_file()
 
 
 # =============================================================================

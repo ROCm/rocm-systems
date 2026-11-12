@@ -4,13 +4,11 @@
 import argparse
 import importlib
 import shutil
-import signal
 import socket
 import sys
 import tempfile
 import time
 from pathlib import Path
-from types import FrameType
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
@@ -58,11 +56,6 @@ from utils.utils_common import (
 )
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
-
-
-def _exit_on_sigterm(signum: int, _frame: Optional[FrameType]) -> None:
-    """Exit on SIGTERM, so that finally blocks still clean up."""
-    sys.exit(128 + signum)
 
 
 class RocProfCompute:
@@ -498,7 +491,6 @@ class RocProfCompute:
 
     @demarcate
     def run_profiler(self) -> None:
-        signal.signal(signal.SIGTERM, _exit_on_sigterm)
         self.print_graphic()
 
         self.replace_parameters_in_output_directory()

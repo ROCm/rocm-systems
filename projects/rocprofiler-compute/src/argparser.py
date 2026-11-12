@@ -51,20 +51,6 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def positive_pid(value: str) -> str:
-    try:
-        parsed = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"process ID must be a positive integer, got {value!r}"
-        )
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError(
-            f"process ID must be a positive integer, got {value!r}"
-        )
-    return str(parsed)
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     supported_archs: Dict[str, str],
@@ -256,7 +242,7 @@ Examples:
     )
     profile_group.add_argument(
         "--attach-pid",
-        type=positive_pid,
+        type=int,
         dest="attach_pid",
         metavar="<pid>",
         default=None,

@@ -408,7 +408,7 @@ def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
         output_directory=str(tmp_path),
-        attach_pid="42",
+        attach_pid=42,
         kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
@@ -426,7 +426,7 @@ def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
     options = profiler.get_profiler_options()
 
     assert options["ROCPROF_ATTACH_TOOL_LIBRARY"] == target_tool
-    find_tool.assert_called_once_with("42")
+    find_tool.assert_called_once_with(42)
 
 
 def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatch):
@@ -435,7 +435,7 @@ def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatc
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
         output_directory=str(tmp_path),
-        attach_pid="42",
+        attach_pid=42,
         kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
