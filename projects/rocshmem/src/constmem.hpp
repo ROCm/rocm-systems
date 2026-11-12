@@ -42,12 +42,12 @@ struct constmem_t {
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
-  size_t ipc_sdma_threshold;  // SDMA_THRESHOLD_DISABLED = SDMA disabled
-  uintptr_t heap_base;  // Local symmetric heap base
-  size_t heap_size;     // Local symmetric heap size in bytes
   uint32_t lds_stage_tile_bytes;
   size_t lds_stage_put_threshold;  // put transfers smaller than this skip the LDS-staged path
   size_t lds_stage_get_threshold;  // get transfers smaller than this skip the LDS-staged path
+  size_t ipc_sdma_threshold;  // SDMA_THRESHOLD_DISABLED = SDMA disabled
+  uintptr_t heap_base;  // Local symmetric heap base
+  size_t heap_size;     // Local symmetric heap size in bytes
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
