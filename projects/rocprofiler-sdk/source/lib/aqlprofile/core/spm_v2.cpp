@@ -234,9 +234,12 @@ resolve_spm_depth(aql_profile::Pm4Factory*      pm4_factory,
     const auto requested_depth = static_cast<aqlprofile_spm_depth_t>(event.flags.spm_flags.depth);
     const bool is_gfx9_sq      = (pm4_factory->GetGpuId() <= aql_profile::GFX10_GPU_ID &&
                              event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-    const bool is_gfx12_sq     = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
-                              event.block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-    const bool is_gfx12_sqg    = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+    const bool is_gfx12_sqc =
+        (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
+         pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockSqAttr &&
+         event.block_name !=
+             static_cast<hsa_ven_amd_aqlprofile_block_name_t>(AQLPROFILE_BLOCK_NAME_SQG));
+    const bool is_gfx12_sqg           = (pm4_factory->GetGpuId() > aql_profile::GFX10_GPU_ID &&
                                event.block_name == static_cast<hsa_ven_amd_aqlprofile_block_name_t>(
                                                        AQLPROFILE_BLOCK_NAME_SQG));
     const bool requires_32bit_default = is_gfx9_sq || is_gfx12_sqg;
@@ -257,10 +260,10 @@ resolve_spm_depth(aql_profile::Pm4Factory*      pm4_factory,
         return false;
     }
 
-    if(is_gfx12_sq && requested_depth == AQLPROFILE_SPM_DEPTH_32_BITS &&
+    if(is_gfx12_sqc && requested_depth == AQLPROFILE_SPM_DEPTH_32_BITS &&
        !pm4_factory->SpmSq32BitEnabled())
     {
-        WARN_LOGGING("gfx12 SQ 32-bit SPM depth is disabled, but {} was requested",
+        WARN_LOGGING("gfx12 SQ/SP 32-bit SPM depth is disabled, but {} was requested",
                      depth_name(requested_depth));
         return false;
     }

@@ -167,12 +167,14 @@ public:
         // block id
         for(uint32_t index = 0; index < counters_vec.size(); ++index)
         {
-            auto&       counter_des  = counters_vec[index];
-            const auto& block_des    = counter_des.block_des;
-            const bool  is_gfx12_sqc = (Primitives::GFXIP_LEVEL >= 11 &&
-                                       block_des.id == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
-            const bool  is_odd_only_sqc_16bit =
-                (is_gfx12_sqc && counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_16_BITS &&
+            auto&       counter_des = counters_vec[index];
+            const auto& block_des   = counter_des.block_des;
+            const bool  is_sqc_even_mirror =
+                (Primitives::GFXIP_LEVEL >= 11 &&
+                 (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                 block_des.id != static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+            const bool is_odd_only_sqc_16bit =
+                (is_sqc_even_mirror && counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_16_BITS &&
                  !config->spm_enable_sq_even_lane);
 
             // The builder consumes resolved per-counter SPM depth and does not re-derive policy.
