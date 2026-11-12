@@ -68,7 +68,7 @@ For memory, read `memchart` first. GL1 is a write-combining stage that reports
 only `Total Requests`; there is no GL1 utilization, stall, bandwidth, or
 GL1-GL2 data, so do not invent a hit rate when the report prints `N/A`. There
 is no GL2 bandwidth row or table, no CPC panel, and no Efficiency Arbiter
-panel. The Memory Chart `DRAM Read Bandwidth` and `DRAM Write Bandwidth`
+panel. The Memory Chart `Memory Read Bandwidth` and `Memory Write Bandwidth`
 include traffic served or absorbed by the Infinity Cache, so they do not measure physical VRAM bytes
 and have no VRAM peak. `Infinity Cache Hit Rate` and VRAM bandwidth are
 `N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
