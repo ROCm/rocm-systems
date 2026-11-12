@@ -325,6 +325,12 @@ class GDAContext : public Context {
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     ActiveWFInfo &wf_info);
 
+  __device__ void broadcastmem_linear_thread_puts_wave(rocshmem_team_t team,
+      void *dst, const void *src, int nelems, int PE_root);
+
+  __device__ void broadcastmem_linear_thread_puts_wg(rocshmem_team_t team,
+      void *dst, const void *src, int nelems, int PE_root);
+
   template <typename T>
   __device__ void fcollect_linear_wg(rocshmem_team_t team, T *dest,
       const T *source, int nelems);
