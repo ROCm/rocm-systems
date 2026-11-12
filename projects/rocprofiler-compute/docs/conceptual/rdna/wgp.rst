@@ -31,16 +31,15 @@ performance state that is active, and ``STABLE_STD`` fixes lower clocks than
 the default state, so its roofs are lower. Do not compare ``roofline.csv``
 files or roofline percentages across performance states.
 
-On gfx1201, the measured roofs are VRAM, MALL (the 64 MB Infinity Cache), GL2,
+On gfx1201, the measured roofs are VRAM, MALL (the Infinity Cache), GL2,
 the GL1 write-combining cache, GL0, and LDS, plus VALU (FP16, FP32, FP64, I32)
 and WMMA (FP8, BF8, FP16, BF16). BF8 is ``V_WMMA_F32_16X16X16_BF8_BF8``,
 the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
 
-* ``VRAM`` (column ``VRAMBw``) is the measured device-memory bandwidth of the
-  256-bit, 20 Gbps VRAM interface. The benchmark streams a dataset far larger
-  than the 64 MB Infinity Cache.
-* ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache, from a buffer
-  that misses in the 8 MB L2 and fits in the Infinity Cache.
+* ``VRAM`` (column ``VRAMBw``) is the measured device-memory bandwidth. The
+  benchmark streams a dataset far larger than the Infinity Cache.
+* ``MALL`` is the measured bandwidth of the Infinity Cache, from a buffer of
+  half its reported size that misses in L2 and fits in the Infinity Cache.
 * ``L2``, ``L1``, and ``L0`` are measured with working sets that stay resident
   in GL2 and GL0. GL1 has no tags, so the ``L1`` roof is the GL2-hit return
   path for a set that misses GL0. gfx1201 has no ``AI L1`` or ``AI L2`` point,
@@ -73,10 +72,9 @@ roof, so the two can differ by a few percent.
 
 The WMMA counter needs a ROCprofiler-SDK and aqlprofile installation that
 supports SQ event 233. Check profiling diagnostics before relying on WMMA
-points. WGP ``SQ_INST_CYCLES_VALU`` reports the raw SDK aggregate of SIMD
-execution cycles. Do not interpret it as elapsed GPU time, a FLOP count, or a
-utilization percentage. Wave-count normalization on gfx1201 still requires
-validation. Measured wave counts can exceed the application launch geometry.
+points. WGP ``SQ_INST_CYCLES_VALU`` counts the cycles needed to execute VALU
+operations. It is not elapsed GPU time, a FLOP count, or a utilization
+percentage. Measured wave counts can exceed the application launch geometry.
 
 
 Roofline performance rates

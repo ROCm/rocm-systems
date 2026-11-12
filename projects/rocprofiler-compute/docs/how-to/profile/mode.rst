@@ -741,12 +741,12 @@ that contains both ``roofline.csv`` and application performance counters
    device-memory roofs:
 
    * ``VRAM`` is the measured device-memory bandwidth (CSV column ``VRAMBw``).
-     Navi 48 has no HBM. Its 256-bit, 20 Gbps VRAM interface peaks at 640 GB/s
-     at the default performance level. The measured roof is lower under
-     ``STABLE_STD``.
-   * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache. The
-     benchmark reads a buffer of half the Infinity Cache capacity repeatedly,
-     so the reads miss in the 8 MB L2 and hit in the Infinity Cache.
+     Navi 48 has no HBM. On the Radeon RX 9070 and RX 9070 XT, the 256-bit,
+     20 Gbps VRAM interface peaks at 640 GB/s at the default performance level.
+     The measured roof is lower under ``STABLE_STD``.
+   * ``MALL`` is the measured bandwidth of the Infinity Cache. The benchmark
+     reads a buffer of half the reported Infinity Cache capacity repeatedly,
+     so the reads miss in L2 and hit in the Infinity Cache.
 
    The ``AI VRAM`` point counts GL2C/EA requests destined for memory. The
    Infinity Cache serves some of those requests, and no performance counter

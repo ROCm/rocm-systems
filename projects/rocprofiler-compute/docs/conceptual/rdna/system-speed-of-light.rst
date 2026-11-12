@@ -168,7 +168,7 @@ from profiler system specs.
 Bandwidth and cache rows
 ------------------------
 
-The memory hierarchy runs GL0 (TCP) -> GL1 write-combining cache -> GL2 -> MALL (Infinity Cache) -> DRAM.
+The memory hierarchy runs GL0 (TCP) -> GL1 write-combining cache -> GL2 -> MALL (Infinity Cache) -> VRAM.
 Rows that have a peak use one transfer per cycle per instance, scaled by instance
 count and ``$max_sclk``.
 
@@ -193,7 +193,7 @@ and do not combine those counts into an independent instruction total. The roofl
 rows subtract WMMA by design, as an estimate described in :ref:`rdna4-roofline`.
 ``Wavefront Occupancy`` is a provisional estimate. Measured wave counts can exceed
 the application launch geometry. Do not infer exact resident-wave counts, shader
-cycles, or occupancy limits from these values. WGP ``SQ_INST_CYCLES_VALU`` is the
-raw SDK aggregate of SIMD execution cycles. Overlapping V_OP32_1 and V_OP32_T
-instructions count separately. Do not interpret it as elapsed GPU time, a FLOP
-count, or a utilization percentage.
+cycles, or occupancy limits from these values. WGP ``SQ_INST_CYCLES_VALU`` counts
+the cycles needed to execute VALU operations, counting overlapping V_OP32_1 and
+V_OP32_T instructions separately. It is not elapsed GPU time, a FLOP count, or a
+utilization percentage.

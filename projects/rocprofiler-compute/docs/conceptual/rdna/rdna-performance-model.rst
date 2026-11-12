@@ -43,7 +43,7 @@ The table provides key details for the RDNA architectures covered by these chapt
      - Discrete GPU with dedicated VRAM
    * - Device memory in the tool
      - System memory through GCEA
-     - VRAM. The 64 MB Infinity Cache (MALL) has a roofline and no MALL counters
+     - VRAM. The Infinity Cache (MALL) has a roofline and no MALL counters
    * - Compute organization
      - Each WGP pairs two CUs. Wave32 is the primary mode, and wave64 is supported
      - Navi 48 has 4 shader engines, 64 CUs, and 32 WGPs. Wave32 is the primary mode, and wave64 is supported

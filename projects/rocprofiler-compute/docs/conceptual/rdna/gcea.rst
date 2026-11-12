@@ -11,7 +11,7 @@ Efficiency Arbiter (EA)
 
 The Efficiency Arbiter (EA), also called GCEA, is the stage where traffic leaves the on-chip cache hierarchy after GL2.
 On gfx115x, the published tables are the DRAM read and write interfaces, the system arbiter (SARB), and the return path toward system memory.
-On gfx1201, EA sends requests toward the 64 MB Infinity Cache (MALL) and DRAM.
+On gfx1201, EA sends requests toward the Infinity Cache (MALL) and VRAM.
 Use these panels when analyzing bandwidth limits or memory-controller behavior after GL2.
 
 The sections below list the metric tables for both generations. Select the architecture tab on each table.
@@ -35,7 +35,7 @@ DRAM read interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
+      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 DRAM write interface
 --------------------
@@ -50,7 +50,7 @@ DRAM write interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
+      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 System arbiter (SARB)
 ---------------------
@@ -65,7 +65,7 @@ System arbiter (SARB)
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
+      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 Return interface
 ----------------
@@ -80,7 +80,7 @@ Return interface
    .. tab-item:: RDNA4 (gfx1201)
       :selected:
 
-      gfx1201 has no Efficiency Arbiter panel. Its EA-to-DRAM traffic is in the Memory Chart table below.
+      gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
 Memory chart: GCEA to system memory
 ===================================
