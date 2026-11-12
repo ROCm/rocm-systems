@@ -8,7 +8,7 @@
 // that overflow its per-communicator ring before a dump drains them, and each
 // JSON dump carries a per-communicator "dump_stats" record with those counts
 // (plugins/profiler/inspector, NCCL 2.32.3). WritesCollRecords runs the same
-// workload and checks only that the Inspector recorded it.
+// Checks the Inspector's "dump_stats" record counts collectives that overflow a one-entry ring (NCCL 2.32.3).
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
