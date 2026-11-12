@@ -181,7 +181,7 @@ profile_group.add_argument(
     type=str,
     nargs="*",
     metavar="values",
-    help="\t\t\tDescription of your feature",
+    help="Description of your feature",
 )
 
 # For a boolean toggle flag
@@ -196,7 +196,7 @@ analyze_group.add_argument(
     base_action="store_const",  # Required — see supported actions below
     nargs=0,
     const=True,
-    help="\t\tDescription of your feature",
+    help="Description of your feature",
 )
 ```
 

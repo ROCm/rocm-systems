@@ -409,20 +409,18 @@ See :ref:`core-install-rocprof-var` for details on backend selection.
 Filtering options
 -----------------
 
-``-b``, ``--block <block-id|block-alias|metric-id>``
+``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   Give all values after one ``-b``, for example ``-b 2 5``. A repeated ``-b``
-   keeps only its own values.
    Note that this option cannot be used with ``--roof-only`` or ``--set``.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``--kernel-iteration-range <iteration>``
+``--kernel-iteration-range``
    Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
-``--set <metric-set>``
+``--set``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
    Cannot be used with ``--roof-only`` or ``--block``.
    See :ref:`profiling-metric-sets`.
@@ -717,11 +715,11 @@ that contains both ``roofline.csv`` and application performance counters
 Roofline options (profile)
 --------------------------
 
-``--device <gpu_id>``
+``--device``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 .. note::
