@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -860,7 +861,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_StatusDiffers_HigherBitFirs
   auto* comm = FirstComm(buf);
   struct rasAuxComm a1 = {};
   a1.comm = comm;
-  a1.status = RAS_ACS_ABORT;  // highest bit -> smallest CLZ -> sorts first
+  a1.status = RAS_ACS_ABORT;  // highest status bit sorts first
   struct rasAuxComm a2 = {};
   a2.comm = comm;
   a2.status = RAS_ACS_INIT;
@@ -885,11 +886,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_NRanksDiffers_FewerRanksFir
   // Final tiebreak is comm->nRanks ASCENDING (most-missing-ranks first), unlike every key above
   // it. commNRanks is pinned equal (and decoupled from ranks.size()) so the two comms tie on every
   // higher-priority key and control actually reaches this branch, instead of the commNRanks
-  // comparison short-circuiting first. status is pinned to a real, non-zero value (not the
-  // zero-init default): COMPILER_CLZ(status) compares the two, and __builtin_clz(0) is undefined
-  // behavior -- status==0 is not a state rasClientRunComms ever produces for a comm with
-  // nRanks>0 anyway (its per-rank loop always sets at least one RAS_ACS_* bit), so a non-zero
-  // value here also matches what this comparator is actually ever called with in production.
+  // comparison short-circuiting first.
   std::vector<char> buf1 = BuildRasCollComms({MakeCommSpec(5, {RankSpec{0, 0}})});
   std::vector<char> buf2 = BuildRasCollComms({MakeCommSpec(5, {RankSpec{0, 0}, RankSpec{1, 1}})});
   struct rasAuxComm a1 = {};
@@ -907,7 +904,7 @@ TEST_F(RasClientSupportMicrotest, AuxCommsCompareRev_EveryKeyEqual_Zero) {
   auto* comm = FirstComm(buf);
   struct rasAuxComm a1 = {};
   a1.comm = comm;
-  a1.status = RAS_ACS_RUNNING;  // non-zero: avoids relying on __builtin_clz(0) being well-defined
+  a1.status = RAS_ACS_RUNNING;
   EXPECT_EQ(rasAuxCommsCompareRev(&a1, &a1), 0);
 }
 
@@ -1586,7 +1583,7 @@ TEST_F(RasClientSupportMicrotest, RunComms_JsonFormat_EarlyExit_SkipsTextLogic) 
   struct rasClient* client = MakeClient();
   client->outputFormat = RAS_OUTPUT_JSON;
   client->status = RAS_CLIENT_COMMS;
-  struct rasCollective* coll = MakeCollective(OneEmptyComm(), {MakeAddr(4000)});
+  struct rasCollective* coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})}), {MakeAddr(4000)});
   client->coll = coll;
 
   rasClientRun(client, nullptr);
@@ -1622,6 +1619,161 @@ TEST_F(RasClientSupportMicrotest, RunComms_MismatchedFwdCounts_ReturnsInternalEr
   // which frees both client->coll (via the rasCollFree() fake) and client itself. Nothing left to
   // free here; doing so would double-free.
   EXPECT_TRUE(closed);
+}
+
+namespace {
+
+// Rejection must happen while client->coll is still set, so rasClientRun frees the collective exactly once.
+void ExpectRunCommsRejects(std::vector<char> data, int nPeers = 1) {
+  std::vector<union ncclSocketAddress> peers;
+  for (int i = 0; i < nPeers; i++) peers.push_back(MakeAddr(static_cast<uint16_t>(4000 + i)));
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(std::move(data), peers);
+  const int collFreeCalls = g_collFreeCalls;
+  bool closed = false;
+  EXPECT_EQ(rasClientRun(client, &closed), ncclInternalError);
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(g_collFreeCalls, collFreeCalls + 1);
+}
+
+}  // namespace
+
+// An over-subscribed record (nRanks + nMissingRanks > commNRanks) is not rejected: rasCollCommsMerge emits one
+// on a suspected commHash collision or when a rank is destroyed mid-collective, and dropping the whole report
+// would terminate the client.  rasClientRunComms sizes its scratch arrays from nRanks (here 2, above commNRanks
+// 1) and must process it.  The two ranks also carry differing status, driving the MISMATCH breakdown whose
+// collOpCounts tally the old commNRanks-based sizing would have overrun.
+TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_AcceptedAndSummarized) {
+  struct rasPeerInfo peers[] = {MakePeer(4000)};
+  rasPeers = peers;
+  nRasPeers = 1;
+
+  RankSpec running{0, 0};
+  RankSpec aborted{1, 0};
+  aborted.abortFlag = true;
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {running, aborted})}), {MakeAddr(4000)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+  EXPECT_NE(std::string::npos, DrainSendQueue(client).find("MISMATCH"));
+  FreeClient(client);
+}
+
+// A comm with no reported ranks is zeroed, not malformed: rasCollCommsInit emits one for a comm
+// still initializing when it samples ncclComms.  Rejecting the whole report would close the client
+// and regress JSON output, so it must be accepted and summarized with a zero (NOCOMM) status rather
+// than reaching COMPILER_CLZ(0).
+TEST_F(RasClientSupportMicrotest, RunComms_ZeroRankComm_AcceptedAsNoComm) {
+  struct rasPeerInfo peers[] = {MakePeer(4000)};
+  rasPeers = peers;
+  nRasPeers = 1;
+
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(0)}), {MakeAddr(4000)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+  EXPECT_NE(std::string::npos, DrainSendQueue(client).find("NOCOMM"));
+  FreeClient(client);
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NegativeCounts_ReturnsInternalError) {
+  for (int field = 0; field < 3; field++) {
+    std::vector<char> data = BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})});
+    struct rasCollComms::comm* comm = FirstComm(data);
+    (field == 0 ? comm->commNRanks : field == 1 ? comm->nRanks : comm->nMissingRanks) = -1;
+    ExpectRunCommsRejects(std::move(data));
+  }
+  // With a missing rank, the record size computed from nRanks = -1 still fits the data.
+  CommSpec c = MakeCommSpec(2, {RankSpec{0, 0}});
+  c.missing = {MissingSpec{1, MakeAddr(4000)}};
+  std::vector<char> data = BuildRasCollComms({c});
+  FirstComm(data)->nRanks = -1;
+  ExpectRunCommsRejects(std::move(data));
+
+  data = BuildRasCollComms({});
+  reinterpret_cast<struct rasCollComms*>(data.data())->nComms = -1;
+  ExpectRunCommsRejects(std::move(data));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_ReportShorterThanHeader_ReturnsInternalError) {
+  ExpectRunCommsRejects(std::vector<char>(offsetof(struct rasCollComms, comms) - 1, 0));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_TruncatedRecord_ReturnsInternalError) {
+  std::vector<char> data = BuildRasCollComms({MakeCommSpec(2, {RankSpec{0, 0}, RankSpec{1, 0}})});
+  data.resize(data.size() - sizeof(struct rasCollComms::comm::rank));
+  ExpectRunCommsRejects(std::move(data));
+
+  CommSpec c = MakeCommSpec(2, {RankSpec{0, 0}});
+  c.missing = {MissingSpec{1, MakeAddr(4000)}};
+  data = BuildRasCollComms({c});
+  data.resize(data.size() - 1);
+  ExpectRunCommsRejects(std::move(data));
+
+  // Less than one record header follows the report header.
+  data = BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}})});
+  data.resize(offsetof(struct rasCollComms, comms) + sizeof(struct rasCollComms::comm) - 1);
+  ExpectRunCommsRejects(std::move(data));
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_PeerIdxOutOfRange_ReturnsInternalError) {
+  for (int peerIdx : {-1, 1}) {
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, peerIdx}})}), /*nPeers*/ 1);
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_NvmlDevOutOfRange_ReturnsInternalError) {
+  for (int nvmlDev : {-1, 64}) {
+    RankSpec r{0, 0};
+    r.nvmlDev = static_cast<char>(nvmlDev);
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
+  }
+}
+
+TEST_F(RasClientSupportMicrotest, RunComms_StatusCodeOutOfRange_ReturnsInternalError) {
+  for (bool async : {false, true}) {
+    RankSpec r{0, 0};
+    (async ? r.asyncError : r.initState) = static_cast<ncclResult_t>(ncclNumResults);
+    ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
+  }
+}
+
+// One known peer (port 100 -> rasPeers[0]); the comm's second rank sits on an unknown peer (port
+// 200, a rasPeerFind miss -> peerIdxConv -1).  The node-counting loop must treat the unknown peer
+// as its own node via its `value == -1` guard, not dereference rasPeers[-1] (which ASan would flag
+// if the guard were dropped).  The two peers are two distinct nodes.
+TEST_F(RasClientSupportMicrotest, RunComms_UnknownPeer_CountedAsSeparateNode) {
+  struct rasPeerInfo peers[] = {MakePeer(100)};
+  rasPeers = peers;
+  nRasPeers = 1;
+  InstallPortBucketNodeGrouping();
+
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(2, {RankSpec{0, 0}, RankSpec{1, 1}})}),
+                                {MakeAddr(100), MakeAddr(200)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+
+  // Table row columns: Group Comms Nodes Ranks/node Ranks/comm Ranks-in-group Status Errors.  The
+  // first line whose first three tokens are integers is the single comm's data row; its third
+  // column is the node count.
+  std::string out = DrainSendQueue(client);
+  int nodes = -1;
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);) {
+    std::istringstream cols(line);
+    int group, comms, n;
+    if (cols >> group >> comms >> n) {
+      nodes = n;
+      break;
+    }
+  }
+  EXPECT_EQ(nodes, 2);
+  FreeClient(client);
 }
 
 // =============================================================================================
