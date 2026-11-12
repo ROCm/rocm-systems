@@ -512,7 +512,7 @@ class IsaProfile(ABC):
 
     @property
     def atomic_legacy_minmax(self) -> bool:
-        """Older float-atomic rules preserve selected input bits and propagate SNaNs."""
+        """Current emulator policy: return the selected input bits and propagate SNaNs."""
         return True
 
     @property

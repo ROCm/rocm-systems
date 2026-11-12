@@ -668,12 +668,12 @@ enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 /// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
 /// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
 /// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
-/// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
-/// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
-/// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
-/// Every capture used FP_DENORM 0 or 3, endpoints that cannot separate input-controlled
-/// from output-controlled flushing. Denormal memory compared against +0 with a normal
-/// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
+/// global F32 contradict that rule on those paths, as do MI350X LDS F32/F64. CDNA1-3 and
+/// RDNA3.5 LDS F32/F64, RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32
+/// inherit this policy without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions
+/// in this tree. Every RDNA capture used FP_DENORM 0 or 3, endpoints that cannot separate
+/// input-controlled from output-controlled flushing. Denormal memory compared against +0 with a
+/// normal replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false,
@@ -724,9 +724,9 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
          "unsupported scalar floating-point atomic operation");
 
-  // CDNA1-2 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
-  // CDNA3-5 / RDNA4 select from the flushed values instead; MI300A/MI350X
-  // still return a quieted SNaN, the data operand's first.
+  // legacy_minmax is the emulator's current CDNA1-2 / RDNA1-3.5 policy: return the original
+  // selected bits and propagate SNaNs. MI300A, MI350X and gfx1100 DS hardware instead return
+  // the flushed winner and a quieted SNaN, the data operand's first; CDNA5 / RDNA4 flush too.
   const Bits old_result = legacy_minmax ? old_bits : old_input;
   const Bits source_result = legacy_minmax ? source_bits : source_input;
   auto is_snan = [&](Bits bits) { return is_nan(bits) && !(bits & kQuiet); };
