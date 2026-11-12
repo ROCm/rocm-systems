@@ -220,8 +220,7 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
 
 #ifdef USE_HOST_VERBS
 __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
-  const char* sel = getenv("ROCSHMEM_HOST_TRANSPORT");
-  if (!sel || std::string(sel) != "verbs") {
+  if (envvar::host_transport.get_value() != "verbs") {
     return;  // MPI-window host path remains the default
   }
 
@@ -250,12 +249,15 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
   bool heap_device = (hipPointerGetAttributes(&attr, heap_base) == hipSuccess &&
                       attr.type == hipMemoryTypeDevice);
 
+  // Reuse the same NIC selector as the GDA path; empty means auto-detect.
+  const std::string& hca = envvar::requested_nic.get_value();
+
   verbs_host_ = std::make_unique<net::VerbsHost>();
   if (!verbs_host_->init(hdp_policy_, heap_base, heap->get_size(), heap_device,
                          num_pes_, my_pe_,
                          static_cast<int>(envvar::max_num_host_contexts),
                          std::move(allgather), std::move(dmabuf),
-                         getenv("ROCSHMEM_HCA"))) {
+                         hca.empty() ? nullptr : hca.c_str())) {
     LOG_ERROR_ABORT("ROCSHMEM_HOST_TRANSPORT=verbs selected but host-verbs "
                     "setup failed");
   }
@@ -320,7 +322,7 @@ __host__ void HostInterface::putmem(void* dest, const void* source,
                                     WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
-    w->put_bytes(dest, source, nelems, pe);
+    w->put(dest, source, nelems, pe);
     return;
   }
 #endif
@@ -338,7 +340,7 @@ __host__ void HostInterface::getmem(void* dest, const void* source,
                                     WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
-    w->get_bytes(dest, source, nelems, pe);
+    w->get(dest, source, nelems, pe);
     return;
   }
 #endif
