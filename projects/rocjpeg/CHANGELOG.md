@@ -8,6 +8,7 @@ Documentation for rocJPEG is available at
 ### Resolved issues
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
+* Fixed handles on a GPU in DPX, TPX, QPX, or CPX mode decoding on another partition, or `rocJpegCreate` failing, when `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, or `CUDA_VISIBLE_DEVICES` selects the devices (for example, out of ascending order or by UUID) or a container exposes only some of the partitions. Each handle now decodes on the partition of the `device_id` passed to `rocJpegCreate`.
 
 ### Changed
 

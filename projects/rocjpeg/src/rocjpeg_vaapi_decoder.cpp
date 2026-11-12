@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <stdlib.h>
 
 #ifdef ROCJPEG_USE_DLOPEN_VA
@@ -461,6 +462,59 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
 #endif
 }
 
+// Returns the render node minor that the KFD topology reports for the GPU with PCI bus ID pci_bus_id ("dddd:bb:dd.f")
+// and UUID gpu_uuid, or -1 if no single GPU node matches. HIP takes a device's bus ID from its node's domain and
+// location_id bits 15:0 and its UUID from the node's unique_id, so the match doesn't depend on the device order or on
+// which devices are visible. If the partitions of a GPU share a bus ID, the UUID decides.
+static int GetKfdRenderNodeMinor(const std::string &pci_bus_id, const std::string &gpu_uuid) {
+    unsigned int domain = 0, bus = 0, device = 0, function = 0;
+    if (std::sscanf(pci_bus_id.c_str(), "%x:%x:%x.%x", &domain, &bus, &device, &function) != 4) {
+        return -1;
+    }
+    const unsigned long long location_id = (bus << 8) | (device << 3) | function;
+    const std::string nodes_path = "/sys/class/kfd/kfd/topology/nodes/";
+    DIR *dir = opendir(nodes_path.c_str());
+    if (dir == nullptr) {
+        return -1;
+    }
+    int bus_id_matches = 0, bus_id_minor = -1, uuid_matches = 0, uuid_minor = -1;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        std::ifstream properties_file(nodes_path + entry->d_name + "/properties");
+        std::unordered_map<std::string, unsigned long long> properties;
+        std::string line, name;
+        unsigned long long value = 0;
+        while (std::getline(properties_file, line)) {
+            std::istringstream fields(line);
+            if (fields >> name >> value) {
+                properties[name] = value;
+            }
+        }
+        // Skip CPU nodes and the nodes of other devices.
+        if (properties["simd_count"] == 0 || properties["drm_render_minor"] == 0 || properties["domain"] != domain ||
+            (properties["location_id"] & 0xFFFF) != location_id) {
+            continue;
+        }
+        const int render_minor = static_cast<int>(properties["drm_render_minor"]);
+        bus_id_matches++;
+        bus_id_minor = render_minor;
+        char node_uuid[17];
+        std::snprintf(node_uuid, sizeof(node_uuid), "%016llx", properties["unique_id"]);
+        if (properties["unique_id"] != 0 && gpu_uuid == node_uuid) {
+            uuid_matches++;
+            uuid_minor = render_minor;
+        }
+    }
+    closedir(dir);
+    if (bus_id_matches == 1) {
+        return bus_id_minor;
+    }
+    return uuid_matches == 1 ? uuid_minor : -1;
+}
+
 /**
  * @brief Initializes the VAAPI decoder for RocJpeg.
  *
@@ -513,8 +567,13 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
         }
     }
 
+    // Prefer the render node that the KFD topology reports for this device. The card's render node plus the
+    // partition offset is the fallback for kernels whose topology can't tell the partitions of a card apart.
+    int kfd_render_minor = GetKfdRenderNodeMinor(gpu_pci_bdf, gpu_uuid);
     std::string drm_node;
-    if (render_node_id >= 0) {
+    if (kfd_render_minor >= 0) {
+        drm_node = "/dev/dri/renderD" + std::to_string(kfd_render_minor);
+    } else if (render_node_id >= 0) {
         drm_node = "/dev/dri/renderD" + std::to_string(render_node_id + offset);
     } else {
         drm_node = GetFirstAvailableDrmNode();
@@ -546,6 +605,8 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
         InfoLog(g_rocjpeg_logger, "Selected GPU UUID: " + gpu_uuid);
         InfoLog(g_rocjpeg_logger, "Selected GPU BDF: " + gpu_pci_bdf_lower);
         InfoLog(g_rocjpeg_logger, "Selected compute partition: " + std::string(partition_name(current_compute_partition)));
+        InfoLog(g_rocjpeg_logger, "KFD topology render node of " + gpu_pci_bdf + ": " +
+                (kfd_render_minor >= 0 ? "renderD" + std::to_string(kfd_render_minor) : std::string("not found")));
         InfoLog(g_rocjpeg_logger, "Selected DRM node: " + drm_node);
     }
 
@@ -1151,8 +1212,8 @@ void RocJpegVappiDecoder::GetVisibleDevices(std::vector<int>& visible_devices_ve
     }
     // Parse via a helper that copies before tokenising, so the std::getenv()
     // buffer (the process environment) is never modified (mutating it is UB).
+    // Keep the list order: device N is the Nth device listed, not the Nth lowest index.
     visible_devices_vetor = ParseVisibleDevicesCsv(visible_devices);
-    std::sort(visible_devices_vetor.begin(), visible_devices_vetor.end());
 }
 
 /**
