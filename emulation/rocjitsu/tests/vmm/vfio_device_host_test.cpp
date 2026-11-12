@@ -1653,6 +1653,74 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
       << "the first listener survived the failure to bind the second";
 }
 
+TEST(VfioServer, CleansListenersWhenServingThreadStartupFails) {
+  for (std::size_t successful_threads : {0u, 1u}) {
+    SCOPED_TRACE(successful_threads);
+    rocjitsu::test::ScopedTempFile config;
+    ASSERT_TRUE(config.initialize("rj-vfu-thread-fail-config-"));
+    ASSERT_TRUE(config.write(compact_vfio_server_config(2)));
+    ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), 2));
+    rocjitsu::test::ScopedTempDirectory runtime;
+    ASSERT_TRUE(runtime.initialize("rj-vfu-thread-fail-"));
+    const std::vector<std::string> socket_paths = {runtime.path() + "/gpu0.sock",
+                                                   runtime.path() + "/gpu1.sock"};
+    int ready_pipe[2];
+    ASSERT_EQ(::pipe(ready_pipe), 0);
+    ScopedFd ready_read(ready_pipe[0]);
+    ScopedFd ready_write(ready_pipe[1]);
+    testing::internal::CaptureStderr();
+    const pid_t server = ::fork();
+    if (server < 0) {
+      (void)testing::internal::GetCapturedStderr();
+      FAIL() << "fork failed: " << std::strerror(errno);
+    }
+    if (server == 0) {
+      ready_read.reset();
+      ::_exit(rocjitsu::run_vfio_server_with_serving_thread_failure_for_test(
+          config.path(), socket_paths, ready_write.get(), successful_threads));
+    }
+    ChildProcessGuard server_guard(server);
+    ready_write.reset();
+    const int ready_event = poll_for_pipe_event(ready_read.get(), 30'000);
+    uint8_t ready = 0;
+    const ssize_t ready_bytes = ready_event == 1 ? ::read(ready_read.get(), &ready, 1) : -1;
+    const auto status = wait_for_child_bounded(server, std::chrono::seconds(15));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(ready_event, 1);
+    EXPECT_EQ(ready_bytes, 0) << "failed startup must not publish readiness";
+    ASSERT_TRUE(status) << "failed thread startup did not stop the server";
+    server_guard.release();
+    ASSERT_TRUE(WIFEXITED(*status));
+    EXPECT_EQ(WEXITSTATUS(*status), 1);
+    EXPECT_NE(diagnostic.find(std::format("cannot start serving thread for PCI function {}",
+                                          successful_threads)),
+              std::string::npos)
+        << diagnostic;
+    for (const auto &path : socket_paths)
+      EXPECT_FALSE(std::filesystem::exists(path)) << path;
+    ready_read.reset();
+
+    ASSERT_EQ(::pipe(ready_pipe), 0);
+    ready_read.reset(ready_pipe[0]);
+    ready_write.reset(ready_pipe[1]);
+    const pid_t retry = ::fork();
+    ASSERT_GE(retry, 0);
+    if (retry == 0) {
+      ready_read.reset();
+      ::_exit(rocjitsu::run_vfio_server(config.path(), socket_paths, ready_write.get()));
+    }
+    ChildProcessGuard retry_guard(retry);
+    ready_write.reset();
+    ASSERT_TRUE(receive_one_ready_byte(ready_read.get())) << "retry could not reuse the sockets";
+    ASSERT_EQ(::kill(retry, SIGTERM), 0);
+    const auto retry_status = wait_for_child_bounded(retry, std::chrono::seconds(15));
+    ASSERT_TRUE(retry_status);
+    retry_guard.release();
+    ASSERT_TRUE(WIFEXITED(*retry_status));
+    EXPECT_EQ(WEXITSTATUS(*retry_status), 0);
+  }
+}
+
 TEST(VfioServer, ReturnsFailureWhenRelativeSocketPathCannotBeNormalized) {
   rocjitsu::test::ScopedTempDirectory runtime;
   ASSERT_TRUE(runtime.initialize("rj-vfu-missing-cwd-"));

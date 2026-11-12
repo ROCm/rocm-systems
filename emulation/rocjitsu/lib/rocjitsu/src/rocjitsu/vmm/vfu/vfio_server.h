@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -67,5 +68,11 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::vector<std::string> &socket_paths,
                                               int ready_fd, int exit_code);
+
+/// @brief Fail serving-thread startup after the specified number of successful starts.
+/// @details Test-only entry point for checking cleanup after native thread-start errors.
+int run_vfio_server_with_serving_thread_failure_for_test(
+    const std::string &config_path, const std::vector<std::string> &socket_paths, int ready_fd,
+    std::size_t successful_threads);
 
 } // namespace rocjitsu
