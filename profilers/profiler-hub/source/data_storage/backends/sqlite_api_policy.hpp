@@ -42,7 +42,14 @@ struct sqlite_api_policy
 #else
         constexpr int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
 #endif
-        return sqlite3_open_v2(path, out_db, flags, nullptr);
+        const int rc = sqlite3_open_v2(path, out_db, flags, nullptr);
+        // Several connections share one file, and a writer may still be
+        // closing it. Without a wait the next statement fails at once.
+        if(rc == SQLITE_OK && out_db != nullptr && *out_db != nullptr)
+        {
+            sqlite3_busy_timeout(*out_db, 5000);
+        }
+        return rc;
     }
 
     /** Opens an existing database without creating or writing it. */

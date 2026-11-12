@@ -377,7 +377,7 @@ TEST_F(c_api_async_ctx_test, a_missing_trace_fails_at_once_and_leaves_the_future
     create();
 
     EXPECT_EQ(ph_ctx_create(&m_ctx, (m_db_path + ".missing").c_str(), m_future),
-              PH_RESULT_CONTEXT_ALLOCATION_FAILED);
+              PH_RESULT_INVALID_FILE);
 
     EXPECT_EQ(m_ctx, nullptr);
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);

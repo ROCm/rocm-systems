@@ -464,27 +464,15 @@ rocpd_v3_reader::visit_track_events_in_id_range(
     if(topo_it == m_catalog->topology_by_track.end()) return;
     const auto& topo = topo_it->second;
 
-    std::optional<size_t>  last_id;
-    std::string_view       last_name;
-    timeline_event_builder build_event{ *m_catalog };
+    std::optional<size_t> last_id;
+    std::string_view      last_name;
 
+    // Same rows as get_events_for_track: a thread's nid/pid/tid also selects
+    // kernel, copy and allocation rows. The timeline drops the ones that
+    // resolve onto a queue or stream; this visit reports every selected row.
     statements_for(*m_read_statements, type)
         .track_range_filtered(topo.nid, topo.pid, topo.tid, id_begin, id_end)
         .for_each([&](const data_storage::schema_v3::event_range_result& row) {
-            data_storage::schema_v3::timeline_event_result located;
-            located.id              = row.id;
-            located.start_timestamp = row.start_timestamp;
-            located.end_timestamp   = row.end_timestamp;
-            located.display_name_id = row.display_name_id;
-            located.nid             = topo.nid;
-            located.pid             = topo.pid;
-            located.tid             = topo.tid;
-            located.agent_id        = row.agent_id;
-            located.queue_id        = row.queue_id;
-            located.stream_id       = row.stream_id;
-            const auto resolved     = build_event(located, type);
-            if(resolved.track && resolved.track->id != track->id) return;
-
             std::string_view name;
             if(row.display_name_id.has_value())
             {

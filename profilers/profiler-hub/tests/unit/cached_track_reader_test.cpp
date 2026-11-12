@@ -546,10 +546,20 @@ TEST_F(cached_track_reader_test, a_windowed_sample_request_is_served_from_the_wh
 
     EXPECT_EQ(m_state.counter_calls, 1);
     ASSERT_EQ(first.list_size, 3U);
+    ASSERT_EQ(second.list_size, first.list_size);
+    // A window keeps storage of its own. The whole-track read behind it is shared.
+    EXPECT_NE(first.samples, second.samples);
     EXPECT_EQ(first.samples[0].timestamp, 10U);
     EXPECT_EQ(first.samples[1].timestamp, 40U);
     EXPECT_EQ(first.samples[2].timestamp, 80U);
-    EXPECT_EQ(first.samples, second.samples);
+    EXPECT_DOUBLE_EQ(first.samples[0].value, 1.0);
+    EXPECT_DOUBLE_EQ(first.samples[1].value, 4.0);
+    EXPECT_DOUBLE_EQ(first.samples[2].value, 8.0);
+    for(uint32_t index = 0; index < first.list_size; ++index)
+    {
+        EXPECT_EQ(second.samples[index].timestamp, first.samples[index].timestamp);
+        EXPECT_DOUBLE_EQ(second.samples[index].value, first.samples[index].value);
+    }
 }
 
 TEST_F(cached_track_reader_test, a_window_past_the_last_sample_holds_the_last_value)
