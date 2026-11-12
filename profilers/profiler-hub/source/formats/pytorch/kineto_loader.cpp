@@ -432,6 +432,14 @@ public:
             {
                 m_cur.cat = s;
             }
+            else if(m_k3 == "pid")
+            {
+                m_cur.pid = lane_id(s);
+            }
+            else if(m_k3 == "tid")
+            {
+                m_cur.tid = lane_id(s);
+            }
         }
         else if(m_depth == 4 && m_in_event && m_k3 == "args" && m_k4 == "name")
         {
@@ -607,6 +615,20 @@ private:
         }
     }
 
+    // A text-valued pid or tid ("Spans", "PyTorch Profiler") has no OS id. Each distinct
+    // string gets the next number counting down from INT32_MAX, in order of first
+    // appearance.
+    std::int64_t lane_id(const std::string& text)
+    {
+        const auto [it, added] = m_lane_ids.try_emplace(text, m_next_lane);
+        if(added)
+        {
+            m_t.lane_names.emplace(m_next_lane, text);
+            --m_next_lane;
+        }
+        return it->second;
+    }
+
     static std::uint32_t intern(std::unordered_map<std::string, std::uint32_t>& ids,
                                 std::vector<std::string>&                       list,
                                 const std::string&                              s)
@@ -713,6 +735,8 @@ private:
     bool                                           m_key_decided = false;
     json_text_t                                    m_text;
     std::string                                    m_args_text;
+    std::unordered_map<std::string, std::int64_t>  m_lane_ids;
+    std::int64_t m_next_lane = std::numeric_limits<std::int32_t>::max();
 };
 }  // namespace
 
@@ -743,6 +767,11 @@ load_kineto(const std::string& path, std::function<bool()> cancelled)
 
     if(!buf.error().empty()) throw std::runtime_error("gzip: " + buf.error());
     if(!ok) throw std::runtime_error("JSON: " + handler.parse_error_message());
+
+    for(const auto& [id, text] : t.lane_names)
+    {
+        t.process_names.emplace(id, text);
+    }
 
     const auto total_ms = common::elapsed_ms(t0);
     t.gzip              = buf.gzip();
