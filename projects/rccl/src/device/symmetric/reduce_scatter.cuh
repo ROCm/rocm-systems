@@ -9,9 +9,11 @@
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
 #include "symmetric/primitives.h"
+#include "symmetric/data_ops.h"
 #else
 #include "kernel.cuh"
 #include "primitives.cuh"
+#include "data_ops.cuh"
 #endif
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, bool EnableTma, typename Red>
@@ -400,6 +402,204 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaLD(ncclSymkDevWorkArgs const* args) {
   ncclSymkRun_ReduceScatter_LD_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
+}
+
+// LSA rank of the package rank i places up from ours, so copy 0 is our own.
+static __device__ __forceinline__ int rsHierCopyLsa(ncclDevComm const& comm, ncclTeam scaleIn, int i) {
+  int r = scaleIn.rank + i;
+  if (r >= scaleIn.nRanks) r -= scaleIn.nRanks;
+  return ncclTeamRankToLsa(comm, scaleIn, r);
+}
+
+// This block's slots for a round on the given rank of scaleUp, one per other package. Rounds alternate
+// between two sets so senders can store a round while the owners' finishers still read the one before.
+static __device__ char* rsHierSlots(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle slotsBuf, int peer,
+                                    uint64_t round, size_t chunkBytes) {
+  size_t roundBytes = size_t(scaleUp.nRanks - 1) * chunkBytes;
+  return (char*)ncclGetResourceBufferLsaPointer(comm, slotsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
+         (2 * blockIdx.x + (round & 1)) * roundBytes;
+}
+
+// How the hierarchical ReduceScatter runs reduceBatch: plain loads through the global aperture, the
+// packages' slots written side by side, and each group of sources in flight together.
+struct rsHierBatchMode : ReduceBatchMode {
+  using SrcSpace = GMemApertureTag;
+  static constexpr bool Interleave = true;
+  static constexpr bool Overlap = true;
+};
+
+// A sender's part of a round: for each other package, sums our package's copies of the block its
+// counterpart of us owns and stores that into our slot there. 
+template <typename T, typename Red>
+static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
+                                  ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts,
+                                  ncclDevResourceHandle slotsBuf, uint64_t round, int nElts, size_t chunkBytes,
+                                  bool aligned) {
+  // A pointer getter so the window is read before the loops: ncclSymPtr re-reads it after every store.
+  ncclLsaPointerGetter<T> inputLsa(input);
+  auto peerOf = [&] __device__(int s) -> int {
+    int to = scaleUp.rank + 1 + s;
+    return to >= scaleUp.nRanks ? to - scaleUp.nRanks : to;
+  };
+  reduceBatch</*PostOp=*/false, rsHierBatchMode>(
+    role, /*inPlace=*/false, /*nBatch=*/scaleUp.nRanks - 1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
+    /*getDst=*/
+    [&] __device__(int s) -> T* {
+      return (T*)(rsHierSlots(comm, scaleUp, slotsBuf, peerOf(s), round, chunkBytes) + s * chunkBytes);
+    },
+    red, /*nSrcs=*/scaleIn.nRanks,
+    /*getSrc=*/
+    [&] __device__(int s, int i) -> T* {
+      return inputLsa(rsHierCopyLsa(comm, scaleIn, i)) + ncclTeamRankToWorld(comm, scaleUp, peerOf(s)) * nAllElts;
+    },
+    /*srcPtrCommonMask=*/aligned ? 15u : 0u, /*getSrcPtrMasked=*/[&] __device__(int) -> unsigned { return 0u; });
+}
+
+// A finisher's part of a round: sums our package's copies of our own block with the sums the other
+// packages stored into our slots, and writes that to output with the post-op applied.
+template <typename T, typename Red>
+static __device__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
+                                    ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts, char const* slots,
+                                    T* output, int nElts, size_t chunkBytes, bool aligned) {
+  ncclLsaPointerGetter<T> blockLsa(input + comm.rank * nAllElts);
+  size_t const slotElts = chunkBytes / sizeof(T);
+  reduceBatch</*PostOp=*/true, rsHierBatchMode>(
+    role, /*inPlace=*/false, /*nBatch=*/1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
+    /*getDst=*/[&] __device__(int) -> T* { return output; }, red, /*nSrcs=*/scaleIn.nRanks + scaleUp.nRanks - 1,
+    /*getSrc=*/
+    [&] __device__(int, int i) -> T* {
+      return i < scaleIn.nRanks ? blockLsa(rsHierCopyLsa(comm, scaleIn, i)) :
+                                  (T*)slots + size_t(i - scaleIn.nRanks) * slotElts;
+    },
+    /*srcPtrCommonMask=*/aligned ? 15u : 0u, /*getSrcPtrMasked=*/[&] __device__(int) -> unsigned { return 0u; });
+}
+
+// This block's row of rsHierFlags on the given rank of scaleUp.
+static __device__ uint64_t* rsHierFlagRow(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle flagsBuf,
+                                          int peer) {
+  return (uint64_t*)ncclGetResourceBufferLsaPointer(comm, flagsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
+         blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+}
+
+// Spins until each of the n flags starting at flags reaches target, then orders the caller's later
+// accesses after what their raisers did before raising them.
+static __device__ void rsHierWaitFlags(ncclDevComm const& comm, uint64_t* flags, int n, uint64_t target) {
+  uint32_t steps = 0;
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int s = 0; s < n; s++) {
+    cuda::atomic_ref<uint64_t> flag(flags[s]);
+    while (flag.load(cuda::memory_order_relaxed) < target) {
+      if (nccl::utility::testAbort(comm.abortFlag, steps)) return;
+    }
+  }
+  cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+}
+
+// Two-level ReduceScatter for an LSA team over packages of hierScaleInSize consecutive ranks: LD within a
+// package (scale-in), ST across packages (scale-up), so a block crosses packages once per package rather
+// than once per rank.
+//  - Senders LD the package's copies of each other package's block, sum them, and ST the partial sum into
+//    that package's landing slot, then raise its ready flag.
+//  - Finishers wait for the ready flags, LD the package's copies of our own block plus the landed partial
+//    sums, and write the result, then raise a credit flag on each sender to free the slot.
+// Senders and finishers are separate warps of a block, so one round's sends overlap the last round's finish.
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
+  // The host picks the chunk size per launch, at most the size the slots were sized for.
+  size_t const chunkBytes = args->kcomm.rsHierChunkSize;
+  size_t const RoundElts = chunkBytes / sizeof(T);
+  ncclSymkArgsHandler handler{args};
+  ncclDevComm const& comm = handler.comm;
+  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), comm, ncclTeamTagLsa(), blockIdx.x};
+  Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
+
+  ncclTeam lsa = ncclTeamLsa(comm);
+  ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
+  ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
+  int nPeers = scaleUp.nRanks - 1;
+  ncclDevResourceHandle slotsBuf = args->kcomm.rsHierSlots;
+  ncclDevResourceHandle flagsBuf = args->kcomm.rsHierFlags;
+  uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(comm, flagsBuf) +
+                    blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+  uint64_t* ready = flags;
+  uint64_t* credit = flags + scaleUp.nRanks;
+  // Peers never write the round count, so it carries over from this block's last launch.
+  uint64_t seq = flags[nPeers];
+
+  // Per element, a sender reads every package rank's copy of the block for each other package, and a
+  // finisher reads every package rank's copy of ours plus a slot per other package. Split the warps in
+  // that proportion, keeping at least one of each.
+  int nWarps = blockDim.x / WARP_SIZE;
+  int sendReads = scaleIn.nRanks * nPeers;
+  int allReads = sendReads + scaleIn.nRanks + nPeers;
+  int nSendWarps = min(max((2 * nWarps * sendReads + allReads) / (2 * allReads), 1), nWarps - 1);
+  int warp = threadIdx.x / WARP_SIZE;
+  bool sender = warp < nSendWarps;
+  ncclCoopWarpSpan role(sender ? 0 : nSendWarps, sender ? nSendWarps : nWarps - nSendWarps, sender ? 0 : 1);
+
+  ncclCoopNamedBarrierInit();
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+
+  uint16_t workLo, workHi;
+  size_t indexLo, indexHi;
+  handler.getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
+  uint64_t round = 0;
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int w = workLo; w <= workHi; w++) {
+    ncclSymkDevWork const& dw = handler.devWork[w];
+    ncclSymPtr<T> input(dw.inputWin, dw.inputOff);
+    T* output = ncclSymPtr<T>(dw.outputWin, dw.outputOff).localPtr();
+    size_t lo = w > workLo ? 0 : indexLo;
+    size_t hi = w < workHi ? dw.nElts : indexHi;
+    // 16-byte packs need every rank's block of the input aligned, not just ours.
+    bool aligned = (dw.inputOff | dw.outputOff | dw.nElts * sizeof(T)) % ncclSymkBytePerPack == 0;
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (; lo < hi; lo += RoundElts, round++) {
+      int n = int(min(RoundElts, hi - lo));
+      if (sender) {
+        // The opening barrier frees the slots for this launch's first two rounds. After that, a round's
+        // slots last held the round two back, which each owner credits once it has read it.
+        if (round >= 2) {
+          if (role.thread_rank() == 0) rsHierWaitFlags(comm, credit, nPeers, seq + round - 1);
+          role.sync();
+        }
+        rsHierSend<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slotsBuf, round, n, chunkBytes, aligned);
+        role.sync();
+        if (role.thread_rank() == 0) {
+          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          NVCC_PRAGMA_UNROLL_DISABLED
+          for (int s = 0; s < nPeers; s++) {
+            int to = scaleUp.rank + 1 + s;
+            if (to >= scaleUp.nRanks) to -= scaleUp.nRanks;
+            cuda::atomic_ref<uint64_t>(rsHierFlagRow(comm, scaleUp, flagsBuf, to)[s])
+              .store(seq + round + 1, cuda::memory_order_relaxed);
+          }
+        }
+      } else {
+        char const* slots = rsHierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
+        if (role.thread_rank() == 0) rsHierWaitFlags(comm, ready, nPeers, seq + round + 1);
+        role.sync();
+        rsHierFinish<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slots, output + lo, n, chunkBytes,
+                        aligned);
+        role.sync();
+        if (role.thread_rank() == 0) {
+          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          NVCC_PRAGMA_UNROLL_DISABLED
+          for (int s = 0; s < nPeers; s++) {
+            int from = scaleUp.rank - 1 - s;
+            if (from < 0) from += scaleUp.nRanks;
+            cuda::atomic_ref<uint64_t>(rsHierFlagRow(comm, scaleUp, flagsBuf, from)[scaleUp.nRanks + s])
+              .store(seq + round + 1, cuda::memory_order_relaxed);
+          }
+        }
+      }
+    }
+  }
+  if (threadIdx.x == 0) flags[nPeers] = seq + round;
+
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
 template <typename Red, typename T>

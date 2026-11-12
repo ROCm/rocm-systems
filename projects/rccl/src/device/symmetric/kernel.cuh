@@ -102,6 +102,8 @@ template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(struct ncclSymkDevWorkArgs const* args);
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaLD(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(struct ncclSymkDevWorkArgs const* args);
 
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_RailA2A_LsaLD(struct ncclSymkDevWorkArgs const* args);
