@@ -2791,6 +2791,9 @@ memory:
   Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipArrayGetSparseProperties_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
   Unit_hipArrayGetInfo_Positive_Basic:
     <<: *level_default
     tags: [query, image, P1]
