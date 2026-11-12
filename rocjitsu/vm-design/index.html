@@ -1193,6 +1193,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#cache-tag-storage-and-measured-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache tag storage and measured cost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#transaction-observation-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2031,6 +2042,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#cache-tag-storage-and-measured-cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache tag storage and measured cost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#transaction-observation-boundaries" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2336,6 +2358,7 @@ execution.</p>
 └── Topology
     └── VirtualMachine                     (CompositeComponent - topology root)
         ├── SimulatedKfd driver_            (owned member, not a child component)
+        ├── FabricEndpoint ("fabric")        (VM-owned local peer transport)
         └── gpu[0..G] ("gpu0"..)           (CompositeComponent, one per GPU)
             ├── SoC ("soc")                 (owned, but its children were adopted
             │                                by the gpuN wrapper above, so it is
@@ -2356,6 +2379,13 @@ execution.</p>
 and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 (engine, topology, partitioning) is managed by <code>SimulationEngine</code>; the SoC
 represents the hardware being modeled.</p>
+<p>For unambiguous local ScaleUp or Infinity Fabric routes, the VM owns a
+<code>FabricEndpoint</code> child that carries admitted peer effects through Simdojo
+endpoints. Both link classes currently use unit-latency functional transport;
+this does not model hardware-specific Infinity Fabric timing. Executing those
+routes does not grant native XGMI discovery: explicit manifests still suppress
+KFD hive and XGMI metadata while the stock driver uses UC PCIe peer BAR
+mappings.</p>
 <h2 id="address-spaces-translation-and-backing">Address spaces, translation, and backing<a class="headerlink" href="#address-spaces-translation-and-backing" title="Permanent link">&para;</a></h2>
 <p><code>GpuVm</code> is the frontend-neutral address-space authority. It owns identity,
 generation, invalidation epochs, immutable access snapshots, translation,
@@ -2408,23 +2438,26 @@ explicit VM reset, but it does not replace one live backing object with another.
 queue operations to the shared <code>GpuVm</code>, queue registry, and queue-owner services and do not duplicate
 translation, TLB/MMU policy, CP, MES, SDMA, or memory-backing behavior.</p>
 <h3 id="translated-pci-cache-boundary">Translated PCI cache boundary<a class="headerlink" href="#translated-pci-cache-boundary" title="Permanent link">&para;</a></h3>
-<p>The existing scalar, vector, and L2 caches are keyed by numeric VMID and virtual
-address, and L2 writeback targets <code>GpuMemory</code>. They are therefore valid only for
-the legacy compatibility binding today. Translated PCI/VFIO scalar and vector
-loads, stores, and atomics intentionally bypass those caches and operate through
-one <code>GpuVmAccess</code> snapshot per instruction. Contiguous lanes are still grouped
-into block accesses, and atomics use the backing's indivisible load and
-compare/exchange operations rather than synthesized read/write pairs.</p>
+<p>The legacy scalar, vector, and L2 cache entries use numeric VMIDs and virtual
+addresses. Translated PCI/VFIO vector loads can instead fill local cacheable
+lines through V$ and L2 when <code>query_translated_local_line()</code> confirms the
+backing, page-table policy, and line epoch. Their tags include the translated
+address-space identity and physical backing information, so an old binding or
+peer alias cannot reuse a local line. Translated scalar loads and atomics use
+the <code>GpuVmAccess</code> path; contiguous lanes are grouped into block accesses and
+atomics use the backing's indivisible operations. Translated stores also use
+<code>GpuVmAccess::write()</code> and advance the local line epoch rather than allocating
+a cache line. UC peer BAR traffic stays on the system/fabric path and does not
+fill this translated-local cache.</p>
 <p>The instruction cache is clean-only, so translated instruction fetch can use it
 safely: its tag includes the full address-space handle generation and
 translation epoch. Root replacement or slot reuse consequently misses without
 allowing stale code from the prior namespace to alias.</p>
-<p>This bypass is a safe intermediate state, not the final physical-cache model. A
-future translated data-cache implementation must key lines by physical
-backing/domain identity plus translated line address and retain the backing
-snapshot needed for eviction. Until that contract exists, routing translated
-data through the legacy caches would permit dirty lines from an old binding to
-write into a replacement backing and is prohibited.</p>
+<p>Translated-local lines are clean fills. Their backing identity and epoch checks
+prevent reuse after a mapping or coherence change; they do not turn a
+translated store into a dirty cache line that could write back to a replacement
+backing. Unsupported or uncacheable translations continue through
+<code>GpuVmAccess</code> without a translated-local fill.</p>
 <h3 id="sdma-queue-execution">SDMA queue execution<a class="headerlink" href="#sdma-queue-execution" title="Permanent link">&para;</a></h3>
 <p><code>SdmaQueueScheduler</code> is owned by the SoC and runs one dedicated worker for all SDMA
 queues. It owns scheduling, bounded root-packet turns, temporary-failure retries,
@@ -2865,6 +2898,22 @@ bound covers its 8-byte memory element although SDATA holds 16 bytes.</p>
 <li><code>s_dcache_inv</code> / <code>s_dcache_inv_vol</code> — invalidate the L1 scalar cache</li>
 <li><code>s_gl1_inv</code> — invalidate the L1 vector cache</li>
 </ul>
+<h3 id="cache-tag-storage-and-measured-cost">Cache tag storage and measured cost<a class="headerlink" href="#cache-tag-storage-and-measured-cost" title="Permanent link">&para;</a></h3>
+<p><code>CacheTag</code> is 96 bytes with translated-local backing and publication metadata,
+compared with 40 bytes before that policy was added. A 64-set, four-way L1
+therefore stores 24 KiB of tags instead of 10 KiB, including when it does not
+use the extra fields. The inline metadata avoids a side-table lookup and
+allocation on fills, hits, and eviction.</p>
+<p>On 2026-11-09, a Release <code>-O3</code> build with amdclang++ 23 ran the existing
+<code>L2CacheBenchmark.ScalarL1Hit</code> and <code>L2CacheBenchmark.VectorL1Hit</code> tests on one
+pinned CPU of a Ryzen Threadripper PRO 9985WX. Five alternating runs after a
+warmup gave median times of 6.518 and 8.726 ns/access on the pre-PR base
+<code>b4b55168e84</code>, versus 18.285 and 22.680 ns/access on the parent branch.
+These end-to-end hit tests include the PR's new admission and coherence paths;
+their difference cannot be attributed to tag size alone. They establish a
+cache-heavy regression to profile before claiming that the shared layout has
+no throughput cost. Reproduce the check with the two GTest filters above in
+matching Release builds, running each binary serially on the same CPU.</p>
 <h3 id="transaction-observation-boundaries">Transaction observation boundaries<a class="headerlink" href="#transaction-observation-boundaries" title="Permanent link">&para;</a></h3>
 <p>Cache geometry does not establish transfer atomicity. <code>MemoryTransactionPolicy</code>
 selects an observation boundary independently of the 128-byte L1 vector and L2
@@ -3066,17 +3115,17 @@ simulated GPU without any kernel driver. It is Linux-only and activated via
 <tr>
 <td><code>ALLOC_MEMORY_OF_GPU</code></td>
 <td><code>alloc_memory_ioctl</code></td>
-<td>Allocates host memory, assigns GPU VA from a linear bump allocator</td>
+<td>Allocates fixed-size backing and assigns a GPU VA, with owner and backing lifetime tracked separately</td>
 </tr>
 <tr>
 <td><code>FREE_MEMORY_OF_GPU</code></td>
 <td><code>free_memory_ioctl</code></td>
-<td>Frees host memory, removes VA mapping</td>
+<td>Retires the allocation's grants and mappings, then releases its backing after outstanding users finish</td>
 </tr>
 <tr>
 <td><code>MAP_MEMORY_TO_GPU</code> / <code>UNMAP</code></td>
 <td>map/unmap ioctls</td>
-<td>No-op (host pointers serve as GPU VAs)</td>
+<td>Publish or retire counted per-device grants consulted by the GPU VM and fabric; peer VRAM maps also require a reachable owner route, so a GPU VA alone does not admit peer access</td>
 </tr>
 <tr>
 <td><code>CREATE_QUEUE</code></td>
@@ -3091,7 +3140,7 @@ simulated GPU without any kernel driver. It is Linux-only and activated via
 <tr>
 <td><code>CREATE_EVENT</code></td>
 <td><code>create_event_ioctl</code></td>
-<td>Allocates a slot in the memfd-backed signal page</td>
+<td>Allocates a slot in the shared signal page</td>
 </tr>
 <tr>
 <td><code>DESTROY_EVENT</code></td>
@@ -3111,11 +3160,12 @@ simulated GPU without any kernel driver. It is Linux-only and activated via
 </tbody>
 </table>
 <h3 id="signal-event-page">Signal event page<a class="headerlink" href="#signal-event-page" title="Permanent link">&para;</a></h3>
-<p>libhsakmt expects a memfd-backed page at the KFD mmap offset
+<p>libhsakmt expects a shared backing page at the KFD mmap offset
 <code>KFD_MMAP_TYPE_EVENTS | gpu_id</code>. Each 64-bit slot corresponds to one
 <code>event_id</code>. libhsakmt polls <code>signal_page[event_id]</code> directly; non-zero means
 the event is pending. <code>close()</code> sets all slots to 1 to unblock any polling
-threads during shutdown.</p>
+threads during shutdown. The backing is a memfd when file sizing and xattrs
+are available, or a keeper token otherwise.</p>
 <hr />
 <h2 id="c-api-rj_vmh">C API (<code>rj_vm.h</code>)<a class="headerlink" href="#c-api-rj_vmh" title="Permanent link">&para;</a></h2>
 <p>The C API wraps the VM behind an opaque <code>rj_vm_t</code> handle:</p>

@@ -1970,12 +1970,20 @@ DBT guest configs select the guest and host targets and execution backend.</p>
 <td>Single CDNA5 GPU (standalone or PCI/VFIO simulation)</td>
 </tr>
 <tr>
+<td><code>gfx1250_mi455x_4gpu_scaleup.json</code></td>
+<td>Four local CDNA5 GPUs with ScaleUp routes</td>
+</tr>
+<tr>
 <td><code>gfx1250_mi455x_kmd_4gpu.json</code></td>
 <td>Four MI455X GPUs (multi-GPU daemon mode)</td>
 </tr>
 <tr>
 <td><code>gfx1250_mi455x_kmd_2node_net.json</code></td>
 <td>Schematic two-node, one-GPU-per-node RCCL NET fixture</td>
+</tr>
+<tr>
+<td><code>gfx1250_mi455x_kmd_4node_2gpu_if.json</code></td>
+<td>Four nodes with two local GPUs and Infinity Fabric routes per node</td>
 </tr>
 <tr>
 <td><code>gfx1251_synthetic.json</code></td>
@@ -2001,6 +2009,9 @@ describe an MI350X (PCI device ID <code>0x75a0</code>). They remain only so that
 callers keep working; use the <code>gfx950_mi350x*</code> names instead. The
 <code>gfx950_mi355x*</code> configs will later describe an MI355X (PCI device ID <code>0x75a3</code>);
 see <a href="https://github.com/ROCm/rocm-systems/issues/14644">#14644</a>.</p>
+<p><code>system.coherence_domains</code> describes GPU membership for inventory and
+validation. Changing that grouping does not grant peer-memory access or change
+runtime cache maintenance, which is assembled per SoC from the modeled routes.</p>
 <h3 id="pcivfio-guest-compatibility">PCI/VFIO guest compatibility<a class="headerlink" href="#pcivfio-guest-compatibility" title="Permanent link">&para;</a></h3>
 <p>The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
@@ -2017,9 +2028,12 @@ complete launch command, GEMM qualification criteria, and troubleshooting.</p>
 currently unqualified. A manifest's network or local fabric edges describe
 reachability; they do not grant peer memory access. Legacy replicated-GPU
 configs retain their XGMI links, hive ID, and XGMI SDMA count for
-compatibility. A manifest with those same GPUs suppresses the advertisement
-until its local peer routes can execute, so converting a legacy config to a
-manifest changes what ROCr discovers. Legacy single-GPU drivers also keep the
+compatibility. An explicit manifest suppresses that XGMI discovery metadata
+even when its local ScaleUp or Infinity Fabric routes execute through the
+VM-owned <code>FabricEndpoint</code>. Those routes model local effects behind the stock
+driver's UC PCIe peer BAR mappings; they do not establish native XGMI
+discovery or cacheable peer access. Converting a legacy config to a manifest
+therefore changes what ROCr discovers. Legacy single-GPU drivers also keep the
 old render-node routing: they claim any render minor even when their config
 advertises a different one. Manifest drivers select only their configured
 render minors. The daemon handshake carries this policy to remote clients, so
@@ -2198,14 +2212,16 @@ the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
 permit up to 16 partitions, while <code>num_threads: 4</code> assigns XCDs from both GPUs
 to each partition.</p>
 <p><code>gfx950_mi350x_kmd_2gpu.json</code> (with its deprecated copy
-<code>gfx950_mi355x_kmd_2gpu.json</code>) and <code>gfx1250_mi455x_kmd_4gpu.json</code> are the
-shipped configs that still pin <code>num_threads: 1</code>. Any multi-partition setting on
-the 2-GPU config hangs RCCL collectives (<code>AllReduce</code>, <code>Broadcast</code>, <code>AllGather</code>,
-<code>ReduceScatter</code>) with the engine workers spinning and the simulation making no
-progress; point-to-point <code>SendRecv</code> is unaffected. The hang predates the default
-and reproduces with as few as two partitions. The 4-GPU config keeps the pin for
-the same reason, though the hang has only been characterised on the 2-GPU
-config. Remove the pins once it is fixed.</p>
+<code>gfx950_mi355x_kmd_2gpu.json</code>), <code>gfx1250_mi455x_kmd_4gpu.json</code>,
+<code>gfx1250_mi455x_kmd_2node_net.json</code>, <code>gfx1250_mi455x_4gpu_scaleup.json</code>, and
+<code>gfx1250_mi455x_kmd_4node_2gpu_if.json</code> are the shipped multi-GPU KMD and
+scale-up fixture configs that pin <code>num_threads: 1</code>. Any multi-partition setting
+on the 2-GPU MI350X config hangs RCCL collectives (<code>AllReduce</code>, <code>Broadcast</code>,
+<code>AllGather</code>, <code>ReduceScatter</code>) with the engine workers spinning and the simulation
+making no progress; point-to-point <code>SendRecv</code> is unaffected. The hang predates
+the default and reproduces with as few as two partitions. The other configs keep
+the pin for the same reason, though the hang has only been characterised on the
+2-GPU config. Remove the pins once it is fixed.</p>
 <p>Raising <code>num_threads</code> only pays off if the work reaches more than one XCD, which
 is decided by <code>AqlQueueConfig::xcd_fanout</code> rather than by how the queue was created (see
 <em>Queue ownership and XCD fan-out</em> in <code>vm-design.md</code>). KFD sets the flag for

@@ -1947,7 +1947,14 @@ guest, while rocJITsu supplies the emulated PCI devices and GPU models.</p>
 <code>scripts/run-vfio-guest.py</code>. It does not build or distribute a guest kernel,
 initramfs, AMDGPU package, ROCm runtime, or rocBLAS payload. Those inputs must
 come from one mutually compatible public release or nightly. Record their
-versions and SHA-256 digests when publishing a result.</p>
+versions and SHA-256 digests when publishing a result.
+The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/guest/README.md">pod guest payload recipe</a> pins the external
+QEMU, libvfio-user, driver, kernel, and ROCm inputs used by the same-host
+peer/RCCL gates. It also distinguishes the zero-patch final driver module
+from earlier diagnostic patch runs.
+The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/scripts/run-rccl-pod-vfio.py">four-node VFIO pod controller</a> uses
+<code>configs/gfx1250_mi455x_kmd_4node_2gpu_if.json</code> to launch the mixed local
+peer and inter-node NET workload described by that recipe.</p>
 <h2 id="host-prerequisites">Host prerequisites<a class="headerlink" href="#host-prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Linux on x86-64.</li>

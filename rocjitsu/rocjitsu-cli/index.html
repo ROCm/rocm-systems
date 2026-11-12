@@ -2440,11 +2440,10 @@ the simulated GPU. It operates in four modes:</p>
 </ul>
 <p>Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.</p>
-<p>Daemon mode currently rejects dma-buf export with <code>EOPNOTSUPP</code>; its RPC protocol
-does not transfer exported descriptors. HIP VMM allocation (<code>hipMemCreate</code>)
-depends on that export even with <code>hipMemHandleTypeNone</code>, so ROCr may report it
-as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
-Ordinary daemon <code>hipMalloc</code>, copies, and kernel dispatch remain supported.</p>
+<p>Daemon mode transfers KFD dma-buf exports to clients. HIP VMM allocation,
+shareable-handle import and export, mapping, and access use remote DRM render
+files. GEM_VA sends the backing descriptor to the daemon, which maps it in the
+client's simulated GPU page table and retains it until unmap or client close.</p>
 <p>For HIP IPC between daemon clients (<code>hipIpcGetMemHandle</code> and
 <code>hipIpcOpenMemHandle</code>), set <code>HSA_ENABLE_IPC_MODE_LEGACY=1</code> before launching the
 clients to select the supported legacy KFD IPC path. The current runtime's
@@ -2684,6 +2683,12 @@ destroys the topology root (VirtualMachine), which destroys the driver.</p>
 <td><code>RpcIoctlRequest</code> + raw args + inlined arrays</td>
 <td>Optional</td>
 </tr>
+<tr>
+<td><code>RPC_GEM_VA</code></td>
+<td>C-&gt;D-&gt;C</td>
+<td><code>RpcGemVaRequest</code></td>
+<td>On MAP</td>
+</tr>
 </tbody>
 </table>
 <h3 id="embedded-pointer-serialization">Embedded Pointer Serialization<a class="headerlink" href="#embedded-pointer-serialization" title="Permanent link">&para;</a></h3>
@@ -2705,6 +2710,12 @@ sharing (same pattern as QEMU vhost-user and CRIU).</p>
   backing. <code>RemoteDriver::mmap</code> closes the received alias on every exit, including
   size-check and mapping failures. If the reply has no descriptor, it borrows
   the stored allocation or import descriptor and leaves that descriptor open.</li>
+<li><code>RPC_GEM_VA</code> MAP requests: the client sends the PRIME-imported backing to the
+  daemon. The daemon retains its mapping until UNMAP or process close, after its
+  GPU page-table entries have been removed.</li>
+<li>Successful KFD dma-buf export replies include the allocation's mapping flags
+  after the ioctl arguments, so a later PRIME import preserves the GPU cache
+  policy even if the KFD allocation is freed first.</li>
 </ul>
 <h3 id="thread-safety">Thread Safety<a class="headerlink" href="#thread-safety" title="Permanent link">&para;</a></h3>
 <p>ROCR is heavily multithreaded. The <code>rpc_mutex_</code> in <code>RemoteDriver</code> serializes
