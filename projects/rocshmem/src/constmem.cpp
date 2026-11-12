@@ -57,9 +57,17 @@ void init_constant_memory(void) {
   constmem_values.lds_stage_get_threshold = envvar::lds_stage::get_threshold;
 
 #if defined(USE_LDS_STAGE)
+  bool device_supports_lds_stage = false;
   {
     int device_id = 0;
     CHECK_HIP(hipGetDevice(&device_id));
+
+    hipDeviceProp_t device_prop;
+    CHECK_HIP(hipGetDeviceProperties(&device_prop, device_id));
+    // Both staged backends are gfx1250-only (lds_stage.hpp); a build that
+    // also targets other archs must not reserve staged LDS on them.
+    device_supports_lds_stage = strncmp(device_prop.gcnArchName, "gfx1250", 7) == 0;
+
     int max_shared_mem_per_block = 0;
     CHECK_HIP(hipDeviceGetAttribute(&max_shared_mem_per_block,
                                      hipDeviceAttributeMaxSharedMemoryPerBlock,
@@ -132,7 +140,8 @@ void init_constant_memory(void) {
       }
     }
   }
-  backend->lds_stage_resolved_tile_bytes = constmem_values.lds_stage_tile_bytes;
+  backend->lds_stage_resolved_tile_bytes =
+      device_supports_lds_stage ? constmem_values.lds_stage_tile_bytes : 0;
 #endif
 
   constmem_values.backend_type = backend->get_type();

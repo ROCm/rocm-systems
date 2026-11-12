@@ -157,7 +157,11 @@ template <MemcpyKind Kind = MemcpyKind::Put>
     tile_bytes -= tile_bytes % element_bytes;
     if (tile_bytes > 0) {
       // Swap to copy_pipelined_deep_asynccnt to benchmark the s_wait_asynccnt path.
-      lds_stage::async_lds::copy_pipelined_deep_mark(
+      constexpr int LoadPolicy = static_cast<int>(cache_policy_aux(
+           is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope));
+       constexpr int StorePolicy = static_cast<int>(cache_policy_aux(
+           is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard));
+       lds_stage::async_lds::copy_pipelined_deep_mark<LoadPolicy, StorePolicy>(
           dst, src, size, reg.ptr, tile_bytes, static_cast<uint32_t>(get_flat_block_id()),
           static_cast<uint32_t>(get_flat_block_size()));
       const size_t covered = lds_stage::covered_bytes(size, tile_bytes);
