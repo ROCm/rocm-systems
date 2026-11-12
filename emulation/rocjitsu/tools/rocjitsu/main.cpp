@@ -335,7 +335,7 @@ void print_paths(bool json) {
   const std::vector<std::filesystem::path> config_dirs = profile_config_search_dirs();
   const std::string runtime_dir = rpc_default_runtime_dir();
   const std::string daemon_socket = rpc_default_socket_path();
-  const std::string default_config_path = rpc_default_config_file_path();
+  const std::string config_handoff_path = rpc_default_config_file_path();
 
   if (json) {
     std::cout << "{\n";
@@ -350,7 +350,7 @@ void print_paths(bool json) {
     std::cout << "  ],\n";
     rocjitsu::cli::write_json_string_field(std::cout, "runtime_dir", runtime_dir);
     rocjitsu::cli::write_json_string_field(std::cout, "daemon_socket", daemon_socket);
-    rocjitsu::cli::write_json_string_field(std::cout, "default_config_path", default_config_path,
+    rocjitsu::cli::write_json_string_field(std::cout, "config_handoff_path", config_handoff_path,
                                            false);
     std::cout << "}\n";
     return;
@@ -361,7 +361,7 @@ void print_paths(bool json) {
     std::cout << "  " << dir.string() << "\n";
   std::cout << "runtime_dir: " << runtime_dir << "\n";
   std::cout << "daemon_socket: " << daemon_socket << "\n";
-  std::cout << "default_config_path: " << default_config_path << "\n";
+  std::cout << "config_handoff_path: " << config_handoff_path << "\n";
 }
 
 void cleanup_runtime_files(pid_t pid) {
@@ -646,6 +646,16 @@ int main(int argc, char *argv[]) {
   const char *config_path = flags.config->value().empty() ? nullptr : flags.config->value().c_str();
   const std::string profile_name = flags.profile->value();
   const std::string local_node = flags.node->value();
+  auto rejects_known_flag_value = [&](std::string_view option, std::string_view value) -> bool {
+    if (value.empty() || !command.find_flag(value))
+      return false;
+    std::cerr << std::format("rocjitsu: {}: requires a value\n", option);
+    return true;
+  };
+  if (config_path && rejects_known_flag_value("--config", config_path))
+    return 1;
+  if (rejects_known_flag_value("--profile", profile_name))
+    return 1;
   std::vector<std::string> vfio_sockets = flags.vfio_socket->values();
   const bool thread_budget_table = flags.thread_budget_table->value();
   config::LaunchOverrides overrides;
