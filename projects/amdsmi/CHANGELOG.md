@@ -286,6 +286,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
+- **Fixed the widened `amdsmi_gpu_metrics_t` accumulators reporting `4294967295` instead of `N/A`**.  
+  - `amdsmi_get_gpu_metrics_info()` and `amd-smi metric` reported an unsupported `gfx_activity_acc`, `mem_activity_acc`, `pcie_nak_sent_count_acc`, `pcie_nak_rcvd_count_acc` or `pcie_lc_perf_other_end_recovery` as a literal `4294967295` instead of `N/A`.
+
+- **Fixed `amd-smi set --compute-partition-mem-alloc-mode` reporting under `accelerator_partition_mem_alloc_mode`**.  
+  - `amd-smi set` and `amd-smi static --partition` now both report `compute_partition_mem_alloc_mode`, matching the flag. Scripts that read the old key from `set --json` must switch to the new one.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
@@ -419,6 +425,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - New APIs: `amdsmi_get_gpu_accelerator_partition_mem_alloc_mode()`, `amdsmi_set_gpu_accelerator_partition_mem_alloc_mode()`.
   - New enum: `amdsmi_accelerator_partition_mem_alloc_mode_t` (`AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_CAPPING`, `AMDSMI_ACCELERATOR_PARTITION_MEM_ALLOC_ALL`).
   - Supersedes the equivalent `compute_partition` memory allocation mode APIs, which are now deprecated.
+  - The `amd-smi` CLI keeps its existing `compute_partition_mem_alloc_mode` JSON output key for continuity; only the C API names change.
 
 - **Added `amdsmi_get_vcn_busy_percent()` API**.  
   - Reports VCN activity on devices without XCP partitions (e.g. Navi), which report `N/A` through the partition-based metrics path.
