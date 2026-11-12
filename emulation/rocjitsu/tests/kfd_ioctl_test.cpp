@@ -21306,6 +21306,7 @@ INSTANTIATE_TEST_SUITE_P(QueueOwnership, KfdRuntimeSaveTest,
                                                               QueueSaveMode::Debugger),
                                             ::testing::Bool()));
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   constexpr uint64_t save_address = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000;
@@ -21380,6 +21381,7 @@ TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   EXPECT_EQ(vm_read32(save_address + end - 64 - 128 + 4, pid), wave->pc);
   EXPECT_FALSE(process->queue_snapshot_map_.at(create.queue_id).debugger_owns_cwsr);
 }
+#endif
 
 class KfdFatalTrapSaveTest : public KfdIoctlTest, public ::testing::WithParamInterface<bool> {
 protected:
@@ -28196,6 +28198,7 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   constexpr uint64_t kernel = 0x600000000ULL, context = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000, expected = 0x12345678;
@@ -28278,6 +28281,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   EXPECT_TRUE(std::ranges::any_of(
       waves, [&](const auto &wave) { return !wave.sgprs.empty() && wave.sgprs[0] == expected; }));
 }
+#endif
 
 INSTANTIATE_TEST_SUITE_P(QueueOwners, KfdPendingMemorySaveTest,
                          ::testing::Values(PendingMemorySaveMode::Runtime,

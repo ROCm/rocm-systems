@@ -518,6 +518,7 @@ TEST_F(SimulatedKfdTest, UserptrUsesCpuAddressIndependentOfGpuVa) {
   EXPECT_EQ(driver->close(), 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPages) {
   util::StringDiagnostic diagnostic;
   auto result = create_test_vm(diagnostic.emitter());
@@ -611,6 +612,7 @@ TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPa
   EXPECT_EQ(::mincore(cpu + 2 * kPage, kPage, &residency), 0);
   EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
 }
+#endif
 
 TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
@@ -664,6 +666,7 @@ TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, ShortHeaderReturnRetiresTailGpuBackingAfterAddressReuse) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
   for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
@@ -852,6 +855,7 @@ TEST_F(SimulatedKfdTest, PartialFixedReplacementOfCallerVramAndGttRetiresGpuPage
     EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
   }
 }
+#endif
 
 TEST_F(SimulatedKfdTest, IpcImportRetainsBackingAcrossViewAndReleasesItOnFree) {
   util::StringDiagnostic diagnostic;
