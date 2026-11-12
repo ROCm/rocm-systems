@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/common/container/small_vector.hpp"
+#include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
@@ -31,15 +32,14 @@
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/experimental/synchronize_contexts.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -88,6 +88,39 @@ peek_outstanding_records(const rocprofiler_context_id_t context)
         outstanding_records += rocprofiler::counters::peek_device_counting_samples(_ctx);
     }
     return outstanding_records;
+}
+
+// Deliver the records now sitting in every buffer this context owns. Goes through the public
+// rocprofiler_flush_buffer rather than buffer::flush so that the PC sampling agent buffers are
+// drained too -- that extra step is the only difference between the two, and it is the whole of
+// this call's PC sampling coverage.
+//
+// Buffer ids are snapshotted before any flush: a flush joins the buffer's task group and runs the
+// tool's buffer callback on this thread, and a callback that creates or destroys a context would
+// deadlock against a registry held across it.
+rocprofiler_status_t
+flush_context_buffers(const rocprofiler_context_id_t context)
+{
+    auto _buffer_ids = rocprofiler::common::container::small_vector<rocprofiler_buffer_id_t, 8>{};
+    if(const auto* _buffers = rocprofiler::buffer::get_buffers())
+    {
+        for(const auto& itr : *_buffers)
+            if(itr && itr->context_id == context.handle)
+                _buffer_ids.emplace_back(rocprofiler_buffer_id_t{itr->buffer_id});
+    }
+
+    // Every buffer is flushed even after one fails, so a buffer that went away cannot hide the
+    // records sitting in the ones behind it. The caller is told about the first real failure.
+    auto _status = ROCPROFILER_STATUS_SUCCESS;
+    for(const auto& itr : _buffer_ids)
+    {
+        auto _itr_status = rocprofiler_flush_buffer(itr);
+        // Destroyed between the snapshot and the flush: it has no records left to deliver.
+        if(_itr_status == ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND) continue;
+        if(_itr_status != ROCPROFILER_STATUS_SUCCESS && _status == ROCPROFILER_STATUS_SUCCESS)
+            _status = _itr_status;
+    }
+    return _status;
 }
 
 }  // namespace
@@ -197,6 +230,14 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
        !rocprofiler::context::get_registered_context(context))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
+    // Cleared up front so that every path returning SUCCESS leaves the runtime-written fields
+    // readable. size is the caller's input and is left alone.
+    if(result != nullptr)
+    {
+        result->num_records         = 0;
+        result->num_timeout_records = 0;
+    }
+
     // Finalization has already run these drains.
     if(rocprofiler::registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
 
@@ -208,10 +249,14 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
         context_flags = options->flags;
         timeout_ns    = options->timeout_ns;
     }
-    if(result == nullptr && context_flags == ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG)
-    {
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    }
+
+    // flags is a bitset, so every test below masks. Comparing it outright silently inverts both
+    // flags the moment a caller combines them.
+    const auto _nohang  = (context_flags & ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG) != 0;
+    const auto _noflush = (context_flags & ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH) != 0;
+
+    // NOHANG only populates the result, so without one there is nothing to ask for.
+    if(result == nullptr && _nohang) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto return_status = ROCPROFILER_STATUS_SUCCESS;
     // Get the number of existing records before any synch if required
@@ -220,8 +265,7 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
         result->num_records = peek_outstanding_records(context);
     }
 
-    // Perform synchronization only if ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is not selected
-    if(context_flags != ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG)
+    if(!_nohang)
     {
         auto outstanding_records = synch_on_context(context, timeout_ns);
         if(outstanding_records > 0)
@@ -234,9 +278,17 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
             result->num_timeout_records = outstanding_records;
         }
     }
-    // Flush unless requested not to
-    if(context_flags != ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH)
-    {}
+
+    // Flushed even when the synchronization timed out: the records that did land belong to the
+    // caller, and the status already says that more are outstanding. A flush failure does not
+    // displace that status.
+    if(!_noflush)
+    {
+        auto _flush_status = flush_context_buffers(context);
+        if(_flush_status != ROCPROFILER_STATUS_SUCCESS &&
+           return_status == ROCPROFILER_STATUS_SUCCESS)
+            return_status = _flush_status;
+    }
     return return_status;
 }
 }

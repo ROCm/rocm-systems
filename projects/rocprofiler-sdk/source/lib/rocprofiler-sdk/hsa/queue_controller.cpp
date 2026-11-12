@@ -1147,7 +1147,9 @@ queue_controller_sync(const uint64_t timeout_ns)
         // Every queue is synced even after one times out, so a slow queue cannot hide the state of
         // the ones behind it.
         get_queue_controller()->iterate_queues(
-            [&outstanding_records](const Queue* _queue) { outstanding_records += _queue->sync(); });
+            [&outstanding_records, timeout_ns](const Queue* _queue) {
+                outstanding_records += _queue->sync(timeout_ns);
+            });
     }
     return outstanding_records;
 }

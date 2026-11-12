@@ -16,18 +16,19 @@ To flush a buffer explicitly, use ``rocprofiler_flush_buffer`` function.
 Records for asynchronous GPU operations, such as kernel dispatches and memory copies, are
 written by runtime-owned threads after the operation retires. Synchronizing on the operation
 is therefore not sufficient for its record to exist, and a flush issued at that point can
-return nothing for it. Call ``rocprofiler_synchronize_contexts`` before the flush when every
-completed operation must be accounted for.
+return nothing for it. Use ``rocprofiler_synchronize_context`` when every completed operation must
+be accounted for: it waits for the records to be written and then flushes the context's buffers,
+so it replaces the ``rocprofiler_flush_buffer`` call rather than preceding it.
 
 .. warning::
 
-   ``rocprofiler_synchronize_contexts`` is experimental. It is declared in
+   ``rocprofiler_synchronize_context`` is experimental. It is declared in
    ``rocprofiler-sdk/experimental/synchronize_contexts.h`` and its interface may change in a
    future release.
 
 .. warning::
 
-   ``rocprofiler_synchronize_contexts`` is expensive and slows tracing while it runs. It blocks
+   ``rocprofiler_synchronize_context`` is expensive and slows tracing while it runs. It blocks
    until record production has caught up and stalls queue creation and destruction for its
    duration. Use it only where a window of records must be complete, typically once before
    reading a buffer. Calling it per dispatch, or anywhere on a hot path, will dominate the cost
