@@ -100,6 +100,54 @@ static inline bool IbCastSkipRecvCompletionCheck(const struct ncclIbNetCommBase*
           base->optRecvCompletion);
 }
 
+// Splits the payload of wrs[0] into 16 KiB RDMA WRITEs aimed at the receiver's chosen blocks.
+// wrs[0] becomes the last piece, so it keeps the immediate data, the signal and the wr_id.
+static ncclResult_t IbCastNearRecvChain(struct ncclIbSendComm* comm, volatile void* slots,
+                                        struct ibv_send_wr** head) {
+  struct ibv_send_wr* lastPieceWr = comm->wrs;
+  struct ibv_sge* payload = comm->sges;
+  *head = comm->wrs;
+  if (lastPieceWr->num_sge == 0) return ncclSuccess;
+
+  int mode = ctsFifoNearRecvMode(slots, 0);
+  uint8_t phases = ctsFifoNearRecvPhases(slots, 0);
+  uint64_t remoteBase = lastPieceWr->wr.rdma.remote_addr;
+  uint32_t length = payload->length;
+
+  int nPieces = DIVUP(length, NCCL_NET_NEAR_RECV_PIECE_SIZE);
+  int maxLeadingPieces = (int)(sizeof(comm->nearRecvWrs) / sizeof(comm->nearRecvWrs[0]));
+  if (nPieces - 1 > maxLeadingPieces) return ncclInternalError;
+
+  for (int piece = 0; piece < nPieces - 1; piece++) {
+    struct ibv_sge* sge = comm->nearRecvSges + piece;
+    sge->addr = payload->addr + (uint64_t)piece * NCCL_NET_NEAR_RECV_PIECE_SIZE;
+    sge->length = NCCL_NET_NEAR_RECV_PIECE_SIZE;
+    sge->lkey = payload->lkey;
+
+    struct ibv_send_wr* wr = comm->nearRecvWrs + piece;
+    memset(wr, 0, sizeof(*wr));
+    wr->opcode = IBV_WR_RDMA_WRITE;
+    wr->sg_list = sge;
+    wr->num_sge = 1;
+    wr->wr.rdma.remote_addr = remoteBase + ncclNearRecvPieceOffset(piece, mode, phases);
+    wr->wr.rdma.rkey = lastPieceWr->wr.rdma.rkey;
+    wr->next = piece + 1 < nPieces - 1 ? wr + 1 : lastPieceWr;
+  }
+
+  uint64_t lastPieceStart = (uint64_t)(nPieces - 1) * NCCL_NET_NEAR_RECV_PIECE_SIZE;
+  payload->addr += lastPieceStart;
+  payload->length = length - lastPieceStart;
+  lastPieceWr->wr.rdma.remote_addr = remoteBase + ncclNearRecvPieceOffset(nPieces - 1, mode, phases);
+  if (nPieces > 1) *head = comm->nearRecvWrs;
+  return ncclSuccess;
+}
+
+void ncclIbCastSetNearRecvHint(void* recvComm, int mode, uint8_t phases) {
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  comm->nearRecvMode = (uint8_t)mode;
+  comm->nearRecvPhases = phases;
+}
+
 ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, int startQpIndex, bool wrrSched,
                              bool useWriteOp) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
@@ -107,6 +155,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   int nreqs = comm->useCtsOffload ? 1 : ctsFifoNreqs(slots, 0);
   uint64_t nowNs = 0;
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+  bool nearRecv = !comm->useCtsOffload && !useWriteOp && nreqs == 1 && nqps == 1 &&
+                  ctsFifoNearRecvMode(slots, 0) != ncclNetNearRecvOff;
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
         reqs[0]->base, reqs[0]->id, slot, nreqs);
@@ -344,7 +394,9 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       for (int r=0; r<nreqs; r++) reqs[r]->tel_post_ts = _tel_ns;
     }
 
-    NCCLCHECK(wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr));
+    struct ibv_send_wr* postWrs = comm->wrs;
+    if (nearRecv) NCCLCHECK(IbCastNearRecvChain(comm, slots, &postWrs));
+    NCCLCHECK(wrap_ibv_post_send(qp->qp, postWrs, &bad_wr));
 
     rcclTelemetryQpSendPosted(qp->telQpStats, useWriteOp ? 0 : 1);
 
@@ -745,6 +797,8 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   struct ncclIbSendFifo* localElem = comm->remCtsFifo.elems[slot];
   struct ncclIbSendFifoCtsInline* localElemInline = (struct ncclIbSendFifoCtsInline*)localElem;
+  uint8_t nearRecvMode = n == 1 ? comm->nearRecvMode : (uint8_t)ncclNetNearRecvOff;
+  comm->nearRecvMode = ncclNetNearRecvOff;
   for (int i = 0; i < n; i++) {
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandles[i];
     if (IbCastAinicCtsInlineData) {
@@ -755,6 +809,8 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       localElemInline[i].tag = (uint16_t)tags[i];
       localElemInline[i].idx = (uint32_t)(comm->base.fifoHead + 1);
       localElemInline[i].rxReqIndex = (uint8_t)rxReqIndex;
+      localElemInline[i].nearRecvMode = nearRecvMode;
+      localElemInline[i].nearRecvPhases = comm->nearRecvPhases;
     } else {
       localElem[i].addr = (uint64_t)data[i];
       // Send all applicable rkeys
@@ -766,6 +822,8 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
       localElem[i].tag = tags[i];
       localElem[i].idx = (uint32_t)(comm->base.fifoHead + 1);
       localElem[i].rxReqIndex = rxReqIndex;
+      localElem[i].nearRecvMode = nearRecvMode;
+      localElem[i].nearRecvPhases = comm->nearRecvPhases;
     }
   }
 

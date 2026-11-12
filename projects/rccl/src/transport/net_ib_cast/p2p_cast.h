@@ -102,5 +102,13 @@ static inline uint32_t ctsFifoTag(volatile void* slotBase, uint32_t rxReqId) {
   if (IbCastAinicCtsInlineData) return (uint32_t)((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].tag;
   return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].tag;
 }
+static inline uint8_t ctsFifoNearRecvMode(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nearRecvMode;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].nearRecvMode;
+}
+static inline uint8_t ctsFifoNearRecvPhases(volatile void* slotBase, uint32_t rxReqId) {
+  if (IbCastAinicCtsInlineData) return ((volatile struct ncclIbSendFifoCtsInline*)slotBase)[rxReqId].nearRecvPhases;
+  return ((volatile struct ncclIbSendFifo*)slotBase)[rxReqId].nearRecvPhases;
+}
 
 #endif // NET_IB_P2P_H_

@@ -73,6 +73,10 @@ extern int64_t ncclParamDmaBufEnable();
 extern ncclNet_t netIbCast;
 extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
 
+// Near-recv mode and per-region phase bits (bit i = region i of the request, see
+// ncclNearRecvPieceOffset in device.h) for the next IB-CAST irecv.
+void ncclIbCastSetNearRecvHint(void* recvComm, int mode, uint8_t phases);
+
 enum rcclIBNicType {
   rcclIBNicTypeUnknown = -1,
   rcclIBNicTypeDefault = 0,

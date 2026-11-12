@@ -467,7 +467,8 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t tag;
   uint32_t idx;
   uint16_t rxReqIndex;
-  char padding[2];
+  uint8_t nearRecvMode;   // ncclNetNearRecvMode
+  uint8_t nearRecvPhases;
 };
 
 #define MAX_INLINE_DATA_SIZE 24
@@ -479,7 +480,9 @@ struct alignas(32) ncclIbSendFifoCtsInline {
   uint8_t rxReqIndex; // num req is max 256
   uint16_t tag;
   uint32_t idx;
-  char padding[8];
+  uint8_t nearRecvMode;   // ncclNetNearRecvMode
+  uint8_t nearRecvPhases;
+  char padding[6];
 } __attribute__((packed));
 
 struct ncclIbQpInitAttr {
@@ -738,6 +741,9 @@ struct ncclIbSendComm {
   // Same reasoning as ncclIbQp::telQpStats: avoid re-resolving per completion.
   RcclChannelStats* telChStats;
   uint16_t remCommId;           // receiver's commId for imm_data encoding (QP sharing)
+  // Leading pieces of a near-recv scatter; the last piece reuses wrs[0].
+  struct ibv_send_wr nearRecvWrs[NCCL_STEPS * NCCL_NET_NEAR_RECV_PIECES_PER_REGION];
+  struct ibv_sge nearRecvSges[NCCL_STEPS * NCCL_NET_NEAR_RECV_PIECES_PER_REGION];
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -830,6 +836,9 @@ struct ncclIbRecvComm {
   int telChId; // Telemetry: NCCL channel ID for this communicator
   // See ncclIbSendComm::telChStats.
   RcclChannelStats* telChStats;
+  // Set by ncclIbCastSetNearRecvHint, consumed by the next irecv.
+  uint8_t nearRecvMode;
+  uint8_t nearRecvPhases;
 };
 static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
