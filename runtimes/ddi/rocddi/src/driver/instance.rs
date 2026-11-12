@@ -11,9 +11,10 @@
 #[cfg(test)]
 use super::test_driver;
 use super::{
-    AddressSpaceInfo, AllocationOperations, AllocationState, Driver, GpuDriver,
-    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver,
-    KfdEventSubscription, linux_kfd,
+    AddressSpaceInfo, AllocationOperations, AllocationState, Driver, GpuCacheControlOperations,
+    GpuClockOperations, GpuFaultModeOperations, GpuKernelQueueOperations, GpuMemoryQueryOperations,
+    GpuPcSamplingOperations, GpuSpmOperations, GpuSurfaceOperations, GpuTrapOperations,
+    GpuUserQueueOperations, KfdDriver, KfdEventSubscription, linux_kfd,
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::{
@@ -505,7 +506,7 @@ impl GpuDriverRef<'_> {
         match self {
             Self::LinuxKfd { driver, state } => driver.clock_counters(state),
             #[cfg(test)]
-            Self::Test { .. } => Err(unsupported_test_gpu()),
+            Self::Test { driver, state } => driver.clock_counters(state),
         }
     }
 
