@@ -57,22 +57,19 @@ VALU for that instruction; counted population and other variants remain
 unqualified. WGP `SQ_INST_CYCLES_VALU` is a raw SIMD execution-cycle count with
 no peak; it is not elapsed time, FLOPs, or utilization.
 
-`Wave Dependency Wait` and `Wave Issue Wait` are percentages of wave cycles,
-from `SQ_WAIT_ANY` and `SQ_WAIT_INST_ANY` over `SQG_WAVE_CYCLES`. The
-`wave_wait` shortcut collects those two rows. The WGP Instruction Issue Stalls
-table, including `Wait for Any`, stays unavailable. `Wavefront Occupancy` and
+The WGP Instruction Issue Stalls table, including `Wait for Any`, is
+unavailable, and Speed-of-Light has no wave-wait rows. `Wavefront Occupancy` and
 WGP `Wave Life` remain provisional while living-wave counter units, reduction,
 and wave-count normalization are validated. Treat these values as unknown when
 inferring occupancy limits or quantified scheduler stalls. Restoration is
 tracked under AIPROFCOMP-907.
 
-For memory, read `memchart` first. GL1 is a write-combining stage: read its
-utilization and stalls, and do not invent a hit rate when the report prints
-`N/A`. `GL2 Cache BW` reports a percentage of the L2 interface peak; the
-`GL2 Cache Bandwidth` table counts size-weighted requests at the GL2 output
-FIFOs. `GL2-Fabric Read BW`, `GL2-Fabric Write BW`, and the Memory Chart
-`DRAM Read Bandwidth` and `DRAM Write Bandwidth` include traffic served or
-absorbed by the Infinity Cache, so they do not measure physical GDDR6 bytes
+For memory, read `memchart` first. GL1 is a write-combining stage that reports
+only `Total Requests`; there is no GL1 utilization, stall, bandwidth, or
+GL1-GL2 data, so do not invent a hit rate when the report prints `N/A`. There
+is no GL2 bandwidth row or table, no CPC panel, and no Efficiency Arbiter
+panel. The Memory Chart `DRAM Read Bandwidth` and `DRAM Write Bandwidth`
+include traffic served or absorbed by the Infinity Cache, so they do not measure physical GDDR6 bytes
 and have no GDDR6 peak. `Infinity Cache Hit Rate` and GDDR6 bandwidth are
 `N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
 is provisional.
@@ -83,6 +80,8 @@ memory, which the Infinity Cache can also serve, so the plot marks it once, at
 `GDDR6`. Compare it with both roofs yourself, because "Limited by" and the hover
 text never name `MALL`. A point above `GDDR6` and below `MALL` means the
 Infinity Cache is absorbing the traffic; never call that kernel GDDR6-limited.
+The `L2` and `L1` roofs have no kernel point, because there is no `AI L2` or
+`AI L1` row.
 Under `STABLE_STD` the measured roofs sit well below the interface peak. The
 VALU roofline rows subtract WMMA issues from all VALU issues and multiply by
 the wave size, validated only for one wave32 FP16 16x16x16 case. They are
