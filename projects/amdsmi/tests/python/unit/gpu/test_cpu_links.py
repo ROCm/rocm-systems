@@ -35,9 +35,7 @@ class TestAmdSmiGetGpuCpuLinks(unittest.TestCase):
             cpu_links_arg[1].link_type = wrapper.AMDSMI_LINK_TYPE_PCIE
             return wrapper.AMDSMI_STATUS_SUCCESS
 
-        with mock.patch.object(
-            wrapper, "amdsmi_get_gpu_cpu_links", side_effect=_fill
-        ) as query:
+        with mock.patch.object(wrapper, "amdsmi_get_gpu_cpu_links", side_effect=_fill) as query:
             result = amdsmi.amdsmi_get_gpu_cpu_links(handle)
 
         self.assertEqual(query.call_count, 2)
@@ -57,9 +55,7 @@ class TestAmdSmiGetGpuCpuLinks(unittest.TestCase):
             num_cpu_links_ref._obj.value = 0
             return wrapper.AMDSMI_STATUS_SUCCESS
 
-        with mock.patch.object(
-            wrapper, "amdsmi_get_gpu_cpu_links", side_effect=_fill
-        ) as query:
+        with mock.patch.object(wrapper, "amdsmi_get_gpu_cpu_links", side_effect=_fill) as query:
             result = amdsmi.amdsmi_get_gpu_cpu_links(handle)
 
         # The two-call idiom still runs in full even when the count is zero.
