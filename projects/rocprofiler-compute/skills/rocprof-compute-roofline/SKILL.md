@@ -41,6 +41,9 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for two more optio
 - `--roofline` collects only roofline data.
 - `--roofline-bench-only` runs only the microbenchmarks, without an application.
 
+On ROCm 10.2 and earlier, these options are named `--device`, `--roof-only` and
+`--bench-only`.
+
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
