@@ -89,6 +89,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--bench-only` → `--roofline-bench-only`
   * `--device` → `--roofline-device`
 
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -148,6 +150,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
 
 * The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
+
+* `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
 
 ### Known issues
 
