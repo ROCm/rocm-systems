@@ -603,3 +603,4 @@ cpack_add_component(dev GROUP runtime)
 # rdc-tests package, -tests postfix
 cpack_add_component_group("tests")
 cpack_add_component(${TESTS_COMPONENT} GROUP tests)
+# CI check: ci:run-wsl on a narrow build (test PR, do not merge)
