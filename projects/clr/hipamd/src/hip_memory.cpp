@@ -5175,8 +5175,11 @@ hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparsePropertie
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (array == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(array) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
   }
 
   *sparseProperties = {};
