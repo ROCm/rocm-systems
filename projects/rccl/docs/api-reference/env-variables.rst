@@ -879,6 +879,25 @@ in the following table.
           GIN fails on that communicator for every backend in the list.
         | Default: unset (every backend except rocSHMEM GDA may be active)
 
+    * - | ``NCCL_GIN_ALLGATHER_ENABLE``
+        | GIN-SDMA AllGather on a single node. Compiled only in the
+          ``--rocshmem-gin`` build.
+      - | ``1``: a symmetric single-segment AllGather on gfx950 may use GIN (default)
+        | ``0``: leave AllGather on the non-GIN selectors
+
+    * - | ``NCCL_GIN_ALLGATHER_MIN_BYTES``
+        | Per-rank byte floor for GIN-SDMA AllGather.
+      - | ``0`` (default): no extra size floor
+
+    * - | ``NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES``
+        | Per-rank size at which AllGather switches from LSA stores to SDMA puts.
+      - | ``8388608`` (8 MiB, default)
+
+    * - | ``NCCL_GIN_ALLGATHER_GFX1250_ENABLE``
+        | Opt in to GIN-SDMA AllGather on gfx1250, including DPX.
+      - | ``0``: gfx1250 keeps the pre-existing AllGather selectors (default)
+        | ``1``: gfx1250 may use the same single-node GIN AllGather path as gfx950
+
     * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
         | Opt in to GinScatter AllReduce on gfx1250.
       - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)

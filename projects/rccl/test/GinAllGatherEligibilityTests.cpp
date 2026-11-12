@@ -113,11 +113,15 @@ class GinAllGatherEligibilityTest : public ::testing::Test {
 } // namespace
 
 TEST_F(GinAllGatherEligibilityTest, RejectsNullOrZeroInputs) {
+  installSingleSegment();
+  EXPECT_TRUE(eligible());
   EXPECT_FALSE(ncclAllGatherGinSdmaEligible(nullptr, send_, recv_, kCount, ncclFloat32));
   EXPECT_FALSE(eligible(0));
 }
 
 TEST_F(GinAllGatherEligibilityTest, RejectsMissingBootstrapAndMultiNode) {
+  installSingleSegment();
+  EXPECT_TRUE(eligible());
   mock_.comm.bootstrap = nullptr;
   EXPECT_FALSE(eligible());
   mock_.comm.bootstrap = &mock_.bootstrapPlaceholder;
@@ -128,14 +132,19 @@ TEST_F(GinAllGatherEligibilityTest, RejectsMissingBootstrapAndMultiNode) {
 TEST_F(GinAllGatherEligibilityTest, RejectsUnsupportedTopologyAndBackend) {
   mock_.comm.nRanks = 32;
   mock_.comm.devrState.lsaSize = 32;
+  installSingleSegment();
   EXPECT_FALSE(eligible());
   mock_.comm.nRanks = 8;
   mock_.comm.devrState.lsaSize = 8;
+  installSingleSegment();
+  EXPECT_TRUE(eligible());
   mock_.sharedRes.ginState.backends[0].ginType = (ncclGinType_t)NCCL_NET_DEVICE_GIN_PROXY;
   EXPECT_FALSE(eligible());
 }
 
 TEST_F(GinAllGatherEligibilityTest, RejectsNonSymmetricAndPartialLsa) {
+  installSingleSegment();
+  EXPECT_TRUE(eligible());
   mock_.comm.symmetricSupport = false;
   EXPECT_FALSE(eligible());
   mock_.comm.symmetricSupport = true;
@@ -173,6 +182,14 @@ TEST_F(GinAllGatherEligibilityTest, RejectsNonSymmetricWindows) {
   EXPECT_FALSE(eligible());
 }
 
+TEST_F(GinAllGatherEligibilityTest, RejectsReceivePastPeerSafeSize) {
+  installSingleSegment();
+  EXPECT_TRUE(eligible());
+  const size_t recvBytes = kCount * sizeof(float) * static_cast<size_t>(mock_.comm.nRanks);
+  recvWin_.mem.lsaMinSize = recvBytes - 1;
+  EXPECT_FALSE(eligible());
+}
+
 TEST_F(GinAllGatherEligibilityTest, AcceptsUnalignedSendThatFitsLocally) {
   // 32-byte send at offset 4. Peer-safe size is smaller than the local window, which
   // used to reject this rank while another rank with offset 0 stayed eligible.
@@ -189,7 +206,12 @@ TEST_F(GinAllGatherEligibilityTest, AcceptsGfx950AndGfx1250) {
   EXPECT_TRUE(eligible());
   std::memset(mock_.archName_, 0, sizeof(mock_.archName_));
   std::memcpy(mock_.archName_, "gfx1250", 7);
-  EXPECT_TRUE(eligible());
+  const char* gfx1250 = std::getenv("NCCL_GIN_ALLGATHER_GFX1250_ENABLE");
+  if (gfx1250 != nullptr && std::strcmp(gfx1250, "1") == 0) {
+    EXPECT_TRUE(eligible());
+  } else {
+    EXPECT_FALSE(eligible());
+  }
 }
 
 TEST_F(GinAllGatherEligibilityTest, RejectsWrongArch) {
@@ -216,6 +238,8 @@ TEST(GinAllGatherCtaCount, ReportsLsaAndSdmaTiers) {
   // Under 16 KiB the LSA band uses 2 chunks: 8 ranks * 2 = 16 CTAs. At 8 MiB, one SDMA CTA.
   EXPECT_EQ(16, ncclAllGatherGinSdmaCtaCount(8, 1024));
   EXPECT_EQ(1, ncclAllGatherGinSdmaCtaCount(8, 8ull * 1024 * 1024));
+  // 16 ranks at 1 MiB ask for 8 chunks, which the 64-CTA LSA barrier pool clamps to 4.
+  EXPECT_EQ(64, ncclAllGatherGinSdmaCtaCount(16, 1ull << 20));
 }
 #else
 TEST(GinAllGatherEligibilityTest, SkippedWithoutGinBuild) {

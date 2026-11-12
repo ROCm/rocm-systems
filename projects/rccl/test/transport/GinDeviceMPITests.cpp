@@ -27,6 +27,7 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #endif
 #ifdef ENABLE_ROCSHMEM_GIN
+#include "algorithms/gin/gin_all_gather.h"
 #include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
 #include "gin/gin_type_env.h"
@@ -360,6 +361,11 @@ std::string sdmaInternalAgCommSkipReason(ncclComm_t comm) {
   if (comm->archName == nullptr ||
       (std::strncmp(comm->archName, "gfx950", 6) != 0 && std::strncmp(comm->archName, "gfx1250", 7) != 0))
     return "GIN-SDMA allgather requires gfx950 or gfx1250";
+  if (std::strncmp(comm->archName, "gfx1250", 7) == 0) {
+    const char* gfx1250 = std::getenv("NCCL_GIN_ALLGATHER_GFX1250_ENABLE");
+    if (gfx1250 == nullptr || std::strcmp(gfx1250, "1") != 0)
+      return "GIN-SDMA allgather on gfx1250 requires NCCL_GIN_ALLGATHER_GFX1250_ENABLE=1";
+  }
   if (comm->nNodes != 1)
     return "GIN-SDMA allgather is scaleup-only (requires nNodes=1)";
   if (!comm->symmetricSupport)
@@ -5401,8 +5407,26 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
   ASSERT_LE(nRanks, 8);
 
   constexpr size_t kSdmaMinBytes = size_t{8} << 20;
-  const std::vector<size_t> counts = {1024, kSdmaMinBytes / sizeof(float)};
+  // 1 and the SDMA size plus one float are not 16-byte multiples, so the LSA
+  // copy takes its 4-byte and byte tails. 1024 and the 8 MiB count cover the
+  // aligned LSA and SDMA tiers.
+  const size_t sdmaCount = kSdmaMinBytes / sizeof(float);
+  const std::vector<size_t> counts = {1, 1024, sdmaCount, sdmaCount + 1};
   const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (std::getenv("NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES") == nullptr)
+    ASSERT_EQ(64, ncclAllGatherGinSdmaCtaCount(16, size_t{1} << 20));
+#endif
+
+  // ASSERT_MPI_EQ returns from the enclosing function, so this stays a macro.
+#define EXPECT_GIN_SDMA(countExpr, sendPtr, recvPtr)                                                                 \
+  do {                                                                                                               \
+    int algo_ = 0, proto_ = 0, channels_ = 0;                                                                        \
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, (countExpr), ncclFloat, ncclSum,         \
+                                                   (sendPtr), (recvPtr), /*graphCapturing=*/0, &algo_, &proto_,      \
+                                                   &channels_));                                                     \
+    ASSERT_MPI_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_AG_GIN_SDMA), algo_);                                      \
+  } while (0)
 
   void* dSend = nullptr;
   void* dRecv = nullptr;
@@ -5431,6 +5455,7 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
       ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), count * sizeof(float), hipMemcpyHostToDevice));
       ASSERT_MPI_EQ(hipSuccess, hipMemset(dRecv, 0, total * sizeof(float)));
       MPI_Barrier(MPI_COMM_WORLD);
+      EXPECT_GIN_SDMA(count, dSend, dRecv);
       ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(dSend, dRecv, count, ncclFloat, comm, stream));
       ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
       if (tag == 0) ASSERT_MPI_TRUE(comm->ginAllGatherState.initialized);
@@ -5455,6 +5480,7 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, host.data(), total * sizeof(float), hipMemcpyHostToDevice));
     void* inPlaceSend = static_cast<char*>(dRecv) + static_cast<size_t>(rank) * count * sizeof(float);
     MPI_Barrier(MPI_COMM_WORLD);
+    EXPECT_GIN_SDMA(count, inPlaceSend, dRecv);
     ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(inPlaceSend, dRecv, count, ncclFloat, comm, stream));
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), dRecv, total * sizeof(float), hipMemcpyDeviceToHost));
@@ -5477,6 +5503,7 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), count * sizeof(float), hipMemcpyHostToDevice));
     ASSERT_MPI_EQ(hipSuccess, hipMemset(dRecv, 0, total * sizeof(float)));
     MPI_Barrier(MPI_COMM_WORLD);
+    EXPECT_GIN_SDMA(count, dSend, dRecv);
 
     ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
     const ncclResult_t captureRes = ncclAllGather(dSend, dRecv, count, ncclFloat, comm, stream);
@@ -5506,6 +5533,7 @@ TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
     }
   }
 }
+#undef EXPECT_GIN_SDMA
 
 // Producer: one block per GIN context. Block b uses ginContext=b, puts into
 // its own slot, and signals signal[b] in that context.

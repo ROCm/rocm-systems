@@ -165,6 +165,9 @@ void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+// GPU-only multi-segment windows left unregistered with GIN. Symk GIN kernels
+// put through the user window and would read a null segment table.
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win);
 // RCCL: smallest registered size across this window's LSA team. Falls back to the
 // local size for host-only test windows that do not carry runtime memory state.
 size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win);

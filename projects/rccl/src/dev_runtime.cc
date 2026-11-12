@@ -813,11 +813,16 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // One HIP DMA-BUF covers only the first segment. Leave a GPU-only multi-segment
-  // window on the LSA path instead of failing registration: enabling GIN for a
-  // single-segment collective must not reject an unrelated window, and GIN
-  // collectives refuse these windows in their eligibility checks.
+  // One HIP DMA-BUF covers only the first segment, so GPU-only multi-segment
+  // windows stay off GIN. A GIN-only window has no other path, so that case
+  // still fails. Other windows stay usable for LSA collectives.
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment) {
+    if (mem->winFlags & NCCL_WIN_GIN_ONLY) {
+      WARN("Window %p spans %d device-memory segments; GIN-only windows cannot be registered on HIP",
+           mem->primaryAddr, mem->maxGlobalNumSegments);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
     INFO(NCCL_INIT, "Window %p spans %d device-memory segments; leaving it unregistered with GIN", mem->primaryAddr,
          mem->maxGlobalNumSegments);
     mem->numGinSegments = 0;
@@ -1272,8 +1277,9 @@ static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevr
                                      struct ncclWindow_vidmem* winDevHost, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterGin)) return ret;
-  // Skipped HIP registration (GPU-only multi-segment) leaves no segment infos.
-  if (mem->ginSegmentInfos == nullptr || mem->numGinSegments <= 0) {
+  // Skipped HIP registration sets numGinSegments to 0. A non-zero count with
+  // no segment infos is not that state and still goes through allocation.
+  if (mem->numGinSegments == 0) {
     winDevHost->numSegments = 0;
     winDevHost->ginMultiSegmentWins = nullptr;
     return ncclSuccess;
@@ -2698,6 +2704,13 @@ ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, stru
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win) {
   return win != NULL && win->memory != NULL && win->memory->maxGlobalNumSegments > 1;
+}
+
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win) {
+  // The HIP skip in symMemoryRegisterGin. Host windows with no memory object,
+  // and windows GIN never tried to register, are not this state.
+  return win != nullptr && win->memory != nullptr && win->memory->numGinSegments <= 0 &&
+         win->memory->maxGlobalNumSegments > 1 && !win->memory->globalHasSysmemSegment;
 }
 
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {

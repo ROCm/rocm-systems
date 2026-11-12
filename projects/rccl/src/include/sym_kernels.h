@@ -211,7 +211,7 @@ ncclResult_t ncclSymkFinalize(struct ncclComm* comm);
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                        size_t nElts);
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                      size_t nElts, bool symAligned16B = true);
+                      size_t nElts, bool symAligned16B = true, bool ginWindowsUnregistered = false);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
 

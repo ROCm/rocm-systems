@@ -1,9 +1,10 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * GIN-SDMA all-gather for single-node gfx950 and gfx1250 communicators. The kernel runs only
- * for a single-segment NCCL_WIN_COLL_SYMMETRIC device window; multi-segment and
- * host-backed registrations stay on the non-GIN path.
+ * GIN-SDMA all-gather for single-node communicators. gfx950 is on by default.
+ * gfx1250, including DPX, stays opt-in (NCCL_GIN_ALLGATHER_GFX1250_ENABLE=1).
+ * The kernel runs only for a single-segment NCCL_WIN_COLL_SYMMETRIC device
+ * window; multi-segment and host-backed registrations stay on the non-GIN path.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
@@ -26,6 +27,9 @@ extern thread_local int ncclGroupDepth;
 
 NCCL_PARAM(GinAllGatherEnable, "GIN_ALLGATHER_ENABLE", 1)
 NCCL_PARAM(GinAllGatherMinBytes, "GIN_ALLGATHER_MIN_BYTES", 0)
+// gfx950 at a full node is the measured case. gfx1250, including DPX, stays
+// on the pre-existing AllGather selectors until it has data of its own.
+NCCL_PARAM(GinAllGatherGfx1250Enable, "GIN_ALLGATHER_GFX1250_ENABLE", 0)
 // Per-rank bytes at or above which SDMA beats direct LSA stores.
 NCCL_PARAM(GinAllGatherSdmaMinBytes, "GIN_ALLGATHER_SDMA_MIN_BYTES", 8 * 1024 * 1024)
 
@@ -56,17 +60,36 @@ constexpr GinAllGatherLsaBand kGinAllGatherLsaBands[] = {
 inline size_t ginAllGatherDivUp(size_t a, size_t b) { return (a + b - 1) / b; }
 inline size_t ginAllGatherAlignUp(size_t a, size_t b) { return ginAllGatherDivUp(a, b) * b; }
 
+__device__ __forceinline__ void ginAllGatherCopyBytes(char* dst, const char* src, size_t begin, size_t end) {
+  for (size_t i = begin + threadIdx.x; i < end; i += blockDim.x) dst[i] = src[i];
+}
+
+// Same tiers as bcastLsa: a byte head to 16-byte alignment, then 16-byte or
+// 4-byte packs chosen by the source/destination offset difference, then a byte
+// tail. A rank whose local slice is not 16-byte aligned still stays on this
+// kernel instead of falling back to a byte-at-a-time copy of the whole slice.
 __device__ __forceinline__ void ginAllGatherCopyCta(char* dst, const char* src, size_t bytes) {
   const uintptr_t dstAddr = reinterpret_cast<uintptr_t>(dst);
   const uintptr_t srcAddr = reinterpret_cast<uintptr_t>(src);
-  // uint4 stores fault or split ranks when only some ranks are 16-byte aligned.
-  // The byte loop keeps every rank on this kernel for an unaligned local slice.
-  if (((dstAddr | srcAddr | bytes) & (sizeof(uint4) - 1)) == 0) {
-    const size_t nVec = bytes / sizeof(uint4);
-    for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) ((uint4*)dst)[i] = ((const uint4*)src)[i];
-    return;
+  const uint32_t alignDiff = static_cast<uint32_t>(srcAddr - dstAddr);
+  size_t nPre = static_cast<size_t>((16u - (dstAddr & 15u)) & 15u);
+  if (nPre > bytes) nPre = bytes;
+  ginAllGatherCopyBytes(dst, src, 0, nPre);
+  size_t cursor = nPre;
+  if ((alignDiff % 16u) == 0) {
+    const size_t nVec = (bytes - cursor) / sizeof(uint4);
+    const uint4* in = reinterpret_cast<const uint4*>(src + cursor);
+    uint4* out = reinterpret_cast<uint4*>(dst + cursor);
+    for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) out[i] = in[i];
+    cursor += nVec * sizeof(uint4);
+  } else if ((alignDiff % 4u) == 0) {
+    const size_t nVec = (bytes - cursor) / sizeof(uint32_t);
+    const uint32_t* in = reinterpret_cast<const uint32_t*>(src + cursor);
+    uint32_t* out = reinterpret_cast<uint32_t*>(dst + cursor);
+    for (size_t i = threadIdx.x; i < nVec; i += blockDim.x) out[i] = in[i];
+    cursor += nVec * sizeof(uint32_t);
   }
-  for (size_t i = threadIdx.x; i < bytes; i += blockDim.x) dst[i] = src[i];
+  ginAllGatherCopyBytes(dst, src, cursor, bytes);
 }
 
 static_assert(kGinAllGatherMaxCtas >= kGinAllGatherMaxRanks, "LSA grid needs a chunk per peer");
@@ -92,11 +115,15 @@ __global__ void ncclGinAllGatherKernel(ncclWindow_t sendWin, size_t sendOff, ncc
     const uint64_t signalValue = gin.readSignal(slot);
     ncclBarrierSession<ncclCoopCta> bar{ncclCoopCta(), ncclTeamTagWorld(), gin, slot};
     bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::None);
+    // In-place allgather already holds this rank's slice in the receive window.
+    const bool skipSelf = sendWin == recvWin && sendOff == recvOff + static_cast<size_t>(devComm.rank) * bytes;
     for (int peer = threadIdx.x; peer < devComm.nRanks; peer += blockDim.x) {
+      if (skipSelf && peer == devComm.rank) continue;
       gin.put(ncclTeamWorld(devComm), peer, recvWin, recvOff + devComm.rank * bytes, sendWin, sendOff, bytes,
               ncclGin_WeakSignalInc{slot});
     }
-    gin.waitSignal(ncclCoopCta(), slot, signalValue + devComm.nRanks);
+    const uint64_t nSignals = static_cast<uint64_t>(devComm.nRanks) - (skipSelf ? 1 : 0);
+    gin.waitSignal(ncclCoopCta(), slot, signalValue + nSignals);
     gin.flush(ncclCoopCta());
     bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::None);
   } else {
@@ -109,7 +136,8 @@ __global__ void ncclGinAllGatherKernel(ncclWindow_t sendWin, size_t sendOff, ncc
       const size_t chunk = bytes - off > chunkBytes ? chunkBytes : bytes - off;
       char* dst = (char*)ncclGetLsaPointer(recvWin, recvOff + devComm.rank * bytes + off, peer);
       const char* src = (const char*)ncclGetLocalPointer(sendWin, sendOff + off);
-      ginAllGatherCopyCta(dst, src, chunk);
+      // In-place: this rank's slice already lives at dst.
+      if (dst != src) ginAllGatherCopyCta(dst, src, chunk);
     }
     bar.sync(ncclCoopCta(), cuda::memory_order_release);
   }
@@ -124,6 +152,8 @@ ncclResult_t ncclGinAllGatherInitOnce(ncclComm* comm) {
     reqs.ginSignalCount = kGinAllGatherMaxCtas;
     reqs.barrierCount = kGinAllGatherSdmaCtas;
     reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+    // This TU is compiled for SDMA only, so a fallback backend's handles will not do.
+    reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, true, NCCL_VERSION_CODE));
     state->initialized = true;
   }
@@ -153,9 +183,13 @@ bool ncclAllGatherGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* re
   if (comm == nullptr || comm->bootstrap == nullptr || sendbuff == nullptr || recvbuff == nullptr || count == 0) {
     return false;
   }
-  // gfx950 and gfx1250. Grouped and implicit-order calls stay out, matching DDA:
-  // the first grouped call would block in device-comm bootstrap before the other ranks submit.
-  if (!IsArchMatch(comm->archName, "gfx950") && !IsArchMatch(comm->archName, "gfx1250")) return false;
+  // gfx950 is the measured path. gfx1250, including DPX, stays opt-in.
+  // Grouped and implicit-order calls stay out, matching DDA: the first grouped
+  // call would block in device-comm bootstrap before the other ranks submit.
+  const bool gfx950 = IsArchMatch(comm->archName, "gfx950");
+  const bool gfx1250 = IsArchMatch(comm->archName, "gfx1250");
+  if (!gfx950 && !gfx1250) return false;
+  if (gfx1250 && ncclParamGinAllGatherGfx1250Enable() == 0) return false;
   if (ncclGroupDepth != 0 || comm->config.launchOrderImplicit == 1) return false;
   if (comm->nNodes != 1 || comm->nRanks <= 0 || comm->nRanks > kGinAllGatherMaxRanks || !comm->symmetricSupport ||
       comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) {

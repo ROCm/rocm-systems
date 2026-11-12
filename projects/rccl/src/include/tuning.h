@@ -71,6 +71,8 @@ struct ncclTuningInput_t {
   int collNetSupport;
   int nvlsSupport;
   bool symAligned16B; // Check for TMA eligibility in sym scheduler
+  // A user window was left without GIN segments. Symk GIN kernels must not run.
+  bool ginWindowsUnregistered;
   int captured;
   int inPlace;
   int minCTAs;  // resolved lower CTA bound (env > per-call > comm)

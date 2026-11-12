@@ -6859,6 +6859,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CTAPolicyZeroFallsBackWhenNoCeOrGinS
       });
 }
 
+#if defined(ENABLE_ROCSHMEM_GIN)
+// GIN is checked before symk. A true eligibility seam must win, and the CTA
+// fake's channel count must be the one the decision publishes.
+TEST(WrapMicrotestIsolated, SelectAllGather_GinSdmaPreemptsSymk) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_GinSdmaPreemptsSymk",
+      []() {
+        ScopedHook ginEligible(g_allGatherGinSdmaEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*,
+                                   bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_AG_GIN_SDMA, decision.algo);
+        EXPECT_EQ(4, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
+
 // ===========================================================================
 // rcclSelectAllGather -- rccl_wrap.cc:1031-1202. Same overall shape as
 // rcclSelectAllReduce, different priority order: DDA -> Hierarchical -> CE

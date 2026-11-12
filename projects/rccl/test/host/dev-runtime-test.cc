@@ -1918,8 +1918,10 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// A device-only multi-segment window is rejected before any GIN registration
-// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
+// A device-only multi-segment window is left unregistered with GIN, whatever
+// NCCL_MULTI_SEGMENT_REGISTER says, so one such window does not reject every
+// other GIN user. A GIN-only window has no fallback and still fails. A
+// single-segment window still registers.
 TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
@@ -1928,14 +1930,22 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegister
                  });
 
   mem.maxGlobalNumSegments = 2;
-  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(mem.numGinSegments, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
   {
     ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
-    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+    EXPECT_EQ(mem.numGinSegments, 0);
   }
+  EXPECT_EQ(reg.calls, 0);
+
+  mem.winFlags = NCCL_WIN_GIN_ONLY;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 
+  mem.winFlags = 0;
   mem.maxGlobalNumSegments = 1;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);

@@ -111,7 +111,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
 
   uint32_t tuning_kmask = (1 << tuning->symKernelId);
   uint32_t valid_kmask = ncclSymkMask(inputs->comm, inputs->func, inputs->devRedOp, inputs->datatype, inputs->countMax,
-                                      inputs->symAligned16B);
+                                      inputs->symAligned16B, inputs->ginWindowsUnregistered);
   if ((tuning_kmask & valid_kmask) == 0) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
