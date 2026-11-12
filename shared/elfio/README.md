@@ -22,7 +22,10 @@ upstream commit, and every consumer picks them up from this one place.
 
 ## Current patches
 
-None. `elfio/` is upstream at `SOURCE` unchanged.
+| Patch | Upstream |
+| --- | --- |
+| `0001-Validate-note-accessor-bounds.patch` | [serge1/ELFIO#173](https://github.com/serge1/ELFIO/pull/173) |
+| `0002-Validate-symbol-hash-table-bounds.patch` | [serge1/ELFIO#174](https://github.com/serge1/ELFIO/pull/174) |
 
 ## Using it
 

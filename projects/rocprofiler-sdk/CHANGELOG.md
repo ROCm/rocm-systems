@@ -12,6 +12,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+- Fixed out-of-bounds reads and unbounded loops when parsing symbol hash tables and notes in malformed ELF files. The shared ELFIO now includes these fixes ahead of their upstream release.
+
 ### Known issues
 
 ### Removed
