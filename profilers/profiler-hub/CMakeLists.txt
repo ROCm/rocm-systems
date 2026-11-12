@@ -122,6 +122,18 @@ add_subdirectory(source)
 
 add_subdirectory(include/cpp)
 
+# Old-path forwarding headers; remove in a future release.
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/shared_types.hpp
+)
+
 file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
