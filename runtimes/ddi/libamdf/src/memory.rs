@@ -249,6 +249,10 @@ impl PendingGpu {
         self.allocation.as_ref().ok_or(INTERNAL)
     }
 
+    fn allocation_mut(&mut self) -> Result<&mut memory::device::Allocation, u64> {
+        self.allocation.as_mut().ok_or(INTERNAL)
+    }
+
     fn into_inner(mut self) -> Result<memory::device::Allocation, u64> {
         self.allocation.take().ok_or(INTERNAL)
     }
@@ -1353,13 +1357,13 @@ pub(crate) unsafe extern "C" fn create(
                 native_allocation.map_err(|e| device.native_error_status(&e))?;
             if registered {
                 source_byte_offset = native_allocation
-                    .host_alias_source_offset()
+                    .backing_offset()
                     .unwrap_or(0)
                     .checked_add(registration_offset)
                     .ok_or(RANGE)?;
                 native_length = native_allocation.info().native_size;
             }
-            let native_allocation = PendingGpu::new(
+            let mut native_allocation = PendingGpu::new(
                 native_allocation,
                 std::ptr::from_ref(device).cast_mut(),
                 !registered,
@@ -1367,8 +1371,11 @@ pub(crate) unsafe extern "C" fn create(
             );
             if !registered && !local {
                 native_allocation
-                    .allocation()?
-                    .set_host_alias_identity(physical_backing_id.words)
+                    .allocation_mut()?
+                    .bind_local_backing_identity(memory::device::LocalBackingIdentity {
+                        namespace: physical_backing_id.words[0],
+                        object: physical_backing_id.words[1],
+                    })
                     .map_err(|error| device.native_error_status(&error))?;
             }
             let addresses = native_allocation.allocation()?.info();
