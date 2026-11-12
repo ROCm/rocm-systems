@@ -447,10 +447,12 @@ static bool is_power_of_2(uint64_t n) { return n && !(n & (n - 1)); }
 rsmi_status_t rsmi_init(uint64_t flags) {
   // Rocm smi is deprecated now, give warning for all users. stderr keeps
   // machine-readable output on stdout (rocm-smi --json/--csv) parseable.
+  // clang-format off
   std::cerr << "WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 "
-               "(https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). "
-               "Please switch to AMD-SMI (https://github.com/ROCm/amdsmi)."
+               "(https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html#rocm-smi-transitions-to-amd-smi). "
+               "Please switch to AMD-SMI (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi)."
             << std::endl;
+  // clang-format on
 
   TRY amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());

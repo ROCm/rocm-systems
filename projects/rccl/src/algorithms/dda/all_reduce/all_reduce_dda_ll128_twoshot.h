@@ -71,9 +71,7 @@ constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
 //
 // WIRE (DdaLL128Wire) picks the phase-1 and phase-2 writer; staged, it takes ddaLL128StageBytes(blockDim.x) of LDS.
 template <typename T, int NRANKS_CT, int WIRE = kDdaLL128WireCoop>
-#if defined(USE_ROCM)
 __launch_bounds__(512)
-#endif
   __global__ void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                            T* __restrict__ recvbuff, // local user output
                                            const T* __restrict__ sendbuff, // local user input

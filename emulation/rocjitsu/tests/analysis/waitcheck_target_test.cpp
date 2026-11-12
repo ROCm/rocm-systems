@@ -675,8 +675,10 @@ TEST(WaitcheckTarget, FlatStoresKeepTheirIdentityOnBothCounters) {
 }
 
 TEST(WaitcheckTarget, DirectToLdsIsNotAVgprResultOnBothCdnaTargets) {
-  const std::array<uint32_t, 2> words{0xe05d1000u, 0x80100008u};
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const std::array<uint32_t, 2> words{load, 0x80100008u};
     std::unique_ptr<Instruction> inst = decode(words, arch);
     ASSERT_NE(inst, nullptr);
     auto events_result = Target::classify_events(*inst, arch);

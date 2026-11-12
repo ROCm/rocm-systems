@@ -19,7 +19,34 @@ HRR Capture is now disabled by default on AMD platforms. The feature will be sec
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
+Capture also needs your consent, given once per user: write the line `yes` to
+`${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent` (`%APPDATA%\hrr\capture-consent`
+on Windows). Where no such file can be kept, as in CI or a container, set
+`HIP_HRR_CAPTURE_CONSENT=yes` instead. Without either, the process runs
+unrecorded and says why in one line on stderr. A set `HIP_HRR_CAPTURE_CONSENT` decides
+either way: any value other than `yes`, such as `no`, withholds consent even
+when the file says yes. The manifest metadata records which of the two gave consent as
+`capture_consent`.
+
+The variable applies to every process that inherits the environment, child processes
+and MPI ranks included. The file applies to that user on every host that shares the
+home directory. Whoever controls the user's environment or configuration directory can
+give consent. On Linux the file counts only as a regular file owned by the user, not
+reached through a symbolic link and with no other hard link. On Windows it is not
+checked for an owner and junctions are followed, so a redirected or shared `%APPDATA%`
+gives no per-user guarantee.
+
+```bash
+d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
+```
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "$env:APPDATA\hrr\capture-consent" yes
+```
+
 A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+
+The archive holds the process's code, models and data. Capture writes `NOTICE.txt` at its root, and the start line and `hrr-playback` point to it: read [Sharing an archive](PRIVACY.md#sharing-an-archive) before sharing one.
 
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
@@ -90,6 +117,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `HIP_HRR_CAPTURE_CONSENT` | *(unset)* | `yes` consents to capture, without the per-user consent file, for every process that inherits it; any other value, such as `no`, withholds consent for them even when the file says yes. Blank counts as unset |
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 | `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, including a graph launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. `HIP_HRR_HOST_SNAPSHOT_CHUNK_KB` (default `64`) sets the chunk a launch stores when its bytes changed. `HIP_HRR_HOST_SNAPSHOT_HELPERS` sets how many threads capture starts to hash large allocations (default one per 8 CPUs, at most 7; `0` for none). The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
@@ -229,6 +257,7 @@ every check is skipped fails.
 ```
 capture.hrr/
   manifest.json
+  NOTICE.txt
   pid-<pid>/
     events.bin
     blobs/
@@ -255,6 +284,8 @@ capture.hrr/
   and `hipLinkAddData` inputs are stored as they were passed.
 - **manifest.json** — counts, versions and device properties; the GPU's PCI
   address, UUID and LUID are written blank
+- **NOTICE.txt** — what the archive can hold and how it may be shared; see
+  [Sharing an archive](PRIVACY.md#sharing-an-archive)
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 
 Code objects read back from the runtime must start with `\x7fELF`,

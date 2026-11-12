@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
@@ -127,6 +128,8 @@ public:
     const bool observes_sgpr_reads = p->observes_sgpr_reads();
     const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
+    const bool observes_lds_direct_reads = p->observes_lds_direct_reads();
+    observes_lds_direct_reads_ |= observes_lds_direct_reads;
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
     const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
@@ -145,12 +148,12 @@ public:
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
-    plugins_.push_back(
-        PluginEntry{std::move(sink), observes_before_execute_instruction,
-                    observes_after_execute_instruction, observes_async_instruction_issued,
-                    observes_memory_instruction_routing, observes_vgpr_reads, observes_vgpr_writes,
-                    observes_sgpr_reads, observes_scalar_register_writes, observes_memory_routing,
-                    observes_tensor_dma_memory_access, observes_tensor_dma_issue, std::move(p)});
+    plugins_.push_back(PluginEntry{
+        std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
+        observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
+        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
+        observes_memory_routing, observes_tensor_dma_memory_access, observes_tensor_dma_issue,
+        observes_lds_direct_reads, std::move(p)});
     return true;
   }
 
@@ -301,6 +304,28 @@ public:
         auto &entry = plugins_[index];
         if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached))
           entry.plugin->onAmdgpuMemoryAccessRouted(access, inst, wf);
+      }
+    });
+  }
+
+  void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                             uint32_t lane) {
+    if (!observes_lds_direct_reads_ || wf.observing_lds_direct_read_)
+      return;
+    // An observer may inspect this same operand while handling the notification.
+    class Restore {
+    public:
+      explicit Restore(bool &flag) : flag_(flag) { flag_ = true; }
+      ~Restore() { flag_ = false; }
+
+    private:
+      bool &flag_;
+    } restore(wf.observing_lds_direct_read_);
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        const auto &entry = plugins_[index];
+        if (entry.observes_lds_direct_reads && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuLdsDirectRead(wf, address, bytes, lane);
       }
     });
   }
@@ -500,10 +525,10 @@ public:
     });
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBarrierResolved(wavefronts);
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, kind);
     });
   }
 
@@ -529,7 +554,8 @@ public:
 private:
   friend class test::ExecutionPluginGroupTestAccess;
 
-  template <typename Callback> void dispatch_with_plugin_lock(Callback &&callback) {
+  // Keep mutex handling out of the callbacks that run without serialization.
+  template <typename Callback> RJ_NOINLINE void dispatch_with_plugin_lock(Callback &&callback) {
     if (plugins_.empty())
       return;
     std::lock_guard<std::recursive_mutex> lock(callback_mutex_);
@@ -623,7 +649,10 @@ private:
       if (!observed)
         return;
     }
-    dispatch_with_optional_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+    if (serialize_hot_hooks_)
+      dispatch_with_plugin_lock([&]() { std::forward<Callback>(callback)(cached); });
+    else
+      std::forward<Callback>(callback)(cached);
   }
 
   // Infrequent hooks may synchronously fire hot register hooks. Recursive
@@ -641,6 +670,7 @@ private:
   bool observes_vgpr_reads_ = false;
   bool observes_vgpr_writes_ = false;
   bool observes_memory_routing_ = false;
+  bool observes_lds_direct_reads_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_tensor_dma_issue_ = false;
   bool observes_sgpr_reads_ = false;
@@ -731,6 +761,7 @@ private:
     bool observes_memory_routing = false;
     bool observes_tensor_dma_memory_access = false;
     bool observes_tensor_dma_issue = false;
+    bool observes_lds_direct_reads = false;
     OwnedPlugin plugin;
   };
 

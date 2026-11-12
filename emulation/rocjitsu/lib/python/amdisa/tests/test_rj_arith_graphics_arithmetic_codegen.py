@@ -123,6 +123,7 @@ def test_cube_reuses_ternary_adapter_and_guest_policies(arch):
         api = 'rj_arith_' + name.lower()
         assert api + '_w64' + arch_suffix in body
         assert 'execute_ternary32' in body
+        assert 'wf.exec() & wf.vgpr_write_mask()' in body
         assert 'arithmetic_flags()' in body
         assert 'fp_round_mode_f32()' in body
         assert 'RJ_ARITH_FP_IEEE_MODE' in body

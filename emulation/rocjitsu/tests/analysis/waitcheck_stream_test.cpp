@@ -209,6 +209,21 @@ TEST(WaitcheckStream, UnknownAndUnsupportedConcreteTargetsFail) {
   EXPECT_FALSE(error.message().empty());
 }
 
+TEST(WaitcheckStream, GlobalTransposeUsesTheWaveSizedReturnRegisters) {
+  for (unsigned wave_size : {32u, 64u}) {
+    for (unsigned width : {2u, 4u}) {
+      const uint32_t op = width == 2 ? 0xee16007cu : 0xee15c07cu;
+      for (unsigned reg : {28u, 29u, 30u}) {
+        const auto report =
+            analyze({op, 27u, 2u, v_mov(0, reg)}, ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
+        ASSERT_FALSE(report.incomplete);
+        const unsigned result_words = wave_size == 64 ? width / 2 : width;
+        EXPECT_EQ(report.diagnostics.size(), unsigned(reg < 27 + result_words));
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, LoadWaitAndSentinelHaveDifferentEffects) {
   for (uint32_t count : {0u, 1u, 63u}) {
     Program program;
@@ -779,8 +794,9 @@ TEST(WaitcheckStream, ControlFlowStopsBeforeAFallthroughWait) {
 
 TEST(WaitcheckStream, PcDestinationsStopBeforeAFallthroughWait) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    for (uint32_t transfer : {0xbe801f00u, 0xbe802e00u, 0x94800200u}) {
-      // s_rfe_b64, s_cbranch_join, s_cbranch_g_fork have explicit PC destinations.
+    for (uint32_t transfer : {0xbe801f00u, 0x95800000u, 0xbe802e00u, 0x94800200u}) {
+      // s_rfe_b64, s_rfe_restore_b64, s_cbranch_join, s_cbranch_g_fork have
+      // explicit PC destinations.
       Program program{0xe0501000u, 0x80000008u, transfer, 0xbf8c0f70u, v_mov(1, 0)};
       const auto report = analyze(program, arch);
       ASSERT_TRUE(report.incomplete);
@@ -816,7 +832,9 @@ TEST(WaitcheckStream, PartialMemoryInstructionsAreIncomplete) {
 
 TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    const auto report = analyze({0xe05d1000u, 0x80100008u}, arch);
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const auto report = analyze({load, 0x80100008u}, arch);
     ASSERT_TRUE(report.incomplete);
     EXPECT_EQ(report.instructions_analyzed, 0u);
     EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);

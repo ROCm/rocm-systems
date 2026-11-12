@@ -153,8 +153,7 @@ void SAbsdiffI32Sop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SRfeRestoreB64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_s_rfe_restore_b64_sop2(*this, wf);
 }
 
 void SMulHiU32Sop2::execute_impl(amdgpu::Wavefront &wf) {

@@ -13,10 +13,12 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -30,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -909,6 +912,54 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
   EXPECT_EQ(decoder.calls, 3u);
 }
 
+// Fails every execution: first through the legacy exception path, whose message
+// becomes the failure detail, then with an encoding error that carries none.
+class FailingDecoder final : public rocjitsu::Decoder {
+public:
+  class Failing final : public rocjitsu::Instruction {
+  public:
+    Failing() : Instruction("failing", &execute_failing) { size_ = 4; }
+  };
+
+  static void execute_failing(rocjitsu::Instruction &, void *wave) {
+    if (std::exchange(with_detail, false))
+      throw util::UnimplementedInst("first-failure-detail");
+    static_cast<amdgpu::Wavefront *>(wave)->report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  }
+
+  rocjitsu::DecodeResult decode(const rj_code_binary_inst_t *,
+                                const rocjitsu::DecodeErrorEmitter &) override {
+    return std::unique_ptr<rocjitsu::Instruction>(new Failing);
+  }
+  size_t max_instruction_words() const override { return 4; }
+
+  static inline bool with_detail = true;
+};
+
+TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutliveAThrowingFailureHandler) {
+  CuFixture fixture("failure_detail");
+  fixture.cu()->replace_decoder_for_test(std::make_unique<FailingDecoder>());
+  FailingDecoder::with_detail = true;
+  bool throw_next = true;
+  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &) -> bool {
+    if (std::exchange(throw_next, false))
+      throw std::runtime_error("failure handler failed");
+    return false;
+  });
+  fixture.write_program(std::array<uint32_t, 1>{kSNop});
+  ASSERT_NE(fixture.launch(1, 0), nullptr);
+
+  // The handler throws while the first failure, which has a detail, is reported.
+  EXPECT_THROW(fixture.cu()->step(), std::runtime_error);
+  // The next failure has no detail of its own and must not report the first one's.
+  testing::internal::CaptureStderr();
+  fixture.cu()->step();
+  const std::string warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(warning.find("could not execute failing"), std::string::npos) << warning;
+  EXPECT_EQ(warning.find("first-failure-detail"), std::string::npos) << warning;
+}
+
 // An external decoder may return an instruction whose raw encoding points into
 // the caller's words.
 class BorrowingDecoder final : public rocjitsu::Decoder {
@@ -1226,7 +1277,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesFullFetchValidatio
   }
 }
 
-TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
+TEST(InstructionCacheCuTest, TranslatedLookaheadKeepsMigratedMfmaOnIssuer) {
   for (const bool refresh_hint : {false, true}) {
     SCOPED_TRACE(refresh_hint);
     GpuVm gpu_vm;
@@ -1248,8 +1299,8 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
     fixture.cu()->step();
     ASSERT_EQ(wf->pc, kCodeBase + 4);
 
-    // Independent MFMAs permit async admission. Both compute a 16x16 matrix
-    // of 32s from packed half-precision ones and an inline zero accumulator.
+    // Migrated MFMAs stay on the issuer even with a fresh admission hint. Both compute a 16x16
+    // matrix of 32s from packed half-precision ones and an inline zero accumulator.
     std::array<uint32_t, 5> program{};
     for (unsigned index = 0; index != 2; ++index) {
       const auto words = cdna4::build_vop3p_mfma(
@@ -1280,10 +1331,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
     for (unsigned steps = 0; wf->pc < kCodeBase + 16 && steps != 3; ++steps)
       fixture.cu()->step();
     EXPECT_EQ(wf->pc, kCodeBase + 16);
-    if (refresh_hint)
-      EXPECT_GT(amdgpu::async_execution::stats.mma, submitted);
-    else
-      EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
+    EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
     for (const unsigned dst : {64u, 80u})
       for (unsigned reg = 0; reg != 4; ++reg)
         for (unsigned lane = 0; lane != 64; ++lane)

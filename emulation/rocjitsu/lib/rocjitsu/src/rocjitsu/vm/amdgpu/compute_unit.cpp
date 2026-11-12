@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
+
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
@@ -11,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
@@ -21,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
@@ -29,7 +35,10 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/amdgpu/texel_byte_range.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
+#include "util/bit.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -59,7 +68,44 @@ bool InstructionComputeUnitView::signal_queue_exception(
                                         retain_failure_for_debugger, delivery_policy);
 }
 
+uint32_t InstructionComputeUnitView::fetch_instruction_word(uint64_t address,
+                                                            uint32_t process_id) const {
+  if (process_id == 0)
+    return raw_cu().memory()->fetch32(address);
+  if (!raw_cu().gpu_vm())
+    return 0;
+  const auto access = raw_cu().gpu_vm()->snapshot_vmid(process_id);
+  uint32_t word = 0;
+  const auto bytes = std::span<std::byte>(reinterpret_cast<std::byte *>(&word), sizeof(word));
+  return access && access->read(address, bytes, VmAccessKind::Execute) == VmAccessOutcome::Complete
+             ? word
+             : 0;
+}
+
+// The logical register access has already been observed. Accessing the
+// shared physical storage here must not synthesize a second notification.
+uint64_t Wavefront::read_backed_sgpr_pair(const SgprPair &pair) const {
+  const uint32_t lo = cu_.read_sgpr_storage(pair.physical_base);
+  const uint64_t hi =
+      pair.backed_words == 2 ? cu_.read_sgpr_storage(pair.physical_base + 1) : pair.local >> 32;
+  return (hi << 32) | lo;
+}
+
+void Wavefront::write_backed_sgpr_pair(SgprPair &pair, uint64_t value) {
+  cu_.sgpr_file_[pair.physical_base] = static_cast<uint32_t>(value);
+  if (pair.backed_words == 2)
+    cu_.sgpr_file_[pair.physical_base + 1] = static_cast<uint32_t>(value >> 32);
+  else
+    pair.local = value;
+}
+
+uint32_t Wavefront::debug_sgpr_capacity() const {
+  return sgpr_alloc_.count ? cu_.sgpr_allocation_block_size() : 0;
+}
+
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
+  if (reg > UINT32_MAX - sgpr_alloc_.base)
+    return 0;
   return cu_.read_sgpr_storage(sgpr_alloc_.base + reg);
 }
 
@@ -68,7 +114,8 @@ uint32_t Wavefront::debug_read_vgpr(uint32_t reg, uint32_t lane) const {
 }
 
 void Wavefront::debug_write_sgpr(uint32_t reg, uint32_t value) {
-  cu_.write_sgpr(sgpr_alloc_.base + reg, value);
+  if (reg <= UINT32_MAX - sgpr_alloc_.base)
+    cu_.write_sgpr(sgpr_alloc_.base + reg, value);
 }
 
 void Wavefront::debug_write_vgpr(uint32_t reg, uint32_t lane, uint32_t value) {
@@ -125,6 +172,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "unimplemented instruction";
   case InstructionExecutionError::DecodeFailure:
     return "instruction decode failure";
+  case InstructionExecutionError::IllegalInstruction:
+    return "illegal instruction";
   }
   return "unknown instruction execution error";
 }
@@ -362,6 +411,13 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t nu
 Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
                                            uint32_t num_sgprs, uint32_t num_vgprs,
                                            uint32_t wave_size) {
+  return dispatch_wf_at(wf_id, wg_id, pc, num_sgprs, num_vgprs, wave_size, std::nullopt);
+}
+
+Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint64_t pc,
+                                           uint32_t num_sgprs, uint32_t num_vgprs,
+                                           uint32_t wave_size,
+                                           std::optional<uint32_t> register_block) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   if (wf_id >= config_.num_wf_slots || (wfs_[wf_id] && !wfs_[wf_id]->is_halted()))
@@ -376,11 +432,12 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
       dispatched_wave_size > wf->max_wf_size_)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs, register_block);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(num_vgprs);
+  int32_t vgpr_base =
+      register_block ? allocate_vgprs_at(num_vgprs, *register_block) : allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -398,15 +455,30 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
   wf->num_sgprs_ = num_sgprs;
   wf->num_vgprs_ = num_vgprs;
+  wf->set_accum_vgpr_base(0);
   wf->exec_ = wf->lane_mask();
   wf->vgpr_write_mask_ = wf->lane_mask();
-  wf->vcc_ = 0;
+  wf->vcc_ = {};
+  wf->scratch_base_ = {};
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+    const uint32_t end = cdna3::sgpr_alias_end(num_sgprs);
+    auto bind_pair = [&](Wavefront::SgprPair &pair, uint32_t first) {
+      if (first < config_.sgprs_per_wf) {
+        pair.physical_base = wf->sgpr_alloc_.base + first;
+        pair.backed_words = std::min(2u, config_.sgprs_per_wf - first);
+      }
+    };
+    bind_pair(wf->vcc_, cdna3::vcc_base(end));
+    bind_pair(wf->scratch_base_, cdna3::flat_scratch_base(end));
+    wf->memory_wait_shadow_.set_sgpr_alias_end(end);
+  }
   wf->m0_ = 0;
   wf->set_shader_engine_id(shader_engine_id_);
   wf->set_scratch_scoreboard_id(scratch_scoreboard_base_ + wf_id);
   wf->set_status_raw(0);
+  wf->flat_pointer32_ = flat_pointer32_;
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
-                    private_aperture_limit_);
+                    private_aperture_limit_, /*override_launch=*/false);
   ++wf->dispatch_generation_;
   if (wf->dispatch_generation_ == 0)
     ++wf->dispatch_generation_;
@@ -535,9 +607,84 @@ void ComputeUnitCore::flush_cp_notifications() {
   }
 }
 
+void ComputeUnitCore::enter_trap_handler(Wavefront &wave, const TrapHandlerConfig &config,
+                                         uint32_t trap_id, uint64_t saved_pc) {
+  const uint32_t saved_status = wave.status_raw();
+  const auto properties = isa_properties(this->arch());
+  const auto wave_state_layout = properties.wave_state_layout;
+  const bool uses_split_wave_state = wave_state_layout != WaveStateLayout::Legacy;
+  wave.set_ttmp(0, static_cast<uint32_t>(saved_pc));
+  if (uses_split_wave_state) {
+    // GFX12 trap entry carries the four-bit trap id in TTMP1[31:28].
+    // GFX12.0 has a 48-bit PC and preserves SCHED_MODE in TTMP1[27:26];
+    // GFX12.5 expands the PC to 57 bits and enters privileged scheduling.
+    const uint32_t pc_hi_mask =
+        wave_state_layout == WaveStateLayout::Gfx12_5 ? 0x01FFFFFFu : 0x0000FFFFu;
+    const uint32_t sched_mode = wave_state_layout == WaveStateLayout::Gfx12
+                                    ? (wave.wave_sched_mode_raw() & 0x3u) << 26
+                                    : 0u;
+    wave.set_ttmp(1, (static_cast<uint32_t>(saved_pc >> 32) & pc_hi_mask) | sched_mode |
+                         ((trap_id & 0xFu) << 28));
+    const uint32_t debug_enabled = config.debug_enabled ? (1u << 23) : 0u;
+    wave.set_ttmp(11, (wave.ttmp(11) & ~(1u << 23)) | debug_enabled);
+    constexpr uint16_t kWholeStatePriv = 4u | (31u << 11);
+    uint32_t state_priv = 0;
+    const auto state_result = read_hwreg_field(wave, kWholeStatePriv, state_priv);
+    assert(state_result == HwregAccessResult::Success);
+    (void)state_result;
+    wave.set_ttmp(12, state_priv);
+  } else {
+    wave.set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
+  }
+  // Dispatch identity. Which TTMPs carry it is architecture-specific and
+  // this must not disagree with what CWSR publishes for the same wave, or
+  // rocm-dbgapi correlates the stopped wave to the wrong workgroup.
+  //
+  // On the profiles where the SPI puts workgroup ids in TTMP6/7/9,
+  // init_wavefront_regs() already seeded them at dispatch and trap entry
+  // has nothing to add -- zeroing TTMP9 here destroyed one of them. The
+  // rest use the gfx9 layout, TTMP8/9/10 = workgroup id x/y/z, which is
+  // also what CWSR serializes (cwsr.cpp writes wg_coord into ttmp[8..10]).
+  // Writing the flat wg_id() into TTMP8 disagreed with that too.
+  if (!properties.uses_ttmp_workgroup_ids) {
+    const auto &wg = wave.wg_coord();
+    wave.set_ttmp(8, wg[0]);
+    wave.set_ttmp(9, wg[1]);
+    wave.set_ttmp(10, wg[2]);
+  }
+  if (!uses_split_wave_state) {
+    wave.set_ttmp(11,
+                  ((wave.queue_packet_id() & 0x1FFFFFFu) << 6) | (wave.wave_in_group() & 0x3Fu));
+    wave.set_ttmp(12, saved_status);
+    const uint32_t debug_enabled = config.debug_enabled ? (1u << 23) : 0u;
+    wave.set_ttmp(13, (wave.ttmp(13) & ~(1u << 23)) | debug_enabled);
+  }
+  wave.set_ttmp(14, static_cast<uint32_t>(config.tma));
+  wave.set_ttmp(15, static_cast<uint32_t>(config.tma >> 32));
+  wave.set_trap_id(trap_id);
+  wave.set_trap_saved_status(saved_status);
+  wave.set_trap_saved_exec(wave.exec());
+  wave.set_trap_interrupt_sent(false);
+  wave.clear_trap_exception_status();
+  // A fresh handler entry owns the halt state from here on; a marker left
+  // over from a previous stop would attribute this entry's HALT to an
+  // s_sendmsghalt that has already been resumed past.
+  wave.set_self_halted(false);
+  wave.set_in_trap_handler(true);
+  if (uses_split_wave_state)
+    wave.set_status_raw(saved_status | kPrivilegedStatusBit);
+  wave.pc = config.tba;
+}
+
 void ComputeUnitCore::handle_memory_access_failure(Wavefront &wf, VmAccessOutcome outcome,
                                                    uint64_t issue_pc) {
   assert(outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable);
+  if (wf.instruction_execution_failed()) {
+    fail_wave_instruction(
+        wf, "memory instruction", issue_pc, wf.instruction_execution_error(),
+        wf.instruction_execution_error_detail() ? wf.instruction_execution_error_detail() : "");
+    return;
+  }
   if (wf.fail_pm4_submission()) {
     abort_dispatch(wf.dispatch_id());
     return;
@@ -696,7 +843,7 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
 
   barrier->signal_count = 0;
   auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members);
+  notify_barrier_complete(members, completion_bit);
   return is_first;
 }
 
@@ -724,10 +871,28 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
   return members;
 }
 
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty()) {
-    plugin_group_->onAmdgpuBarrierResolved(members);
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
+                                              uint8_t completion_bit) {
+  if (members.empty())
+    return;
+  BarrierKind kind;
+  switch (completion_bit) {
+  case kNamedBarrierBit:
+    kind = BarrierKind::Named;
+    break;
+  case kWorkgroupBarrierBit:
+  case kWorkgroupTrapBarrierBit:
+    kind = BarrierKind::Workgroup;
+    break;
+  case kClusterBarrierBit:
+  case kClusterTrapBarrierBit:
+    kind = BarrierKind::Cluster;
+    break;
+  default:
+    assert(false && "unknown barrier completion bit");
+    return;
   }
+  plugin_group_->onAmdgpuBarrierResolved(members, kind);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -807,7 +972,7 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   if (barrier.signal_count >= barrier.member_count) {
     barrier.signal_count = 0;
     auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members);
+    notify_barrier_complete(members, kNamedBarrierBit);
   }
   return barrier.member_count == 0;
 }
@@ -859,7 +1024,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
         return;
       barrier.signal_count = 0;
       auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members);
+      notify_barrier_complete(members, completion_bit);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -988,7 +1153,7 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
   }
 
   if (lds_bytes > 0) {
-    uint32_t aligned = util::align_up(lds_bytes, 256u);
+    const uint64_t aligned = lds_allocation_bytes(arch(), lds_bytes);
     uint32_t lds_capacity_bytes = config_.lds_size_kb * 1024u;
     if (next_lds_alloc_ + aligned > lds_capacity_bytes) {
       return false;
@@ -1037,7 +1202,110 @@ void ComputeUnitCore::tick_pipelines() {
     tensor_dma_pipeline_.tick();
 }
 
+// GFX11 ISA 3.3.3. Nullify before debugger probes, memory side effects, and writeback.
+void ComputeUnitCore::qualify_gfx11_memory(Instruction &inst, const Wavefront &wf) {
+  if (inst.data()->tag() != GLOBAL_MEM && inst.data()->tag() != LOCAL_MEM)
+    return;
+  auto &d = *inst.data_as<VectorMemState>();
+  if (nullify_unallocated_memory_result(inst, wf))
+    return;
+  // Native DS addresses already include the workgroup base. Preserve active lanes
+  // so a suppressed read writes zeros even for the second destination of a dual load.
+  if (d.tag() == LOCAL_MEM && !d.lds_stack_inputs) {
+    const uint32_t bytes = d.elem_size * d.num_elems;
+    for (uint64_t lanes = d.lane_mask; lanes; lanes &= lanes - 1) {
+      const unsigned lane = std::countr_zero(lanes);
+      if (d.atomic_op != AtomicOp::NONE && d.elem_size != 0 &&
+          ((d.per_lane_addr[lane] % d.elem_size) ||
+           (d.ds2_active && d.ds2_per_lane_addr[lane] % d.elem_size)))
+        d.ds_memviol = true;
+      const bool primary = wf.contains_lds_range(d.per_lane_addr[lane], bytes);
+      const bool secondary =
+          !d.ds2_active || wf.contains_lds_range(d.ds2_per_lane_addr[lane], bytes);
+      if (!primary || (d.is_load && !secondary))
+        d.ds_oob_lane_mask |= uint64_t{1} << lane;
+      if (d.ds2_active && (!secondary || (d.is_load && !primary)))
+        d.ds2_oob_lane_mask |= uint64_t{1} << lane;
+    }
+  }
+}
+
+bool ComputeUnitCore::nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf) {
+  const auto tag = inst.data()->tag();
+  if (tag != GLOBAL_MEM && tag != LOCAL_MEM)
+    return false;
+  auto &d = *inst.data_as<VectorMemState>();
+  // Block transfers check each enabled DWORD against the allocation independently.
+  if (!d.is_load || d.lds_dst || d.is_block_transfer)
+    return false;
+  const auto &allocation = wf.vgpr_alloc();
+  uint32_t words = d.destination_vgpr_count() + d.buffer_tfe;
+  // On GFX12 the VBUFFER status register still participates in allocation
+  // when the data fits exactly. LDS and FLAT have no such encoded status.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
+      d.dst_reg_base + words == allocation.base + allocation.count) {
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    words += modifiers.buffer_tfe;
+  }
+  if (allocation.contains(d.dst_reg_base, words) &&
+      (!d.ds2_active || allocation.contains(d.ds2_dst_reg_base, d.ds2_destination_vgpr_count())))
+    return false;
+  d.exec_mask = d.lane_mask = 0;
+  d.element_lane_masks.clear();
+  if (d.image_sample)
+    for (auto &tap : d.image_sample->taps)
+      tap.lane_mask = 0;
+  return true;
+}
+
+void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const Wavefront &wf) {
+  if (inst.data()->tag() != GLOBAL_MEM && inst.data()->tag() != LOCAL_MEM)
+    return;
+  auto &d = *inst.data_as<VectorMemState>();
+  if (!d.is_load || d.lds_dst)
+    return;
+  // CDNA4 section 3.6.1 nullifies the whole access, including a returning
+  // atomic's memory update. Check before debugger probes and routing. AGPRs
+  // use a separate simulator bank and have no per-wave extent here.
+  const uint32_t base = d.dst_reg_base;
+  // Both results of a CDNA4 dual DS operation occupy one consecutive tuple.
+  const uint32_t count =
+      d.destination_vgpr_count() + (d.ds2_active ? d.ds2_destination_vgpr_count() : 0);
+  if (!owns_memory_result_vgprs(wf, base, count)) {
+    d.exec_mask = d.lane_mask = 0;
+    d.element_lane_masks.clear();
+  }
+}
+
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
+    qualify_cdna4_memory_destination(*inst, wf);
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    qualify_gfx11_memory(*inst, wf);
+  if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    nullify_unallocated_memory_result(*inst, wf);
+  return route_prepared_memory_inst(inst, wf);
+}
+
+// Only gfx1250 partitions the shared aperture into local and distributed LDS.
+static bool flat_offset_is_dds(rj_code_arch_t arch, uint64_t offset) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA5 && (offset & (uint64_t{1} << 31));
+}
+
+// FLAT-to-LDS atomic alignment faults the whole wave before global translation.
+// GFX1250's distributed shared segment has a distinct atomic path.
+static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemState &state,
+                                          uint64_t shared_offset) {
+  const bool checks_alignment =
+      arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+      arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+      (arch == ROCJITSU_CODE_ARCH_CDNA5 && !flat_offset_is_dds(arch, shared_offset));
+  return checks_alignment && state.atomic_op != AtomicOp::NONE && state.elem_size &&
+         shared_offset % state.elem_size != 0;
+}
+
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(Instruction *inst, Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
   const bool observe_routed_access =
@@ -1048,8 +1316,12 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   uint64_t flat_dds_lane_mask = 0;
   std::array<uint64_t, 64> pre_routing_address_storage;
   std::span<const uint64_t> pre_routing_addresses;
+  const uint64_t shared_base =
+      wf.use_wave_apertures() ? wf.shared_aperture_base() : shared_aperture_base_;
+  const uint64_t shared_limit =
+      wf.use_wave_apertures() ? wf.shared_aperture_limit() : shared_aperture_limit_;
   if (inst->data()->tag() == GLOBAL_MEM && inst->mnemonic().starts_with("flat_") &&
-      shared_aperture_base_ != 0) {
+      shared_base != 0) {
     auto &d = *inst->data_as<VectorMemState>();
     // The wavefront is the authority on its own width. VectorMemState::wf_size
     // is set by whoever built the state, and the DS paths leave it at its
@@ -1060,9 +1332,10 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       const uint64_t lane_bit = uint64_t{1} << lane;
       if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
         const uint64_t address = d.per_lane_addr[lane];
-        if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
-          if (arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
-              ((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
+        const uint64_t aperture_pointer =
+            address - (flat_selects_segment_before_offset(arch()) ? d.flat_aperture_offset : 0);
+        if (flat_in_shared_aperture(aperture_pointer, shared_base, shared_limit)) {
+          if (flat_offset_is_dds(arch(), address - shared_base))
             flat_dds_lane_mask |= lane_bit;
           else
             flat_local_lane_mask |= lane_bit;
@@ -1076,11 +1349,11 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
     d.flat_local_lane_mask = flat_local_lane_mask & request_lanes;
     d.flat_dds_lane_mask = flat_dds_lane_mask & request_lanes;
     d.flat_local_oob_lane_mask = 0;
-    d.flat_local_allocation_end.reset();
-    // Snapshot the current modeled allocation, including its 256-byte scheduler
-    // rounding; per-target allocation and encoding granules remain unmodeled.
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA4 && d.flat_local_lane_mask != 0)
-      d.flat_local_allocation_end = uint64_t{wf.lds_base()} + wf.lds_size();
+    d.lds_allocation.reset();
+    if (d.flat_local_lane_mask) {
+      d.lds_allocation = LdsAllocationRange::from_size(wf.lds_base(), wf.lds_size());
+      d.flat_local_allocation_end = d.lds_allocation->end;
+    }
     if (flat_shared_lane_mask != 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
@@ -1088,15 +1361,38 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
         if (flat_shared_lane_mask & (uint64_t{1} << lane)) {
-          uint64_t offset = d.per_lane_addr[lane] - shared_aperture_base_;
+          uint64_t offset = d.per_lane_addr[lane] - shared_base;
           // RDNA4 FLAT uses unsigned 17-bit LDS address math. Keep the
           // workgroup LDS base outside that wrapping calculation.
-          if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+          if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
             offset &= 0x1FFFFu;
-            if (offset >= wf.lds_size() || d.elem_size > wf.lds_size() - offset)
+          if (d.flat_local_allocation_end &&
+              (offset >= wf.lds_size() || d.elem_size > wf.lds_size() - offset))
+            d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
+          if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) {
+            const uint64_t bytes = uint64_t{d.elem_size} * d.num_elems;
+            if (!util::is_range_in_bounds(offset, bytes, wf.lds_size()))
               d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
           }
           d.per_lane_addr[lane] = offset + wf.lds_base();
+          const bool gfx11 =
+              arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+          if ((d.flat_local_lane_mask & (uint64_t{1} << lane)) &&
+              flat_shared_atomic_misaligned(arch(), d, offset))
+            d.ds_memviol = true;
+          if (gfx11) {
+            if (!wf.contains_lds_range(d.per_lane_addr[lane], d.elem_size * d.num_elems))
+              d.flat_local_oob_lane_mask |= (uint64_t{1} << lane) & request_lanes;
+          }
+          if (d.lds_allocation && d.elem_size && (d.flat_local_lane_mask & (uint64_t{1} << lane))) {
+            const uint32_t bytes = d.num_elems * d.elem_size;
+            const auto retained =
+                d.lds_allocation->retained_bytes(d.per_lane_addr[lane], bytes, d.elem_size);
+            if (retained == 0)
+              d.flat_local_oob_lane_mask |= uint64_t{1} << lane;
+            if (arch() == ROCJITSU_CODE_ARCH_CDNA2 && retained < bytes)
+              d.flat_memory_violation = true;
+          }
         }
       }
     }
@@ -1132,6 +1428,11 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   // wants it rather than on any plugin at all, because building the
   // observation is real work on the per-instruction path and most plugins have
   // no use for it.
+  if (route_tag == LOCAL_MEM && !normalized_to_local) {
+    auto &data = *inst->data_as<VectorMemState>();
+    if (native_ds_atomic_misaligned(data, arch(), transpose_request_lane_mask(data, wf.wf_size())))
+      data.ds_memviol = true;
+  }
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
@@ -1272,9 +1573,13 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
                        : info->exec_masked
                            ? wf.exec()
                            : (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff});
-      if (!scalar && (inst.flags() & CONDITIONAL_MEMORY_LANES))
-        lanes = MemoryWaitScoreboard::result_lanes(inst, wf);
-      if (!lanes && !scoreboard.outstanding(counter))
+      uint64_t issue_lanes = lanes;
+      if (!scalar && (inst.flags() & CONDITIONAL_MEMORY_LANES)) {
+        const auto masks = MemoryWaitScoreboard::memory_lanes(inst, wf);
+        issue_lanes = masks.issue;
+        lanes = masks.result;
+      }
+      if (!issue_lanes && !scoreboard.outstanding(counter))
         return;
       // These qualified loads have one known FIFO class. The legacy VM
       // counter shares one class across ordinary loads; SMEM stays unordered.
@@ -1289,20 +1594,21 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       assert(inst.num_dst_operands() == 1);
       const auto &operand = *inst.dst_operand(0);
       if (scalar) {
-        if (const auto range = resolve_scalar_register_range(wf, operand.encoding_value(),
-                                                             std::max(1, operand.size_bits() / 32)))
+        if (const auto range = resolve_scalar_destination_range(
+                wf, operand.encoding_value(), std::max(1, operand.size_bits() / 32)))
           if (const auto reg = range->register_ref())
             scoreboard.add(
                 {sequence, wf.pc, lanes, *reg, counter, MemoryWaitScoreboard::kFullDwordByteMask});
       } else {
         auto reg = operand.decoded_vgpr();
-        if (reg && !wf.gpr_idx_en()) {
+        if (reg && !wf.gpr_idx_en() &&
+            !(inst.flags() & (RESERVES_UNWRITTEN_VGPR | COMPACT_WAVE64_MEMORY_RESULT))) {
           reg->index +=
               reg->index < ACC_VGPR_OFFSET ? wf.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8 : 0;
-          if (!owns_vgpr_range(wf, wf.vgpr_alloc().base + reg->index, reg->width))
+          if (!owns_memory_result_range(wf, wf.vgpr_alloc().base + reg->index, reg->width))
             reg = std::nullopt;
         } else {
-          reg = RegisterAccess(wf).destination_register(operand);
+          reg = RegisterAccess(wf).memory_destination_register(inst, operand);
         }
         if (reg)
           scoreboard.add(
@@ -1331,14 +1637,18 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Even a single-group VMEM instruction drains preceding SMEM translations.
   if (xevent != classified.end())
     scoreboard.xcnt_group(xscalar);
-  const uint64_t vector_lanes = MemoryWaitScoreboard::result_lanes(inst, wf);
+  const auto memory_lanes = MemoryWaitScoreboard::memory_lanes(inst, wf);
+  const uint64_t vector_lanes = memory_lanes.result;
 
   // Source checks precede this pure FLAT domain calculation. Resolve admission,
   // overwrite ordering and result readiness before execution.
   const bool flat = inst.mnemonic().starts_with("flat_");
-  const auto planned_flat = flat ? MemoryWaitScoreboard::flat_lanes(inst, wf, shared_aperture_base_,
-                                                                    shared_aperture_limit_)
-                                 : MemoryWaitScoreboard::FlatLanes{};
+  const auto planned_flat =
+      flat ? MemoryWaitScoreboard::flat_lanes(
+                 inst, wf,
+                 wf.use_wave_apertures() ? wf.shared_aperture_base() : shared_aperture_base_,
+                 wf.use_wave_apertures() ? wf.shared_aperture_limit() : shared_aperture_limit_)
+           : MemoryWaitScoreboard::FlatLanes{};
   const uint64_t flat_shared_lanes = planned_flat.shared;
   const uint64_t flat_requests = planned_flat.requests;
   const auto flat_counter_lanes = [&](WaitCounterKind counter) {
@@ -1367,6 +1677,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   std::array<Destination, kBlockDwordCount> destinations;
   size_t num_destinations = 0;
   auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
+    if (reg.cls == RegClass::TTMP && !wf.shader_can_write_ttmp())
+      return;
     assert(num_destinations < destinations.size());
     destinations[num_destinations++] = {reg, lanes, bytes};
   };
@@ -1407,7 +1719,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
               }
           continue;
         }
-        const auto reg = access.destination_register(operand);
+        const auto reg = access.memory_destination_register(inst, operand);
         if (operand.decoded_vgpr() && !reg) {
           // Completion validates every vector destination together.
           count = 0;
@@ -1418,22 +1730,12 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      const uint8_t bytes =
-          sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
-      const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
-                                      : modifiers.memory_result_last_bytes;
       for (unsigned i = 0; i < count; ++i) {
-        auto reg = registers[i];
+        const auto reg = registers[i];
         const auto lanes = reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0};
-        if (reg.cls != RegClass::VGPR || bytes == tail) {
-          append(reg, lanes,
-                 reg.cls == RegClass::VGPR ? bytes : MemoryWaitScoreboard::kFullDwordByteMask);
-        } else {
-          const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-          if (--reg.width)
-            append(reg, lanes, bytes);
-          append(last, lanes, tail);
-        }
+        for_each_memory_result_range(
+            reg, modifiers, sram_ecc(),
+            [&](RegisterRef range, uint8_t bytes) { append(range, lanes, bytes); });
       }
     }
   }
@@ -1531,7 +1833,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
                         event.kind == WaitEventKind::SqMessage ||
                         event.kind == WaitEventKind::SccWrite;
     // Zero-EXEC instructions still occupy positions behind pending requests.
-    if (!scalar && !vector_lanes && !scoreboard.outstanding(counter))
+    if (!scalar && !memory_lanes.issue && !scoreboard.outstanding(counter))
       continue;
     const auto sequence =
         scoreboard.issue(event, config_.arch, scoreboard.issue_units(inst, event, config_.arch));
@@ -1609,6 +1911,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
                                            uint64_t flat_local_lane_mask,
                                            uint64_t flat_dds_lane_mask) {
   std::vector<ImageSampleFootprint> image_footprints;
+  std::array<uint64_t, 16> scalar_element_masks;
   MemoryAccessObservation access;
   access.mnemonic = inst.mnemonic();
   access.pc = wf.pc;
@@ -1642,9 +1945,17 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.architectural_exec_lane_mask = 1;
     // The pipeline skips a buffer access whose bounds mask clears every DWORD.
     // Like an out-of-range vector lane, its lane is active but not valid.
-    const bool accessed = state.load_dword_mask != 0;
+    const bool accessed = !state.memviol && state.load_dword_mask != 0;
     access.valid_lane_mask = accessed;
     access.request_lane_mask = accessed;
+    if (accessed && state.atomic_op == AtomicOp::NONE && state.load_dword_mask != 0xffff) {
+      assert(state.num_dwords <= scalar_element_masks.size());
+      auto masks = std::span(scalar_element_masks).first(state.num_dwords);
+      for (size_t word = 0; word < masks.size(); ++word)
+        masks[word] = (state.load_dword_mask >> word) & 1u;
+      if (std::ranges::find(masks, uint64_t{0}) != masks.end())
+        access.element_lane_masks = masks;
+    }
     access.addresses = std::span<const uint64_t>(&state.addr, 1);
     break;
   }
@@ -1662,11 +1973,16 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.elements_per_lane = state.num_elems;
     access.active_lane_mask = state.exec_mask;
     access.architectural_exec_lane_mask = wf.exec() & access.wavefront_lane_mask();
+    const uint64_t requests = transpose_request_lane_mask(state, wf_size);
+    const bool rejected = state.rejects_routed_access();
     access.valid_lane_mask = state.lane_mask;
-    access.request_lane_mask = transpose_request_lane_mask(state, wf_size);
+    // A prequalified synchronous fault rejects every lane before either pipeline accesses bytes.
+    if (rejected)
+      access.valid_lane_mask = 0;
+    access.request_lane_mask = rejected ? 0 : requests;
     access.flat_local_lane_mask = flat_local_lane_mask & access.request_lane_mask;
     access.flat_dds_lane_mask = flat_dds_lane_mask & access.request_lane_mask;
-    access.flat_local_oob_lane_mask = state.flat_local_oob_lane_mask;
+    access.flat_local_oob_lane_mask = rejected ? 0 : state.flat_local_oob_lane_mask;
     access.flat_local_allocation_end = state.flat_local_allocation_end;
     // Intersected with the requesting lanes, which is how the global pipeline
     // splits the wave: a swizzled lane that never requests costs nothing.
@@ -1682,7 +1998,8 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
       access.image_sample_footprints = image_footprints;
     } else
       access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
-    access.element_lane_masks = state.element_lane_masks.view();
+    if (!rejected)
+      access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =
           std::span<const uint64_t>(state.ds2_per_lane_addr.data(), wf_size);
@@ -1748,7 +2065,7 @@ void ComputeUnitCore::update_wf_states() {
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs);
+      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -1840,8 +2157,10 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
     const GpuVmAccess *vm_access = active->vm_access();
-    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
-                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    const uint64_t pc =
+        vm_access || active->process_id() ? active->vm_instruction_pc() : active->pc;
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, pc, word)
+                                    : inst_cache_.peek_word(pc, active->process_id(), word);
     if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
@@ -1906,10 +2225,9 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction_impl(
-    Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
+[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
+ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
+                                        MaybeAsyncWindowStorage<EnableAsync> storage) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -1917,6 +2235,28 @@ template <bool EnableAsync>
         window->drain();
     }
   };
+
+  if (active->pending_memory_trap_) [[unlikely]] {
+    drain_async_window();
+    if (!active->wait_counters().empty()) {
+      active->set_wait_all();
+      return IssueOutcome::NotIssued;
+    }
+    active->pending_memory_trap_ = false;
+    const auto config = trap_handler_resolver_ ? trap_handler_resolver_(*active) : std::nullopt;
+    if (config && config->tba && !active->in_trap_handler()) {
+      enter_trap_handler(*active, *config, 0, active->pc);
+    } else if (active->fail_pm4_submission()) {
+      abort_dispatch(active->dispatch_id());
+    } else if (!(aperture_violation_handler_ && aperture_violation_handler_(*active))) {
+      const bool claimed = defer_queue_exception(nullptr, active->queue_id(), active->process_id(),
+                                                 kAqlQueueApertureViolation, false, false,
+                                                 QueueExceptionDeliveryPolicy::PublishAndCancel);
+      handle_instruction_failure(*active, "unhandled FLAT private atomic memory violation",
+                                 claimed);
+    }
+    return IssueOutcome::NotIssued;
+  }
 
   std::optional<GpuVmAccess> fresh_vm_access;
   const GpuVmAccess *vm_access = active->vm_access();
@@ -1964,6 +2304,7 @@ template <bool EnableAsync>
     }
   }
   const bool vm_address_space = vm_access != nullptr;
+  const uint64_t fetch_pc = vm_address_space ? active->vm_instruction_pc() : active->pc;
 
   std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> words{};
   constexpr uint32_t kFirstFetchBytes = InstructionCache::kFetchBytes;
@@ -1987,7 +2328,7 @@ template <bool EnableAsync>
     }
     return VmAccessOutcome::Complete;
   };
-  VmAccessOutcome fetch_outcome = fetch(active->pc, words.data(), kFirstFetchBytes);
+  VmAccessOutcome fetch_outcome = fetch(fetch_pc, words.data(), kFirstFetchBytes);
   // GFX10 MIMG has a two-bit NSA count at bits 2:1. Only NSA=3 needs
   // a fifth word; shorter instructions must not fetch beyond the normal window.
   constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
@@ -1995,7 +2336,7 @@ template <bool EnableAsync>
   if (fetch_outcome == VmAccessOutcome::Complete &&
       (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
       (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
-    fetch_outcome = fetch(active->pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
+    fetch_outcome = fetch(fetch_pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
@@ -2013,7 +2354,7 @@ template <bool EnableAsync>
       return IssueOutcome::NotIssued;
     }
     if (fetch_outcome == VmAccessOutcome::Faulted && memory_violation_handler_ &&
-        memory_violation_handler_(*active, active->pc, false, active->pc)) {
+        memory_violation_handler_(*active, fetch_pc, false, active->pc)) {
       return IssueOutcome::NotIssued;
     }
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(),
@@ -2025,10 +2366,9 @@ template <bool EnableAsync>
 
   active->trace_inst_count_++;
 
-  util::StringDiagnostic decode_error;
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
-                                                    decode_error.emitter(), reuse_decoded);
+                                                    decode_error_.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     // Preserve debugger-first handling of illegal instructions. PM4 failures
@@ -2045,14 +2385,14 @@ template <bool EnableAsync>
         "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
         this->name(), active->wf_id(), active->pc, active->process_id(), active->queue_id(),
         active->dispatch_id(), active->wg_id(), words[0], words[1], words[2], words[3],
-        decode_error.message());
+        decode_error_.message());
+    decode_error_({});
     handle_instruction_failure(*active, failure, exception_claimed);
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
-  std::string execution_failure_detail;
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
@@ -2060,7 +2400,10 @@ template <bool EnableAsync>
         window->drain();
     }
     fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(), execution_failure_detail);
+                          active->instruction_execution_error(),
+                          // Taken before reporting, so a throwing failure handler
+                          // cannot leave it for the next instruction.
+                          std::exchange(execution_failure_detail_, {}));
   };
   // Operand resolution outside execute_instruction() participates in the same
   // per-instruction failure contract as the generated execution callback.
@@ -2084,13 +2427,16 @@ template <bool EnableAsync>
       wait_state->before(*inst, config_.arch);
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
   }
+  const bool wait_for_buffer_lanes =
+      wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
+      MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch);
   bool wait_checked = false;
 
   if constexpr (EnableAsync) {
     bool may_submit = true;
     std::optional<uint64_t> issuer;
     auto *admission = storage ? storage->admission : nullptr;
-    if (window && window->take_issuer(active->pc)) {
+    if (window && window->take_issuer(fetch_pc)) {
       may_submit = false;
       if (admission)
         ++admission->stats.issuer;
@@ -2101,7 +2447,7 @@ template <bool EnableAsync>
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
         std::ranges::copy_n(words.begin(), first.size(), first.begin());
-        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
+        issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, fetch_pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
       }
@@ -2111,7 +2457,7 @@ template <bool EnableAsync>
       window = &storage->window.emplace(*this, *active, storage->has_accvgprs);
     if (window) {
       window->before(*inst);
-      if (wait_state) {
+      if (wait_state && !wait_for_buffer_lanes) {
         wait_state->check_instruction(*inst, *active);
         wait_checked = true;
       }
@@ -2132,7 +2478,7 @@ template <bool EnableAsync>
     }
   }
 
-  if (wait_state && !wait_checked)
+  if (wait_state && !wait_checked && !wait_for_buffer_lanes)
     wait_state->check_instruction(*inst, *active);
 
   struct ProbeWaitIssue {
@@ -2145,7 +2491,8 @@ template <bool EnableAsync>
     if (debugger_active)
       probe_wait_issue = ProbeWaitIssue{active->ensure_memory_wait_scoreboard().issue_snapshot(),
                                         active->pc, active->dispatch_generation()};
-    track_memory_wait(*inst, *active);
+    if (!wait_for_buffer_lanes)
+      track_memory_wait(*inst, *active);
   }
 
   // The cause classifiers report into this as they run; see alu_exceptions.h.
@@ -2182,7 +2529,7 @@ template <bool EnableAsync>
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
   // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
   // interrupt message, restores STATUS, and returns through s_rfe_b64.
-  if (std::string_view(inst->mnemonic()) == "s_trap") {
+  if (inst->flags() & SOFTWARE_TRAP) {
     // s_trap bypasses execute_instruction(), but still occupies the adjacent
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
@@ -2190,72 +2537,7 @@ template <bool EnableAsync>
     if (!active->in_trap_handler() && trap_handler_resolver_) {
       auto config = trap_handler_resolver_(*active);
       if (config && config->tba != 0) {
-        const uint64_t saved_pc = active->pc;
-        const uint32_t saved_status = active->status_raw();
-        const auto properties = isa_properties(this->arch());
-        const auto wave_state_layout = properties.wave_state_layout;
-        const bool uses_split_wave_state = wave_state_layout != WaveStateLayout::Legacy;
-        active->set_ttmp(0, static_cast<uint32_t>(saved_pc));
-        if (uses_split_wave_state) {
-          // GFX12 trap entry carries the four-bit trap id in TTMP1[31:28].
-          // GFX12.0 has a 48-bit PC and preserves SCHED_MODE in TTMP1[27:26];
-          // GFX12.5 expands the PC to 57 bits and enters privileged scheduling.
-          const uint32_t pc_hi_mask =
-              wave_state_layout == WaveStateLayout::Gfx12_5 ? 0x01FFFFFFu : 0x0000FFFFu;
-          const uint32_t sched_mode = wave_state_layout == WaveStateLayout::Gfx12
-                                          ? (active->wave_sched_mode_raw() & 0x3u) << 26
-                                          : 0u;
-          active->set_ttmp(1, (static_cast<uint32_t>(saved_pc >> 32) & pc_hi_mask) | sched_mode |
-                                  ((trap_id & 0xFu) << 28));
-          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
-          active->set_ttmp(11, (active->ttmp(11) & ~(1u << 23)) | debug_enabled);
-          constexpr uint16_t kWholeStatePriv = 4u | (31u << 11);
-          uint32_t state_priv = 0;
-          const auto state_result = read_hwreg_field(*active, kWholeStatePriv, state_priv);
-          assert(state_result == HwregAccessResult::Success);
-          (void)state_result;
-          active->set_ttmp(12, state_priv);
-        } else {
-          active->set_ttmp(1, static_cast<uint32_t>(saved_pc >> 32) | (trap_id << 16));
-        }
-        // Dispatch identity. Which TTMPs carry it is architecture-specific and
-        // this must not disagree with what CWSR publishes for the same wave, or
-        // rocm-dbgapi correlates the stopped wave to the wrong workgroup.
-        //
-        // On the profiles where the SPI puts workgroup ids in TTMP6/7/9,
-        // init_wavefront_regs() already seeded them at dispatch and trap entry
-        // has nothing to add -- zeroing TTMP9 here destroyed one of them. The
-        // rest use the gfx9 layout, TTMP8/9/10 = workgroup id x/y/z, which is
-        // also what CWSR serializes (cwsr.cpp writes wg_coord into ttmp[8..10]).
-        // Writing the flat wg_id() into TTMP8 disagreed with that too.
-        if (!properties.uses_ttmp_workgroup_ids) {
-          const auto &wg = active->wg_coord();
-          active->set_ttmp(8, wg[0]);
-          active->set_ttmp(9, wg[1]);
-          active->set_ttmp(10, wg[2]);
-        }
-        if (!uses_split_wave_state) {
-          active->set_ttmp(11, ((active->queue_packet_id() & 0x1FFFFFFu) << 6) |
-                                   (active->wave_in_group() & 0x3Fu));
-          active->set_ttmp(12, saved_status);
-          const uint32_t debug_enabled = config->debug_enabled ? (1u << 23) : 0u;
-          active->set_ttmp(13, (active->ttmp(13) & ~(1u << 23)) | debug_enabled);
-        }
-        active->set_ttmp(14, static_cast<uint32_t>(config->tma));
-        active->set_ttmp(15, static_cast<uint32_t>(config->tma >> 32));
-        active->set_trap_id(trap_id);
-        active->set_trap_saved_status(saved_status);
-        active->set_trap_saved_exec(active->exec());
-        active->set_trap_interrupt_sent(false);
-        active->clear_trap_exception_status();
-        // A fresh handler entry owns the halt state from here on; a marker left
-        // over from a previous stop would attribute this entry's HALT to an
-        // s_sendmsghalt that has already been resumed past.
-        active->set_self_halted(false);
-        active->set_in_trap_handler(true);
-        if (uses_split_wave_state)
-          active->set_status_raw(saved_status | kPrivilegedStatusBit);
-        active->pc = config->tba;
+        enter_trap_handler(*active, *config, trap_id, active->pc);
         return IssueOutcome::Issued;
       }
     }
@@ -2278,7 +2560,9 @@ template <bool EnableAsync>
         return IssueOutcome::Issued;
       }
       if (target == 0) {
-        active->halt();
+        // The null-PC return sentinel terminates like s_endpgm, including its
+        // implicit memory wait before registers and the wave slot are freed.
+        active->end();
         return IssueOutcome::Issued;
       }
     }
@@ -2290,7 +2574,11 @@ template <bool EnableAsync>
 
   const uint32_t executing_process = active->process_id();
   const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail);
+      execute_instruction(inst, *active, &execution_failure_detail_);
+  if (wait_for_buffer_lanes) {
+    wait_state->check_instruction(*inst, *active);
+    track_memory_wait(*inst, *active);
+  }
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
@@ -2361,17 +2649,36 @@ template <bool EnableAsync>
   // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
   const bool debug_probe = debugger_active && inst->is_memory_op() && inst->data() &&
                            (inst->data()->tag() == GLOBAL_MEM || inst->data()->tag() == SCALAR_MEM);
-  std::vector<uint64_t> dbg_addrs;
-  uint32_t dbg_bytes = 0;
+  struct DebugMemoryRange : MemoryByteRange {
+    bool shared;
+  };
+  std::vector<DebugMemoryRange> debug_ranges;
   bool dbg_is_write = false;
   bool dbg_is_atomic = false;
   if (debug_probe) {
+    const uint64_t shared_base =
+        active->use_wave_apertures() ? active->shared_aperture_base() : shared_aperture_base_;
+    const uint64_t shared_limit =
+        active->use_wave_apertures() ? active->shared_aperture_limit() : shared_aperture_limit_;
+    const auto add_range = [&](MemoryByteRange range,
+                               std::optional<bool> flat_shared = std::nullopt) {
+      debug_ranges.push_back({range, flat_shared.value_or(flat_in_shared_aperture(
+                                         range.address, shared_base, shared_limit))});
+    };
     if (inst->data()->tag() == SCALAR_MEM) {
       auto &d = *inst->data_as<ScalarMemState>();
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
-      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size);
-      dbg_addrs.push_back(d.addr);
+      if (!d.memviol && d.load_dword_mask) {
+        if (!dbg_is_atomic && d.elem_size >= sizeof(uint32_t) && d.load_dword_mask != 0xffff) {
+          for (uint32_t i = 0; i < d.num_dwords; ++i)
+            if (d.load_dword_mask & (1u << i))
+              add_range({d.addr + i * sizeof(uint32_t), sizeof(uint32_t)});
+        } else {
+          add_range(
+              {d.addr, std::max(1u, dbg_is_atomic ? d.elem_size : d.num_dwords * d.elem_size)});
+        }
+      }
     } else {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);
@@ -2380,17 +2687,68 @@ template <bool EnableAsync>
       // range check below reports a zero-sized range as *unmapped*, so an
       // atomic whose decoder left elem_size unset would fault on every lane of
       // a perfectly mapped buffer.
-      dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
-      dbg_addrs.reserve(d.wf_size);
+      const uint32_t bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
+      // The debugger and the issued transfer must agree even if a callback
+      // republishes the sparse ranges or replaces the address-space root.
+      const bool check_residency = d.check_texel_residency && active->address_space() &&
+                                   vm_access && vm_access->info().ready;
+      const bool check_buffer = d.reports_buffer_residency() && active->address_space() &&
+                                vm_access && vm_access->info().ready;
+      const auto ranges = check_residency ? vm_access->nonresident_prt_ranges() : nullptr;
+      if (check_residency || check_buffer) {
+        d.translated.access = *vm_access;
+        d.translated.initialized = true;
+      }
+      if (check_buffer)
+        qualify_buffer_residency(d, *vm_access);
+      const auto &element_lanes = d.element_lane_masks;
+      debug_ranges.reserve(d.wf_size);
+      const bool flat = inst->mnemonic().starts_with("flat_");
+      auto record = [&](uint64_t lanes, std::span<const uint64_t> addresses,
+                        TranslatedMemoryProgress &progress) {
+        if (d.rejects_private_atomic(lanes))
+          return;
+        if (check_residency) {
+          progress.nonresident_lanes = nonresident_texel_lanes(d, addresses, lanes, ranges.get());
+          lanes &= ~*progress.nonresident_lanes;
+        }
+        while (lanes) {
+          const auto lane = std::countr_zero(lanes);
+          lanes &= lanes - 1;
+          std::optional<bool> flat_shared;
+          if (flat) {
+            const uint64_t pointer =
+                d.per_lane_addr[lane] -
+                (flat_selects_segment_before_offset(arch()) ? d.flat_aperture_offset : 0);
+            flat_shared = !(d.scratch_lane_mask & (uint64_t{1} << lane)) &&
+                          flat_in_shared_aperture(pointer, shared_base, shared_limit);
+            if (*flat_shared) {
+              const uint64_t offset = d.per_lane_addr[lane] - shared_base;
+              if (flat_offset_is_dds(arch(), offset) ||
+                  flat_shared_atomic_misaligned(arch(), d, offset)) {
+                debug_ranges.clear();
+                return;
+              }
+            }
+          }
+          if (d.scratch_swizzle || !element_lanes.empty()) {
+            any_texel_byte_range(d, lane, addresses[lane], element_lanes,
+                                 [&](MemoryByteRange range) {
+                                   add_range(range, flat_shared);
+                                   return false;
+                                 });
+          } else {
+            add_range({addresses[lane], bytes}, flat_shared);
+          }
+        }
+      };
+      const uint64_t lanes =
+          transpose_request_lane_mask(d, active->wf_size()) & active->lane_mask();
       if (d.image_sample) {
-        for (const auto &tap : d.image_sample->taps)
-          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-            if (tap.lane_mask & (uint64_t{1} << lane))
-              dbg_addrs.push_back(tap.addresses[lane]);
+        for (auto &tap : d.image_sample->taps)
+          record(tap.lane_mask & lanes, tap.addresses, tap.translated);
       } else {
-        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-          if (d.lane_mask & (1ULL << lane))
-            dbg_addrs.push_back(d.per_lane_addr[lane]);
+        record(lanes, d.per_lane_addr, d.translated);
       }
     }
   }
@@ -2400,29 +2758,27 @@ template <bool EnableAsync>
   // found no faulting address, the access would be dropped with nothing
   // delivered. Checking only the first byte let a multi-byte load, store or
   // atomic that starts near the end of a mapped page run off it unnoticed, so
-  // the whole [addr, addr + dbg_bytes) range is validated.
+  // each actual byte range is validated.
   const uint32_t dbg_vmid = active->process_id();
-  auto access_faults = [&](uint64_t addr) {
-    const bool shared_address = active->shared_aperture_base() != 0 &&
-                                addr >= active->shared_aperture_base() &&
-                                addr <= active->shared_aperture_limit();
-    if (shared_address)
+  auto access_faults = [&](const DebugMemoryRange &range) {
+    const uint64_t addr = range.address;
+    if (range.shared)
       return false;
     if (vm_address_space) {
       const VmAccessKind access = dbg_is_atomic  ? VmAccessKind::Atomic
                                   : dbg_is_write ? VmAccessKind::Write
                                                  : VmAccessKind::Read;
-      return vm_access->query_access(addr, dbg_bytes, access) == VmAccessOutcome::Faulted;
+      return vm_access->query_access(addr, range.bytes, access) == VmAccessOutcome::Faulted;
     }
     return dbg_vmid != 0;
   };
   // Locate the faulting address once. The report loop below resumes from this
   // iterator rather than rescanning: each access_faults() call is a page-table
-  // walk per touched page, and dbg_addrs holds one entry per active lane.
-  auto first_fault = dbg_addrs.end();
+  // walk per touched page.
+  auto first_fault = debug_ranges.end();
   if (debug_probe && memory_violation_handler_)
-    first_fault = std::ranges::find_if(dbg_addrs, access_faults);
-  const bool debug_memory_fault = first_fault != dbg_addrs.end();
+    first_fault = std::ranges::find_if(debug_ranges, access_faults);
+  const bool debug_memory_fault = first_fault != debug_ranges.end();
 
   // The trap return is whatever instruction just left the handler. Asking the
   // wave rather than matching mnemonics keeps this ISA-agnostic: the spelling
@@ -2447,9 +2803,9 @@ template <bool EnableAsync>
     active->pc += inst_size;
     // first_fault is already known to fault, so it is reported without a second
     // range walk; only the lanes after it still have to be tested.
-    for (auto it = first_fault; it != dbg_addrs.end(); ++it) {
+    for (auto it = first_fault; it != debug_ranges.end(); ++it) {
       if ((it == first_fault || access_faults(*it)) &&
-          memory_violation_handler_(*active, *it, dbg_is_write, issue_pc)) {
+          memory_violation_handler_(*active, it->address, dbg_is_write, issue_pc)) {
         fault_claimed = true;
         break;
       }
@@ -2536,8 +2892,8 @@ template <bool EnableAsync>
   // severe than a watchpoint and wins if both would fire on the same
   // instruction, which it does by returning above before reaching here.
   if (debug_probe && !active->debug_halted() && watchpoint_handler_) {
-    for (uint64_t addr : dbg_addrs)
-      if (watchpoint_handler_(*active, addr, dbg_bytes, dbg_is_write, dbg_is_atomic))
+    for (const auto range : debug_ranges)
+      if (watchpoint_handler_(*active, range.address, range.bytes, dbg_is_write, dbg_is_atomic))
         break;
   }
   return IssueOutcome::Issued;
@@ -2577,7 +2933,8 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
       const uint64_t slot_bit = uint64_t{1} << wf->wf_id();
       if ((selected_slots & slot_bit) == 0)
         continue;
-      const bool single_step = wf->debug_single_step();
+      // A pending memory exception owns the stop, including one raised by this issue.
+      const bool single_step = wf->debug_single_step() && !wf->memory_trap_pending();
       if constexpr (EnableAsync) {
         issue_async_instruction(wf.get(), admission, async_wave_size, has_accvgprs);
         if (wf->is_halted()) {
@@ -2587,7 +2944,8 @@ ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_siz
       } else if (issue_instruction(wf.get()) == IssueOutcome::Issued && issued) {
         *issued |= slot_bit;
       }
-      if (single_step && !wf->in_trap_handler() && !wf->debug_halted() && single_step_handler_)
+      if (single_step && !wf->memory_trap_pending() && !wf->in_trap_handler() &&
+          !wf->debug_halted() && single_step_handler_)
         single_step_handler_(*wf);
     }
   }
