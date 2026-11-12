@@ -49,7 +49,7 @@ Memory chart - Instruction Cache:
     rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
     unit: Percent
   ICache-GL1 Read Bandwidth:
-    rst: Not collected by this implementation. The instruction cache counters give no request size.
+    rst: Not available
     unit: Bytes/s
 Memory chart - Scalar Data Cache:
   DCache Requests:
@@ -62,7 +62,7 @@ Memory chart - Scalar Data Cache:
     rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     unit: Bytes/s
   DCache-GL1 Read Bandwidth:
-    rst: Not collected by this implementation. The scalar data cache counters give no request size.
+    rst: Not available
     unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Hit Rate:
@@ -79,7 +79,7 @@ Memory chart - LDS (Local Data Share):
     rst: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
     unit: Percent
   LDS Bandwidth:
-    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword. Counter exposure and hardware normalization remain subject to Navi48 qualification.
+    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword.
     unit: Bytes/s
 Memory chart - GL2 Cache (L2):
   GL2 Hit Rate:
@@ -100,13 +100,13 @@ Memory chart - L2 to Memory:
     unit: Bytes/s
 Memory chart - Infinity Cache and VRAM:
   Infinity Cache Hit Rate:
-    rst: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
+    rst: Not available
     unit: Percent
   VRAM Read Bandwidth:
-    rst: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching VRAM.
+    rst: Not available
     unit: Bytes/s
   VRAM Write Bandwidth:
-    rst: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching VRAM.
+    rst: Not available
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
@@ -134,7 +134,7 @@ Roofline Performance Rates:
   WMMA FLOPs (F16->F32):
     rst: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, FP8, and BF8. The peak is the measured FP16 WMMA rate. BF8 has its own measured roof, V_WMMA_F32_16X16X16_BF8_BF8, at the same 8192 FLOPs per instruction.
     unit: GFLOP/s
-  VALU FLOPs (F64):
+  VALU FLOPs (FP64):
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
   GL0 Cache BW (TCP Cache):
@@ -259,11 +259,11 @@ WGP VALU Instruction Mix:
     rst: Raw vector arithmetic instruction count. This includes integer and floating-point instructions and is not a FLOP count.
     unit: Instructions
   SQ_INST_CYCLES_VALU:
-    rst: SDK-reported aggregate SIMD execution-cycle count for VALU operations. Overlapping V_OP32_1 and V_OP32_T instructions count separately. The counted instance and wave population still require qualification; this is not elapsed GPU time, a FLOP count, or a utilization percentage.
+    rst: Cycles needed to execute VALU operations, counting overlapping V_OP32_1 and V_OP32_T instructions separately.
     unit: Cycles
 WGP WMMA Instruction FLOPs and IOPs Counting:
   SQ_INST_CYCLES_VALU_WMMA:
-    rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
+    rst: Cycles of work sent for WMMA.
     unit: Cycles
   SQ_WMMA_VALU_INSTS:
     rst: Number of WMMA instructions issued.
