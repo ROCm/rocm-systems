@@ -10,6 +10,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - 'shared/sha256/**'
+      - '.github/workflows/rocprofiler-sdk-formatting.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -220,3 +221,48 @@ jobs:
           git diff -- source/share/rocprofiler-sdk/config.yaml
           exit 1
         fi
+
+  # The systems PR bot waits for a check run named pre-commit
+  # (tools/systems_pr_bot/policy.yml). A pull request that does not touch a
+  # project wired into another formatting workflow never creates that check,
+  # and the bot times out. This job is that check for rocprofiler-sdk.
+  pre-commit:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          .pre-commit-config.yaml
+        sparse-checkout-cone-mode: false
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - run: pip install pre-commit
+
+    - name: Run pre-commit on changed rocprofiler-sdk files
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+          echo "Not a pull request, skipping."
+          exit 0
+        fi
+        MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+        FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" "$HEAD_SHA" \
+          | while IFS= read -r f; do
+              case "$f" in
+                projects/rocprofiler-sdk/*) [ -f "$f" ] && echo "$f" ;;
+              esac
+            done)
+        if [ -z "$FILES" ]; then
+          echo "No rocprofiler-sdk files changed, skipping."
+          exit 0
+        fi
+        echo "Checking files:"
+        echo "$FILES"
+        pre-commit run --files $FILES
