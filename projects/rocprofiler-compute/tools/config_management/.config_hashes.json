@@ -23,7 +23,7 @@
         "0100_system_info.yaml": "690a3492daf91b89479a8929828f5061",
         "0200_system_speed_of_light.yaml": "4bdc57f4c014b5d3e0ccf0ab5b275cb8",
         "0300_memory_chart.yaml": "ec4cc7b887cc3aa7e667059c25a97095",
-        "0400_roofline.yaml": "596f698562186eebb0f48bf1a8b5ccd6",
+        "0400_roofline.yaml": "4789ebfabc80c2aa364c5ff22db9c8bd",
         "0600_workgroup_manager_spi.yaml": "6bec4f3e0302611c19539a6dec1c22d2",
         "0700_workgroup_processor_wgp.yaml": "1f7218c5630ac90d5a2f35be20144557",
         "0900_gl0_cache_and_lds.yaml": "a1cd626bfe5f664ac65f390c89ce3d0e",

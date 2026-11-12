@@ -41,7 +41,7 @@ class MockMspec:
 
 
 class MockNavi48Mspec:
-    """Minimal MachineSpecs: a Navi48, whose memory levels include MALL and GDDR6."""
+    """Minimal MachineSpecs: a Navi48, whose memory levels include MALL and VRAM."""
 
     gpu_model = "rdna4_navi48"
     gpu_series = "rdna4"
@@ -407,13 +407,13 @@ def test_canonical_frame_requires_bandwidths_and_peaks() -> None:
     assert canonical_frame([500.0], [0.0, float("inf")]) is None
 
 
-def test_gfx1201_figure_draws_the_gddr6_and_mall_roofs_where_mi_draws_hbm(
+def test_gfx1201_figure_draws_the_vram_and_mall_roofs_where_mi_draws_hbm(
     tmp_path: Path, benchmarked_roofline
 ) -> None:
-    """Navi48 names its device-memory roof GDDR6 and draws the measured Infinity
+    """Navi48 names its device-memory roof VRAM and draws the measured Infinity
     Cache bandwidth as the MALL roof. An MI roofline keeps HBM and no MALL."""
     header = (
-        "device,GDDR6Bw,MALLBw,L2Bw,L1Bw,L0Bw,LDSBw,FP32Flops,FP64Flops,WMMAF16Flops"
+        "device,VRAMBw,MALLBw,L2Bw,L1Bw,L0Bw,LDSBw,FP32Flops,FP64Flops,WMMAF16Flops"
     )
     row = "0,170,345,4800,4900,7000,5300,12900,290,71000"
     navi48_dir = tmp_path / "navi48"
@@ -438,18 +438,18 @@ def test_gfx1201_figure_draws_the_gddr6_and_mall_roofs_where_mi_draws_hbm(
         for trace in benchmarked_roofline().generate_plot("FP64", fig=go.Figure()).data
     ]
 
-    assert navi48_names[:6] == ["LDS", "L0", "L1", "L2", "MALL", "GDDR6"]
+    assert navi48_names[:6] == ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
     assert "HBM" not in navi48_names
     assert "HBM" in mi_names
     assert "MALL" not in mi_names
-    assert "GDDR6" not in mi_names
+    assert "VRAM" not in mi_names
 
 
-def test_gddr6_and_mall_traces_have_their_own_colors() -> None:
-    """GDDR6 shares the HBM color. MALL has a mid-tone color of its own that
+def test_vram_and_mall_traces_have_their_own_colors() -> None:
+    """VRAM shares the HBM color. MALL has a mid-tone color of its own that
     shows on both the white and black plot areas and differs from the
     page's #888888 fallback trace color."""
-    assert get_color("gddr6") == get_color("hbm")
+    assert get_color("vram") == get_color("hbm")
     mall = get_color("mall")
     assert mall == "#9467BD"
     other_roofs = {k: v for k, v in TRACE_COLORS.items() if k != "mall"}
