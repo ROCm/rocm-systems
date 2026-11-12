@@ -125,9 +125,13 @@ bind_flows(loaded_trace_t&                           trace,
         for(const auto& pending : flows)
         {
             while(next < rows.size() && rows[next].start <= pending.ts)
+            {
                 open.push_back(next++);
+            }
             while(!open.empty() && rows[open.back()].end < pending.ts)
+            {
                 open.pop_back();
+            }
             if(open.empty())
             {
                 ++trace.diag.flow_unbound;

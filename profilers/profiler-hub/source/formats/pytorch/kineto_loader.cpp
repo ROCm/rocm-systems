@@ -341,27 +341,33 @@ public:
     bool null()
     {
         if(m_text.active())
+        {
             m_text.token("null");
+        }
         else if(member_wanted())
+        {
             add_member("null");
+        }
         return true;
     }
     bool boolean(bool val)
     {
+        const std::string_view token = val ? "true" : "false";
         if(m_text.active())
-            m_text.token(val ? "true" : "false");
+        {
+            m_text.token(token);
+        }
         else if(member_wanted())
-            add_member(val ? "true" : "false");
+        {
+            add_member(token);
+        }
         return true;
     }
     static bool binary(binary_t& /*val*/) { return true; }
 
     bool number_integer(number_integer_t v)
     {
-        if(m_text.active())
-            m_text.token(std::to_string(v));
-        else if(member_wanted())
-            add_member(std::to_string(v));
+        keep_number(std::to_string(v));
         if(at_time_key())
         {
             const auto magnitude = v < 0 ? ~static_cast<std::uint64_t>(v) + 1
@@ -374,10 +380,7 @@ public:
     }
     bool number_unsigned(number_unsigned_t v)
     {
-        if(m_text.active())
-            m_text.token(std::to_string(v));
-        else if(member_wanted())
-            add_member(std::to_string(v));
+        keep_number(std::to_string(v));
         if(at_time_key())
         {
             set_time(integer_us_to_ns(v, false));
@@ -389,10 +392,7 @@ public:
     }
     bool number_float(number_float_t v, const string_t& text)
     {
-        if(m_text.active())
-            m_text.token(text);
-        else if(member_wanted())
-            add_member(text);
+        keep_number(text);
         if(at_time_key())
         {
             set_time(text_us_to_ns(text));
@@ -456,9 +456,13 @@ public:
     {
         const bool nested = m_text.active();
         if(nested)
+        {
             m_text.open('{');
+        }
         else if(member_wanted())
+        {
             begin_member('{');
+        }
         ++m_depth;
         if(m_depth == 3 && m_k1 == "traceEvents")
         {
@@ -503,9 +507,13 @@ public:
     bool start_array(std::size_t /*elements*/)
     {
         if(m_text.active())
+        {
             m_text.open('[');
+        }
         else if(member_wanted())
+        {
             begin_member('[');
+        }
         ++m_depth;
         return true;
     }
@@ -560,7 +568,7 @@ private:
         bool            has_flow_id = false;
     };
 
-    enum class capture_t
+    enum class capture_t : std::uint8_t
     {
         none,
         args,    // an event's args object
@@ -575,6 +583,19 @@ private:
         return m_depth == 1 && m_k1 != "traceEvents" && m_k1 != "deviceProperties" &&
                m_k1 != "schemaVersion" && m_k1 != "baseTimeNanoseconds" &&
                m_k1 != "host_name";
+    }
+
+    // A number goes to the text being re-serialised, or to the trace-wide members.
+    void keep_number(std::string_view token)
+    {
+        if(m_text.active())
+        {
+            m_text.token(token);
+        }
+        else if(member_wanted())
+        {
+            add_member(token);
+        }
     }
 
     void add_member(std::string_view value)
