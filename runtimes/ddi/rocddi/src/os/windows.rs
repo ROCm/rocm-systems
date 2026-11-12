@@ -5,6 +5,7 @@
 
 pub(crate) mod file;
 mod memory;
+pub(crate) mod module;
 pub(crate) mod process_identity;
 
 use crate::{Error, ErrorKind};

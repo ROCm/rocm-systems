@@ -16,3 +16,6 @@ pub(crate) use linux::{
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("the HSA frontend currently requires a platform adapter");
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+pub(crate) use linux::tooling;
