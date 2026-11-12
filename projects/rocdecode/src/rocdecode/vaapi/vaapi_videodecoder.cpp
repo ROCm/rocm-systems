@@ -841,7 +841,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
     }
     std::string gpu_uuid(hip_dev_prop.uuid.bytes, sizeof(hip_dev_prop.uuid.bytes));
 
-    // Match by PCI BDF (consistent between HIP and sysfs), with unique_id as fallback.
+    // Find the card's render node by PCI BDF (consistent between HIP and sysfs), with unique_id as fallback.
     char pci_bus_id_buf[64] = {0};
     std::string gpu_pci_bdf;
     if (hipDeviceGetPCIBusId(pci_bus_id_buf, sizeof(pci_bus_id_buf), device_id) == hipSuccess) {
@@ -855,10 +855,12 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         }
     }
 
+    // Reuse a context only for the same HIP device. Partitions of one card (DPX/TPX/QPX/CPX) share the
+    // BDF above and may share the UUID, but each partition has its own render node, so matching on
+    // either would run a later partition on the render node of the first partition opened.
     if (!va_contexts_.empty()) {
         for (va_ctx_idx = 0; va_ctx_idx < va_contexts_.size(); va_ctx_idx++) {
-            if ((!gpu_pci_bdf.empty() && gpu_pci_bdf == va_contexts_[va_ctx_idx].gpu_pci_bdf) ||
-                gpu_uuid.compare(va_contexts_[va_ctx_idx].gpu_uuid) == 0) {
+            if (va_contexts_[va_ctx_idx].device_id == device_id) {
                 found_existing = true;
                 break;
             }
@@ -873,8 +875,6 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         va_ctx_idx = static_cast<uint32_t>(va_contexts_.size() - 1);
 
         va_contexts_[va_ctx_idx].device_id = device_id;
-        va_contexts_[va_ctx_idx].gpu_uuid.assign(gpu_uuid);
-        va_contexts_[va_ctx_idx].gpu_pci_bdf = gpu_pci_bdf;
         va_contexts_[va_ctx_idx].hip_dev_prop = hip_dev_prop;
 #ifndef _WIN32
         va_contexts_[va_ctx_idx].drm_fd = -1;

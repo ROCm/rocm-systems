@@ -122,8 +122,6 @@ void DecodeSurfaceAttribs(const VASurfaceAttrib *attr_list, unsigned int attr_co
 
 typedef struct {
     int device_id;
-    std::string gpu_uuid;
-    std::string gpu_pci_bdf;
 #ifndef _WIN32
     int drm_fd;
 #else
