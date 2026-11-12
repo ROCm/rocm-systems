@@ -3333,7 +3333,10 @@ hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, un
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
-  hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+  // A moved graph's owned references were transferred to the child graph node that adopted
+  // them, so retain must register against that graph. Retaining on the empty shell would
+  // make it an owner again and tie the reference's lifetime to the shell instead.
+  hip::Graph* g = ihipResolveGraphHandle(graph);
   if (!hip::UserObject::isUserObjvalid(userObject) && !g->isUserObjGraphValid(userObject)) {
     HIP_RETURN(hipSuccess);
   }
@@ -3355,7 +3358,10 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
-  hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
+  // Resolve for the same reason as retain: the shell owns nothing after a move, so a
+  // release against it would silently find no reference and return success having done
+  // nothing, leaving the caller's reference held until the parent is destroyed.
+  hip::Graph* g = ihipResolveGraphHandle(graph);
   if (!g->isUserObjGraphValid(userObject) || userObject->referenceCount() < count) {
     HIP_RETURN(hipSuccess);
   }
