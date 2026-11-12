@@ -1276,6 +1276,11 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
           report(error_out, "entry TTMP capture exceeds the trap-temporary register file");
           return std::nullopt;
         }
+        if (*source_class == RegClass::TTMP && !supports_entry_ttmp_capture(arch_)) {
+          report(error_out, "entry TTMP capture requires unprivileged TTMP reads, which this "
+                            "target does not support");
+          return std::nullopt;
+        }
         const std::pair<RegClass, uint16_t> source = {*source_class, arg.register_index};
         if (std::ranges::find(sources, source) == sources.end())
           sources.push_back(source);

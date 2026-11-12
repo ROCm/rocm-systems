@@ -105,6 +105,14 @@ public:
 
   amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
 
+  /// @brief Register an additional test plugin after initialize() and before dispatch.
+  bool add_plugin(std::unique_ptr<ExecutionPlugin> plugin) {
+    return plugin_group_->add(std::move(plugin));
+  }
+
+  /// @brief Address of the synthesized descriptor; code follows immediately.
+  static constexpr uint64_t KERNEL_ADDR = 0x1000;
+
   /// @brief Address the kernarg image passed to set_kernarg() is loaded at, and
   ///        therefore the value the CP places in the kernarg SGPR pair.
   static constexpr uint64_t KERNARG_ADDR = 0x40000;
@@ -266,7 +274,7 @@ private:
   ///   several dispatches still reports the first matching one here.
   const WavefrontSnapshot *run(const std::vector<uint32_t> &code, uint32_t private_bytes,
                                uint32_t workgroup_id = 0) {
-    const uint64_t ko = write_kernel(0x1000, code, private_bytes);
+    const uint64_t ko = write_kernel(KERNEL_ADDR, code, private_bytes);
     if (!kernarg_bytes_.empty())
       mem_->load_image(kernarg_bytes_.data(), kernarg_bytes_.size(), KERNARG_ADDR);
     // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves

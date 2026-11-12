@@ -6334,7 +6334,7 @@ TEST(InstrumentorResources, EntrySnapshotsRejectUndeclaredSourcesAndThirdValue) 
   }
 }
 
-TEST(InstrumentorResources, EntryTtmpSnapshotsUseTrapTemporaryIndices) {
+TEST(InstrumentorResources, EntryTtmpSnapshotsRejectPrivilegedSourcesOnGfx950) {
   constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
@@ -6344,6 +6344,36 @@ TEST(InstrumentorResources, EntryTtmpSnapshotsUseTrapTemporaryIndices) {
                               kTestKernargSize),
       {{"test_kernel", kTestKernargSize, 4, 4, 0}});
   const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+  options.register_growth = OriginalRegisterCounts{4, 4};
+  Instrumentor instrumentor(object, kArch, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "snapshots";
+  point.probe_args = {{.source = ProbeArgSource::EntryTtmp, .register_index = 8}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_NE(result.errors.front().find("unprivileged TTMP reads"), std::string::npos)
+      << result.errors.front();
+}
+
+TEST(InstrumentorResources, EntryTtmpSnapshotsUseTrapTemporaryIndices) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);
+  const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded());
+  const std::vector<uint8_t> image = test::with_resource_metadata(
+      make_kernarg_kernel_elf({nop.value(), end.value()}, 0, EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                              kTestKernargSize, true),
+      {{"test_kernel", kTestKernargSize, 4, 4, 0}});
+  const std::vector<uint8_t> body =
+      test::make_amdgpu_probe_elf("snapshots", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
   const AmdGpuCodeObject object(image.data(), image.size());
   const AmdGpuCodeObject probe(body.data(), body.size());
   InstrumentationOptions options;

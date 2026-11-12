@@ -675,6 +675,10 @@ guest allocation or the descriptor's enabled scalar entry-input range, even when
 instrumentation grows the register file. This includes hardware input padding
 that the metadata's used-register count need not cover. TTMP sources use their
 separate 0..15 index range and do not reserve ordinary SGPR allocation.
+`EntryTtmp` is supported only on RDNA4 and CDNA5, whose user shaders can read
+TTMP0-15 without trap-handler privilege. Other targets are rejected during
+planning; in particular, a CDNA4 unprivileged TTMP read would silently return
+zero instead of the requested launch value.
 
 `AnchorVgpr` sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
