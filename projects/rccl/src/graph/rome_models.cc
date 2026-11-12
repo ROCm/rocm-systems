@@ -4126,51 +4126,52 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   return ncclSuccess;
 }
 
-#define MAX_OPT_TOKENS 10
 extern const char* topoPathTypeStr[];
 
-static void parseOptions(struct ncclTopoSystem* system, const char* options) {
-  if (strcmp(options, "")) {
-    char* str_temp = (char*)malloc(strlen(options) + 1);
-    if (str_temp == nullptr) {
-      WARN("Failed to allocate memory for options parsing");
-      return;
-    }
-    strcpy(str_temp, options);
-    char* tokens[MAX_OPT_TOKENS];
-    int numTokens = 0;
-    char* state;
-    tokens[numTokens] = strtok_r(str_temp, "=, ", &state);
-    numTokens++;
-    while (tokens[numTokens - 1] != NULL && numTokens < MAX_OPT_TOKENS)
-      tokens[numTokens++] = strtok_r(NULL, "=, ", &state);
-    for (int i = 0; i < numTokens / 2; i++) {
-      if (strcmp(tokens[i * 2], "netGdrLevel") == 0) {
-        int j;
-        for (j = 0; j <= PATH_SYS; j++) {
-          if (strcmp(tokens[i * 2 + 1], topoPathTypeStr[j]) == 0) break;
-        }
-        if (j <= PATH_SYS) system->netGdrLevel = j;
-        else {
-          system->netGdrLevel = -2;
-          WARN("invalid netGdrLevel: %s", tokens[i * 2 + 1]);
-        }
-      } else if (strcmp(tokens[i * 2], "pivotA2AEnabled") == 0) {
-        system->pivotA2AEnabled = (bool)atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "pivotA2ANumBiRings") == 0) {
-        system->pivotA2ANumBiRings = atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "tuning") == 0) {
-        system->tuning = atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "ll128Enabled") == 0) {
-        system->ll128Enabled = (bool)atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "baseBw") == 0) {
-        system->baseBw = std::stof(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "treeDefined") == 0) {
-        system->treeDefined = (bool)atol(tokens[i * 2 + 1]);
-      }
-    }
-    free(str_temp);
+// Calls f(key, value) for every key=value pair of a model's options; false if the string could not be copied.
+template <typename F>
+static bool forEachOption(const char* options, F f) {
+  char* str_temp = (char*)malloc(strlen(options) + 1);
+  if (str_temp == nullptr) return false;
+  strcpy(str_temp, options);
+  char* state;
+  for (char* key = strtok_r(str_temp, "=, ", &state); key != NULL; key = strtok_r(NULL, "=, ", &state)) {
+    char* value = strtok_r(NULL, "=, ", &state);
+    if (value == NULL) break;
+    f(key, value);
   }
+  free(str_temp);
+  return true;
+}
+
+static void parseOptions(struct ncclTopoSystem* system, const char* options) {
+  bool copied = forEachOption(options, [system](const char* key, const char* value) {
+    if (strcmp(key, "netGdrLevel") == 0) {
+      int j;
+      for (j = 0; j <= PATH_SYS; j++) {
+        if (strcmp(value, topoPathTypeStr[j]) == 0) break;
+      }
+      if (j <= PATH_SYS) {
+        system->netGdrLevel = j;
+      } else {
+        system->netGdrLevel = -2;
+        WARN("invalid netGdrLevel: %s", value);
+      }
+    } else if (strcmp(key, "pivotA2AEnabled") == 0) {
+      system->pivotA2AEnabled = (bool)atol(value);
+    } else if (strcmp(key, "pivotA2ANumBiRings") == 0) {
+      system->pivotA2ANumBiRings = atol(value);
+    } else if (strcmp(key, "tuning") == 0) {
+      system->tuning = atol(value);
+    } else if (strcmp(key, "ll128Enabled") == 0) {
+      system->ll128Enabled = (bool)atol(value);
+    } else if (strcmp(key, "baseBw") == 0) {
+      system->baseBw = std::stof(value);
+    } else if (strcmp(key, "treeDefined") == 0) {
+      system->treeDefined = (bool)atol(value);
+    }
+  });
+  if (!copied) WARN("Failed to allocate memory for options parsing");
 }
 
 static ncclResult_t rcclTopoSetPresetRomeModelIdx(struct ncclTopoSystem* system, int idx) {
@@ -4185,32 +4186,14 @@ static ncclResult_t rcclTopoSetPresetRomeModelIdx(struct ncclTopoSystem* system,
 }
 
 static bool checkOption(const char* options, const char* name) {
-  if (strcmp(options, "")) {
-    char* str_temp = (char*)malloc(strlen(options) + 1);
-    if (str_temp == nullptr) {
-      WARN("Failed to allocate memory for options checking");
-      return false;
-    }
-    strcpy(str_temp, options);
-    char* tokens[MAX_OPT_TOKENS];
-    int numTokens = 0;
-    char* state;
-    tokens[numTokens] = strtok_r(str_temp, "=, ", &state);
-    numTokens++;
-    while (tokens[numTokens - 1] != NULL && numTokens < MAX_OPT_TOKENS)
-      tokens[numTokens++] = strtok_r(NULL, "=, ", &state);
-
-    bool result = false;
-    for (int i = 0; i < numTokens / 2; i++) {
-      if (strcmp(tokens[i * 2], name) == 0) {
-        result = (bool)atol(tokens[i * 2 + 1]);
-        break;
-      }
-    }
-    free(str_temp);
-    return result;
-  }
-  return false;
+  bool found = false, result = false;
+  bool copied = forEachOption(options, [&](const char* key, const char* value) {
+    if (found || strcmp(key, name)) return;
+    found = true;
+    result = (bool)atol(value);
+  });
+  if (!copied) WARN("Failed to allocate memory for options checking");
+  return result;
 }
 
 ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
