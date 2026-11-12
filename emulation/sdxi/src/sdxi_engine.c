@@ -430,6 +430,7 @@ static ssize_t exec_compress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
         uint64_t result = (uint64_t)out_len;
         memcpy((uint8_t *)&csb + SDXI_CSB_RESULT_LEN_OFF, &result, sizeof(result));
         write_guest(vfu_ctx, csb_gpa, &csb, sizeof(csb));
+        vfu_irq_trigger(vfu_ctx, 0);
     }
 
     return (ssize_t)out_len;
@@ -528,6 +529,7 @@ static ssize_t exec_decompress(vfu_ctx_t *vfu_ctx, uint64_t src_gpa,
         uint64_t result = (uint64_t)out_len;
         memcpy((uint8_t *)&csb + SDXI_CSB_RESULT_LEN_OFF, &result, sizeof(result));
         write_guest(vfu_ctx, csb_gpa, &csb, sizeof(csb));
+        vfu_irq_trigger(vfu_ctx, 0);
     }
 
     return (ssize_t)out_len;
@@ -804,6 +806,7 @@ static int exec_elemwise(vfu_ctx_t *vfu_ctx,
         uint64_t result = (uint64_t)dst_len;
         memcpy((uint8_t *)&csb + SDXI_CSB_RESULT_LEN_OFF, &result, sizeof(result));
         write_guest(vfu_ctx, csb_gpa, &csb, sizeof(csb));
+        vfu_irq_trigger(vfu_ctx, 0);
     }
 
     return 0;
@@ -1184,9 +1187,8 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
                 memcpy(&scalar,   dsc + SDXI_ELEM_SCALAR_OFF,    8U);
                 int er = exec_elemwise(vfu_ctx, src_addr, src_len, dst_addr,
                                        dtype, op, scalar, csb_gpa);
-                write_csb = false;
                 if (er < 0) { csb_ok = -1; }
-                else { cxt->num_elemwise++; cxt->bytes_elemwise += src_len; }
+                else { cxt->num_elemwise++; cxt->bytes_elemwise += src_len; write_csb = false; }
                 break;
             }
             default:
@@ -1213,6 +1215,7 @@ void sdxi_engine_process_cxt(vfu_ctx_t *vfu_ctx, uint64_t l2_gpa,
             if (csb_ok < 0)
                 csb.flags = SDXI_CST_BLK_ER_BIT;
             write_guest(vfu_ctx, csb_gpa, &csb, sizeof(csb));
+            vfu_irq_trigger(vfu_ctx, 0);
         }
 
         cxt->read_idx++;

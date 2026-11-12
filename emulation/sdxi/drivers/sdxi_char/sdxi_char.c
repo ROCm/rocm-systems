@@ -30,6 +30,9 @@
 #include <linux/types.h>
 #ifdef CONFIG_IO_URING
 #include <linux/io_uring/cmd.h>
+#include <linux/interrupt.h>
+#include <linux/spinlock.h>
+#include <linux/list.h>
 #endif
 
 #include "sdxi_user.h"
@@ -120,6 +123,11 @@ struct sdxi_char_dev {
 	struct mutex      lock;
 	struct miscdevice misc;
 	char              name[32];
+#ifdef CONFIG_IO_URING
+	spinlock_t        irq_lock;
+	struct list_head  inflight;
+	int               msix_irq;
+#endif
 };
 
 static struct sdxi_char_dev *g_sdev;
@@ -620,6 +628,398 @@ static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 }
 
 #ifdef CONFIG_IO_URING
+
+struct sdxi_inflight {
+	struct list_head    node;
+	struct io_uring_cmd *cmd;
+	unsigned int        issue_flags;
+	void               *csb_cpu;
+	dma_addr_t          csb_dma;
+	struct bounce       src;
+	struct bounce       dst;
+	bool                use_csb_len;
+	bool                aborted;
+	u64                 dst_uaddr;
+	void __user        *uioc;
+	size_t              ioc_size;
+	u8                  ioc_buf[48];
+};
+
+static void sdxi_cmd_finish(struct io_uring_cmd *cmd, unsigned int issue_flags)
+{
+	struct sdxi_inflight *inf = *(struct sdxi_inflight **)cmd->pdu;
+	struct sdxi_char_dev *sdev = g_sdev;
+	u8 *csb;
+	u32 flags;
+	u64 out_len;
+	long ret = 0;
+
+	if (inf->aborted) {
+		kfree(inf);
+		io_uring_cmd_done(cmd, -ENODEV, issue_flags);
+		return;
+	}
+
+	csb     = (u8 *)inf->csb_cpu;
+	flags   = le32_to_cpu(*(__le32 *)(csb + CSB_FLAGS_OFF));
+	out_len = le64_to_cpu(*(__le64 *)(csb + CSB_RESULT_OFF));
+
+	if (flags & CSB_ER_BIT) {
+		ret = -EIO;
+		goto done;
+	}
+
+	if (inf->dst.cpu) {
+		size_t copy_len = inf->use_csb_len ? (size_t)out_len : inf->dst.size;
+		if (inf->use_csb_len && out_len > inf->dst.size) {
+			ret = -EIO;
+			goto done;
+		}
+		if (copy_to_user((void __user *)inf->dst_uaddr,
+				 inf->dst.cpu, copy_len)) {
+			ret = -EFAULT;
+			goto done;
+		}
+	}
+
+	if (inf->use_csb_len && inf->uioc) {
+		*(u64 *)(inf->ioc_buf + 40) = out_len;
+		if (copy_to_user(inf->uioc, inf->ioc_buf, inf->ioc_size))
+			ret = -EFAULT;
+	}
+done:
+	if (sdev) {
+		bounce_free(sdev, &inf->src);
+		bounce_free(sdev, &inf->dst);
+		if (inf->csb_cpu)
+			dma_free_coherent(&sdev->pdev->dev, CSB_SIZE,
+					  inf->csb_cpu, inf->csb_dma);
+	}
+	kfree(inf);
+	io_uring_cmd_done(cmd, ret, issue_flags);
+}
+
+static irqreturn_t sdxi_completion_irq(int irq, void *data)
+{
+	struct sdxi_char_dev *sdev = data;
+	struct sdxi_inflight *inf, *tmp;
+	LIST_HEAD(done);
+
+	spin_lock(&sdev->irq_lock);
+	list_for_each_entry_safe(inf, tmp, &sdev->inflight, node) {
+		u32 sig = le32_to_cpu(
+			*(__le32 *)((u8 *)inf->csb_cpu + CSB_SIGNAL_OFF));
+		if (sig != 0xFFFFFFFF) {
+			list_del(&inf->node);
+			list_add_tail(&inf->node, &done);
+		}
+	}
+	spin_unlock(&sdev->irq_lock);
+
+	list_for_each_entry_safe(inf, tmp, &done, node) {
+		list_del(&inf->node);
+		*(struct sdxi_inflight **)inf->cmd->pdu = inf;
+		io_uring_cmd_complete_in_task(inf->cmd, sdxi_cmd_finish);
+	}
+	return IRQ_HANDLED;
+}
+
+static int sdxi_submit_inflight(struct sdxi_char_dev *sdev,
+				struct sdxi_inflight *inf,
+				const u8 *dsc)
+{
+	unsigned long flags;
+	u8 *slot;
+
+	if (!mutex_trylock(&sdev->lock))
+		return -EAGAIN;
+
+	slot = ring_slot(&sdev->client);
+	memcpy(slot, dsc, 56);
+	*(__le64 *)(slot + 56) = cpu_to_le64(inf->csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+	mutex_unlock(&sdev->lock);
+
+	spin_lock_irqsave(&sdev->irq_lock, flags);
+	list_add_tail(&inf->node, &sdev->inflight);
+	spin_unlock_irqrestore(&sdev->irq_lock, flags);
+
+	return -EIOCBQUEUED;
+}
+
+static struct sdxi_inflight *alloc_inflight(struct sdxi_char_dev *sdev,
+					    struct io_uring_cmd *cmd,
+					    unsigned int issue_flags)
+{
+	struct sdxi_inflight *inf = kzalloc(sizeof(*inf), GFP_KERNEL);
+
+	if (!inf)
+		return NULL;
+	inf->cmd         = cmd;
+	inf->issue_flags = issue_flags;
+	inf->csb_cpu = dma_alloc_coherent(&sdev->pdev->dev, CSB_SIZE,
+					  &inf->csb_dma, GFP_KERNEL);
+	if (!inf->csb_cpu) {
+		kfree(inf);
+		return NULL;
+	}
+	memset(inf->csb_cpu, 0xFF, CSB_SIZE);
+	return inf;
+}
+
+static void free_inflight(struct sdxi_char_dev *sdev, struct sdxi_inflight *inf)
+{
+	bounce_free(sdev, &inf->src);
+	bounce_free(sdev, &inf->dst);
+	if (inf->csb_cpu)
+		dma_free_coherent(&sdev->pdev->dev, CSB_SIZE,
+				  inf->csb_cpu, inf->csb_dma);
+	kfree(inf);
+}
+
+static int uring_submit_memcpy(struct sdxi_char_dev *sdev,
+			       struct io_uring_cmd *cmd,
+			       unsigned int issue_flags)
+{
+	void __user *arg = u64_to_user_ptr(READ_ONCE(cmd->sqe->addr));
+	struct sdxi_ioc_memcpy ioc;
+	struct sdxi_inflight *inf;
+	u8 dsc[56];
+	int ret;
+
+	if (copy_from_user(&ioc, arg, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.len == 0) {
+		io_uring_cmd_done(cmd, 0, issue_flags);
+		return 0;
+	}
+	if (ioc.len > MAX_OP_SIZE)
+		return -E2BIG;
+
+	inf = alloc_inflight(sdev, cmd, issue_flags);
+	if (!inf)
+		return -ENOMEM;
+
+	ret = bounce_alloc(sdev, ioc.len, &inf->src);
+	if (ret)
+		goto err;
+	ret = bounce_alloc(sdev, ioc.len, &inf->dst);
+	if (ret)
+		goto err;
+
+	if (copy_from_user(inf->src.cpu, (void __user *)ioc.src, ioc.len)) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	inf->dst_uaddr   = ioc.dst;
+	inf->use_csb_len = false;
+	inf->uioc        = NULL;
+
+	memset(dsc, 0, sizeof(dsc));
+	*(__le32 *)(dsc + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COPY));
+	*(__le32 *)(dsc + 4)  = cpu_to_le32((u32)(ioc.len - 1));
+	*(__le64 *)(dsc + 16) = cpu_to_le64(inf->src.dma);
+	*(__le64 *)(dsc + 24) = cpu_to_le64(inf->dst.dma);
+
+	ret = sdxi_submit_inflight(sdev, inf, dsc);
+	if (ret != -EIOCBQUEUED)
+		goto err;
+	return -EIOCBQUEUED;
+err:
+	free_inflight(sdev, inf);
+	return ret;
+}
+
+static int uring_submit_compress(struct sdxi_char_dev *sdev,
+				 struct io_uring_cmd *cmd,
+				 unsigned int issue_flags)
+{
+	void __user *arg = u64_to_user_ptr(READ_ONCE(cmd->sqe->addr));
+	struct sdxi_ioc_compress ioc;
+	struct sdxi_inflight *inf;
+	u8 dsc[56];
+	int ret;
+
+	if (copy_from_user(&ioc, arg, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0 || ioc.dst_cap == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE || ioc.dst_cap > MAX_OP_SIZE)
+		return -E2BIG;
+
+	inf = alloc_inflight(sdev, cmd, issue_flags);
+	if (!inf)
+		return -ENOMEM;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &inf->src);
+	if (ret)
+		goto err;
+	ret = bounce_alloc(sdev, ioc.dst_cap, &inf->dst);
+	if (ret)
+		goto err;
+
+	if (copy_from_user(inf->src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	inf->dst_uaddr   = ioc.dst;
+	inf->use_csb_len = true;
+	inf->uioc        = arg;
+	inf->ioc_size    = sizeof(ioc);
+	memcpy(inf->ioc_buf, &ioc, sizeof(ioc));
+
+	memset(dsc, 0, sizeof(dsc));
+	*(__le32 *)(dsc + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COMPRESS));
+	*(__le32 *)(dsc + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(dsc + 8)  = cpu_to_le32((u32)ioc.dst_cap);
+	*(__le32 *)(dsc + 12) = cpu_to_le32((ioc.level & 0xFFU) |
+					    ((ioc.algo & 0xFFU) << 8U));
+	*(__le64 *)(dsc + 16) = cpu_to_le64(inf->src.dma);
+	*(__le64 *)(dsc + 24) = cpu_to_le64(inf->dst.dma);
+
+	ret = sdxi_submit_inflight(sdev, inf, dsc);
+	if (ret != -EIOCBQUEUED)
+		goto err;
+	return -EIOCBQUEUED;
+err:
+	free_inflight(sdev, inf);
+	return ret;
+}
+
+static int uring_submit_decompress(struct sdxi_char_dev *sdev,
+				   struct io_uring_cmd *cmd,
+				   unsigned int issue_flags)
+{
+	void __user *arg = u64_to_user_ptr(READ_ONCE(cmd->sqe->addr));
+	struct sdxi_ioc_decompress ioc;
+	struct sdxi_inflight *inf;
+	u8 dsc[56];
+	int ret;
+
+	if (copy_from_user(&ioc, arg, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0 || ioc.dst_cap == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE || ioc.dst_cap > MAX_OP_SIZE)
+		return -E2BIG;
+
+	inf = alloc_inflight(sdev, cmd, issue_flags);
+	if (!inf)
+		return -ENOMEM;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &inf->src);
+	if (ret)
+		goto err;
+	ret = bounce_alloc(sdev, ioc.dst_cap, &inf->dst);
+	if (ret)
+		goto err;
+
+	if (copy_from_user(inf->src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	inf->dst_uaddr   = ioc.dst;
+	inf->use_csb_len = true;
+	inf->uioc        = arg;
+	inf->ioc_size    = sizeof(ioc);
+	memcpy(inf->ioc_buf, &ioc, sizeof(ioc));
+
+	memset(dsc, 0, sizeof(dsc));
+	*(__le32 *)(dsc + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_DECOMPRESS));
+	*(__le32 *)(dsc + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(dsc + 8)  = cpu_to_le32((u32)ioc.dst_cap);
+	*(__le32 *)(dsc + 12) = cpu_to_le32((ioc.algo & 0xFFU) << 8U);
+	*(__le64 *)(dsc + 16) = cpu_to_le64(inf->src.dma);
+	*(__le64 *)(dsc + 24) = cpu_to_le64(inf->dst.dma);
+
+	ret = sdxi_submit_inflight(sdev, inf, dsc);
+	if (ret != -EIOCBQUEUED)
+		goto err;
+	return -EIOCBQUEUED;
+err:
+	free_inflight(sdev, inf);
+	return ret;
+}
+
+static int uring_submit_elemwise(struct sdxi_char_dev *sdev,
+				 struct io_uring_cmd *cmd,
+				 unsigned int issue_flags)
+{
+	void __user *arg = u64_to_user_ptr(READ_ONCE(cmd->sqe->addr));
+	struct sdxi_ioc_elemwise ioc;
+	struct sdxi_inflight *inf;
+	u8 dsc[56];
+	size_t elem_sz, dst_len;
+	bool is_reduce;
+	int ret;
+
+	if (copy_from_user(&ioc, arg, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.src_len == 0)
+		return -EINVAL;
+	if (ioc.src_len > MAX_OP_SIZE)
+		return -E2BIG;
+
+	switch (ioc.dtype) {
+	case SDXI_DTYPE_FP32:
+	case SDXI_DTYPE_INT32:  elem_sz = 4; break;
+	case SDXI_DTYPE_FP16:
+	case SDXI_DTYPE_BF16:   elem_sz = 2; break;
+	case SDXI_DTYPE_INT8:
+	case SDXI_DTYPE_FP8_E4M3:
+	case SDXI_DTYPE_FP8_E5M2:
+	case SDXI_DTYPE_INT4:   elem_sz = 1; break;
+	default: return -EINVAL;
+	}
+
+	is_reduce = (ioc.op == SDXI_ELEMOP_REDUCE_MIN ||
+		     ioc.op == SDXI_ELEMOP_REDUCE_MAX);
+	dst_len = is_reduce ? elem_sz : (size_t)ioc.src_len;
+
+	inf = alloc_inflight(sdev, cmd, issue_flags);
+	if (!inf)
+		return -ENOMEM;
+
+	ret = bounce_alloc(sdev, ioc.src_len, &inf->src);
+	if (ret)
+		goto err;
+	ret = bounce_alloc(sdev, dst_len, &inf->dst);
+	if (ret)
+		goto err;
+
+	if (copy_from_user(inf->src.cpu, (void __user *)ioc.src, ioc.src_len)) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	inf->dst_uaddr   = ioc.dst;
+	inf->use_csb_len = true;
+	inf->uioc        = arg;
+	inf->ioc_size    = sizeof(ioc);
+	memcpy(inf->ioc_buf, &ioc, sizeof(ioc));
+
+	memset(dsc, 0, sizeof(dsc));
+	*(__le32 *)(dsc + 0)  = cpu_to_le32(make_opcode(TYPE_COMPUTE, SUBTYPE_ELEMWISE));
+	*(__le32 *)(dsc + 4)  = cpu_to_le32((u32)ioc.src_len);
+	*(__le32 *)(dsc + 8)  = cpu_to_le32(ioc.dtype);
+	*(__le32 *)(dsc + 12) = cpu_to_le32(ioc.op);
+	*(__le64 *)(dsc + 16) = cpu_to_le64(inf->src.dma);
+	*(__le64 *)(dsc + 24) = cpu_to_le64(inf->dst.dma);
+	*(__le64 *)(dsc + 32) = cpu_to_le64(ioc.scalar);
+
+	ret = sdxi_submit_inflight(sdev, inf, dsc);
+	if (ret != -EIOCBQUEUED)
+		goto err;
+	return -EIOCBQUEUED;
+err:
+	free_inflight(sdev, inf);
+	return ret;
+}
+
 static int sdxi_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
 {
 	struct sdxi_char_dev *sdev = g_sdev;
@@ -629,44 +1029,70 @@ static int sdxi_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
 	if (!sdev)
 		return -ENODEV;
 
-	/*
-	 * poll_csb() calls usleep_range() — cannot run in the submission
-	 * path where blocking is forbidden.  Signal io-wq to retry from a
-	 * sleepable worker thread.
-	 */
-	if (issue_flags & IO_URING_F_NONBLOCK)
-		return -EAGAIN;
+	/* INFO/STATS are pure MMIO — always synchronous */
+	switch (cmd->cmd_op) {
+	case SDXI_IOC_INFO:
+		mutex_lock(&sdev->lock);
+		ret = handle_info(sdev, arg);
+		mutex_unlock(&sdev->lock);
+		io_uring_cmd_done(cmd, ret, issue_flags);
+		return 0;
+	case SDXI_IOC_STATS:
+		mutex_lock(&sdev->lock);
+		ret = handle_stats(sdev, arg);
+		mutex_unlock(&sdev->lock);
+		io_uring_cmd_done(cmd, ret, issue_flags);
+		return 0;
+	case SDXI_IOC_DMABUF_COPY:
+		/* dma-buf async lifecycle is complex; keep synchronous */
+		if (issue_flags & IO_URING_F_NONBLOCK)
+			return -EAGAIN;
+		mutex_lock(&sdev->lock);
+		ret = handle_dmabuf_copy(sdev, arg);
+		mutex_unlock(&sdev->lock);
+		io_uring_cmd_done(cmd, ret, issue_flags);
+		return 0;
+	}
 
-	mutex_lock(&sdev->lock);
+	if (sdev->msix_irq < 0) {
+		/* No MSI-X: synchronous fallback via io-wq */
+		if (issue_flags & IO_URING_F_NONBLOCK)
+			return -EAGAIN;
+		mutex_lock(&sdev->lock);
+		switch (cmd->cmd_op) {
+		case SDXI_IOC_MEMCPY:
+			ret = handle_memcpy(sdev, arg);
+			break;
+		case SDXI_IOC_COMPRESS:
+			ret = handle_compress(sdev, arg);
+			break;
+		case SDXI_IOC_DECOMPRESS:
+			ret = handle_decompress(sdev, arg);
+			break;
+		case SDXI_IOC_ELEMWISE:
+			ret = handle_elemwise(sdev, arg);
+			break;
+		default:
+			ret = -EOPNOTSUPP;
+		}
+		mutex_unlock(&sdev->lock);
+		io_uring_cmd_done(cmd, ret, issue_flags);
+		return 0;
+	}
+
+	/* MSI-X available: async path */
 	switch (cmd->cmd_op) {
 	case SDXI_IOC_MEMCPY:
-		ret = handle_memcpy(sdev, arg);
-		break;
+		return uring_submit_memcpy(sdev, cmd, issue_flags);
 	case SDXI_IOC_COMPRESS:
-		ret = handle_compress(sdev, arg);
-		break;
+		return uring_submit_compress(sdev, cmd, issue_flags);
 	case SDXI_IOC_DECOMPRESS:
-		ret = handle_decompress(sdev, arg);
-		break;
+		return uring_submit_decompress(sdev, cmd, issue_flags);
 	case SDXI_IOC_ELEMWISE:
-		ret = handle_elemwise(sdev, arg);
-		break;
-	case SDXI_IOC_INFO:
-		ret = handle_info(sdev, arg);
-		break;
-	case SDXI_IOC_STATS:
-		ret = handle_stats(sdev, arg);
-		break;
-	case SDXI_IOC_DMABUF_COPY:
-		ret = handle_dmabuf_copy(sdev, arg);
-		break;
+		return uring_submit_elemwise(sdev, cmd, issue_flags);
 	default:
-		ret = -EOPNOTSUPP;
+		return -EOPNOTSUPP;
 	}
-	mutex_unlock(&sdev->lock);
-
-	io_uring_cmd_done(cmd, ret, issue_flags);
-	return 0;
 }
 #endif /* CONFIG_IO_URING */
 
@@ -860,6 +1286,31 @@ static int sdxi_char_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_hw;
 
 	g_sdev = sdev;
+#ifdef CONFIG_IO_URING
+	spin_lock_init(&sdev->irq_lock);
+	INIT_LIST_HEAD(&sdev->inflight);
+	sdev->msix_irq = -1;
+	ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_MSIX);
+	if (ret == 1) {
+		int irq = pci_irq_vector(pdev, 0);
+		ret = request_irq(irq, sdxi_completion_irq, 0, "sdxi_char", sdev);
+		if (ret == 0) {
+			sdev->msix_irq = irq;
+			dev_info(&pdev->dev, "sdxi_char: MSI-X IRQ %d\n", irq);
+		} else {
+			pci_free_irq_vectors(pdev);
+			dev_warn(&pdev->dev,
+				 "sdxi_char: request_irq failed (%d), async disabled\n",
+				 ret);
+		}
+		ret = 0;
+	} else {
+		if (ret > 0)
+			pci_free_irq_vectors(pdev);
+		dev_warn(&pdev->dev, "sdxi_char: MSI-X unavailable, async disabled\n");
+		ret = 0;
+	}
+#endif
 	dev_info(&pdev->dev, "sdxi_char: registered /dev/%s\n", sdev->name);
 	return 0;
 
@@ -885,6 +1336,37 @@ static void sdxi_char_remove(struct pci_dev *pdev)
 
 	g_sdev = NULL;
 	misc_deregister(&sdev->misc);
+#ifdef CONFIG_IO_URING
+	if (sdev->msix_irq >= 0) {
+		free_irq(sdev->msix_irq, sdev);
+		pci_free_irq_vectors(pdev);
+		sdev->msix_irq = -1;
+	}
+	{
+		struct sdxi_inflight *inf, *tmp;
+		LIST_HEAD(orphans);
+		unsigned long flags;
+
+		spin_lock_irqsave(&sdev->irq_lock, flags);
+		list_splice_init(&sdev->inflight, &orphans);
+		spin_unlock_irqrestore(&sdev->irq_lock, flags);
+
+		list_for_each_entry_safe(inf, tmp, &orphans, node) {
+			list_del(&inf->node);
+			bounce_free(sdev, &inf->src);
+			bounce_free(sdev, &inf->dst);
+			if (inf->csb_cpu)
+				dma_free_coherent(&pdev->dev, CSB_SIZE,
+						  inf->csb_cpu, inf->csb_dma);
+			inf->csb_cpu = NULL;
+			inf->src.cpu = NULL;
+			inf->dst.cpu = NULL;
+			inf->aborted = true;
+			*(struct sdxi_inflight **)inf->cmd->pdu = inf;
+			io_uring_cmd_complete_in_task(inf->cmd, sdxi_cmd_finish);
+		}
+	}
+#endif
 	sdxi_hw_fini(sdev);
 	pci_iounmap(pdev, sdev->bar2);
 	pci_iounmap(pdev, sdev->bar0);
