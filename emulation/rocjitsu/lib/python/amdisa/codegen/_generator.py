@@ -9384,7 +9384,9 @@ class CodeGenerator:
             return gds_guard + self._gen_ds_write2(dst_ops, src_ops, sem)
 
         if cls == 'atc_probe':
-            L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+            L.append(
+                '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+            )
             L.append('  d->translation_probe = true;')
             L.append('  d->num_dwords = 1;')
             L.append('  d->is_load = false;')
@@ -9403,7 +9405,7 @@ class CodeGenerator:
 
         if cls == 'buffer_store_from_lds':
             return (
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);\n'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);\n'
                 '  d->elem_size = 4;\n'
                 '  d->num_elems = 1;\n'
                 '  d->is_load = false;\n'
@@ -9491,7 +9493,7 @@ class CodeGenerator:
             )
             flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             self._append_wait_counter_type(L, sem, cls)
             L.append(
@@ -9520,7 +9522,7 @@ class CodeGenerator:
             and self.isa_spec.profile.waitcnt_family == 'gfx10'
         ):
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             self._append_wait_counter_type(L, sem, cls)
             L.append(
@@ -9534,7 +9536,7 @@ class CodeGenerator:
             source = 'addr' if ordered else 'data0'
             subtract = str(inst.name == 'DS_SUB_GS_REG_RTN').lower()
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             L.append(
                 '  if (!amdgpu::GwsDevice::prepare_register_access('
@@ -9616,7 +9618,7 @@ class CodeGenerator:
         ):
             wide = str(inst.name == 'IMAGE_BVH64_INTERSECT_RAY').lower()
             L = [
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                 f'  {self._memory_cache_policy()}',
             ]
             self._append_wait_counter_type(L, sem, 'buffer_load')
@@ -9634,7 +9636,7 @@ class CodeGenerator:
         ):
             data_base = self._vgpr_base_expr('vdata')
             L = [
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                 f'  d->is_load = {self._atomic_return_expr("0")};',
                 f'  d->dst_reg_base = {data_base};',
                 f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
@@ -9663,7 +9665,7 @@ class CodeGenerator:
             form = self._image_instruction_form(inst.name)
             data_base = self._vgpr_base_expr('vdata')
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
             )
             packed = self.isa_spec.arch_name == 'cdna2' and form.raw
             if atomic:
@@ -9784,7 +9786,7 @@ class CodeGenerator:
             resource = 'inst_.srsrc * 4'
             sc0, _, _ = self._coherency_exprs()
             L = [
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                 f'  d->is_load = {self._atomic_return_expr(sc0)};',
                 f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
                 f'  {self._memory_cache_policy()}',
@@ -9837,7 +9839,7 @@ class CodeGenerator:
             )
             return linear_body + '\n'.join(
                 [
-                    '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                    '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                     f'  d->is_load = {str(load).lower()};',
                     f'  {self._memory_cache_policy()}',
                     f'  d->wait_counter_type = {counter};',
@@ -9938,7 +9940,9 @@ class CodeGenerator:
             f'  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, {nd}u);'
         )
         L.append('  if (!dst_register) return;')
-        L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+        L.append(
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+        )
         L.append('  d->dst_register = *dst_register;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
@@ -9962,7 +9966,9 @@ class CodeGenerator:
     ) -> str:
         L = []
         nd = sem.num_elems
-        L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+        L.append(
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+        )
         L.append(f'  d->num_dwords = {nd};')
         if self.isa_spec.profile.smem_address_uses_access_size:
             L.append('  d->elem_size = 4;')
@@ -10003,7 +10009,7 @@ class CodeGenerator:
         L = [
             f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {data_dwords}u);',
             '  if (!data_register) return;',
-            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();',
             '  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);',
         ]
         if return_dwords != data_dwords:
@@ -10566,7 +10572,7 @@ class CodeGenerator:
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         if not dedicated_flat_lds_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
@@ -10621,7 +10627,7 @@ class CodeGenerator:
         data_field = self.isa_spec.profile.flat_store_src_field
         data_base = self._vgpr_base_expr(data_field)
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(
@@ -10705,7 +10711,7 @@ class CodeGenerator:
         _, _, nt = self._coherency_exprs()
         stride = esz * ne
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -10749,7 +10755,7 @@ class CodeGenerator:
         _, _, nt = self._coherency_exprs()
         stride = esz * ne
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -10813,7 +10819,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {sem.elem_size};')
@@ -10831,7 +10837,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {sem.elem_size};')
         L.append(f'  d->num_elems = {sem.num_elems};')
@@ -10940,7 +10946,7 @@ class CodeGenerator:
         L = []
         sc0, sc1, nt = self._coherency_exprs()
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         acc = self._acc_vgpr_expr
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
@@ -10993,7 +10999,7 @@ class CodeGenerator:
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11102,7 +11108,7 @@ class CodeGenerator:
         is_cmpswap = sem.operation in ('cmpswap', 'fcmpswap')
         has_data1 = is_cmpswap or sem.operation == 'wrap'
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if returns_data:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -11194,7 +11200,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11273,7 +11279,7 @@ class CodeGenerator:
 
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if is_rtn:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -11331,7 +11337,7 @@ class CodeGenerator:
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append('  d->elem_size = 4;')
@@ -11365,7 +11371,7 @@ class CodeGenerator:
         is_async = sem.operation == 'async_barrier_arrive'
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if not is_async:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -11482,7 +11488,7 @@ class CodeGenerator:
         if not exec_independent:
             L.append('  }')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append('  d->elem_size = 4;')
         L.append('  d->num_elems = 0;')
@@ -11553,7 +11559,7 @@ class CodeGenerator:
             else 'mubuf_calculate_addresses'
         )
         L = [
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
             f'  d->is_load = {str(is_load).lower()};',
             f'  {self._memory_cache_policy()}',
             f'  d->non_temporal = {self._coherency_exprs()[2]};',
@@ -11642,7 +11648,7 @@ class CodeGenerator:
         if has_lds_field:
             L.append('  if (inst_.lds) {')
             L.append(
-                '    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+                '    std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
             )
             L.append(f'    d->elem_size = {esz};')
             L.append(f'    d->num_elems = {ne};')
@@ -11661,7 +11667,7 @@ class CodeGenerator:
             L.append('  }')
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11700,7 +11706,7 @@ class CodeGenerator:
             else 'mubuf_calculate_addresses'
         )
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -11767,7 +11773,7 @@ class CodeGenerator:
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11816,7 +11822,7 @@ class CodeGenerator:
         """Generate profile-specific DS ADDTID load addressing."""
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {sem.elem_size};')
@@ -11833,7 +11839,7 @@ class CodeGenerator:
         """Generate profile-specific DS ADDTID store addressing."""
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {sem.elem_size};')
         L.append(f'  d->num_elems = {sem.num_elems};')
@@ -11895,7 +11901,7 @@ class CodeGenerator:
         tr_kind = getattr(sem, 'transpose_kind', 0) or default_tr_kind
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11919,7 +11925,7 @@ class CodeGenerator:
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -12046,7 +12052,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -12131,7 +12137,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
@@ -19549,6 +19555,11 @@ class CodeGenerator:
             )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)set_data\(', 'inst.set_data(', prefixed_body
+            )
+            prefixed_body = _re.sub(
+                r'(?<!\.)(?<!\w)acquire_data<',
+                'inst.template acquire_data<',
+                prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)size_(?!\w)', 'inst.size()', prefixed_body
