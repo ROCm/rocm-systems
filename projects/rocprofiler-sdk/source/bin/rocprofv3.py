@@ -782,10 +782,15 @@ For attachment profiling of running processes:
             "'kernel' collects all counter groups within a single application run via in-process "
             "kernel replay: each dispatch is replayed once per counter group, with device-memory "
             "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "group. "
+            "'range' does the same for each marked phase: an outermost roctx range, or a pair of "
+            "rocprofiler_range_replay_begin and rocprofiler_range_replay_end calls. "
+            "'range-host' re-runs the application's own code between those calls and requires "
+            "ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. "
+            "kernel, range, and range-host require --pmc and --kernel-replay-beta-enabled. "
             "'application' (default) re-runs the whole application once per counter group."
         ),
-        choices=("kernel", "application"),
+        choices=("kernel", "range", "range-host", "application"),
         default=None,
     )
 
@@ -793,9 +798,9 @@ For attachment profiling of running processes:
         kernel_replay_options,
         "--kernel-replay-beta-enabled",
         help=(
-            "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
-            "behaviour may change in a future release. Required when --replay-mode kernel is "
-            "specified."
+            "Acknowledge that in-process replay (--replay-mode kernel, range, or range-host) is a "
+            "beta feature and its behaviour may change in a future release. Required when one of "
+            "those modes is specified."
         ),
     )
 
@@ -1447,6 +1452,11 @@ def has_set_attr(obj, key):
         return True
     else:
         return False
+
+
+def in_process_replay_mode(mode):
+    """True when one run collects every counter group, instead of relaunching the application."""
+    return mode in ("kernel", "range", "range-host")
 
 
 def services_conflicting_with_kernel_replay(args, environ=None):
@@ -2250,33 +2260,37 @@ def run(app_args, args, **kwargs):
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
 
-    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+    replay_mode = getattr(args, "replay_mode", None)
 
-    if kernel_replay_mode:
+    if in_process_replay_mode(replay_mode):
         if not getattr(args, "kernel_replay_beta_enabled", None):
             fatal_error(
-                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-                "feature via --kernel-replay-beta-enabled"
+                f"--replay-mode {replay_mode} requires acknowledgement that in-process replay "
+                "is a beta feature via --kernel-replay-beta-enabled"
             )
         if not args.pmc and not args.pmc_groups:
             fatal_error(
-                "--replay-mode kernel requires counter collection "
+                f"--replay-mode {replay_mode} requires counter collection "
                 "(--pmc or pmc_groups)"
             )
         replay_conflicts = services_conflicting_with_kernel_replay(args)
         if replay_conflicts:
             fatal_error(
-                "--replay-mode kernel cannot be combined with "
+                f"--replay-mode {replay_mode} cannot be combined with "
                 + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
+                + ". In-process replay only varies counter groups from one pass to the next; "
                 "every other service stays on for all of the passes and would report each "
                 "kernel once per pass. Collect them in a separate run."
             )
 
-        # Route counter collection through the in-process kernel-replay service. The SDK derives
-        # the pass count from the number of counter groups via the tool's pass-count callback, so
-        # there is nothing else to communicate.
-        update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+        # The SDK derives the pass count from the number of counter groups via the tool's
+        # pass-count callback, so there is nothing else to communicate.
+        if replay_mode == "kernel":
+            update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
+        else:
+            update_env("ROCPROF_RANGE_REPLAY", True, overwrite_if_true=True)
+            if replay_mode == "range-host":
+                update_env("ROCPROF_RANGE_REPLAY_HOST", True, overwrite_if_true=True)
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
@@ -2691,15 +2705,16 @@ def main(argv=None):
         has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
     )
 
-    replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
+    replay_mode = getattr(cmd_args, "replay_mode", None)
+    replay_enabled = in_process_replay_mode(replay_mode)
     if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
         fatal_error(
-            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-            "feature via --kernel-replay-beta-enabled"
+            f"--replay-mode {replay_mode} requires acknowledgement that in-process replay is a "
+            "beta feature via --kernel-replay-beta-enabled"
         )
     if replay_enabled and not (cli_has_pmc or input_has_counters):
         fatal_error(
-            "--replay-mode kernel requires counter collection "
+            f"--replay-mode {replay_mode} requires counter collection "
             "(--pmc, input-file pmc, or pmc_groups)"
         )
 
@@ -2722,7 +2737,7 @@ def main(argv=None):
         if (
             cli_pmc is not None
             and len(cli_pmc) > 1
-            and getattr(cmd_args, "replay_mode", None) != "kernel"
+            and not in_process_replay_mode(getattr(cmd_args, "replay_mode", None))
         ):
             return "multiple --pmc flags"
         if len(input_pmc_jobs) > 1:

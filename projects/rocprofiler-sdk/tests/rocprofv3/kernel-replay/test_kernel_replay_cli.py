@@ -232,6 +232,47 @@ def test_replay_without_beta_acknowledgement_is_rejected():
         )
 
 
+def test_range_mode_collects_every_group_in_one_run():
+    """A marked phase is one replay unit, so two --pmc flags stay one application run."""
+    runs = launched_runs(
+        "--pmc",
+        "SQ_WAVES",
+        "--pmc",
+        "GRBM_COUNT",
+        "--replay-mode",
+        "range",
+        "--kernel-replay-beta-enabled",
+    )
+    assert len(runs) == 1
+    assert runs[0].replay_mode == "range"
+    assert runs[0].pmc == [["SQ_WAVES"], ["GRBM_COUNT"]]
+
+
+def test_range_host_mode_is_one_run():
+    runs = launched_runs(
+        "--pmc",
+        "SQ_WAVES",
+        "--pmc",
+        "GRBM_COUNT",
+        "--replay-mode",
+        "range-host",
+        "--kernel-replay-beta-enabled",
+    )
+    assert len(runs) == 1
+    assert runs[0].replay_mode == "range-host"
+
+
+def test_range_without_beta_acknowledgement_is_rejected():
+    try:
+        launched_runs("--pmc", "SQ_WAVES", "--replay-mode", "range")
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError(
+            "range replay without the beta acknowledgement should be rejected"
+        )
+
+
 def test_replay_without_counter_collection_is_rejected():
     try:
         launched_runs("--replay-mode", "kernel", "--kernel-replay-beta-enabled")

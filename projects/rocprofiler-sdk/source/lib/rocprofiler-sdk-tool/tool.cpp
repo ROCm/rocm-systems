@@ -71,6 +71,7 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
+#include <rocprofiler-sdk/experimental/range_replay.h>
 #include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
@@ -2071,7 +2072,7 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     {
         return;
     }
-    else if(tool::get_config().kernel_replay)
+    else if(tool::get_config().kernel_replay || tool::get_config().range_replay)
     {
         // Under kernel replay every targeted dispatch selects its group deterministically by pass
         // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
@@ -2120,7 +2121,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
     counter_record.dispatch_data = dispatch_data;
 
-    if(tool::get_config().kernel_replay)
+    if(tool::get_config().kernel_replay || tool::get_config().range_replay)
     {
         // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
         // replay_pass stays tied to the counter group actually collected for this pass rather than
@@ -2637,6 +2638,119 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
+// Range replay asks for one pass count per range, before it knows which agent the range will
+// bind to. Use the widest counter-group list any agent has, which is the list the user asked
+// for when every agent implements those counters.
+uint64_t range_replay_pass_count_callback(uint64_t /*range_id*/,
+                                          rocprofiler_user_data_t /*user_data*/)
+{
+    auto n = size_t{0};
+    for(const auto& entry : get_agent_profiles().profiles)
+        n = std::max(n, entry.second.size());
+    return (n == 0) ? 1 : n;
+}
+
+void
+range_replay_callback(rocprofiler_callback_tracing_record_t record,
+                      rocprofiler_user_data_t* /*user_data*/,
+                      void* /*data*/)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_range_replay_data_t*>(record.payload);
+
+    if(record.operation == ROCPROFILER_RANGE_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        payload->pass_count_cb = range_replay_pass_count_callback;
+        payload->host_replay   = tool::get_config().range_replay_host ? 1 : 0;
+    }
+    else if(record.operation == ROCPROFILER_RANGE_REPLAY_PASS)
+    {
+        // current_pass is 1-based: pass 0 is the application's own run and publishes nothing, so
+        // the counter callback's value_or(0) selects group 0 for it and group N for pass N.
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            tl_current_replay_pass = payload->current_pass;
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            tl_current_replay_pass.reset();
+    }
+}
+
+// Packet range replay treats an outermost roctx range as the phase. Nested ranges stay markers.
+// Host replay is not started from here: the sigsetjmp has to be in the application's frame.
+struct range_bracket_t
+{
+    int              push_depth     = 0;
+    bool             open           = false;
+    bool             opened_by_push = false;
+    roctx_range_id_t start_id       = 0;
+};
+
+thread_local auto     tl_range_bracket = range_bracket_t{};
+std::atomic<uint64_t> next_range_id{1};
+
+void
+open_marked_replay_range()
+{
+    const auto status = rocprofiler_range_replay_begin(next_range_id.fetch_add(1));
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "range replay: could not open a range from an roctx marker";
+        return;
+    }
+    tl_range_bracket.open = true;
+}
+
+void
+close_marked_replay_range()
+{
+    if(!tl_range_bracket.open) return;
+    rocprofiler_range_replay_end();
+    tl_range_bracket.open           = false;
+    tl_range_bracket.opened_by_push = false;
+}
+
+void
+range_replay_marker_callback(rocprofiler_callback_tracing_record_t record,
+                             rocprofiler_user_data_t* /*user_data*/,
+                             void* /*data*/)
+{
+    if(!tool::get_config().range_replay || tool::get_config().range_replay_host) return;
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API) return;
+
+    auto* marker  = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+    auto& bracket = tl_range_bracket;
+
+    if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        if(bracket.push_depth == 0 && !bracket.open)
+        {
+            open_marked_replay_range();
+            bracket.opened_by_push = bracket.open;
+        }
+        ++bracket.push_depth;
+    }
+    else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    {
+        if(bracket.push_depth > 0) --bracket.push_depth;
+        if(bracket.opened_by_push && bracket.push_depth == 0) close_marked_replay_range();
+    }
+    else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && !bracket.open)
+    {
+        bracket.start_id = marker->retval.roctx_range_id_t_retval;
+        open_marked_replay_range();
+    }
+    else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER && bracket.open &&
+            !bracket.opened_by_push && marker->args.roctxRangeStop.id == bracket.start_id)
+    {
+        close_marked_replay_range();
+    }
+}
+
 struct real_callbacks_t
 {};
 
@@ -2665,6 +2779,8 @@ struct tracing_callbacks_t
     , counter_record{counter_record_callback}
     , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
     , kernel_replay{kernel_replay_callback}
+    , range_replay{range_replay_callback}
+    , range_replay_marker{range_replay_marker_callback}
     {}
 
     explicit tracing_callbacks_t(dummy_callbacks_t)
@@ -2679,6 +2795,8 @@ struct tracing_callbacks_t
     , counter_dispatch{dummy_counter_dispatch_callback}
     , counter_record{dummy_counter_record_callback}
     , kernel_replay{dummy_callback_tracing_callback}
+    , range_replay{dummy_callback_tracing_callback}
+    , range_replay_marker{dummy_callback_tracing_callback}
     {}
 
     const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
@@ -2695,6 +2813,8 @@ struct tracing_callbacks_t
     const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
     const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
     const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
+    const rocprofiler_callback_tracing_cb_t               range_replay                    = nullptr;
+    const rocprofiler_callback_tracing_cb_t               range_replay_marker             = nullptr;
 };
 
 auto
@@ -3119,6 +3239,26 @@ apply_core_capability_gates(tool::config& cfg)
     // before counter collection starts when the library cannot replay
     if(cfg.kernel_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
         cfg.kernel_replay = false;
+
+    if(cfg.range_replay && cfg.kernel_replay)
+    {
+        ROCP_WARNING << "ROCPROF_RANGE_REPLAY and ROCPROF_KERNEL_REPLAY are both set; "
+                        "using range replay";
+        cfg.kernel_replay = false;
+    }
+
+    if(cfg.range_replay && !cfg.counter_collection)
+    {
+        ROCP_ERROR << "ROCPROF_RANGE_REPLAY requires counter collection "
+                      "(ROCPROF_COUNTER_COLLECTION); continuing without range replay";
+        cfg.range_replay      = false;
+        cfg.range_replay_host = false;
+    }
+    if(cfg.range_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY))
+    {
+        cfg.range_replay      = false;
+        cfg.range_replay_host = false;
+    }
 }
 }  // namespace
 
@@ -3840,6 +3980,60 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                          "kernel replay tracing configure failed");
 
         start_context(kernel_replay_ctx, "kernel replay");
+    }
+
+    // Range replay: one snapshot window per marked phase. Packet mode also opens a range around
+    // an outermost roctxRangePush or roctxRangeStart. Host mode does not: the application opens
+    // the range with ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
+    if(tool::get_config().range_replay)
+    {
+        auto range_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&range_replay_ctx),
+                         "failed to create range replay context");
+
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 range_replay_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.range_replay,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY),
+                         "range replay tracing configure failed");
+
+        start_context(range_replay_ctx, "range replay");
+
+        if(!tool::get_config().range_replay_host &&
+           core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API))
+        {
+            auto marker_ops = std::array<rocprofiler_tracing_operation_t, 4>{
+                ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA,
+                ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop,
+                ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA,
+                ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop,
+            };
+            auto marker_ctx = rocprofiler_context_id_t{0};
+            ROCPROFILER_CALL(rocprofiler_create_context(&marker_ctx),
+                             "failed to create range replay marker context");
+            ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                     marker_ctx,
+                                                     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                                                     marker_ops.data(),
+                                                     marker_ops.size(),
+                                                     callbacks.range_replay_marker,
+                                                     nullptr),
+                                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API),
+                             "range replay marker tracing configure failed");
+            start_context(marker_ctx, "range replay markers");
+        }
+
+        ROCP_INFO << "range replay: counter groups are collected once per marked phase. "
+                  << (tool::get_config().range_replay_host
+                          ? "The application must open the range with "
+                            "ROCPROFILER_RANGE_REPLAY_HOST_BEGIN."
+                          : "An outermost roctx range, or rocprofiler_range_replay_begin and "
+                            "rocprofiler_range_replay_end, marks the phase.");
     }
 
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
