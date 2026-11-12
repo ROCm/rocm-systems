@@ -1015,14 +1015,13 @@ impl GpuDriverRef<'_> {
     pub(crate) fn create_pc_sampling(
         &self,
         request: PcSamplingRequest,
-        existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<PcSamplingState, Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
             Self::LinuxKfd { driver, state } => {
-                let inner = driver.create_pc_sampling(state, request, existing_trace_id)?;
+                let inner = driver.create_pc_sampling(state, request)?;
                 Ok(PcSamplingState::LinuxKfd(DriverPcSampling::new(
                     (*driver).clone(),
                     inner,

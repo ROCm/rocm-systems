@@ -10,7 +10,8 @@ use crate::Error;
 use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, PcSamplingResource};
 use crate::memory::storage::{Owned, Shared};
-use std::num::NonZeroU32;
+#[cfg(target_os = "linux")]
+pub mod linux;
 
 /// Optional native system-clock domain, separate from the host profiling clock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,15 +85,15 @@ impl ClockCounters {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SpmDestinationReport {
-    /// Timeout value returned by KFD.
-    pub timeout: u32,
-    /// Bytes copied before this result was returned.
-    pub bytes_copied: u32,
-    /// Whether KFD observed dropped samples.
+    /// Remaining timeout in milliseconds after the update.
+    pub remaining_timeout_milliseconds: u32,
+    /// Bytes copied into the previous destination before replacing it.
+    pub previous_destination_bytes_copied: u32,
+    /// Whether the provider observed dropped samples.
     pub data_loss: bool,
 }
 
-/// Native failure together with any scalar progress returned by KFD.
+/// Native failure together with progress reported by the provider.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct SpmDestinationFailure {
@@ -102,7 +103,7 @@ pub struct SpmDestinationFailure {
     pub report: SpmDestinationReport,
 }
 
-/// KFD PC sampling mechanism available on an activated GPU.
+/// PC sampling mechanism available on an activated GPU.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PcSamplingMethod {
     /// Wave trap handler records program counters.
@@ -122,6 +123,23 @@ pub enum PcSamplingIntervalUnit {
     Instructions,
 }
 
+/// Constraint on the interval, separate from its unit and numeric bounds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcSamplingIntervalRestriction {
+    /// Every nonzero interval within the bounds is permitted.
+    Any,
+    /// The interval must also be a power of two.
+    PowerOfTwo,
+}
+
+impl PcSamplingIntervalRestriction {
+    /// Checks the semantic restriction independently of native flag values.
+    #[must_use]
+    pub const fn permits(self, interval: u64) -> bool {
+        interval != 0 && (matches!(self, Self::Any) || interval.is_power_of_two())
+    }
+}
+
 /// Native PC sampling capability reported for one method and interval unit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PcSamplingConfiguration {
@@ -133,8 +151,8 @@ pub struct PcSamplingConfiguration {
     pub minimum_interval: u64,
     /// Largest interval accepted by the driver.
     pub maximum_interval: u64,
-    /// Native restrictions, including the power-of-two interval flag.
-    pub flags: u64,
+    /// Additional permitted-interval restriction.
+    pub restriction: PcSamplingIntervalRestriction,
 }
 
 /// Selects immutable driver support or configurations available right now.
@@ -262,23 +280,7 @@ impl GpuDevice<'_> {
     #[doc(hidden)]
     pub fn create_pc_sampling(&self, request: PcSamplingRequest) -> Result<PcSampling, Error> {
         Ok(PcSampling {
-            inner: self.driver.create_pc_sampling(request, None)?,
-        })
-    }
-
-    /// Takes ownership of an existing stopped native registration on this
-    /// device. The creator retains ownership if this call returns an error.
-    ///
-    /// # Errors
-    /// Rejects an unavailable method or interval, or a lost device context.
-    #[doc(hidden)]
-    pub fn adopt_pc_sampling(
-        &self,
-        request: PcSamplingRequest,
-        trace_id: NonZeroU32,
-    ) -> Result<PcSampling, Error> {
-        Ok(PcSampling {
-            inner: self.driver.create_pc_sampling(request, Some(trace_id))?,
+            inner: self.driver.create_pc_sampling(request)?,
         })
     }
 
@@ -324,24 +326,27 @@ impl GpuDevice<'_> {
     ///
     /// # Safety
     /// When `destination` is `Some`, it must address at least `size` writable
-    /// bytes that KFD can access. The caller must retain that backing and
+    /// bytes the provider can access. The caller must retain that backing and
     /// exclude conflicting CPU or device access until a later replacement or
     /// unset has completed successfully, or until the SPM and device are
     /// conclusively torn down. A failed call may leave either the previous or
-    /// the new destination reachable by KFD, so both must be retained until
+    /// the new destination reachable by the provider, so both must be retained until
     /// that uncertainty is resolved. The address must not be derived from a
-    /// short lived borrow because KFD writes after this call returns.
+    /// short lived borrow because the provider writes after this call returns.
     #[doc(hidden)]
     #[allow(unsafe_code)]
     pub unsafe fn spm_set_destination(
         &self,
         size: u32,
-        timeout: u32,
+        timeout_milliseconds: u32,
         destination: Option<usize>,
     ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
-        unsafe { self.driver.spm_set_destination(size, timeout, destination) }
+        unsafe {
+            self.driver
+                .spm_set_destination(size, timeout_milliseconds, destination)
+        }
     }
 }
 

@@ -7,6 +7,7 @@ pub(crate) mod cstream;
 #[cfg(target_os = "linux")]
 mod linux;
 pub(crate) mod memory;
+pub(crate) mod profiling;
 #[cfg(target_os = "linux")]
 use linux as native;
 #[cfg(windows)]

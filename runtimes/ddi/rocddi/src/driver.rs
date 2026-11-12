@@ -526,12 +526,11 @@ pub(crate) trait GpuPcSamplingOperations: Driver {
         device: &Self::DeviceState,
         set: PcSamplingConfigurationSet,
     ) -> Result<Vec<PcSamplingConfiguration>, Error>;
-    /// Creates a PC sampling registration, optionally reusing a trace ID.
+    /// Creates a new PC sampling registration.
     fn create_pc_sampling(
         &self,
         device: &Self::DeviceState,
         request: PcSamplingRequest,
-        existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<Owned<Self::PcSampling>, Error>;
 }
 
