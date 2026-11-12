@@ -1290,7 +1290,7 @@ void ComputeUnitCore::qualify_cdna4_memory_destination(Instruction &inst, const 
   }
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> inst,
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> &&inst,
                                                    Wavefront &wf) {
   if (arch() == ROCJITSU_CODE_ARCH_CDNA4)
     qualify_cdna4_memory_destination(*inst, wf);
@@ -1318,7 +1318,7 @@ static bool flat_shared_atomic_misaligned(rj_code_arch_t arch, const VectorMemSt
          shared_offset % state.elem_size != 0;
 }
 
-VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> inst,
+VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst,
                                                             Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
