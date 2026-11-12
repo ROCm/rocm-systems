@@ -24,13 +24,14 @@ struct reader_catalog_t;
  * off leaves that format's sources out of the build, and the probe reports
  * the file as unsupported.
  */
-[[nodiscard]] bool is_supported_format(const reader_types::trace_format_t& format);
+[[nodiscard]] bool
+is_supported_format(const reader_types::trace_format_t& format);
 
 /** @brief Reader backend for @p format. Throws std::invalid_argument when no
  *         entry reads it. */
-[[nodiscard]] std::unique_ptr<reader_t::impl> make_reader_impl(
-    const reader_types::trace_format_t&      format,
-    std::unique_ptr<profiler_hub::storage_t> storage,
-    std::shared_ptr<reader_catalog_t>        catalog);
+[[nodiscard]] std::unique_ptr<reader_t::impl>
+make_reader_impl(const reader_types::trace_format_t&      format,
+                 std::unique_ptr<profiler_hub::storage_t> storage,
+                 std::shared_ptr<reader_catalog_t>        catalog);
 
 }  // namespace profiler_hub

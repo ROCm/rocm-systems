@@ -24,7 +24,8 @@ namespace profiler_hub
 // regular file. The date pins the source contents for summary.bin, which does
 // not check its sources, so the name must change when any source changes.
 // The timeline and catalog caches also check each source's size, mtime, and path.
-[[nodiscard]] std::string trace_cache_directory(
-    std::string_view cache_root, const std::vector<std::string>& source_paths);
+[[nodiscard]] std::string
+trace_cache_directory(std::string_view                cache_root,
+                      const std::vector<std::string>& source_paths);
 
 }  // namespace profiler_hub

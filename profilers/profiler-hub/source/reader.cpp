@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "profiler-hub/cpp/reader.hpp"
-#include "profiler-hub/cpp/storage.hpp"
 #include "formats/trace_formats.hpp"
+#include "profiler-hub/cpp/storage.hpp"
 #include "reader_impl.hpp"
 #include "storage_impl.hpp"
 
@@ -491,7 +491,8 @@ reader_t::read_table_events(const resolved_event_query& query,
                             ph_table_event*             rows,
                             uint32_t                    capacity)
 {
-    return m_impl->read_table_events(query, event_type, after_id, last_id, rows, capacity);
+    return m_impl->read_table_events(
+        query, event_type, after_id, last_id, rows, capacity);
 }
 
 bool

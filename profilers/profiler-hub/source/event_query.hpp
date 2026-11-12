@@ -46,17 +46,19 @@ struct resolved_event_query
 
 /** @brief Case-insensitive match. substring selects a contained term. partial
  *         selects any term; otherwise every term must match. */
-[[nodiscard]] bool text_matches_terms(std::string_view                     text,
-                                      const std::vector<std::string>&      terms,
-                                      bool                                 substring,
-                                      bool                                 partial);
+[[nodiscard]] bool
+text_matches_terms(std::string_view                text,
+                   const std::vector<std::string>& terms,
+                   bool                            substring,
+                   bool                            partial);
 
 /** @brief Fills string_ids and kernel_symbol_ids from the catalog. An empty
  *         search_strings list leaves both id lists empty and does not mark
  *         the query as string-filtered. */
-void resolve_event_query_strings(const reader_catalog_t& catalog,
-                                 resolved_event_query&   query,
-                                 bool                    substring,
-                                 bool                    partial);
+void
+resolve_event_query_strings(const reader_catalog_t& catalog,
+                            resolved_event_query&   query,
+                            bool                    substring,
+                            bool                    partial);
 
 }  // namespace profiler_hub

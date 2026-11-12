@@ -206,7 +206,7 @@ TEST_F(c_api_future_test, wait_returns_after_the_finished_callback_has_returned)
 TEST_F(c_api_future_test, cancel_interrupts_the_sql_connection_the_call_is_running)
 {
     create();
-    std::atomic<int> hits{ 0 };
+    std::atomic<int>                     hits{ 0 };
     const profiler_hub::sql_cancel_scope scope{ m_future };
     const profiler_hub::running_sql      sql{
         [](void* arg) noexcept {
@@ -224,7 +224,7 @@ TEST_F(c_api_future_test, sql_that_starts_after_cancel_is_interrupted_immediatel
 {
     create();
     ASSERT_EQ(ph_future_cancel(m_future), PH_RESULT_SUCCESS);
-    std::atomic<int> hits{ 0 };
+    std::atomic<int>                     hits{ 0 };
     const profiler_hub::sql_cancel_scope scope{ m_future };
 
     const profiler_hub::running_sql sql{
@@ -646,26 +646,14 @@ TEST_F(c_api_async_call_test, an_unattached_future_cancels_a_synchronous_table_r
 
     ph_table_event_t row{};
     uint32_t         count = 99;
-    EXPECT_EQ(ph_event_query_read(query,
-                                  PH_EVENT_TYPE_REGION,
-                                  0,
-                                  UINT64_MAX,
-                                  &row,
-                                  1,
-                                  &count,
-                                  m_future),
+    EXPECT_EQ(ph_event_query_read(
+                  query, PH_EVENT_TYPE_REGION, 0, UINT64_MAX, &row, 1, &count, m_future),
               PH_RESULT_CANCELLED);
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
 
     count = 99;
-    EXPECT_EQ(ph_event_query_read(query,
-                                  PH_EVENT_TYPE_REGION,
-                                  0,
-                                  UINT64_MAX,
-                                  &row,
-                                  1,
-                                  &count,
-                                  m_future),
+    EXPECT_EQ(ph_event_query_read(
+                  query, PH_EVENT_TYPE_REGION, 0, UINT64_MAX, &row, 1, &count, m_future),
               PH_RESULT_CANCELLED);
     EXPECT_EQ(ph_future_wait(m_future), PH_RESULT_INVALID_ARGUMENT);
     EXPECT_EQ(ph_event_query_free(query), PH_RESULT_SUCCESS);

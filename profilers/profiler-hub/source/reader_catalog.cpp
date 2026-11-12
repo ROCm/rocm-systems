@@ -289,7 +289,8 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
     // Counter tracks, one row per (nid, agent, counter). Sample, kernel, and
     // memory activity are separate tracks because their tables do not share
     // rows.
-    auto add_counter_tracks = [&](const auto& statement, reader_types::track_kind_t kind) {
+    auto add_counter_tracks = [&](const auto&                statement,
+                                  reader_types::track_kind_t kind) {
         for(const auto& row : statement().to_vector())
         {
             auto track_ptr         = std::make_shared<reader_types::track_info_t>();
@@ -309,15 +310,17 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
             }
             if(row.min_value.has_value() && row.max_value.has_value())
             {
-                track_ptr->value_range = reader_types::value_range_t{
-                    row.min_value.value(), row.max_value.value() };
+                track_ptr->value_range =
+                    reader_types::value_range_t{ row.min_value.value(),
+                                                 row.max_value.value() };
             }
 
             link_owner(*track_ptr, row.nid, row.pid);
             tracks.push_back(track_ptr);
         }
     };
-    add_counter_tracks(stmts.pmc_track_statement(), reader_types::track_kind_t::pmc_agent);
+    add_counter_tracks(stmts.pmc_track_statement(),
+                       reader_types::track_kind_t::pmc_agent);
     add_counter_tracks(stmts.pmc_kernel_track_statement(),
                        reader_types::track_kind_t::pmc_kernel);
     add_memory_activity_tracks(stmts, next_id);
@@ -327,7 +330,8 @@ reader_catalog_t::build_tracks(data_storage::schema_v3::read_statements& stmts)
 
 void
 reader_catalog_t::add_memory_activity_tracks(
-    data_storage::schema_v3::read_statements& stmts, size_t& next_synthetic_id)
+    data_storage::schema_v3::read_statements& stmts,
+    size_t&                                   next_synthetic_id)
 {
     // Cumulative allocated bytes, one track per node and agent. A free takes
     // its agent, size, and missing level from the newest still-open allocation
@@ -360,18 +364,18 @@ reader_catalog_t::add_memory_activity_tracks(
     };
     struct activity_group
     {
-        size_t                                 nid{};
-        size_t                                 agent_id{};
-        std::optional<size_t>                  pid;
-        std::string                            name;
-        uint64_t                               pmc_id{};
-        uint64_t                               total{ 0 };
-        uint64_t                               min_ts{ std::numeric_limits<uint64_t>::max() };
-        uint64_t                               max_ts{ 0 };
-        double                                 min_value{ 0 };
-        double                                 max_value{ 0 };
-        bool                                   has_value{ false };
-        std::vector<memory_activity_point_t>   points;
+        size_t                nid{};
+        size_t                agent_id{};
+        std::optional<size_t> pid;
+        std::string           name;
+        uint64_t              pmc_id{};
+        uint64_t              total{ 0 };
+        uint64_t              min_ts{ std::numeric_limits<uint64_t>::max() };
+        uint64_t              max_ts{ 0 };
+        double                min_value{ 0 };
+        double                max_value{ 0 };
+        bool                  has_value{ false };
+        std::vector<memory_activity_point_t> points;
     };
 
     uint64_t next_pmc_id = 1;
@@ -383,8 +387,10 @@ reader_catalog_t::add_memory_activity_tracks(
         }
     }
 
-    std::unordered_map<open_address_key_t, std::vector<open_alloc_t>, open_address_key_hash_t>
-        open_by_address;
+    std::unordered_map<open_address_key_t,
+                       std::vector<open_alloc_t>,
+                       open_address_key_hash_t>
+                                                        open_by_address;
     std::map<std::pair<size_t, size_t>, activity_group> groups;
 
     for(const auto& row : stmts.memory_allocation_statement()().to_vector())
@@ -398,13 +404,13 @@ reader_catalog_t::add_memory_activity_tracks(
         if(is_free && row.address.has_value())
         {
             const open_address_key_t address_key{ row.nid, row.address.value() };
-            const auto found = open_by_address.find(address_key);
+            const auto               found = open_by_address.find(address_key);
             if(found != open_by_address.end() && !found->second.empty())
             {
                 const open_alloc_t& matched = found->second.back();
-                agent     = matched.agent_id;
-                bytes     = matched.byte_size;
-                has_agent = true;
+                agent                       = matched.agent_id;
+                bytes                       = matched.byte_size;
+                has_agent                   = true;
                 if(level.empty()) level = matched.level;
                 found->second.pop_back();
                 if(found->second.empty()) open_by_address.erase(found);
@@ -412,9 +418,9 @@ reader_catalog_t::add_memory_activity_tracks(
         }
         if(!has_agent) continue;
 
-        const auto key = std::make_pair(row.nid, agent);
-        auto       inserted = groups.emplace(key, activity_group{});
-        activity_group& group = inserted.first->second;
+        const auto      key      = std::make_pair(row.nid, agent);
+        auto            inserted = groups.emplace(key, activity_group{});
+        activity_group& group    = inserted.first->second;
         if(inserted.second)
         {
             group.nid      = row.nid;
@@ -433,10 +439,10 @@ reader_catalog_t::add_memory_activity_tracks(
         }
 
         memory_activity_point_t point;
-        point.id    = row.id;
-        point.start = row.start;
-        point.end   = row.end;
-        point.value = static_cast<double>(group.total);
+        point.id     = row.id;
+        point.start  = row.start;
+        point.end    = row.end;
+        point.value  = static_cast<double>(group.total);
         group.min_ts = std::min(group.min_ts, point.start);
         group.max_ts = std::max(group.max_ts, point.end);
         if(!group.has_value)
@@ -463,10 +469,11 @@ reader_catalog_t::add_memory_activity_tracks(
     {
         activity_group& group = entry.second;
         if(group.points.empty()) continue;
-        std::sort(group.points.begin(),
-                  group.points.end(),
-                  [](const memory_activity_point_t& left,
-                     const memory_activity_point_t& right) { return left.id < right.id; });
+        std::sort(
+            group.points.begin(),
+            group.points.end(),
+            [](const memory_activity_point_t& left,
+               const memory_activity_point_t& right) { return left.id < right.id; });
 
         auto track_ptr         = std::make_shared<reader_types::track_info_t>();
         track_ptr->id          = next_synthetic_id++;
@@ -517,7 +524,7 @@ reader_catalog_t::memory_activity_id_span(uint64_t& first_id, uint64_t& last_id)
 void
 reader_catalog_t::publish_memory_activity_pmc_infos()
 {
-    uint64_t next_id = 1;
+    uint64_t                   next_id = 1;
     std::unordered_set<size_t> used_ids;
     used_ids.reserve(pmc_infos.size());
     for(const reader_types::pmc_info_ptr_t& info : pmc_infos)
@@ -541,22 +548,22 @@ reader_catalog_t::publish_memory_activity_pmc_infos()
         }
         used_ids.insert(track->pmc_id);
 
-        auto info                  = std::make_shared<reader_types::pmc_info_t>();
-        info->id                   = track->pmc_id;
-        info->name                 = track->name;
-        info->symbol               = track->name;
-        info->description          = track->name;
-        info->long_description     = track->name;
-        info->target_arch          = "GPU";
-        info->units                = "bytes";
-        info->event_code           = 0;
-        info->instance_id          = 0;
-        info->is_constant          = 0;
-        info->is_derived           = 0;
-        info->extdata              = "{}";
-        info->node_info            = track->node_info;
-        info->process_info         = track->process_info;
-        const auto agent           = agents_by_id.find(track->agent_id);
+        auto info              = std::make_shared<reader_types::pmc_info_t>();
+        info->id               = track->pmc_id;
+        info->name             = track->name;
+        info->symbol           = track->name;
+        info->description      = track->name;
+        info->long_description = track->name;
+        info->target_arch      = "GPU";
+        info->units            = "bytes";
+        info->event_code       = 0;
+        info->instance_id      = 0;
+        info->is_constant      = 0;
+        info->is_derived       = 0;
+        info->extdata          = "{}";
+        info->node_info        = track->node_info;
+        info->process_info     = track->process_info;
+        const auto agent       = agents_by_id.find(track->agent_id);
         if(agent != agents_by_id.end()) info->agent_info = agent->second;
         pmc_infos.push_back(std::move(info));
     }
@@ -624,10 +631,9 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
                 // A NULL id is read as 0, so the NULL group and the 0 group
                 // share this key. Fold the later group into the track already
                 // created for it.
-                const agent_queue_track_key_t key{ kind,
-                                                   row.nid,
-                                                   row.agent_id,
-                                                   row.queue_id };
+                const agent_queue_track_key_t key{
+                    kind, row.nid, row.agent_id, row.queue_id
+                };
                 if(const auto existing = agent_queue_track_by_key.find(key);
                    existing != agent_queue_track_by_key.end() && existing->second)
                 {

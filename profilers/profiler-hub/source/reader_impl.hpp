@@ -8,8 +8,8 @@
 #include "profiler-hub/cpp/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
-#include "histogram_grid.hpp"
 #include "event_query.hpp"
+#include "histogram_grid.hpp"
 #include "reader_catalog.hpp"
 
 #include <memory>
@@ -48,7 +48,7 @@ struct reader_t::impl
 
     virtual void build_catalog_category(reader_t::catalog_category_t category,
                                         reader_catalog_t&            catalog) = 0;
-    virtual void ensure_track_topology_indexes()                         = 0;
+    virtual void ensure_track_topology_indexes()                   = 0;
 
     // Info table accessors (cached)
     [[nodiscard]] reader_types::node_info_list_t            get_all_nodes();
@@ -141,12 +141,12 @@ struct reader_t::impl
      *         Returns false when this format has no summary query. An empty
      *         @p rows with true means the filter matched no events. */
     [[nodiscard]] virtual bool summarize_name_durations(
-        const resolved_event_query&          query,
-        uint32_t                             event_type,
+        const resolved_event_query&           query,
+        uint32_t                              event_type,
         std::vector<name_duration_summary_t>& rows);
-    [[nodiscard]] virtual bool     table_event_id_span(uint32_t  event_type,
-                                                       uint64_t& first_id,
-                                                       uint64_t& last_id) = 0;
+    [[nodiscard]] virtual bool table_event_id_span(uint32_t  event_type,
+                                                   uint64_t& first_id,
+                                                   uint64_t& last_id) = 0;
 
 protected:
     // reader_t keeps the category enum private. Formats name it through here.

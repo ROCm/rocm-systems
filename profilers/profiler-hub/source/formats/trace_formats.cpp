@@ -4,10 +4,10 @@
 #include "trace_formats.hpp"
 
 #if PROFILER_HUB_ENABLE_ROCPD_V2
-#include "formats/rocpd_v2/rocpd_v2_reader.hpp"
+#    include "formats/rocpd_v2/rocpd_v2_reader.hpp"
 #endif
 #if PROFILER_HUB_ENABLE_ROCPD_V3
-#include "formats/rocpd_v3/rocpd_v3_reader.hpp"
+#    include "formats/rocpd_v3/rocpd_v3_reader.hpp"
 #endif
 #include "reader_impl.hpp"
 #include "trim_schema.hpp"
@@ -28,8 +28,9 @@ struct format_entry_t
 {
     trace_schema_t schema;
     uint32_t       major;
-    std::unique_ptr<reader_t::impl> (*make_reader)(std::unique_ptr<storage_t> storage,
-                                                   std::shared_ptr<reader_catalog_t> catalog);
+    std::unique_ptr<reader_t::impl> (*make_reader)(
+        std::unique_ptr<storage_t>        storage,
+        std::shared_ptr<reader_catalog_t> catalog);
     std::unique_ptr<trim_schema_t> (*make_trim)();
 };
 
@@ -37,13 +38,15 @@ const format_entry_t*
 find_format(trace_schema_t schema, version_t version)
 {
 #if PROFILER_HUB_ENABLE_ROCPD_V3
-    static const format_entry_t rocpd_v3{ trace_schema_t::rocpd, 3, make_rocpd_v3_reader,
-                                          make_rocpd_v3_trim_schema };
+    static const format_entry_t rocpd_v3{
+        trace_schema_t::rocpd, 3, make_rocpd_v3_reader, make_rocpd_v3_trim_schema
+    };
     if(schema == rocpd_v3.schema && version.major == rocpd_v3.major) return &rocpd_v3;
 #endif
 #if PROFILER_HUB_ENABLE_ROCPD_V2
-    static const format_entry_t rocpd_v2{ trace_schema_t::rocpd, 2, make_rocpd_v2_reader,
-                                          make_rocpd_v2_trim_schema };
+    static const format_entry_t rocpd_v2{
+        trace_schema_t::rocpd, 2, make_rocpd_v2_reader, make_rocpd_v2_trim_schema
+    };
     if(schema == rocpd_v2.schema && version.major == rocpd_v2.major) return &rocpd_v2;
 #endif
     (void) schema;

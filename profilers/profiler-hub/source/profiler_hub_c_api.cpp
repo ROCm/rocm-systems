@@ -3,10 +3,10 @@
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
-#include "sql_cancel.hpp"
 #include "profiler-hub/c/profiler_hub.h"
 #include "profiler-hub/c/profiler_hub_trim.h"
 #include "profiler-hub/cpp/reader.hpp"
+#include "sql_cancel.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -115,7 +115,9 @@ get_event_details(ph_ctx_t        ctx,
 
     const uint64_t event_id = event->id;
     return run_operation(
-        ctx, future, [ctx, event, event_id, expected_type, details, fetch]() -> ph_result_t {
+        ctx,
+        future,
+        [ctx, event, event_id, expected_type, details, fetch]() -> ph_result_t {
             if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
             {
                 return ready;
@@ -124,7 +126,7 @@ get_event_details(ph_ctx_t        ctx,
             if(const auto found = ctx->track_id_of(track_id, event_id, expected_type);
                found.has_value())
             {
-                track_id       = found.value();
+                track_id        = found.value();
                 event->track_id = track_id;
             }
             *details = fetch(ctx, track_id, event_id);
@@ -158,7 +160,7 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
 }
 
 ph_result_t
-ph_ctx_create_files(ph_ctx_t*           ctx,
+ph_ctx_create_files(ph_ctx_t*          ctx,
                     const char* const* paths,
                     uint32_t           path_count,
                     ph_future_t        future)
@@ -167,7 +169,7 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
 }
 
 ph_result_t
-ph_ctx_create_files_cached(ph_ctx_t*           ctx,
+ph_ctx_create_files_cached(ph_ctx_t*          ctx,
                            const char* const* paths,
                            uint32_t           path_count,
                            const char*        cache_directory,
@@ -595,15 +597,14 @@ ph_get_region_details(ph_ctx_t             ctx,
                       ph_region_details_t* details,
                       ph_future_t          future)
 {
-    return get_event_details(
-        ctx,
-        event,
-        details,
-        future,
-        PH_EVENT_TYPE_REGION,
-        [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
-            return context->get_region_details(track_id, id);
-        });
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_REGION,
+                             [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
+                                 return context->get_region_details(track_id, id);
+                             });
 }
 
 ph_result_t
@@ -618,7 +619,8 @@ ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
                              future,
                              PH_EVENT_TYPE_KERNEL_DISPATCH,
                              [](ph_ctx_t context, uint32_t track_id, uint64_t id) {
-                                 return context->get_kernel_dispatch_details(track_id, id);
+                                 return context->get_kernel_dispatch_details(track_id,
+                                                                             id);
                              });
 }
 
@@ -810,8 +812,8 @@ known_event_type(uint32_t type)
     return type == PH_EVENT_TYPE_REGION || type == PH_EVENT_TYPE_REGION_SAMPLE ||
            type == PH_EVENT_TYPE_KERNEL_DISPATCH || type == PH_EVENT_TYPE_MEMORY_COPY ||
            type == PH_EVENT_TYPE_MEMORY_ALLOCATE || type == PH_EVENT_TYPE_HIP_EVENT ||
-           type == PH_EVENT_TYPE_PMC_COUNTER ||
-           type == PH_EVENT_TYPE_PMC_SAMPLE || type == PH_EVENT_TYPE_MEMORY_ACTIVITY;
+           type == PH_EVENT_TYPE_PMC_COUNTER || type == PH_EVENT_TYPE_PMC_SAMPLE ||
+           type == PH_EVENT_TYPE_MEMORY_ACTIVITY;
 }
 
 std::optional<uint64_t>
@@ -825,7 +827,8 @@ copied_id(ph_optional_uint64_t value)
 }
 
 ph_result_t
-copy_event_filter(const ph_event_filter_t& filter, profiler_hub::resolved_event_query& query)
+copy_event_filter(const ph_event_filter_t&            filter,
+                  profiler_hub::resolved_event_query& query)
 {
     if(filter.size < sizeof(ph_event_filter_t))
     {
@@ -884,7 +887,9 @@ copy_event_filter(const ph_event_filter_t& filter, profiler_hub::resolved_event_
 }  // namespace
 
 ph_result_t
-ph_event_query_create(ph_ctx_t ctx, const ph_event_filter_t* filter, ph_event_query_t* query)
+ph_event_query_create(ph_ctx_t                 ctx,
+                      const ph_event_filter_t* filter,
+                      ph_event_query_t*        query)
 {
     if(query != nullptr)
     {
@@ -960,7 +965,8 @@ ph_event_query_read(ph_event_query_t  query,
     {
         return PH_RESULT_INVALID_CONTEXT;
     }
-    if(rows == nullptr || count == nullptr || capacity == 0 || !known_event_type(event_type))
+    if(rows == nullptr || count == nullptr || capacity == 0 ||
+       !known_event_type(event_type))
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
@@ -1006,8 +1012,8 @@ ph_event_query_id_span(ph_event_query_t query,
             return PH_RESULT_CANCELLED;
         }
         const profiler_hub::sql_cancel_scope cancel{ future };
-        uint64_t first = 0;
-        uint64_t last  = 0;
+        uint64_t                             first = 0;
+        uint64_t                             last  = 0;
         if(query->ctx->table_event_id_span(query->query, event_type, first, last))
         {
             *first_id = first;
@@ -1038,7 +1044,7 @@ ph_event_query_summarize_durations(ph_event_query_t                    query,
         {
             return PH_RESULT_CANCELLED;
         }
-        const profiler_hub::sql_cancel_scope cancel{ future };
+        const profiler_hub::sql_cancel_scope               cancel{ future };
         std::vector<profiler_hub::name_duration_summary_t> rows;
         if(!query->ctx->summarize_name_durations(query->query, event_type, rows))
         {
@@ -1051,11 +1057,8 @@ ph_event_query_summarize_durations(ph_event_query_t                    query,
         for(const profiler_hub::name_duration_summary_t& row : rows)
         {
             const ph_name_duration_summary_t view = {
-                row.name.c_str(),
-                row.count,
-                row.min_duration,
-                row.max_duration,
-                row.total_duration,
+                row.name.c_str(), row.count,          row.min_duration,
+                row.max_duration, row.total_duration,
             };
             callback(&view, user_data);
         }
@@ -1140,7 +1143,8 @@ ph_lookup_text(ph_ctx_t ctx, uint64_t id, uint32_t kind, const char** text)
             return PH_RESULT_INVALID_ARGUMENT;
         }
         const auto& symbol = *it->second;
-        *text = symbol.display_name.empty() ? symbol.name.c_str() : symbol.display_name.c_str();
+        *text              = symbol.display_name.empty() ? symbol.name.c_str()
+                                                         : symbol.display_name.c_str();
         return PH_RESULT_SUCCESS;
     });
 }

@@ -72,7 +72,7 @@ public:
     /** Builds one track and returns it. Does not keep the events. @p keep_name
      *  owns each display name; its pointer is stored on the event. */
     [[nodiscard]] std::vector<ph_event_t> load_events(
-        const reader_types::track_info_ptr_t&                track,
+        const reader_types::track_info_ptr_t&               track,
         const std::function<const char*(std::string_view)>& keep_name);
 
     [[nodiscard]] std::vector<ph_sample_t> load_samples(
@@ -98,13 +98,13 @@ private:
                               Build&&                               build);
 
     [[nodiscard]] std::vector<ph_event_t> build_sorted_events(
-        track_row_reader&                                    reader,
-        const reader_types::track_info_ptr_t&                track,
+        track_row_reader&                                   reader,
+        const reader_types::track_info_ptr_t&               track,
         const std::function<const char*(std::string_view)>& keep_name);
 
     [[nodiscard]] std::vector<ph_event_t> read_thread_track_in_parts(
-        track_row_reader&                                    reader,
-        const reader_types::track_info_ptr_t&                track,
+        track_row_reader&                                   reader,
+        const reader_types::track_info_ptr_t&               track,
         const std::function<const char*(std::string_view)>& keep_name);
 
     // ph_event_t.name has to outlive the row that produced it. The deque is

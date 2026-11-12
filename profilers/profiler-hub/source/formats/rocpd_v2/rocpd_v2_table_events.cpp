@@ -104,11 +104,12 @@ time_clause(std::string_view alias, const resolved_event_query& query)
 const reader_types::track_info_ptr_t*
 find_track(const reader_catalog_t& catalog, uint32_t track_id)
 {
-    const auto found = std::find_if(catalog.tracks.begin(),
-                                    catalog.tracks.end(),
-                                    [track_id](const reader_types::track_info_ptr_t& track) {
-                                        return track && track->id == track_id;
-                                    });
+    const auto found =
+        std::find_if(catalog.tracks.begin(),
+                     catalog.tracks.end(),
+                     [track_id](const reader_types::track_info_ptr_t& track) {
+                         return track && track->id == track_id;
+                     });
     return found != catalog.tracks.end() ? &*found : nullptr;
 }
 
@@ -121,9 +122,10 @@ track_clause(const reader_catalog_t&     catalog,
 {
     if(query.tracks.empty()) return true;
 
-    const auto kind = type == event_type_t::region            ? track_kind_t::thread
-                      : type == event_type_t::kernel_dispatch ? track_kind_t::kernel_dispatch_agent_queue
-                                                              : track_kind_t::memory_copy_agent_queue;
+    const auto  kind = type == event_type_t::region ? track_kind_t::thread
+                       : type == event_type_t::kernel_dispatch
+                           ? track_kind_t::kernel_dispatch_agent_queue
+                           : track_kind_t::memory_copy_agent_queue;
     std::string any;
     for(const uint32_t track_id : query.tracks)
     {
@@ -139,8 +141,9 @@ track_clause(const reader_catalog_t&     catalog,
         }
         else
         {
-            one = fmt::format(
-                "O.gpuId = {} AND O.queueId = {}", (*track)->agent_id, (*track)->queue_id);
+            one = fmt::format("O.gpuId = {} AND O.queueId = {}",
+                              (*track)->agent_id,
+                              (*track)->queue_id);
         }
         if(!any.empty()) any += " OR ";
         any += "(" + one + ")";
@@ -177,7 +180,8 @@ read_page(Statement& statement,
           Publish&&  publish)
 {
     // SQLite binds signed 64-bit integers, so an unbounded range stops at INT64_MAX.
-    const uint64_t upper_id = std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
+    const uint64_t upper_id =
+        std::min<uint64_t>(last_id, static_cast<uint64_t>(INT64_MAX));
     if(after_id >= upper_id) return 0;
 
     uint32_t filled = 0;
@@ -222,7 +226,8 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
             for(const uint32_t track_id : query.tracks)
             {
                 const auto* track = find_track(*m_catalog, track_id);
-                if(track == nullptr || (*track)->category != track_kind_t::pmc_agent) continue;
+                if(track == nullptr || (*track)->category != track_kind_t::pmc_agent)
+                    continue;
                 if(!any.empty()) any += " OR ";
                 any += fmt::format("(M.deviceId = {} AND M.monitorType = {})",
                                    (*track)->agent_id,
@@ -241,15 +246,18 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
                 &sample_row_t::start,
                 &sample_row_t::end,
                 &sample_row_t::value);
-        return read_page<sample_row_t>(
-            statement, after_id, last_id, capacity, [&](const sample_row_t& row, uint32_t index) {
-                ph_table_event& out = rows[index];
-                out                 = ph_table_event{};
-                out.id              = row.id;
-                out.start           = row.start;
-                out.end             = row.end;
-                out.value           = row.value.value_or(0.0);
-            });
+        return read_page<sample_row_t>(statement,
+                                       after_id,
+                                       last_id,
+                                       capacity,
+                                       [&](const sample_row_t& row, uint32_t index) {
+                                           ph_table_event& out = rows[index];
+                                           out                 = ph_table_event{};
+                                           out.id              = row.id;
+                                           out.start           = row.start;
+                                           out.end             = row.end;
+                                           out.value           = row.value.value_or(0.0);
+                                       });
     }
 
     const auto type = reader_event_type(event_type);
@@ -257,9 +265,10 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
     const bool        is_region = type.value() == event_type_t::region;
     const std::string alias     = is_region ? "A" : "O";
 
-    std::string where = is_region ? std::string{ "1" }
-                                  : rocpd_v2::op_kind_where(
-                                        "O", type.value() == event_type_t::memory_copy);
+    std::string where =
+        is_region
+            ? std::string{ "1" }
+            : rocpd_v2::op_kind_where("O", type.value() == event_type_t::memory_copy);
     add_and(where, time_clause(alias, query));
     if(query.process_id.has_value())
     {
@@ -290,15 +299,17 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
         add_and(where, strings);
     }
 
-    constexpr std::string_view k_no_kernel = "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL";
-    constexpr std::string_view k_no_copy   = "NULL, NULL, NULL";
+    constexpr std::string_view k_no_kernel =
+        "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL";
+    constexpr std::string_view k_no_copy = "NULL, NULL, NULL";
     std::string                sql;
     if(is_region)
     {
-        sql = fmt::format("SELECT A.id, A.start, A.end, A.apiName_id, NULL, A.pid, A.tid, "
-                          "NULL, NULL, {}, {} FROM rocpd_api A",
-                          k_no_kernel,
-                          k_no_copy);
+        sql =
+            fmt::format("SELECT A.id, A.start, A.end, A.apiName_id, NULL, A.pid, A.tid, "
+                        "NULL, NULL, {}, {} FROM rocpd_api A",
+                        k_no_kernel,
+                        k_no_copy);
     }
     else
     {
@@ -309,11 +320,12 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
                   "K.groupSegmentSize, K.privateSegmentSize"
                 : std::string{ k_no_kernel };
         const std::string copy = is_copy ? copy_api_columns() : std::string{ k_no_copy };
-        sql = fmt::format("SELECT O.id, O.start, O.end, O.description_id, O.opType_id, A.pid, "
-                          "A.tid, O.gpuId, O.queueId, {}, {} FROM rocpd_op O {}",
-                          kernel,
-                          copy,
-                          op_api_joins());
+        sql                    = fmt::format(
+            "SELECT O.id, O.start, O.end, O.description_id, O.opType_id, A.pid, "
+                               "A.tid, O.gpuId, O.queueId, {}, {} FROM rocpd_op O {}",
+            kernel,
+            copy,
+            op_api_joins());
     }
     sql += fmt::format(" WHERE {} AND {}.id > ? AND {}.id <= ? ORDER BY {}.id LIMIT ?",
                        where,
@@ -362,11 +374,11 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
             out.end             = row.end;
             out.name_id         = published_string(
                 is_region ? row.name_id : op_name_id(row.name_id, row.category_id));
-            out.category_id      = published_string(row.category_id);
-            out.nid              = rocpd_v2::k_node_id;
-            out.process_id       = or_zero(row.pid);
-            out.pid              = or_zero(row.pid);
-            out.tid              = or_zero(row.tid);
+            out.category_id = published_string(row.category_id);
+            out.nid         = rocpd_v2::k_node_id;
+            out.process_id  = or_zero(row.pid);
+            out.pid         = or_zero(row.pid);
+            out.tid         = or_zero(row.tid);
             if(row.pid.has_value() && row.tid.has_value())
             {
                 if(const auto thread = thread_info(row.pid.value(), row.tid.value()))
@@ -391,7 +403,9 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
 }
 
 bool
-rocpd_v2_reader::table_event_id_span(uint32_t event_type, uint64_t& first_id, uint64_t& last_id)
+rocpd_v2_reader::table_event_id_span(uint32_t  event_type,
+                                     uint64_t& first_id,
+                                     uint64_t& last_id)
 {
     first_id = 0;
     last_id  = 0;
@@ -469,8 +483,8 @@ add_summary(std::unordered_map<std::string, name_duration_summary_t>& groups,
 }  // namespace
 
 bool
-rocpd_v2_reader::summarize_name_durations(const resolved_event_query&           query,
-                                          uint32_t                              event_type,
+rocpd_v2_reader::summarize_name_durations(const resolved_event_query& query,
+                                          uint32_t                    event_type,
                                           std::vector<name_duration_summary_t>& rows)
 {
     rows.clear();
@@ -488,9 +502,10 @@ rocpd_v2_reader::summarize_name_durations(const resolved_event_query&           
     const bool        is_region = type.value() == event_type_t::region;
     const std::string alias     = is_region ? "A" : "O";
 
-    std::string where = is_region ? std::string{ "1" }
-                                  : rocpd_v2::op_kind_where(
-                                        "O", type.value() == event_type_t::memory_copy);
+    std::string where =
+        is_region
+            ? std::string{ "1" }
+            : rocpd_v2::op_kind_where("O", type.value() == event_type_t::memory_copy);
     add_and(where, time_clause(alias, query));
     if(query.process_id.has_value())
     {
@@ -535,7 +550,7 @@ rocpd_v2_reader::summarize_name_durations(const resolved_event_query&           
                           "ELSE IFNULL(ST.string, '') END"
                         : "CASE WHEN IFNULL(SD.string, '') != '' THEN SD.string "
                           "ELSE IFNULL(ST.string, '') END";
-        from = "rocpd_op O " + op_api_joins() +
+        from      = "rocpd_op O " + op_api_joins() +
                " LEFT JOIN rocpd_string SD ON SD.id = O.description_id"
                " LEFT JOIN rocpd_string ST ON ST.id = O.opType_id";
         if(m_has_kernel_api)
@@ -546,8 +561,8 @@ rocpd_v2_reader::summarize_name_durations(const resolved_event_query&           
 
     const std::string duration = alias + ".end - " + alias + ".start";
     const std::string sql      = "SELECT " + name_expr + ", COUNT(*), MIN(" + duration +
-                            "), MAX(" + duration + "), SUM(" + duration + ") FROM " + from +
-                            " WHERE " + where + " GROUP BY 1";
+                            "), MAX(" + duration + "), SUM(" + duration + ") FROM " +
+                            from + " WHERE " + where + " GROUP BY 1";
 
     std::unordered_map<std::string, name_duration_summary_t> groups;
     m_backend

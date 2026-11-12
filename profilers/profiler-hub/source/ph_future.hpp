@@ -56,12 +56,12 @@ private:
     const ph_finished_fn m_on_finished;
     std::stop_source     m_stop;
 
-    std::mutex                 m_mutex;
-    std::condition_variable    m_done_cv;
-    std::shared_ptr<ph_future> m_user_reference;
-    bool                       m_attached{ false };
-    bool                       m_finishing{ false };
-    bool                       m_done{ false };
-    ph_result_t                m_result{ PH_RESULT_SUCCESS };
+    std::mutex                                              m_mutex;
+    std::condition_variable                                 m_done_cv;
+    std::shared_ptr<ph_future>                              m_user_reference;
+    bool                                                    m_attached{ false };
+    bool                                                    m_finishing{ false };
+    bool                                                    m_done{ false };
+    ph_result_t                                             m_result{ PH_RESULT_SUCCESS };
     std::vector<std::pair<void (*)(void*) noexcept, void*>> m_sql;
 };

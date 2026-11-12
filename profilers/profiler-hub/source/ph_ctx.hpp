@@ -1,10 +1,10 @@
 #pragma once
 
 #include "cached_track_reader.hpp"
-#include "event_query.hpp"
 #include "common/connection_pool.hpp"
-#include "histogram_grid.hpp"
 #include "common/thread_pool.hpp"
+#include "event_query.hpp"
+#include "histogram_grid.hpp"
 #include "pending_futures.hpp"
 #include "pooled_connection_source.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
@@ -90,10 +90,11 @@ struct ph_ctx
         const profiler_hub::resolved_event_query&           query,
         uint32_t                                            event_type,
         std::vector<profiler_hub::name_duration_summary_t>& rows);
-    [[nodiscard]] bool table_event_id_span(const profiler_hub::resolved_event_query& query,
-                                           uint32_t event_type,
-                                           uint64_t& first_id,
-                                           uint64_t& last_id);
+    [[nodiscard]] bool table_event_id_span(
+        const profiler_hub::resolved_event_query& query,
+        uint32_t                                  event_type,
+        uint64_t&                                 first_id,
+        uint64_t&                                 last_id);
 
     [[nodiscard]] ph_schema_version_t get_schema_version();
     [[nodiscard]] ph_track_list_t     get_track_list();
@@ -103,8 +104,8 @@ struct ph_ctx
     [[nodiscard]] ph_event_list_t get_track_events(uint32_t track_id,
                                                    uint64_t start_ts,
                                                    uint64_t end_ts);
-    void release_track_events(ph_event_list_t* events);
-    void release_track_samples(ph_sample_list_t* samples);
+    void                          release_track_events(ph_event_list_t* events);
+    void                          release_track_samples(ph_sample_list_t* samples);
     [[nodiscard]] std::optional<ph_event_list_t> get_correlated_events(
         uint32_t        track_id,
         uint64_t        event_id,
@@ -121,9 +122,9 @@ struct ph_ctx
                                                                     uint64_t event_id);
     [[nodiscard]] ph_memory_alloc_details_t get_memory_alloc_details(uint32_t track_id,
                                                                      uint64_t event_id);
-    [[nodiscard]] std::optional<uint32_t>  track_id_of(uint32_t        track_id,
-                                                       uint64_t        event_id,
-                                                       ph_event_type_t event_type);
+    [[nodiscard]] std::optional<uint32_t>   track_id_of(uint32_t        track_id,
+                                                        uint64_t        event_id,
+                                                        ph_event_type_t event_type);
     [[nodiscard]] ph_sample_list_t          get_track_samples(uint32_t track_id,
                                                               uint64_t start_ts,
                                                               uint64_t end_ts);
@@ -156,20 +157,20 @@ private:
     void               set_load_state(load_state_t state);
     void               set_load_state_if_loading(load_state_t state);
 
-    void               initialize_track_list();
-    void               prepare_track_store();
-    void               attach_track_store();
+    void                                         initialize_track_list();
+    void                                         prepare_track_store();
+    void                                         attach_track_store();
     [[nodiscard]] profiler_hub::histogram_grid_t histogram_grid(size_t max_buckets) const;
-    [[nodiscard]] bool load_all_tracks(const stop_requested_fn& stop_requested,
-                                       const progress_fn&       progress);
-    void               initialize_node_info();
-    void               initialize_node_agents();
-    void               initialize_node_processes();
-    void               initialize_node_threads();
-    void               initialize_node_streams();
-    void               initialize_node_queues();
-    void               initialize_node_pmc_infos();
-    void               initialize_stream_hardware_links();
+    [[nodiscard]] bool        load_all_tracks(const stop_requested_fn& stop_requested,
+                                              const progress_fn&       progress);
+    void                      initialize_node_info();
+    void                      initialize_node_agents();
+    void                      initialize_node_processes();
+    void                      initialize_node_threads();
+    void                      initialize_node_streams();
+    void                      initialize_node_queues();
+    void                      initialize_node_pmc_infos();
+    void                      initialize_stream_hardware_links();
     [[nodiscard]] const char* keep_event_name(std::string_view text);
 
     struct accepted_source_t
@@ -178,41 +179,42 @@ private:
         std::string                                uuid;
         ph_schema_version_t                        version{};
         profiler_hub::reader_types::trace_schema_t schema{
-            profiler_hub::reader_types::trace_schema_t::unknown };
+            profiler_hub::reader_types::trace_schema_t::unknown
+        };
     };
 
     struct placed_track_t
     {
-        uint32_t                                         source_index{};
-        profiler_hub::reader_types::track_info_ptr_t     track;
+        uint32_t                                     source_index{};
+        profiler_hub::reader_types::track_info_ptr_t track;
     };
 
     struct trace_source_t
     {
-        std::string                                         path;
-        std::string                                         uuid;
-        std::shared_ptr<profiler_hub::reader_catalog_t>     catalog;
-        std::unique_ptr<profiler_hub::common::connection_pool> pool;
+        std::string                                             path;
+        std::string                                             uuid;
+        std::shared_ptr<profiler_hub::reader_catalog_t>         catalog;
+        std::unique_ptr<profiler_hub::common::connection_pool>  pool;
         std::unique_ptr<profiler_hub::pooled_connection_source> connections;
-        std::unique_ptr<profiler_hub::cached_track_reader>  reader;
-        uint32_t                                            track_offset{};
-        uint32_t                                            track_count{};
-        std::unordered_map<uint32_t, uint32_t>              global_of_local;
-        profiler_hub::reader_types::agent_info_list_t       agents;
-        std::vector<ph_agent_t>                             c_agents;
-        profiler_hub::reader_types::process_info_list_t     processes;
-        std::vector<ph_process_t>                           c_processes;
-        profiler_hub::reader_types::thread_info_list_t      threads;
-        std::vector<ph_thread_t>                            c_threads;
-        profiler_hub::reader_types::stream_info_list_t      streams;
-        std::vector<ph_stream_t>                            c_streams;
-        profiler_hub::reader_types::queue_info_list_t       queues;
-        std::vector<ph_queue_t>                             c_queues;
-        profiler_hub::reader_types::pmc_info_list_t         pmc_infos;
-        std::vector<ph_pmc_info_t>                          c_pmc_infos;
-        std::vector<ph_stream_hardware_link_t>              c_stream_hardware_links;
+        std::unique_ptr<profiler_hub::cached_track_reader>      reader;
+        uint32_t                                                track_offset{};
+        uint32_t                                                track_count{};
+        std::unordered_map<uint32_t, uint32_t>                  global_of_local;
+        profiler_hub::reader_types::agent_info_list_t           agents;
+        std::vector<ph_agent_t>                                 c_agents;
+        profiler_hub::reader_types::process_info_list_t         processes;
+        std::vector<ph_process_t>                               c_processes;
+        profiler_hub::reader_types::thread_info_list_t          threads;
+        std::vector<ph_thread_t>                                c_threads;
+        profiler_hub::reader_types::stream_info_list_t          streams;
+        std::vector<ph_stream_t>                                c_streams;
+        profiler_hub::reader_types::queue_info_list_t           queues;
+        std::vector<ph_queue_t>                                 c_queues;
+        profiler_hub::reader_types::pmc_info_list_t             pmc_infos;
+        std::vector<ph_pmc_info_t>                              c_pmc_infos;
+        std::vector<ph_stream_hardware_link_t>                  c_stream_hardware_links;
         std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> nodes;
-        ph_node_t                                           node{};
+        ph_node_t                                                             node{};
     };
 
     ph_ctx(std::vector<accepted_source_t> accepted, std::string cache_directory);
@@ -222,30 +224,31 @@ private:
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
 
-    [[nodiscard]] trace_source_t& source_at(uint32_t index);
+    [[nodiscard]] trace_source_t&       source_at(uint32_t index);
     [[nodiscard]] const trace_source_t& source_at(uint32_t index) const;
     [[nodiscard]] const placed_track_t* place_of(uint32_t track_id) const;
     // The file that holds this event. A known track_id whose file contains
     // the id selects that file. Otherwise the files are searched by id.
-    [[nodiscard]] trace_source_t* source_for_event(uint32_t        track_id,
-                                                   uint64_t        event_id,
-                                                   ph_event_type_t event_type);
-    void open_sources();
+    [[nodiscard]] trace_source_t*      source_for_event(uint32_t        track_id,
+                                                        uint64_t        event_id,
+                                                        ph_event_type_t event_type);
+    void                               open_sources();
     [[nodiscard]] ph_optional_uint64_t global_track_id(
-        const trace_source_t&                            source,
+        const trace_source_t&                               source,
         const profiler_hub::reader_types::track_info_ptr_t& track) const;
 
-    std::vector<accepted_source_t>   m_accepted;
-    std::string                      m_cache_directory;
+    std::vector<accepted_source_t>                  m_accepted;
+    std::string                                     m_cache_directory;
     std::unique_ptr<profiler_hub::track_file_store> m_track_store;
-    std::vector<std::unique_ptr<trace_source_t>> m_sources;
-    std::string                      m_file_path;
-    profiler_hub::track_read_options m_read_options;
-    ph_schema_version_t              m_schema_version;
-    profiler_hub::reader_types::trace_schema_t m_trace_schema{
-        profiler_hub::reader_types::trace_schema_t::unknown };
+    std::vector<std::unique_ptr<trace_source_t>>    m_sources;
+    std::string                                     m_file_path;
+    profiler_hub::track_read_options                m_read_options;
+    ph_schema_version_t                             m_schema_version;
+    profiler_hub::reader_types::trace_schema_t      m_trace_schema{
+        profiler_hub::reader_types::trace_schema_t::unknown
+    };
 
-    std::vector<ph_track_t> m_c_tracks;
+    std::vector<ph_track_t>                      m_c_tracks;
     std::unordered_map<uint32_t, placed_track_t> m_track_by_id;
 
     struct c_histogram_storage_t

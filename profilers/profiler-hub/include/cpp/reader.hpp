@@ -14,7 +14,7 @@
 
 extern "C"
 {
-struct ph_table_event;
+    struct ph_table_event;
 }
 
 namespace profiler_hub

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "../../sql_cancel.hpp"
 #include "common/traits.hpp"
 #include "debug.hpp"
-#include "../../sql_cancel.hpp"
 #include <fmt/format.h>
 
 #include <cstddef>

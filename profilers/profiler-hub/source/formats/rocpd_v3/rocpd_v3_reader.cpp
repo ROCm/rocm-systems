@@ -53,8 +53,8 @@ public:
         {
             event.display_name = kernel_symbol_label(m_catalog, row.kernel_id);
         }
-        event.category          = resolve_string(row.category_id, m_category);
-        event.track             = resolve_track(row, type);
+        event.category = resolve_string(row.category_id, m_category);
+        event.track    = resolve_track(row, type);
         return event;
     }
 
@@ -201,8 +201,7 @@ statements_for(const data_storage::schema_v3::read_statements& stmts,
         return stmts.memory_allocate_statements();
     if(type == reader_types::event_type_t::memory_copy)
         return stmts.memory_copy_statements();
-    if(type == reader_types::event_type_t::hip_event)
-        return stmts.hip_event_statements();
+    if(type == reader_types::event_type_t::hip_event) return stmts.hip_event_statements();
     return stmts.region_statements();
 }
 
@@ -261,9 +260,8 @@ count_events(const data_storage::schema_v3::read_statements& stmts,
                              stmts.memory_alloc_count_time_filtered(),
                              range);
         case event_type_t::hip_event:
-            return run_count(stmts.hip_event_count(),
-                             stmts.hip_event_count_time_filtered(),
-                             range);
+            return run_count(
+                stmts.hip_event_count(), stmts.hip_event_count_time_filtered(), range);
         default: return 0;
     }
 }
@@ -301,18 +299,14 @@ rocpd_v3_reader::build_catalog_category(catalog_category_t category,
         case catalog_category_t::string_list:
             catalog.build_string_list(*m_read_statements);
             break;
-        case catalog_category_t::nodes:
-            catalog.build_nodes(*m_read_statements);
-            break;
+        case catalog_category_t::nodes: catalog.build_nodes(*m_read_statements); break;
         case catalog_category_t::processes:
             catalog.build_processes(*m_read_statements);
             break;
         case catalog_category_t::threads:
             catalog.build_threads(*m_read_statements);
             break;
-        case catalog_category_t::agents:
-            catalog.build_agents(*m_read_statements);
-            break;
+        case catalog_category_t::agents: catalog.build_agents(*m_read_statements); break;
         case catalog_category_t::tracks:
             if(load_derived_tracks(catalog)) return;
             catalog.build_tracks(*m_read_statements);
@@ -330,9 +324,7 @@ rocpd_v3_reader::build_catalog_category(catalog_category_t category,
         case catalog_category_t::streams:
             catalog.build_streams(*m_read_statements);
             break;
-        case catalog_category_t::queues:
-            catalog.build_queues(*m_read_statements);
-            break;
+        case catalog_category_t::queues: catalog.build_queues(*m_read_statements); break;
         case catalog_category_t::pmc_infos:
             catalog.build_pmc_infos(*m_read_statements);
             break;
@@ -370,7 +362,7 @@ rocpd_v3_reader::get_events(const reader_types::event_filter_t& filter)
 
 reader_types::timeline_event_list_t
 rocpd_v3_reader::get_events_for_track(reader_types::track_info_ptr_t      track,
-                                     const reader_types::event_filter_t& filter)
+                                      const reader_types::event_filter_t& filter)
 {
     if(!track) return {};
 
@@ -497,7 +489,7 @@ rocpd_v3_reader::visit_track_events_in_id_range(
 
 reader_types::timeline_event_list_t
 rocpd_v3_reader::get_category_track_events(const reader_types::track_info_ptr_t& track,
-                                          const reader_types::event_filter_t&   filter)
+                                           const reader_types::event_filter_t&   filter)
 {
     if(!track->node_info) return {};
     const auto nid = track->node_info->node_id;
@@ -574,7 +566,7 @@ rocpd_v3_reader::get_category_track_events(const reader_types::track_info_ptr_t&
 
 reader_types::counter_timeline_event_list_t
 rocpd_v3_reader::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
-                                             const reader_types::event_filter_t& filter)
+                                              const reader_types::event_filter_t& filter)
 {
     if(!track || !track->node_info) return {};
     if(track->category != reader_types::track_kind_t::pmc_agent &&
@@ -598,9 +590,8 @@ rocpd_v3_reader::get_counter_events_for_track(reader_types::track_info_ptr_t    
         events.reserve(points->size());
         for(const memory_activity_point_t& point : *points)
         {
-            if(has_time &&
-               (point.start < filter.time_window.start.value() ||
-                point.start > filter.time_window.end.value()))
+            if(has_time && (point.start < filter.time_window.start.value() ||
+                            point.start > filter.time_window.end.value()))
             {
                 continue;
             }
@@ -616,19 +607,20 @@ rocpd_v3_reader::get_counter_events_for_track(reader_types::track_info_ptr_t    
     std::vector<data_storage::schema_v3::pmc_sample_result> results;
     if(has_time)
     {
-        results = m_read_statements
-                      ->pmc_sample_time_filtered_statement()(nid,
-                                                             track->agent_id,
-                                                             track->pmc_id,
-                                                             filter.time_window.start.value(),
-                                                             filter.time_window.end.value())
-                      .to_vector();
+        results =
+            m_read_statements
+                ->pmc_sample_time_filtered_statement()(nid,
+                                                       track->agent_id,
+                                                       track->pmc_id,
+                                                       filter.time_window.start.value(),
+                                                       filter.time_window.end.value())
+                .to_vector();
     }
     else
     {
-        results = m_read_statements
-                      ->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
-                      .to_vector();
+        results =
+            m_read_statements->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
+                .to_vector();
     }
 
     events.reserve(results.size());
@@ -774,7 +766,8 @@ rocpd_v3_reader::get_region_details(const reader_types::timeline_event_t& event)
 
         // rocpd_arg rows hang off the region's rocpd_event id, the same join
         // the legacy reader uses (rocpd_region -> rocpd_event -> rocpd_arg).
-        const auto arg_rows = m_read_statements->arg_detail()(r.event_id.value()).to_vector();
+        const auto arg_rows =
+            m_read_statements->arg_detail()(r.event_id.value()).to_vector();
         data.args.reserve(arg_rows.size());
         for(const auto& arg : arg_rows)
         {
@@ -984,24 +977,24 @@ rocpd_v3_reader::get_call_stack(const reader_types::timeline_event_t& event)
     using reader_types::event_type_t;
     if(event.unique_identifier.type != event_type_t::region) return {};
 
-    const auto source_rows =
-        m_read_statements->region_statements().by_id(event.unique_identifier.id).to_vector();
+    const auto source_rows = m_read_statements->region_statements()
+                                 .by_id(event.unique_identifier.id)
+                                 .to_vector();
     if(source_rows.empty()) return {};
 
     timeline_event_builder build_event{ *m_catalog };
-    const auto             source = build_event(source_rows.front(), event_type_t::region);
+    const auto source = build_event(source_rows.front(), event_type_t::region);
     if(!source.track) return {};
 
     reader_types::event_filter_t filter;
     filter.types.push_back(event_type_t::region);
     auto regions = get_events_for_track(source.track, filter);
-    std::sort(
-        regions.begin(),
-        regions.end(),
-        [](const reader_types::timeline_event_t& lhs,
-           const reader_types::timeline_event_t& rhs) {
-            return lhs.start_timestamp < rhs.start_timestamp;
-        });
+    std::sort(regions.begin(),
+              regions.end(),
+              [](const reader_types::timeline_event_t& lhs,
+                 const reader_types::timeline_event_t& rhs) {
+                  return lhs.start_timestamp < rhs.start_timestamp;
+              });
 
     struct active_region_t
     {
@@ -1037,7 +1030,7 @@ rocpd_v3_reader::get_call_stack(const reader_types::timeline_event_t& event)
         if(region.unique_identifier.id == event.unique_identifier.id)
         {
             auto add_frame = [&](const reader_types::timeline_event_t& frame_event) {
-                reader_types::stack_frame_t      frame;
+                reader_types::stack_frame_t          frame;
                 reader_types::program_counter_info_t program_counter;
                 program_counter.event_id = frame_event.unique_identifier.id;
                 program_counter.function = std::string(frame_event.display_name);
@@ -1047,7 +1040,8 @@ rocpd_v3_reader::get_call_stack(const reader_types::timeline_event_t& event)
                 {
                     program_counter.extdata = frame_meta->line_info;
                     const auto source_context =
-                        json_serializers::deserialize_source_context(frame_meta->line_info);
+                        json_serializers::deserialize_source_context(
+                            frame_meta->line_info);
                     if(!source_context.empty())
                     {
                         const auto& source_info = source_context.front();
@@ -1082,12 +1076,11 @@ rocpd_v3_reader::get_call_stack(const reader_types::timeline_event_t& event)
         }
 
         active.push_back({ &region, level });
-        std::sort(
-            active.begin(),
-            active.end(),
-            [](const active_region_t& lhs, const active_region_t& rhs) {
-                return lhs.level < rhs.level;
-            });
+        std::sort(active.begin(),
+                  active.end(),
+                  [](const active_region_t& lhs, const active_region_t& rhs) {
+                      return lhs.level < rhs.level;
+                  });
     }
     return {};
 }
@@ -1137,9 +1130,7 @@ rocpd_v3_reader::get_correlated_events(const reader_types::timeline_event_t& eve
     const decltype(stmts.region)* statement = nullptr;
     switch(event.unique_identifier.type)
     {
-        case reader_types::event_type_t::region:
-            statement = &stmts.region;
-            break;
+        case reader_types::event_type_t::region: statement = &stmts.region; break;
         case reader_types::event_type_t::kernel_dispatch:
             statement = &stmts.kernel_dispatch;
             break;
@@ -1149,9 +1140,7 @@ rocpd_v3_reader::get_correlated_events(const reader_types::timeline_event_t& eve
         case reader_types::event_type_t::memory_allocate:
             statement = &stmts.memory_allocate;
             break;
-        case reader_types::event_type_t::hip_event:
-            statement = &stmts.hip_event;
-            break;
+        case reader_types::event_type_t::hip_event: statement = &stmts.hip_event; break;
         default: return {};
     }
 

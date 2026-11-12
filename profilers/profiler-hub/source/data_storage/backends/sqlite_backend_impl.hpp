@@ -263,7 +263,8 @@ template <typename SqlitePolicy>
 void
 database_backend<SqlitePolicy>::execute(const std::string& query)
 {
-    const profiler_hub::running_sql activity{ &database_backend::interrupt_callback, this };
+    const profiler_hub::running_sql activity{ &database_backend::interrupt_callback,
+                                              this };
     validate_sqlite3_result(
         SqlitePolicy::exec(m_sqlite3, query.c_str()), "Failed to execute query:", query);
 }

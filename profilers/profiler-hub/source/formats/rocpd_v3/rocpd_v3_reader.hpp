@@ -95,14 +95,14 @@ public:
                                              uint64_t                    after_id,
                                              uint64_t                    last_id,
                                              ph_table_event*             rows,
-                                             uint32_t                    capacity) override;
+                                             uint32_t capacity) override;
     [[nodiscard]] bool     table_event_id_span(uint32_t  event_type,
                                                uint64_t& first_id,
                                                uint64_t& last_id) override;
     [[nodiscard]] bool     summarize_name_durations(
-        const resolved_event_query&           query,
-        uint32_t                              event_type,
-        std::vector<name_duration_summary_t>& rows) override;
+            const resolved_event_query&           query,
+            uint32_t                              event_type,
+            std::vector<name_duration_summary_t>& rows) override;
 
 private:
     // Resolve event metadata from event-specific table by db_id and type.
@@ -125,10 +125,11 @@ private:
     std::shared_ptr<data_storage::schema_v3::read_statements> m_read_statements;
 };
 
-[[nodiscard]] std::unique_ptr<reader_t::impl> make_rocpd_v3_reader(
-    std::unique_ptr<profiler_hub::storage_t> storage,
-    std::shared_ptr<reader_catalog_t>        catalog);
+[[nodiscard]] std::unique_ptr<reader_t::impl>
+make_rocpd_v3_reader(std::unique_ptr<profiler_hub::storage_t> storage,
+                     std::shared_ptr<reader_catalog_t>        catalog);
 
-[[nodiscard]] std::unique_ptr<trim_schema_t> make_rocpd_v3_trim_schema();
+[[nodiscard]] std::unique_ptr<trim_schema_t>
+make_rocpd_v3_trim_schema();
 
 }  // namespace profiler_hub

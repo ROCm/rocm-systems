@@ -1,15 +1,15 @@
 #include "ph_ctx.hpp"
-#include "event_query.hpp"
-#include "track_file_store.hpp"
-#include "trace_trim.hpp"
+#include "catalog_aggregate_store.hpp"
 #include "debug.hpp"
+#include "event_query.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_future.hpp"
-#include "sql_cancel.hpp"
-#include "catalog_aggregate_store.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
+#include "sql_cancel.hpp"
+#include "trace_trim.hpp"
+#include "track_file_store.hpp"
 #include "track_read_options.hpp"
 
 #include <algorithm>
@@ -109,8 +109,7 @@ track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
             return type == event_type_t::memory_allocate;
         case track_kind_t::memory_copy_agent_queue:
             return type == event_type_t::memory_copy;
-        case track_kind_t::hip_event_agent_queue:
-            return type == event_type_t::hip_event;
+        case track_kind_t::hip_event_agent_queue: return type == event_type_t::hip_event;
         case track_kind_t::stream: return type != event_type_t::region;
         case track_kind_t::thread:
         case track_kind_t::thread_sample: return true;
@@ -450,9 +449,7 @@ ph_ctx::place_of(uint32_t track_id) const
 }
 
 ph_ctx::trace_source_t*
-ph_ctx::source_for_event(uint32_t        track_id,
-                         uint64_t        event_id,
-                         ph_event_type_t event_type)
+ph_ctx::source_for_event(uint32_t track_id, uint64_t event_id, ph_event_type_t event_type)
 {
     const auto type = to_reader_event_type(event_type);
     if(!type.has_value() || m_sources.empty()) return nullptr;
@@ -461,7 +458,7 @@ ph_ctx::source_for_event(uint32_t        track_id,
     profiler_hub::reader_types::timeline_event_t query;
     query.unique_identifier = { .id   = static_cast<size_t>(event_id),
                                 .type = type.value() };
-    const auto contains = [&query](trace_source_t& held) {
+    const auto contains     = [&query](trace_source_t& held) {
         const auto track = held.pool->with_connection(
             [&query](profiler_hub::common::connection& connection) {
                 return connection.reader().track_of(query);
@@ -483,7 +480,7 @@ ph_ctx::source_for_event(uint32_t        track_id,
 }
 
 ph_optional_uint64_t
-ph_ctx::global_track_id(const trace_source_t& source,
+ph_ctx::global_track_id(const trace_source_t&                               source,
                         const profiler_hub::reader_types::track_info_ptr_t& track) const
 {
     if(!track) return ph_optional_uint64_t{ .value = 0, .is_valid = 0 };
@@ -541,10 +538,10 @@ ph_ctx::ph_ctx(std::vector<accepted_source_t> accepted, std::string cache_direct
 : m_accepted{ std::move(accepted) }
 , m_cache_directory{ std::move(cache_directory) }
 , m_file_path{ m_accepted.empty() ? std::string{} : m_accepted.front().path }
-, m_schema_version{ m_accepted.empty() ? ph_schema_version_t{} : m_accepted.front().version }
-, m_trace_schema{ m_accepted.empty()
-                      ? profiler_hub::reader_types::trace_schema_t::unknown
-                      : m_accepted.front().schema }
+, m_schema_version{ m_accepted.empty() ? ph_schema_version_t{}
+                                       : m_accepted.front().version }
+, m_trace_schema{ m_accepted.empty() ? profiler_hub::reader_types::trace_schema_t::unknown
+                                     : m_accepted.front().schema }
 {}
 
 ph_ctx::~ph_ctx()
@@ -632,8 +629,8 @@ ph_ctx::run_async(std::shared_ptr<ph_future>   future,
                         else
                         {
                             const profiler_hub::sql_cancel_scope cancel{ future.get() };
-                            const auto         result = operation();
-                            ph_future_status_t status = PH_FUTURE_ERROR;
+                            const auto                           result = operation();
+                            ph_future_status_t                   status = PH_FUTURE_ERROR;
                             if(result == PH_RESULT_SUCCESS)
                             {
                                 status = PH_FUTURE_FINISHED;
@@ -781,22 +778,25 @@ ph_ctx::trim_trace(uint64_t    start_ts,
                    const char* output_path,
                    ph_future*  future)
 {
-    if(output_path == nullptr || output_path[0] == '\0') return PH_RESULT_INVALID_ARGUMENT;
-    if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
+    if(output_path == nullptr || output_path[0] == '\0')
+        return PH_RESULT_INVALID_ARGUMENT;
+    if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        return ready;
     if(m_sources.empty()) return PH_RESULT_INVALID_FILE;
 
     // SaveTrimmedData adds source 0's origin when that origin is greater than
     // zero. Subtract it back, then put the same displayed range on each source.
-    constexpr uint64_t k_unset = std::numeric_limits<uint64_t>::max();
+    constexpr uint64_t k_unset   = std::numeric_limits<uint64_t>::max();
     const auto         origin_of = [this](uint32_t source_index) {
         uint64_t origin = k_unset;
         for(const ph_track_t& track : m_c_tracks)
         {
-            if(track.source_index == source_index) origin = std::min(origin, track.start_ts);
+            if(track.source_index == source_index)
+                origin = std::min(origin, track.start_ts);
         }
         return origin;
     };
-    const uint64_t base = origin_of(0);
+    const uint64_t base      = origin_of(0);
     uint64_t       rel_start = start_ts;
     uint64_t       rel_end   = end_ts;
     if(base != k_unset && base > 0)
@@ -817,8 +817,8 @@ ph_ctx::trim_trace(uint64_t    start_ts,
         const uint64_t        window_start =
             origin == k_unset ? start_ts : place(origin, rel_start);
         const uint64_t window_end = origin == k_unset ? end_ts : place(origin, rel_end);
-        inputs.push_back(
-            profiler_hub::trim_source_t{ source.path, source.uuid, window_start, window_end });
+        inputs.push_back(profiler_hub::trim_source_t{
+            source.path, source.uuid, window_start, window_end });
     }
 
     const profiler_hub::version_t version{ m_schema_version.major,
@@ -958,8 +958,8 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
                 {
                     continue;
                 }
-                depth = held.reader->nesting_depth_of(
-                    track, correlated_id, correlated_type);
+                depth =
+                    held.reader->nesting_depth_of(track, correlated_id, correlated_type);
                 if(depth.has_value())
                 {
                     placed_track = track;
@@ -977,8 +977,7 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
             .name          = keep_event_name(event.display_name),
             .type          = correlated_type,
             .nesting_depth = depth.value(),
-            .track_id      = global.is_valid != 0 ? static_cast<uint32_t>(global.value)
-                                                  : 0,
+            .track_id = global.is_valid != 0 ? static_cast<uint32_t>(global.value) : 0,
         });
     }
 
@@ -1071,10 +1070,11 @@ ph_ctx::get_region_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_region_details_t{};
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::region);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_region_details(source);
-        });
+    auto details = source_at(place->source_index)
+                       .pool->with_connection(
+                           [&source](profiler_hub::common::connection& connection) {
+                               return connection.reader().get_region_details(source);
+                           });
     if(!details.has_value())
     {
         return ph_region_details_t{};
@@ -1114,10 +1114,12 @@ ph_ctx::get_kernel_dispatch_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_kernel_dispatch_details_t{};
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::kernel_dispatch);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_kernel_dispatch_details(source);
-        });
+    auto details =
+        source_at(place->source_index)
+            .pool->with_connection(
+                [&source](profiler_hub::common::connection& connection) {
+                    return connection.reader().get_kernel_dispatch_details(source);
+                });
     if(!details.has_value())
     {
         return ph_kernel_dispatch_details_t{};
@@ -1164,10 +1166,11 @@ ph_ctx::get_memory_copy_details(uint32_t track_id, uint64_t event_id)
     if(place == nullptr) return ph_memory_copy_details_t{};
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::memory_copy);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_memory_copy_details(source);
-        });
+    auto details = source_at(place->source_index)
+                       .pool->with_connection(
+                           [&source](profiler_hub::common::connection& connection) {
+                               return connection.reader().get_memory_copy_details(source);
+                           });
     if(!details.has_value())
     {
         return ph_memory_copy_details_t{};
@@ -1211,10 +1214,12 @@ ph_ctx::get_memory_alloc_details(uint32_t track_id, uint64_t event_id)
     }
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::memory_allocate);
-    auto details = source_at(place->source_index).pool->with_connection(
-        [&source](profiler_hub::common::connection& connection) {
-            return connection.reader().get_memory_alloc_details(source);
-        });
+    auto details =
+        source_at(place->source_index)
+            .pool->with_connection(
+                [&source](profiler_hub::common::connection& connection) {
+                    return connection.reader().get_memory_alloc_details(source);
+                });
     if(!details.has_value())
     {
         return ph_memory_alloc_details_t{};
@@ -1277,7 +1282,7 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
         return 0;
     }
 
-    profiler_hub::resolved_event_query local = query;
+    profiler_hub::resolved_event_query local  = query;
     trace_source_t&                    origin = source_at(source_index);
     local.tracks.clear();
     local.tracks.reserve(query.tracks.size());
@@ -1304,10 +1309,9 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
 }
 
 bool
-ph_ctx::summarize_name_durations(
-    const profiler_hub::resolved_event_query&           query,
-    uint32_t                                            event_type,
-    std::vector<profiler_hub::name_duration_summary_t>& rows)
+ph_ctx::summarize_name_durations(const profiler_hub::resolved_event_query& query,
+                                 uint32_t                                  event_type,
+                                 std::vector<profiler_hub::name_duration_summary_t>& rows)
 {
     rows.clear();
     uint32_t source_index = 0;
@@ -1327,7 +1331,7 @@ ph_ctx::summarize_name_durations(
     }
     if(source_index >= m_sources.size()) return true;
 
-    profiler_hub::resolved_event_query local = query;
+    profiler_hub::resolved_event_query local  = query;
     trace_source_t&                    origin = source_at(source_index);
     local.tracks.clear();
     local.tracks.reserve(query.tracks.size());
@@ -1364,8 +1368,8 @@ ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
     {
         return false;
     }
-    return source_at(source_index).pool->with_connection(
-        [&](profiler_hub::common::connection& connection) {
+    return source_at(source_index)
+        .pool->with_connection([&](profiler_hub::common::connection& connection) {
             return connection.reader().table_event_id_span(event_type, first_id, last_id);
         });
 }
@@ -1409,11 +1413,11 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
 {
     if(m_track_store && m_track_store->ready())
     {
-        const profiler_hub::histogram_grid_t grid = histogram_grid(max_buckets);
-        const profiler_hub::stored_histogram_t stored = m_track_store->histogram(
-            static_cast<uint64_t>(grid.origin),
-            static_cast<uint64_t>(grid.bucket_size),
-            static_cast<uint64_t>(grid.bucket_count));
+        const profiler_hub::histogram_grid_t   grid = histogram_grid(max_buckets);
+        const profiler_hub::stored_histogram_t stored =
+            m_track_store->histogram(static_cast<uint64_t>(grid.origin),
+                                     static_cast<uint64_t>(grid.bucket_size),
+                                     static_cast<uint64_t>(grid.bucket_count));
 
         auto storage = std::make_unique<c_histogram_storage_t>();
         storage->tracks.reserve(stored.tracks.size());
@@ -1427,12 +1431,12 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
                 narrow_histogram_count(destination.size()),
                 destination.empty() ? nullptr : destination.data() });
         }
-        storage->histogram = ph_histogram_t{
-            stored.origin_ts,
-            stored.bucket_size,
-            narrow_histogram_count(stored.bucket_count),
-            narrow_histogram_count(storage->tracks.size()),
-            storage->tracks.empty() ? nullptr : storage->tracks.data() };
+        storage->histogram =
+            ph_histogram_t{ stored.origin_ts,
+                            stored.bucket_size,
+                            narrow_histogram_count(stored.bucket_count),
+                            narrow_histogram_count(storage->tracks.size()),
+                            storage->tracks.empty() ? nullptr : storage->tracks.data() };
         output = storage->histogram;
         const std::lock_guard<std::mutex> lock{ m_histogram_mutex };
         m_histograms.push_back(std::move(storage));
@@ -1463,7 +1467,7 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
 
     for(std::size_t index = 0; index < parts.size(); ++index)
     {
-        const auto&         part = parts[index];
+        const auto&           part = parts[index];
         const trace_source_t& held = *m_sources[index];
         for(const auto& source_track : part.tracks)
         {
@@ -1471,7 +1475,7 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
             {
                 continue;
             }
-            const uint32_t local_id = narrow_histogram_count(source_track.track->id);
+            const uint32_t local_id     = narrow_histogram_count(source_track.track->id);
             uint32_t       published_id = local_id;
             if(m_sources.size() != 1)
             {
@@ -1516,7 +1520,7 @@ void
 ph_ctx::initialize_track_list()
 {
     const bool    single_source = m_sources.size() == 1;
-    std::uint32_t next_id      = 0;
+    std::uint32_t next_id       = 0;
     for(std::uint32_t source_index = 0; source_index < m_sources.size(); ++source_index)
     {
         trace_source_t& source = source_at(source_index);
@@ -1533,38 +1537,38 @@ ph_ctx::initialize_track_list()
             source.global_of_local.emplace(local_id, global_id);
             m_track_by_id.emplace(global_id, placed_track_t{ source_index, track });
             m_c_tracks.push_back(ph_track_t{
-                .id          = global_id,
-                .track_name  = track->name.c_str(),
-                .nid         = track->node_info
-                                   ? static_cast<std::uint64_t>(track->node_info->node_id)
-                                   : 0,
-                .pid         = track->process_info
-                                   ? static_cast<std::uint64_t>(track->process_info->pid)
-                                   : 0,
-                .tid         = track->thread_info
-                                   ? static_cast<std::uint64_t>(track->thread_info->thread_id)
-                                   : 0,
-                .event_count = static_cast<std::uint32_t>(std::min<size_t>(
+                .id             = global_id,
+                .track_name     = track->name.c_str(),
+                .nid            = track->node_info
+                                      ? static_cast<std::uint64_t>(track->node_info->node_id)
+                                      : 0,
+                .pid            = track->process_info
+                                      ? static_cast<std::uint64_t>(track->process_info->pid)
+                                      : 0,
+                .tid            = track->thread_info
+                                      ? static_cast<std::uint64_t>(track->thread_info->thread_id)
+                                      : 0,
+                .event_count    = static_cast<std::uint32_t>(std::min<size_t>(
                     track->event_count, std::numeric_limits<std::uint32_t>::max())),
-                .agent_id    = static_cast<std::uint64_t>(track->agent_id),
-                .category    = to_c_track_category(track->category),
-                .queue_id    = static_cast<std::uint64_t>(track->queue_id),
-                .stream_id   = static_cast<std::uint64_t>(track->stream_id),
-                .start_ts    = static_cast<std::uint64_t>(track->start_ts),
-                .end_ts      = static_cast<std::uint64_t>(track->end_ts),
-                .value_range = track->value_range
-                                   ? ph_value_range_t{ track->value_range->min,
+                .agent_id       = static_cast<std::uint64_t>(track->agent_id),
+                .category       = to_c_track_category(track->category),
+                .queue_id       = static_cast<std::uint64_t>(track->queue_id),
+                .stream_id      = static_cast<std::uint64_t>(track->stream_id),
+                .start_ts       = static_cast<std::uint64_t>(track->start_ts),
+                .end_ts         = static_cast<std::uint64_t>(track->end_ts),
+                .value_range    = track->value_range
+                                      ? ph_value_range_t{ track->value_range->min,
                                                        track->value_range->max,
                                                        1 }
-                                   : ph_value_range_t{},
-                .process_row_id = track->process_info
-                                      ? static_cast<std::uint64_t>(track->process_info->id)
-                                      : 0,
+                                      : ph_value_range_t{},
+                .process_row_id = track->process_info ? static_cast<std::uint64_t>(
+                                                            track->process_info->id)
+                                                      : 0,
                 .thread_row_id  = track->thread_info
                                       ? static_cast<std::uint64_t>(track->thread_info->id)
                                       : 0,
-                .pmc_id       = static_cast<std::uint64_t>(track->pmc_id),
-                .source_index = source_index,
+                .pmc_id         = static_cast<std::uint64_t>(track->pmc_id),
+                .source_index   = source_index,
             });
         }
         source.track_count =
@@ -1591,7 +1595,7 @@ profiler_hub::histogram_grid_t
 ph_ctx::histogram_grid(size_t max_buckets) const
 {
     using profiler_hub::reader_types::timestamp_ns_t;
-    bool         any    = false;
+    bool           any    = false;
     timestamp_ns_t origin = 0;
     timestamp_ns_t end    = 0;
     for(const std::unique_ptr<trace_source_t>& source : m_sources)
@@ -1612,7 +1616,7 @@ ph_ctx::prepare_track_store()
 {
     if(m_cache_directory.empty() || m_sources.empty()) return;
 
-    auto store = std::make_unique<profiler_hub::track_file_store>();
+    auto                     store = std::make_unique<profiler_hub::track_file_store>();
     std::vector<std::string> paths;
     paths.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& source : m_sources)
@@ -1628,18 +1632,21 @@ ph_ctx::prepare_track_store()
                                     m_schema_version.patch);
     if(!opened)
     {
-        LOG_WARNING("[Profiler-Hub] Track cache is not available. Timeline data stays in memory.");
+        LOG_WARNING("[Profiler-Hub] Track cache is not available. Timeline data stays in "
+                    "memory.");
         return;
     }
     if(!store->ready() && !store->begin_write())
     {
-        LOG_WARNING("[Profiler-Hub] Track cache {} cannot be created. Timeline data stays in memory.",
+        LOG_WARNING("[Profiler-Hub] Track cache {} cannot be created. Timeline data "
+                    "stays in memory.",
                     store->directory());
         return;
     }
     if(store->writing())
     {
-        const profiler_hub::histogram_grid_t grid = histogram_grid(k_stored_histogram_buckets);
+        const profiler_hub::histogram_grid_t grid =
+            histogram_grid(k_stored_histogram_buckets);
         store->set_histogram_grid(static_cast<uint64_t>(grid.origin),
                                   static_cast<uint64_t>(grid.bucket_size),
                                   static_cast<uint64_t>(grid.bucket_count));
@@ -1672,8 +1679,8 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         uint64_t{ 0 },
         [](uint64_t sum, const auto& track) { return sum + track.event_count; });
 
-    const bool writing = m_track_store && m_track_store->writing();
-    const bool cached  = m_track_store && m_track_store->ready();
+    const bool writing       = m_track_store && m_track_store->writing();
+    const bool cached        = m_track_store && m_track_store->ready();
     uint64_t   loaded_events = 0;
     for(auto& c_track : m_c_tracks)
     {
@@ -1706,17 +1713,18 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
             if(samples)
             {
                 const std::vector<ph_sample_t> loaded = reader.load_samples(track);
-                m_track_store->write_samples(
-                    c_track.id,
-                    place->source_index,
-                    static_cast<uint32_t>(track->id),
-                    loaded,
-                    static_cast<uint64_t>(track->end_ts));
+                m_track_store->write_samples(c_track.id,
+                                             place->source_index,
+                                             static_cast<uint32_t>(track->id),
+                                             loaded,
+                                             static_cast<uint64_t>(track->end_ts));
             }
             else if(duration)
             {
-                const std::vector<ph_event_t> loaded = reader.load_events(
-                    track, [this](std::string_view text) { return m_track_store->intern(text); });
+                const std::vector<ph_event_t> loaded =
+                    reader.load_events(track, [this](std::string_view text) {
+                        return m_track_store->intern(text);
+                    });
                 uint32_t deepest = 0;
                 for(const ph_event_t& event : loaded)
                 {
@@ -1747,7 +1755,8 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         loaded_events += c_track.event_count;
         if(progress && total_events != 0)
         {
-            progress(static_cast<double>(loaded_events) / static_cast<double>(total_events),
+            progress(static_cast<double>(loaded_events) /
+                         static_cast<double>(total_events),
                      writing ? "Writing track files" : "Loading tracks");
         }
     }
@@ -1793,31 +1802,38 @@ ph_ctx::initialize_node_info()
             };
         }
 
-        source.node.agents = ph_agent_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_agents.size()),
-            .agents    = source.c_agents.data() };
-        source.node.process_list = ph_process_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_processes.size()),
-            .processes = source.c_processes.data() };
-        source.node.track_list = ph_track_list_t{
-            .list_size = source.track_count,
-            .tracks    = source.track_count == 0 ? nullptr
-                                                 : m_c_tracks.data() + source.track_offset };
-        source.node.thread_list = ph_thread_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_threads.size()),
-            .threads   = source.c_threads.data() };
-        source.node.stream_list = ph_stream_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_streams.size()),
-            .streams   = source.c_streams.data() };
-        source.node.queue_list = ph_queue_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_queues.size()),
-            .queues    = source.c_queues.data() };
-        source.node.pmc_info_list = ph_pmc_info_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_pmc_infos.size()),
-            .pmc_infos = source.c_pmc_infos.data() };
+        source.node.agents = ph_agent_list_t{ .list_size = static_cast<std::uint32_t>(
+                                                  source.c_agents.size()),
+                                              .agents = source.c_agents.data() };
+        source.node.process_list =
+            ph_process_list_t{ .list_size =
+                                   static_cast<std::uint32_t>(source.c_processes.size()),
+                               .processes = source.c_processes.data() };
+        source.node.track_list =
+            ph_track_list_t{ .list_size = source.track_count,
+                             .tracks    = source.track_count == 0
+                                              ? nullptr
+                                              : m_c_tracks.data() + source.track_offset };
+        source.node.thread_list =
+            ph_thread_list_t{ .list_size =
+                                  static_cast<std::uint32_t>(source.c_threads.size()),
+                              .threads = source.c_threads.data() };
+        source.node.stream_list =
+            ph_stream_list_t{ .list_size =
+                                  static_cast<std::uint32_t>(source.c_streams.size()),
+                              .streams = source.c_streams.data() };
+        source.node.queue_list = ph_queue_list_t{ .list_size = static_cast<std::uint32_t>(
+                                                      source.c_queues.size()),
+                                                  .queues = source.c_queues.data() };
+        source.node.pmc_info_list =
+            ph_pmc_info_list_t{ .list_size =
+                                    static_cast<std::uint32_t>(source.c_pmc_infos.size()),
+                                .pmc_infos = source.c_pmc_infos.data() };
         source.node.stream_hardware_links = ph_stream_hardware_link_list_t{
-            .list_size = static_cast<std::uint32_t>(source.c_stream_hardware_links.size()),
-            .links     = source.c_stream_hardware_links.data() };
+            .list_size =
+                static_cast<std::uint32_t>(source.c_stream_hardware_links.size()),
+            .links = source.c_stream_hardware_links.data()
+        };
     }
 }
 

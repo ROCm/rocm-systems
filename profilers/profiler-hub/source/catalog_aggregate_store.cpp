@@ -6,15 +6,15 @@
 #include "cache_directory.hpp"
 #include "debug.hpp"
 #if PROFILER_HUB_ENABLE_ROCPD_V2
-#include "formats/rocpd_v2/rocpd_v2_reader.hpp"
+#    include "formats/rocpd_v2/rocpd_v2_reader.hpp"
 #endif
 #include "reader_catalog.hpp"
 
 #include <bit>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -112,9 +112,7 @@ known_derived_kind(uint32_t kind, reader_types::track_kind_t& out)
         case reader_types::track_kind_t::memory_allocate_agent_queue:
         case reader_types::track_kind_t::memory_copy_agent_queue:
         case reader_types::track_kind_t::stream:
-        case reader_types::track_kind_t::hip_event_agent_queue:
-            out = value;
-            return true;
+        case reader_types::track_kind_t::hip_event_agent_queue: out = value; return true;
     }
     return false;
 }
@@ -145,8 +143,8 @@ stat_source(const std::string& path, source_identity_t& identity)
 std::string
 catalog_directory(const reader_catalog_t& catalog)
 {
-    const std::string cache_directory =
-        trace_cache_directory(catalog.aggregate_cache_root, catalog.aggregate_cache_paths);
+    const std::string cache_directory = trace_cache_directory(
+        catalog.aggregate_cache_root, catalog.aggregate_cache_paths);
     if(cache_directory.empty()) return {};
     return (std::filesystem::path{ cache_directory } / "catalog").string();
 }
@@ -274,7 +272,8 @@ known_kind(uint32_t kind, reader_types::track_kind_t& out)
     {
         case static_cast<uint32_t>(reader_types::track_kind_t::thread):
         case static_cast<uint32_t>(reader_types::track_kind_t::pmc_agent):
-        case static_cast<uint32_t>(reader_types::track_kind_t::kernel_dispatch_agent_queue):
+        case static_cast<uint32_t>(
+            reader_types::track_kind_t::kernel_dispatch_agent_queue):
         case static_cast<uint32_t>(reader_types::track_kind_t::memory_copy_agent_queue):
             out = static_cast<reader_types::track_kind_t>(kind);
             return true;
@@ -297,12 +296,14 @@ queue_gpu_id(const reader_types::queue_info_t& queue)
     {
         throw std::runtime_error{ "catalog aggregate queue name has no gpu id" };
     }
-    return static_cast<uint64_t>(std::stoull(queue.name.substr(k_prefix.size(), mark - k_prefix.size())));
+    return static_cast<uint64_t>(
+        std::stoull(queue.name.substr(k_prefix.size(), mark - k_prefix.size())));
 }
 #endif
 
 void
-rename_into_place(const std::filesystem::path& temporary, const std::filesystem::path& final_path)
+rename_into_place(const std::filesystem::path& temporary,
+                  const std::filesystem::path& final_path)
 {
     std::error_code error;
     std::filesystem::rename(temporary, final_path, error);
@@ -326,10 +327,12 @@ load_catalog_aggregates(reader_catalog_t& catalog)
     {
         const std::filesystem::path path = aggregate_file(catalog);
         if(path.empty() || !std::filesystem::is_regular_file(path)) return false;
-        if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size()) return false;
+        if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size())
+            return false;
 
         source_identity_t live;
-        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source], live))
+        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source],
+                        live))
         {
             return false;
         }
@@ -341,22 +344,23 @@ load_catalog_aggregates(reader_catalog_t& catalog)
         in.bytes(magic, 4);
         if(!same_magic(magic, k_magic) || in.u32() != k_format_version) return false;
         if(in.u32() != catalog.aggregate_cache_source) return false;
-        if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime)) return false;
+        if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime))
+            return false;
         if(in.text() != live.path) return false;
 
-        const uint32_t process_count = in.u32();
+        const uint32_t                                process_count = in.u32();
         std::vector<reader_types::process_info_ptr_t> processes;
         processes.reserve(process_count);
         for(uint32_t index = 0; index < process_count; ++index)
         {
-            auto process = std::make_shared<reader_types::process_info_t>();
-            process->pid = static_cast<size_t>(in.u64());
-            process->id  = process->pid;
+            auto process       = std::make_shared<reader_types::process_info_t>();
+            process->pid       = static_cast<size_t>(in.u64());
+            process->id        = process->pid;
             process->node_info = node->second;
             processes.push_back(std::move(process));
         }
 
-        const uint32_t thread_count = in.u32();
+        const uint32_t                               thread_count = in.u32();
         std::vector<reader_types::thread_info_ptr_t> threads;
         threads.reserve(thread_count);
         std::unordered_map<size_t, reader_types::process_info_ptr_t> process_by_pid;
@@ -366,12 +370,13 @@ load_catalog_aggregates(reader_catalog_t& catalog)
         }
         for(uint32_t index = 0; index < thread_count; ++index)
         {
-            auto thread = std::make_shared<reader_types::thread_info_t>();
+            auto thread               = std::make_shared<reader_types::thread_info_t>();
             thread->id                = static_cast<size_t>(in.u64());
             thread->parent_process_id = static_cast<size_t>(in.u64());
             thread->thread_id         = static_cast<size_t>(in.u64());
             thread->node_info         = node->second;
-            if(const auto process = process_by_pid.find(thread->parent_process_id.value_or(0));
+            if(const auto process =
+                   process_by_pid.find(thread->parent_process_id.value_or(0));
                process != process_by_pid.end())
             {
                 thread->process_info = process->second;
@@ -379,7 +384,7 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             threads.push_back(std::move(thread));
         }
 
-        const uint32_t agent_count = in.u32();
+        const uint32_t                              agent_count = in.u32();
         std::vector<reader_types::agent_info_ptr_t> agents;
         agents.reserve(agent_count);
         for(uint32_t index = 0; index < agent_count; ++index)
@@ -393,19 +398,20 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             agents.push_back(std::move(agent));
         }
 
-        const uint32_t queue_count = in.u32();
+        const uint32_t                              queue_count = in.u32();
         std::vector<reader_types::queue_info_ptr_t> queues;
         queues.reserve(queue_count);
         for(uint32_t index = 0; index < queue_count; ++index)
         {
-            const uint64_t gpu_id   = in.u64();
-            const uint64_t queue_id = in.u64();
+            const uint64_t gpu_id    = in.u64();
+            const uint64_t queue_id  = in.u64();
             const bool     has_owner = in.u8() != 0;
             const uint64_t owner     = in.u64();
-            auto queue      = std::make_shared<reader_types::queue_info_t>();
-            queue->queue_id = static_cast<size_t>(queue_id);
-            queue->nid      = rocpd_v2::k_node_id;
-            queue->name     = "GPU " + std::to_string(gpu_id) + " Queue " + std::to_string(queue_id);
+            auto           queue     = std::make_shared<reader_types::queue_info_t>();
+            queue->queue_id          = static_cast<size_t>(queue_id);
+            queue->nid               = rocpd_v2::k_node_id;
+            queue->name =
+                "GPU " + std::to_string(gpu_id) + " Queue " + std::to_string(queue_id);
             queue->node_info = node->second;
             if(has_owner)
             {
@@ -430,17 +436,17 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             thread_by_id.emplace(thread->id, thread);
         }
 
-        const uint32_t pmc_count = in.u32();
+        const uint32_t                            pmc_count = in.u32();
         std::vector<reader_types::pmc_info_ptr_t> pmc_infos;
         pmc_infos.reserve(pmc_count);
         for(uint32_t index = 0; index < pmc_count; ++index)
         {
-            auto pmc    = std::make_shared<reader_types::pmc_info_t>();
-            pmc->id     = static_cast<size_t>(in.u64());
+            auto pmc                 = std::make_shared<reader_types::pmc_info_t>();
+            pmc->id                  = static_cast<size_t>(in.u64());
             const uint64_t device_id = in.u64();
-            pmc->name   = in.text();
-            pmc->symbol = pmc->name;
-            pmc->node_info = node->second;
+            pmc->name                = in.text();
+            pmc->symbol              = pmc->name;
+            pmc->node_info           = node->second;
             if(const auto agent = agent_by_id.find(static_cast<size_t>(device_id));
                agent != agent_by_id.end())
             {
@@ -449,7 +455,7 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             pmc_infos.push_back(std::move(pmc));
         }
 
-        const uint32_t track_count = in.u32();
+        const uint32_t                              track_count = in.u32();
         std::vector<reader_types::track_info_ptr_t> tracks;
         std::vector<stored_track_t>                 stored_tracks;
         tracks.reserve(track_count);
@@ -457,25 +463,25 @@ load_catalog_aggregates(reader_catalog_t& catalog)
         for(uint32_t index = 0; index < track_count; ++index)
         {
             stored_track_t stored;
-            stored.id          = in.u64();
-            stored.kind        = in.u32();
-            stored.name        = in.text();
-            stored.event_count = in.u64();
-            stored.start_ts    = in.u64();
-            stored.end_ts      = in.u64();
-            stored.agent_id    = in.u64();
-            stored.queue_id    = in.u64();
-            stored.pmc_id      = in.u64();
-            stored.has_process = in.u8() != 0;
-            stored.pid         = in.u64();
-            stored.has_topology = in.u8() != 0;
-            stored.topo_pid    = in.u64();
-            stored.topo_tid    = in.u64();
-            stored.has_thread  = in.u8() != 0;
+            stored.id            = in.u64();
+            stored.kind          = in.u32();
+            stored.name          = in.text();
+            stored.event_count   = in.u64();
+            stored.start_ts      = in.u64();
+            stored.end_ts        = in.u64();
+            stored.agent_id      = in.u64();
+            stored.queue_id      = in.u64();
+            stored.pmc_id        = in.u64();
+            stored.has_process   = in.u8() != 0;
+            stored.pid           = in.u64();
+            stored.has_topology  = in.u8() != 0;
+            stored.topo_pid      = in.u64();
+            stored.topo_tid      = in.u64();
+            stored.has_thread    = in.u8() != 0;
             stored.thread_row_id = in.u64();
-            stored.has_value   = in.u8() != 0;
-            stored.value_min   = in.f64();
-            stored.value_max   = in.f64();
+            stored.has_value     = in.u8() != 0;
+            stored.value_min     = in.f64();
+            stored.value_max     = in.f64();
 
             reader_types::track_kind_t kind{};
             if(!known_kind(stored.kind, kind)) return false;
@@ -492,7 +498,8 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             track->node_info   = node->second;
             if(stored.has_process)
             {
-                if(const auto process = process_by_pid.find(static_cast<size_t>(stored.pid));
+                if(const auto process =
+                       process_by_pid.find(static_cast<size_t>(stored.pid));
                    process != process_by_pid.end())
                 {
                     track->process_info = process->second;
@@ -500,7 +507,8 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             }
             if(stored.has_thread)
             {
-                if(const auto thread = thread_by_id.find(static_cast<size_t>(stored.thread_row_id));
+                if(const auto thread =
+                       thread_by_id.find(static_cast<size_t>(stored.thread_row_id));
                    thread != thread_by_id.end())
                 {
                     track->thread_info = thread->second;
@@ -518,16 +526,22 @@ load_catalog_aggregates(reader_catalog_t& catalog)
         std::unordered_map<size_t, reader_types::process_info_ptr_t> processes_by_id;
         std::unordered_map<size_t, reader_types::thread_info_ptr_t>  threads_by_id;
         std::unordered_map<size_t, reader_types::agent_info_ptr_t>   agents_by_id;
-        std::unordered_map<topology_key_t, reader_types::track_info_ptr_t, topology_key_hash_t>
+        std::unordered_map<topology_key_t,
+                           reader_types::track_info_ptr_t,
+                           topology_key_hash_t>
             track_by_topology;
-        std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> topology_by_track;
+        std::unordered_map<reader_types::track_info_ptr_t, topology_key_t>
+            topology_by_track;
         std::unordered_map<agent_queue_track_key_t,
                            reader_types::track_info_ptr_t,
                            agent_queue_track_key_hash_t>
             agent_queue_track_by_key;
-        for(const auto& process : processes) processes_by_id.emplace(process->id, process);
-        for(const auto& thread : threads) threads_by_id.emplace(thread->id, thread);
-        for(const auto& agent : agents) agents_by_id.emplace(agent->id, agent);
+        for(const auto& process : processes)
+            processes_by_id.emplace(process->id, process);
+        for(const auto& thread : threads)
+            threads_by_id.emplace(thread->id, thread);
+        for(const auto& agent : agents)
+            agents_by_id.emplace(agent->id, agent);
         for(size_t index = 0; index < tracks.size(); ++index)
         {
             const auto&           track  = tracks[index];
@@ -540,7 +554,8 @@ load_catalog_aggregates(reader_catalog_t& catalog)
                 topology_by_track.emplace(track, topology);
                 track_by_topology.emplace(topology, track);
             }
-            if(track->category == reader_types::track_kind_t::kernel_dispatch_agent_queue ||
+            if(track->category ==
+                   reader_types::track_kind_t::kernel_dispatch_agent_queue ||
                track->category == reader_types::track_kind_t::memory_copy_agent_queue)
             {
                 agent_queue_track_by_key.emplace(
@@ -552,17 +567,17 @@ load_catalog_aggregates(reader_catalog_t& catalog)
             }
         }
 
-        catalog.processes               = std::move(processes);
-        catalog.threads                 = std::move(threads);
-        catalog.agents                  = std::move(agents);
-        catalog.queues                  = std::move(queues);
-        catalog.pmc_infos               = std::move(pmc_infos);
-        catalog.tracks                  = std::move(tracks);
-        catalog.processes_by_id         = std::move(processes_by_id);
-        catalog.threads_by_id           = std::move(threads_by_id);
-        catalog.agents_by_id            = std::move(agents_by_id);
-        catalog.track_by_topology       = std::move(track_by_topology);
-        catalog.topology_by_track       = std::move(topology_by_track);
+        catalog.processes                = std::move(processes);
+        catalog.threads                  = std::move(threads);
+        catalog.agents                   = std::move(agents);
+        catalog.queues                   = std::move(queues);
+        catalog.pmc_infos                = std::move(pmc_infos);
+        catalog.tracks                   = std::move(tracks);
+        catalog.processes_by_id          = std::move(processes_by_id);
+        catalog.threads_by_id            = std::move(threads_by_id);
+        catalog.agents_by_id             = std::move(agents_by_id);
+        catalog.track_by_topology        = std::move(track_by_topology);
+        catalog.topology_by_track        = std::move(topology_by_track);
         catalog.agent_queue_track_by_key = std::move(agent_queue_track_by_key);
         catalog.derived_aggregates_ready = true;
         LOG_INFO("[Profiler-Hub] Using catalog aggregates {}", path.string());
@@ -585,7 +600,8 @@ save_catalog_aggregates(const reader_catalog_t& catalog)
         if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size()) return;
 
         source_identity_t live;
-        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source], live))
+        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source],
+                        live))
         {
             return;
         }
@@ -642,7 +658,7 @@ save_catalog_aggregates(const reader_catalog_t& catalog)
             out.u32(static_cast<uint32_t>(catalog.tracks.size()));
             for(const auto& track : catalog.tracks)
             {
-                const auto topology = catalog.topology_by_track.find(track);
+                const auto topology     = catalog.topology_by_track.find(track);
                 const bool has_topology = topology != catalog.topology_by_track.end();
                 out.u64(static_cast<uint64_t>(track->id));
                 out.u32(static_cast<uint32_t>(track->category));
@@ -654,12 +670,15 @@ save_catalog_aggregates(const reader_catalog_t& catalog)
                 out.u64(static_cast<uint64_t>(track->queue_id));
                 out.u64(static_cast<uint64_t>(track->pmc_id));
                 out.u8(track->process_info ? 1 : 0);
-                out.u64(track->process_info ? static_cast<uint64_t>(track->process_info->pid) : 0);
+                out.u64(track->process_info
+                            ? static_cast<uint64_t>(track->process_info->pid)
+                            : 0);
                 out.u8(has_topology ? 1 : 0);
                 out.u64(has_topology ? static_cast<uint64_t>(topology->second.pid) : 0);
                 out.u64(has_topology ? static_cast<uint64_t>(topology->second.tid) : 0);
                 out.u8(track->thread_info ? 1 : 0);
-                out.u64(track->thread_info ? static_cast<uint64_t>(track->thread_info->id) : 0);
+                out.u64(track->thread_info ? static_cast<uint64_t>(track->thread_info->id)
+                                           : 0);
                 out.u8(track->value_range ? 1 : 0);
                 out.f64(track->value_range ? track->value_range->min : 0);
                 out.f64(track->value_range ? track->value_range->max : 0);
@@ -695,10 +714,12 @@ load_derived_tracks(reader_catalog_t& catalog)
     {
         const std::filesystem::path path = derived_file(catalog);
         if(path.empty() || !std::filesystem::is_regular_file(path)) return false;
-        if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size()) return false;
+        if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size())
+            return false;
 
         source_identity_t live;
-        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source], live))
+        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source],
+                        live))
         {
             return false;
         }
@@ -711,17 +732,21 @@ load_derived_tracks(reader_catalog_t& catalog)
             return false;
         }
         if(in.u32() != catalog.aggregate_cache_source) return false;
-        if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime)) return false;
+        if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime))
+            return false;
         if(in.text() != live.path) return false;
 
-        const uint32_t track_count = in.u32();
+        const uint32_t                              track_count = in.u32();
         std::vector<reader_types::track_info_ptr_t> tracks;
         tracks.reserve(track_count);
         std::unordered_map<size_t, reader_types::track_info_ptr_t> tracks_by_id;
-        std::unordered_map<topology_key_t, reader_types::track_info_ptr_t, topology_key_hash_t>
+        std::unordered_map<topology_key_t,
+                           reader_types::track_info_ptr_t,
+                           topology_key_hash_t>
             track_by_topology;
-        std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> topology_by_track;
-        std::unordered_map<reader_types::track_info_ptr_t, size_t>         db_id_by_track;
+        std::unordered_map<reader_types::track_info_ptr_t, topology_key_t>
+                                                                   topology_by_track;
+        std::unordered_map<reader_types::track_info_ptr_t, size_t> db_id_by_track;
         std::unordered_map<size_t, reader_types::track_info_ptr_t> sample_track_by_db_id;
         std::unordered_map<stream_track_key_t,
                            reader_types::track_info_ptr_t,
@@ -741,20 +766,20 @@ load_derived_tracks(reader_catalog_t& catalog)
             reader_types::track_kind_t kind{};
             const uint64_t             id = in.u64();
             if(!known_derived_kind(in.u32(), kind)) return false;
-            auto track         = std::make_shared<reader_types::track_info_t>();
-            track->id          = static_cast<size_t>(id);
-            track->category    = kind;
-            track->name        = in.text();
-            track->extdata     = in.text();
-            track->event_count = static_cast<size_t>(in.u64());
-            track->agent_id    = static_cast<size_t>(in.u64());
-            track->queue_id    = static_cast<size_t>(in.u64());
-            track->stream_id   = static_cast<size_t>(in.u64());
-            track->db_pid      = static_cast<size_t>(in.u64());
-            track->pmc_id      = static_cast<size_t>(in.u64());
-            track->start_ts    = static_cast<size_t>(in.u64());
-            track->end_ts      = static_cast<size_t>(in.u64());
-            const bool has_value = in.u8() != 0;
+            auto track             = std::make_shared<reader_types::track_info_t>();
+            track->id              = static_cast<size_t>(id);
+            track->category        = kind;
+            track->name            = in.text();
+            track->extdata         = in.text();
+            track->event_count     = static_cast<size_t>(in.u64());
+            track->agent_id        = static_cast<size_t>(in.u64());
+            track->queue_id        = static_cast<size_t>(in.u64());
+            track->stream_id       = static_cast<size_t>(in.u64());
+            track->db_pid          = static_cast<size_t>(in.u64());
+            track->pmc_id          = static_cast<size_t>(in.u64());
+            track->start_ts        = static_cast<size_t>(in.u64());
+            track->end_ts          = static_cast<size_t>(in.u64());
+            const bool   has_value = in.u8() != 0;
             const double value_min = in.f64();
             const double value_max = in.f64();
             if(has_value)
@@ -767,7 +792,8 @@ load_derived_tracks(reader_catalog_t& catalog)
             const size_t pid     = static_cast<size_t>(in.u64());
             const bool   has_tid = in.u8() != 0;
             const size_t tid     = static_cast<size_t>(in.u64());
-            if(const auto node = catalog.nodes_by_id.find(nid); node != catalog.nodes_by_id.end())
+            if(const auto node = catalog.nodes_by_id.find(nid);
+               node != catalog.nodes_by_id.end())
             {
                 track->node_info = node->second;
             }
@@ -788,14 +814,14 @@ load_derived_tracks(reader_catalog_t& catalog)
                 }
             }
 
-            const bool has_topology = in.u8() != 0;
+            const bool           has_topology = in.u8() != 0;
             const topology_key_t topology{ static_cast<size_t>(in.u64()),
                                            static_cast<size_t>(in.u64()),
                                            static_cast<size_t>(in.u64()) };
-            const bool     has_db_id = in.u8() != 0;
-            const uint64_t db_id     = in.u64();
-            const bool     has_sample = in.u8() != 0;
-            const uint64_t sample_id  = in.u64();
+            const bool           has_db_id  = in.u8() != 0;
+            const uint64_t       db_id      = in.u64();
+            const bool           has_sample = in.u8() != 0;
+            const uint64_t       sample_id  = in.u64();
             if(has_topology)
             {
                 topology_by_track.emplace(track, topology);
@@ -812,13 +838,14 @@ load_derived_tracks(reader_catalog_t& catalog)
             if(agent_queue_kind(kind))
             {
                 agent_queue_track_by_key.emplace(
-                    agent_queue_track_key_t{ kind, nid, track->agent_id, track->queue_id },
+                    agent_queue_track_key_t{
+                        kind, nid, track->agent_id, track->queue_id },
                     track);
             }
             if(kind == reader_types::track_kind_t::stream)
             {
-                stream_track_by_key.emplace(stream_track_key_t{ nid, track->db_pid, track->stream_id },
-                                            track);
+                stream_track_by_key.emplace(
+                    stream_track_key_t{ nid, track->db_pid, track->stream_id }, track);
             }
 
             const uint32_t point_count = in.u32();
@@ -853,24 +880,24 @@ load_derived_tracks(reader_catalog_t& catalog)
             tracks.push_back(std::move(track));
         }
 
-        const uint32_t link_count = in.u32();
+        const uint32_t                            link_count = in.u32();
         reader_types::stream_hardware_link_list_t links;
         links.reserve(link_count);
         for(uint32_t index = 0; index < link_count; ++index)
         {
             reader_types::stream_hardware_link_t link;
             if(!known_derived_kind(in.u32(), link.category)) return false;
-            link.nid       = static_cast<size_t>(in.u64());
-            link.pid       = static_cast<size_t>(in.u64());
-            link.stream_id = static_cast<size_t>(in.u64());
-            const bool has_agent = in.u8() != 0;
-            const size_t agent   = static_cast<size_t>(in.u64());
-            const bool has_queue = in.u8() != 0;
-            const size_t queue   = static_cast<size_t>(in.u64());
+            link.nid               = static_cast<size_t>(in.u64());
+            link.pid               = static_cast<size_t>(in.u64());
+            link.stream_id         = static_cast<size_t>(in.u64());
+            const bool   has_agent = in.u8() != 0;
+            const size_t agent     = static_cast<size_t>(in.u64());
+            const bool   has_queue = in.u8() != 0;
+            const size_t queue     = static_cast<size_t>(in.u64());
             if(has_agent) link.agent_id = agent;
             if(has_queue) link.queue_id = queue;
-            const bool     has_stream = in.u8() != 0;
-            const uint64_t stream_id  = in.u64();
+            const bool     has_stream   = in.u8() != 0;
+            const uint64_t stream_id    = in.u64();
             const bool     has_hardware = in.u8() != 0;
             const uint64_t hardware_id  = in.u64();
             if(has_stream)
@@ -892,15 +919,15 @@ load_derived_tracks(reader_catalog_t& catalog)
             links.push_back(std::move(link));
         }
 
-        catalog.tracks                   = std::move(tracks);
-        catalog.track_by_topology        = std::move(track_by_topology);
-        catalog.topology_by_track        = std::move(topology_by_track);
-        catalog.db_id_by_track           = std::move(db_id_by_track);
-        catalog.sample_track_by_db_id    = std::move(sample_track_by_db_id);
-        catalog.stream_track_by_key      = std::move(stream_track_by_key);
-        catalog.agent_queue_track_by_key = std::move(agent_queue_track_by_key);
-        catalog.stream_hardware_links    = std::move(links);
-        catalog.m_memory_activity        = std::move(memory_activity);
+        catalog.tracks                     = std::move(tracks);
+        catalog.track_by_topology          = std::move(track_by_topology);
+        catalog.topology_by_track          = std::move(topology_by_track);
+        catalog.db_id_by_track             = std::move(db_id_by_track);
+        catalog.sample_track_by_db_id      = std::move(sample_track_by_db_id);
+        catalog.stream_track_by_key        = std::move(stream_track_by_key);
+        catalog.agent_queue_track_by_key   = std::move(agent_queue_track_by_key);
+        catalog.stream_hardware_links      = std::move(links);
+        catalog.m_memory_activity          = std::move(memory_activity);
         catalog.m_memory_activity_first_id = memory_first_id;
         catalog.m_memory_activity_last_id  = memory_last_id;
         catalog.m_memory_activity_has_ids  = memory_has_ids;
@@ -925,7 +952,8 @@ save_derived_tracks(const reader_catalog_t& catalog)
         if(catalog.aggregate_cache_source >= catalog.aggregate_cache_paths.size()) return;
 
         source_identity_t live;
-        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source], live))
+        if(!stat_source(catalog.aggregate_cache_paths[catalog.aggregate_cache_source],
+                        live))
         {
             return;
         }
@@ -967,14 +995,14 @@ save_derived_tracks(const reader_catalog_t& catalog)
             out.u32(fit_count(catalog.tracks.size()));
             for(const auto& track : catalog.tracks)
             {
-                const auto topology = catalog.topology_by_track.find(track);
+                const auto topology     = catalog.topology_by_track.find(track);
                 const bool has_topology = topology != catalog.topology_by_track.end();
-                const auto db_id = catalog.db_id_by_track.find(track);
-                const bool has_db_id = db_id != catalog.db_id_by_track.end();
-                const auto sample_id = sample_id_by_track.find(track);
-                const bool has_sample = sample_id != sample_id_by_track.end();
-                const auto nid = nid_by_track.find(track);
-                const auto points = catalog.m_memory_activity.find(track->id);
+                const auto db_id        = catalog.db_id_by_track.find(track);
+                const bool has_db_id    = db_id != catalog.db_id_by_track.end();
+                const auto sample_id    = sample_id_by_track.find(track);
+                const bool has_sample   = sample_id != sample_id_by_track.end();
+                const auto nid          = nid_by_track.find(track);
+                const auto points       = catalog.m_memory_activity.find(track->id);
 
                 out.u64(static_cast<uint64_t>(track->id));
                 out.u32(static_cast<uint32_t>(track->category));
@@ -993,13 +1021,16 @@ save_derived_tracks(const reader_catalog_t& catalog)
                 out.f64(track->value_range ? track->value_range->max : 0);
                 const uint64_t stored_nid =
                     nid != nid_by_track.end() ? static_cast<uint64_t>(nid->second)
-                    : track->node_info       ? static_cast<uint64_t>(track->node_info->node_id)
-                                             : 0;
+                    : track->node_info ? static_cast<uint64_t>(track->node_info->node_id)
+                                       : 0;
                 out.u64(stored_nid);
                 out.u8(track->process_info ? 1 : 0);
-                out.u64(track->process_info ? static_cast<uint64_t>(track->process_info->id) : 0);
+                out.u64(track->process_info
+                            ? static_cast<uint64_t>(track->process_info->id)
+                            : 0);
                 out.u8(track->thread_info ? 1 : 0);
-                out.u64(track->thread_info ? static_cast<uint64_t>(track->thread_info->id) : 0);
+                out.u64(track->thread_info ? static_cast<uint64_t>(track->thread_info->id)
+                                           : 0);
                 out.u8(has_topology ? 1 : 0);
                 out.u64(has_topology ? static_cast<uint64_t>(topology->second.nid) : 0);
                 out.u64(has_topology ? static_cast<uint64_t>(topology->second.pid) : 0);
@@ -1027,7 +1058,8 @@ save_derived_tracks(const reader_catalog_t& catalog)
             }
 
             out.u32(fit_count(catalog.stream_hardware_links.size()));
-            for(const reader_types::stream_hardware_link_t& link : catalog.stream_hardware_links)
+            for(const reader_types::stream_hardware_link_t& link :
+                catalog.stream_hardware_links)
             {
                 out.u32(static_cast<uint32_t>(link.category));
                 out.u64(static_cast<uint64_t>(link.nid));
@@ -1038,9 +1070,12 @@ save_derived_tracks(const reader_catalog_t& catalog)
                 out.u8(link.queue_id ? 1 : 0);
                 out.u64(link.queue_id ? static_cast<uint64_t>(link.queue_id.value()) : 0);
                 out.u8(link.stream_track ? 1 : 0);
-                out.u64(link.stream_track ? static_cast<uint64_t>(link.stream_track->id) : 0);
+                out.u64(link.stream_track ? static_cast<uint64_t>(link.stream_track->id)
+                                          : 0);
                 out.u8(link.hardware_track ? 1 : 0);
-                out.u64(link.hardware_track ? static_cast<uint64_t>(link.hardware_track->id) : 0);
+                out.u64(link.hardware_track
+                            ? static_cast<uint64_t>(link.hardware_track->id)
+                            : 0);
             }
         }
         rename_into_place(temporary, path);

@@ -42,7 +42,7 @@ connection_pool::lease::~lease()
 connection_pool::connection_pool(std::string_view file_path,
                                  size_t           num_connections,
                                  std::shared_ptr<profiler_hub::reader_catalog_t> catalog,
-                                 std::string_view uuid,
+                                 std::string_view                                uuid,
                                  const profiler_hub::reader_types::trace_format_t& format)
 {
     m_connections.reserve(num_connections);

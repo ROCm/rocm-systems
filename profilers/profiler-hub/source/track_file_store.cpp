@@ -23,14 +23,14 @@ namespace profiler_hub
 namespace
 {
 
-constexpr uint32_t k_file_header_bytes = 64;
-constexpr uint32_t k_event_record_bytes = 40;
+constexpr uint32_t k_file_header_bytes   = 64;
+constexpr uint32_t k_event_record_bytes  = 40;
 constexpr uint32_t k_sample_record_bytes = 16;
-constexpr uint32_t k_index_record_bytes = 16;
-constexpr char     k_meta_magic[4]   = { 'P', 'H', 'M', '1' };
-constexpr char     k_string_magic[4] = { 'P', 'H', 'N', '1' };
-constexpr char     k_event_magic[4]  = { 'P', 'H', 'E', '1' };
-constexpr char     k_sample_magic[4] = { 'P', 'H', 'S', '1' };
+constexpr uint32_t k_index_record_bytes  = 16;
+constexpr char     k_meta_magic[4]       = { 'P', 'H', 'M', '1' };
+constexpr char     k_string_magic[4]     = { 'P', 'H', 'N', '1' };
+constexpr char     k_event_magic[4]      = { 'P', 'H', 'E', '1' };
+constexpr char     k_sample_magic[4]     = { 'P', 'H', 'S', '1' };
 
 static_assert(std::endian::native == std::endian::little,
               "the track cache is little-endian");
@@ -256,9 +256,9 @@ same_magic(const char actual[4], const char expected[4])
 }
 
 void
-write_file_header(binary_writer&     out,
-                  const char         magic[4],
-                  uint32_t           record_size,
+write_file_header(binary_writer&       out,
+                  const char           magic[4],
+                  uint32_t             record_size,
                   const file_header_t& header)
 {
     out.bytes(magic, 4);
@@ -340,10 +340,10 @@ sparse_overlaps(const std::vector<overlap_bucket_t>& buckets)
     for(size_t index = 0; index < buckets.size(); ++index)
     {
         if(buckets[index].event_count == 0) continue;
-        sparse.push_back(ph_histogram_bucket_t{
-            .bucket_index = static_cast<uint32_t>(index),
-            .event_count  = buckets[index].event_count,
-            .value        = buckets[index].value });
+        sparse.push_back(
+            ph_histogram_bucket_t{ .bucket_index = static_cast<uint32_t>(index),
+                                   .event_count  = buckets[index].event_count,
+                                   .value        = buckets[index].value });
     }
     return sparse;
 }
@@ -387,7 +387,7 @@ sample_histogram(const std::vector<ph_sample_t>& samples,
         populated.push_back(ph_histogram_bucket_t{
             .bucket_index = static_cast<uint32_t>(index),
             .event_count  = buckets[index].count,
-            .value        = buckets[index].sum / static_cast<double>(buckets[index].count) });
+            .value = buckets[index].sum / static_cast<double>(buckets[index].count) });
     }
     if(populated.size() < 2) return populated;
 
@@ -400,8 +400,7 @@ sample_histogram(const std::vector<ph_sample_t>& samples,
             gap < populated[index + 1].bucket_index;
             ++gap)
         {
-            filled.push_back(
-                ph_histogram_bucket_t{ gap, 0, populated[index].value });
+            filled.push_back(ph_histogram_bucket_t{ gap, 0, populated[index].value });
         }
     }
     return filled;
@@ -437,25 +436,27 @@ track_file_store::open(const std::string&              cache_root,
 
     try
     {
-        const std::string cache_directory = trace_cache_directory(cache_root, source_paths);
+        const std::string cache_directory =
+            trace_cache_directory(cache_root, source_paths);
         if(cache_directory.empty()) return false;
 
         m_sources.reserve(source_paths.size());
         for(const std::string& source_path : source_paths)
         {
             const std::filesystem::path file{ source_path };
-            source_identity_t identity;
-            identity.path  = source_path;
-            identity.size  = static_cast<uint64_t>(std::filesystem::file_size(file));
-            identity.mtime = std::filesystem::last_write_time(file).time_since_epoch().count();
+            source_identity_t           identity;
+            identity.path = source_path;
+            identity.size = static_cast<uint64_t>(std::filesystem::file_size(file));
+            identity.mtime =
+                std::filesystem::last_write_time(file).time_since_epoch().count();
             m_sources.push_back(std::move(identity));
         }
 
-        m_schema         = schema;
-        m_version_major  = version_major;
-        m_version_minor  = version_minor;
-        m_version_patch  = version_patch;
-        m_directory      = (std::filesystem::path{ cache_directory } / "timeline").string();
+        m_schema        = schema;
+        m_version_major = version_major;
+        m_version_minor = version_minor;
+        m_version_patch = version_patch;
+        m_directory = (std::filesystem::path{ cache_directory } / "timeline").string();
 
         const std::filesystem::path metadata =
             std::filesystem::path{ m_directory } / "timeline.meta";
@@ -465,8 +466,8 @@ track_file_store::open(const std::string&              cache_root,
         char          magic[4] = {};
         in.bytes(magic, 4);
         if(!same_magic(magic, k_meta_magic) || in.u32() != k_format_version) return true;
-        if(in.u32() != m_schema || in.u32() != m_version_major || in.u32() != m_version_minor ||
-           in.u32() != m_version_patch)
+        if(in.u32() != m_schema || in.u32() != m_version_major ||
+           in.u32() != m_version_minor || in.u32() != m_version_patch)
         {
             return true;
         }
@@ -488,21 +489,21 @@ track_file_store::open(const std::string&              cache_root,
         for(uint32_t index = 0; index < track_count; ++index)
         {
             track_entry_t entry;
-            entry.global_id      = in.u32();
-            entry.source_index   = in.u32();
-            entry.local_id       = in.u32();
-            const uint32_t kind  = in.u32();
+            entry.global_id     = in.u32();
+            entry.source_index  = in.u32();
+            entry.local_id      = in.u32();
+            const uint32_t kind = in.u32();
             if(kind != static_cast<uint32_t>(payload_t::events) &&
                kind != static_cast<uint32_t>(payload_t::samples))
             {
                 throw std::runtime_error{ "track cache entry has an unknown kind" };
             }
-            entry.kind           = static_cast<payload_t>(kind);
-            entry.nesting_depth  = in.u32();
-            std::ignore          = in.u32();
-            entry.record_count   = in.u64();
-            entry.start_ts       = in.u64();
-            entry.end_ts         = in.u64();
+            entry.kind             = static_cast<payload_t>(kind);
+            entry.nesting_depth    = in.u32();
+            std::ignore            = in.u32();
+            entry.record_count     = in.u64();
+            entry.start_ts         = in.u64();
+            entry.end_ts           = in.u64();
             const uint32_t buckets = in.u32();
             entry.buckets.reserve(buckets);
             for(uint32_t bucket = 0; bucket < buckets; ++bucket)
@@ -534,7 +535,8 @@ track_file_store::open(const std::string&              cache_root,
         return true;
     } catch(const std::exception& failure)
     {
-        LOG_WARNING("[Profiler-Hub] Ignoring track cache {}: {}", m_directory, failure.what());
+        LOG_WARNING(
+            "[Profiler-Hub] Ignoring track cache {}: {}", m_directory, failure.what());
         clear_tracks();
         m_strings.clear();
         m_ready = false;
@@ -633,17 +635,18 @@ track_file_store::write_events(uint32_t                       global_id,
     for(const ph_event_t& event : events)
     {
         event_record_t record{};
-        record.id            = event.id;
-        record.start         = event.start;
-        record.end           = event.end;
-        record.name_id       = intern_id(event.name == nullptr ? std::string_view{}
-                                                               : std::string_view{ event.name });
+        record.id      = event.id;
+        record.start   = event.start;
+        record.end     = event.end;
+        record.name_id = intern_id(
+            event.name == nullptr ? std::string_view{} : std::string_view{ event.name });
         record.type          = static_cast<uint32_t>(event.type);
         record.nesting_depth = event.nesting_depth;
         deepest              = std::max(deepest, event.nesting_depth);
         end                  = std::max(end, event.end);
         records.push_back(record);
-        index.push_back(depth_index_record_t{ record.type, record.nesting_depth, record.id });
+        index.push_back(
+            depth_index_record_t{ record.type, record.nesting_depth, record.id });
     }
 
     struct live_t
@@ -662,7 +665,8 @@ track_file_store::write_events(uint32_t                       global_id,
     for(size_t record_index = 0; record_index < records.size(); ++record_index)
     {
         const uint64_t next_start = records[record_index].start;
-        std::erase_if(live, [next_start](const live_t& item) { return item.end < next_start; });
+        std::erase_if(live,
+                      [next_start](const live_t& item) { return item.end < next_start; });
         if(record_index % m_checkpoint_interval == 0)
         {
             checkpoint_t checkpoint;
@@ -682,11 +686,11 @@ track_file_store::write_events(uint32_t                       global_id,
         std::filesystem::path{ m_directory } / event_file(global_id);
     binary_writer out{ path };
     file_header_t header;
-    header.record_count      = records.size();
-    header.checkpoint_count  = checkpoints.size();
-    header.nesting_depth     = deepest;
-    header.start_ts          = records.front().start;
-    header.end_ts            = end;
+    header.record_count     = records.size();
+    header.checkpoint_count = checkpoints.size();
+    header.nesting_depth    = deepest;
+    header.start_ts         = records.front().start;
+    header.end_ts           = end;
     write_file_header(out, k_event_magic, k_event_record_bytes, header);
     out.bytes(records.data(), records.size() * sizeof(event_record_t));
     header.checkpoint_offset = out.offset();
@@ -705,12 +709,14 @@ track_file_store::write_events(uint32_t                       global_id,
     out.seek(0);
     write_file_header(out, k_event_magic, k_event_record_bytes, header);
 
-    std::sort(index.begin(), index.end(), [](const depth_index_record_t& lhs,
-                                              const depth_index_record_t& rhs) {
-        if(lhs.type != rhs.type) return lhs.type < rhs.type;
-        return lhs.id < rhs.id;
-    });
-    binary_writer index_out{ std::filesystem::path{ m_directory } / index_file(global_id) };
+    std::sort(index.begin(),
+              index.end(),
+              [](const depth_index_record_t& lhs, const depth_index_record_t& rhs) {
+                  if(lhs.type != rhs.type) return lhs.type < rhs.type;
+                  return lhs.id < rhs.id;
+              });
+    binary_writer index_out{ std::filesystem::path{ m_directory } /
+                             index_file(global_id) };
     index_out.bytes(index.data(), index.size() * sizeof(depth_index_record_t));
 
     track_entry_t entry;
@@ -722,8 +728,8 @@ track_file_store::write_events(uint32_t                       global_id,
     entry.record_count  = records.size();
     entry.start_ts      = header.start_ts;
     entry.end_ts        = header.end_ts;
-    entry.buckets       = overlap_histogram(
-        events, m_hist_origin, m_hist_bucket_size, m_hist_bucket_count);
+    entry.buckets =
+        overlap_histogram(events, m_hist_origin, m_hist_bucket_size, m_hist_bucket_count);
     m_tracks.push_back(std::move(entry));
     index_track(m_tracks.back());
 }
@@ -900,7 +906,7 @@ track_file_store::nesting_depth_of(uint32_t        source_index,
     uint64_t      high   = entry->record_count;
     while(low < high)
     {
-        const uint64_t       middle = low + (high - low) / 2;
+        const uint64_t middle = low + (high - low) / 2;
         in.seek(middle * sizeof(depth_index_record_t));
         const auto record = in.record<depth_index_record_t>();
         if(record.type < wanted || (record.type == wanted && record.id < event_id))
@@ -962,7 +968,7 @@ track_file_store::release_events(ph_event_t* events)
 {
     if(events == nullptr) return;
     const std::lock_guard<std::mutex> lock{ m_result_mutex };
-    const auto found = std::find_if(
+    const auto                        found = std::find_if(
         m_held_events.begin(), m_held_events.end(), [events](const auto& held) {
             return held != nullptr && held->data() == events;
         });
@@ -974,7 +980,7 @@ track_file_store::release_samples(ph_sample_t* samples)
 {
     if(samples == nullptr) return;
     const std::lock_guard<std::mutex> lock{ m_result_mutex };
-    const auto found = std::find_if(
+    const auto                        found = std::find_if(
         m_held_samples.begin(), m_held_samples.end(), [samples](const auto& held) {
             return held != nullptr && held->data() == samples;
         });
@@ -982,7 +988,9 @@ track_file_store::release_samples(ph_sample_t* samples)
 }
 
 stored_histogram_t
-track_file_store::histogram(uint64_t origin, uint64_t bucket_size, uint64_t bucket_count) const
+track_file_store::histogram(uint64_t origin,
+                            uint64_t bucket_size,
+                            uint64_t bucket_count) const
 {
     const bool same_grid = origin == m_hist_origin && bucket_size == m_hist_bucket_size &&
                            bucket_count == m_hist_bucket_count;
@@ -1041,7 +1049,9 @@ track_file_store::index_file(uint32_t global_id) const
 }
 
 std::vector<ph_event_t>
-track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t end_ts) const
+track_file_store::read_events(uint32_t global_id,
+                              uint64_t start_ts,
+                              uint64_t end_ts) const
 {
     const track_entry_t* entry = find_global(global_id);
     if(entry == nullptr || entry->kind != payload_t::events) return {};
@@ -1061,13 +1071,14 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
     };
 
     binary_reader in{ std::filesystem::path{ m_directory } / event_file(global_id) };
-    const file_header_t header = read_file_header(in, k_event_magic, k_event_record_bytes);
+    const file_header_t header =
+        read_file_header(in, k_event_magic, k_event_record_bytes);
     if(header.record_count == 0) return {};
 
-    const uint64_t stride = m_checkpoint_interval == 0
-                                ? uint64_t{ 1 }
-                                : static_cast<uint64_t>(m_checkpoint_interval);
-    uint64_t       seen   = 0;
+    const uint64_t stride      = m_checkpoint_interval == 0
+                                     ? uint64_t{ 1 }
+                                     : static_cast<uint64_t>(m_checkpoint_interval);
+    uint64_t       seen        = 0;
     const auto     note_record = [&] {
         if(seen % stride == 0)
         {
@@ -1093,10 +1104,9 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
         return take(header.record_count);
     }
 
-    const auto window = make_window_filter(start_ts, end_ts).time_window;
+    const auto     window       = make_window_filter(start_ts, end_ts).time_window;
     const uint64_t window_start = window.start.value_or(0);
-    const uint64_t window_end =
-        window.end.value_or(std::numeric_limits<uint64_t>::max());
+    const uint64_t window_end = window.end.value_or(std::numeric_limits<uint64_t>::max());
 
     std::vector<loaded_checkpoint_t> checkpoints;
     if(header.checkpoint_count != 0)
@@ -1106,8 +1116,8 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
         for(uint64_t index = 0; index < header.checkpoint_count; ++index)
         {
             loaded_checkpoint_t checkpoint;
-            checkpoint.record_index = in.u64();
-            checkpoint.next_start   = in.u64();
+            checkpoint.record_index   = in.u64();
+            checkpoint.next_start     = in.u64();
             const uint32_t open_count = in.u32();
             std::ignore               = in.u32();
             if(static_cast<uint64_t>(open_count) > header.record_count)
@@ -1127,8 +1137,10 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
     size_t chosen = 0;
     for(size_t index = 0; index < checkpoints.size(); ++index)
     {
-        if(checkpoints[index].next_start <= window_start) chosen = index;
-        else break;
+        if(checkpoints[index].next_start <= window_start)
+            chosen = index;
+        else
+            break;
     }
     uint64_t scan_begin = checkpoints.empty() ? 0 : checkpoints[chosen].record_index;
     uint64_t scan_end   = header.record_count;
@@ -1173,31 +1185,33 @@ track_file_store::read_events(uint32_t global_id, uint64_t start_ts, uint64_t en
 }
 
 std::vector<ph_sample_t>
-track_file_store::read_samples(uint32_t global_id, uint64_t start_ts, uint64_t end_ts) const
+track_file_store::read_samples(uint32_t global_id,
+                               uint64_t start_ts,
+                               uint64_t end_ts) const
 {
     const track_entry_t* entry = find_global(global_id);
     if(entry == nullptr || entry->kind != payload_t::samples) return {};
 
     binary_reader in{ std::filesystem::path{ m_directory } / sample_file(global_id) };
-    const file_header_t header = read_file_header(in, k_sample_magic, k_sample_record_bytes);
+    const file_header_t header =
+        read_file_header(in, k_sample_magic, k_sample_record_bytes);
     if(header.record_count == 0) return {};
 
     const auto sample_at = [&](uint64_t index) {
         in.seek(k_file_header_bytes + index * sizeof(sample_record_t));
         return in.record<sample_record_t>();
     };
-    const auto append_range = [&](std::vector<ph_sample_t>& destination,
-                                  uint64_t                  begin,
-                                  uint64_t                  end) {
-        if(end <= begin) return;
-        in.seek(k_file_header_bytes + begin * sizeof(sample_record_t));
-        for(uint64_t index = begin; index < end; ++index)
-        {
-            const sample_record_t record = in.record<sample_record_t>();
-            destination.push_back(
-                ph_sample_t{ .timestamp = record.timestamp, .value = record.value });
-        }
-    };
+    const auto append_range =
+        [&](std::vector<ph_sample_t>& destination, uint64_t begin, uint64_t end) {
+            if(end <= begin) return;
+            in.seek(k_file_header_bytes + begin * sizeof(sample_record_t));
+            for(uint64_t index = begin; index < end; ++index)
+            {
+                const sample_record_t record = in.record<sample_record_t>();
+                destination.push_back(
+                    ph_sample_t{ .timestamp = record.timestamp, .value = record.value });
+            }
+        };
 
     if(start_ts == 0 && end_ts == 0)
     {
@@ -1206,15 +1220,16 @@ track_file_store::read_samples(uint32_t global_id, uint64_t start_ts, uint64_t e
         return whole;
     }
 
-    const uint64_t upper =
-        end_ts == 0 ? std::numeric_limits<uint64_t>::max() : end_ts;
-    uint64_t low  = 0;
-    uint64_t high = header.record_count;
+    const uint64_t upper = end_ts == 0 ? std::numeric_limits<uint64_t>::max() : end_ts;
+    uint64_t       low   = 0;
+    uint64_t       high  = header.record_count;
     while(low < high)
     {
         const uint64_t middle = low + (high - low) / 2;
-        if(sample_at(middle).timestamp < start_ts) low = middle + 1;
-        else high = middle;
+        if(sample_at(middle).timestamp < start_ts)
+            low = middle + 1;
+        else
+            high = middle;
     }
     const uint64_t first_inside = low;
 
@@ -1223,8 +1238,10 @@ track_file_store::read_samples(uint32_t global_id, uint64_t start_ts, uint64_t e
     while(low < high)
     {
         const uint64_t middle = low + (high - low) / 2;
-        if(upper < sample_at(middle).timestamp) high = middle;
-        else low = middle + 1;
+        if(upper < sample_at(middle).timestamp)
+            high = middle;
+        else
+            low = middle + 1;
     }
     const uint64_t first_after = low;
 
@@ -1261,8 +1278,9 @@ track_file_store::rebuild_histogram(uint64_t origin,
         if(entry.kind == payload_t::events)
         {
             std::vector<overlap_bucket_t> buckets(static_cast<size_t>(bucket_count));
-            binary_reader in{ std::filesystem::path{ m_directory } / event_file(entry.global_id) };
-            const file_header_t header =
+            binary_reader                 in{ std::filesystem::path{ m_directory } /
+                              event_file(entry.global_id) };
+            const file_header_t           header =
                 read_file_header(in, k_event_magic, k_event_record_bytes);
             for(uint64_t index = 0; index < header.record_count; ++index)
             {
@@ -1280,7 +1298,7 @@ track_file_store::rebuild_histogram(uint64_t origin,
         {
             std::vector<ph_sample_t> samples;
             samples.reserve(static_cast<size_t>(entry.record_count));
-            binary_reader in{ std::filesystem::path{ m_directory } /
+            binary_reader       in{ std::filesystem::path{ m_directory } /
                               sample_file(entry.global_id) };
             const file_header_t header =
                 read_file_header(in, k_sample_magic, k_sample_record_bytes);

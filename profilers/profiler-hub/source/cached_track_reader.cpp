@@ -4,10 +4,10 @@
 #include "cached_track_reader.hpp"
 
 #include "common/helper_group.hpp"
-#include "track_file_store.hpp"
 #include "common/natural_merge_sort.hpp"
 #include "depth_tracker.hpp"
 #include "event_partitions.hpp"
+#include "track_file_store.hpp"
 #include "track_window.hpp"
 
 #include <algorithm>
@@ -81,15 +81,14 @@ to_ph_event_type(reader_types::event_type_t type)
 ph_event_t
 to_ph_event(const reader_types::timeline_event_t& event, uint32_t track_id)
 {
-    return ph_event_t{
-        .id            = event.unique_identifier.id,
-        .start         = event.start_timestamp,
-        .end           = event.end_timestamp,
-        .name          = event.display_name.empty() ? "" : event.display_name.data(),
-        .type          = to_ph_event_type(event.unique_identifier.type),
-        .nesting_depth = 0,
-        .track_id      = track_id
-    };
+    return ph_event_t{ .id    = event.unique_identifier.id,
+                       .start = event.start_timestamp,
+                       .end   = event.end_timestamp,
+                       .name =
+                           event.display_name.empty() ? "" : event.display_name.data(),
+                       .type          = to_ph_event_type(event.unique_identifier.type),
+                       .nesting_depth = 0,
+                       .track_id      = track_id };
 }
 
 ph_sample_t
@@ -205,20 +204,20 @@ samples_for_window(const std::vector<ph_sample_t>& sorted,
     const uint64_t upper =
         window_end == 0 ? std::numeric_limits<uint64_t>::max() : window_end;
 
-    const auto first_inside = std::lower_bound(
-        sorted.begin(),
-        sorted.end(),
-        window_start,
-        [](const ph_sample_t& sample, uint64_t timestamp) {
-            return sample.timestamp < timestamp;
-        });
-    const auto first_after = std::upper_bound(
-        sorted.begin(),
-        sorted.end(),
-        upper,
-        [](uint64_t timestamp, const ph_sample_t& sample) {
-            return timestamp < sample.timestamp;
-        });
+    const auto first_inside =
+        std::lower_bound(sorted.begin(),
+                         sorted.end(),
+                         window_start,
+                         [](const ph_sample_t& sample, uint64_t timestamp) {
+                             return sample.timestamp < timestamp;
+                         });
+    const auto first_after =
+        std::upper_bound(sorted.begin(),
+                         sorted.end(),
+                         upper,
+                         [](uint64_t timestamp, const ph_sample_t& sample) {
+                             return timestamp < sample.timestamp;
+                         });
 
     auto begin = first_inside;
     if(begin != sorted.begin())
@@ -360,10 +359,8 @@ cached_track_reader::nesting_depth_of(const reader_types::track_info_ptr_t& trac
         {
             return m_store->nesting_depth_of(
                 m_store_source, static_cast<uint32_t>(track->id), id, type);
-        }
-        catch(const std::exception&)
-        {
-        }
+        } catch(const std::exception&)
+        {}
     }
 
     const auto             whole = events(track, 0, 0);
@@ -391,9 +388,8 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
                              uint64_t                              start_ts,
                              uint64_t                              end_ts)
 {
-    if(!track ||
-       (track->category != reader_types::track_kind_t::pmc_agent &&
-        track->category != reader_types::track_kind_t::pmc_memory))
+    if(!track || (track->category != reader_types::track_kind_t::pmc_agent &&
+                  track->category != reader_types::track_kind_t::pmc_memory))
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }
@@ -417,8 +413,8 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
         });
     });
 
-    auto windowed = samples_for_window(
-        whole, start_ts, end_ts, static_cast<uint64_t>(track->end_ts));
+    auto windowed =
+        samples_for_window(whole, start_ts, end_ts, static_cast<uint64_t>(track->end_ts));
 
     const std::scoped_lock lock{ m_windowed_mutex };
     return as_list(m_windowed_samples.emplace_back(std::move(windowed)));
@@ -426,7 +422,7 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
 
 std::vector<ph_event_t>
 cached_track_reader::load_events(
-    const reader_types::track_info_ptr_t&                track,
+    const reader_types::track_info_ptr_t&               track,
     const std::function<const char*(std::string_view)>& keep_name)
 {
     if(!track) return {};
@@ -461,8 +457,8 @@ cached_track_reader::name_keeper()
 
 std::vector<ph_event_t>
 cached_track_reader::build_sorted_events(
-    track_row_reader&                                    reader,
-    const reader_types::track_info_ptr_t&                track,
+    track_row_reader&                                   reader,
+    const reader_types::track_info_ptr_t&               track,
     const std::function<const char*(std::string_view)>& keep_name)
 {
     if(track->category == reader_types::track_kind_t::thread &&
@@ -481,8 +477,8 @@ cached_track_reader::build_sorted_events(
 
 std::vector<ph_event_t>
 cached_track_reader::read_thread_track_in_parts(
-    track_row_reader&                                    reader,
-    const reader_types::track_info_ptr_t&                track,
+    track_row_reader&                                   reader,
+    const reader_types::track_info_ptr_t&               track,
     const std::function<const char*(std::string_view)>& keep_name)
 {
     std::vector<table_id_span> spans;
@@ -510,7 +506,7 @@ cached_track_reader::read_thread_track_in_parts(
     const uint32_t track_id = static_cast<uint32_t>(track->id);
     struct collect_t
     {
-        std::vector<ph_event_t>*                         events;
+        std::vector<ph_event_t>*                            events;
         const std::function<const char*(std::string_view)>* keep;
     };
     const auto visitor = [](void*                                    context,
@@ -519,14 +515,13 @@ cached_track_reader::read_thread_track_in_parts(
                             reader_types::timestamp_ns_t             end,
                             std::string_view                         name) {
         auto* collect = static_cast<collect_t*>(context);
-        collect->events->push_back(ph_event_t{
-            .id            = id.id,
-            .start         = start,
-            .end           = end,
-            .name          = (*collect->keep)(name),
-            .type          = to_ph_event_type(id.type),
-            .nesting_depth = 0,
-            .track_id      = 0 });
+        collect->events->push_back(ph_event_t{ .id            = id.id,
+                                               .start         = start,
+                                               .end           = end,
+                                               .name          = (*collect->keep)(name),
+                                               .type          = to_ph_event_type(id.type),
+                                               .nesting_depth = 0,
+                                               .track_id      = 0 });
     };
 
     std::atomic<size_t> next{ 0 };

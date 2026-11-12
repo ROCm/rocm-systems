@@ -49,8 +49,10 @@ quote_text(std::string_view text)
     std::string quoted = "'";
     for(const char ch : text)
     {
-        if(ch == '\'') quoted += "''";
-        else quoted += ch;
+        if(ch == '\'')
+            quoted += "''";
+        else
+            quoted += ch;
     }
     quoted += '\'';
     return quoted;
@@ -210,9 +212,9 @@ interval_rows(data_storage::sqlite_backend& backend, const std::string& sql)
 }
 
 std::vector<sample_point_t>
-monitor_samples(data_storage::sqlite_backend&         backend,
-                const reader_types::track_info_t&     track,
-                const reader_types::time_window_t&    window)
+monitor_samples(data_storage::sqlite_backend&      backend,
+                const reader_types::track_info_t&  track,
+                const reader_types::time_window_t& window)
 {
     std::string sql = fmt::format(
         "SELECT start, CAST(value AS REAL) FROM rocpd_monitor WHERE deviceId = {} AND "
@@ -221,8 +223,8 @@ monitor_samples(data_storage::sqlite_backend&         backend,
         rocpd_v2::quote_text(track.name));
     if(window.start.has_value() && window.end.has_value())
     {
-        sql += fmt::format(
-            " AND start >= {} AND start <= {}", *window.start, *window.end);
+        sql +=
+            fmt::format(" AND start >= {} AND start <= {}", *window.start, *window.end);
     }
     sql += " ORDER BY start";
 
@@ -248,7 +250,8 @@ bool
 selects(const reader_types::event_filter_t& filter, event_type_t type)
 {
     return filter.types.empty() ||
-           std::find(filter.types.begin(), filter.types.end(), type) != filter.types.end();
+           std::find(filter.types.begin(), filter.types.end(), type) !=
+               filter.types.end();
 }
 
 bool
@@ -302,9 +305,10 @@ rocpd_v2_reader::rocpd_v2_reader(std::unique_ptr<profiler_hub::storage_t> storag
 bool
 rocpd_v2_reader::has_table(std::string_view name)
 {
-    return count_of(*m_backend,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = " +
-                        rocpd_v2::quote_text(name)) != 0;
+    return count_of(
+               *m_backend,
+               "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = " +
+                   rocpd_v2::quote_text(name)) != 0;
 }
 
 void
@@ -312,7 +316,8 @@ rocpd_v2_reader::ensure_track_topology_indexes()
 {
     constexpr std::array<std::string_view, 5> k_indexes{
         "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_api_track ON rocpd_api(pid, tid, start)",
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_op_track ON rocpd_op(gpuId, queueId, start)",
+        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_op_track ON rocpd_op(gpuId, queueId, "
+        "start)",
         "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_monitor_track ON "
         "rocpd_monitor(deviceId, monitorType, start)",
         "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_api_ops_api ON rocpd_api_ops(api_id)",
@@ -362,15 +367,16 @@ rocpd_v2_reader::canonical_string_id(size_t string_id) const
 reader_types::track_info_ptr_t
 rocpd_v2_reader::thread_track(size_t pid, size_t tid) const
 {
-    const auto found = m_catalog->track_by_topology.find(topology_key_t{ k_node_id, pid, tid });
+    const auto found =
+        m_catalog->track_by_topology.find(topology_key_t{ k_node_id, pid, tid });
     return found != m_catalog->track_by_topology.end() ? found->second : nullptr;
 }
 
 reader_types::track_info_ptr_t
 rocpd_v2_reader::op_track(bool is_copy, size_t gpu_id, size_t queue_id) const
 {
-    const auto kind = is_copy ? track_kind_t::memory_copy_agent_queue
-                              : track_kind_t::kernel_dispatch_agent_queue;
+    const auto kind  = is_copy ? track_kind_t::memory_copy_agent_queue
+                               : track_kind_t::kernel_dispatch_agent_queue;
     const auto found = m_catalog->agent_queue_track_by_key.find(
         agent_queue_track_key_t{ kind, k_node_id, gpu_id, queue_id });
     return found != m_catalog->agent_queue_track_by_key.end() ? found->second : nullptr;
@@ -414,15 +420,14 @@ rocpd_v2_reader::op_event(const op_row_t& row) const
 {
     const bool                     is_copy = row.is_copy != 0;
     reader_types::timeline_event_t event;
-    event.unique_identifier = {
-        .id   = row.id,
-        .type = is_copy ? event_type_t::memory_copy : event_type_t::kernel_dispatch
-    };
-    event.start_timestamp = row.start;
-    event.end_timestamp   = row.end;
-    event.display_name    = text_of(op_name_id(row.description_id, row.op_type_id));
-    event.category        = text_of(row.op_type_id);
-    event.track           = op_track(is_copy, row.gpu_id, row.queue_id);
+    event.unique_identifier = { .id   = row.id,
+                                .type = is_copy ? event_type_t::memory_copy
+                                                : event_type_t::kernel_dispatch };
+    event.start_timestamp   = row.start;
+    event.end_timestamp     = row.end;
+    event.display_name      = text_of(op_name_id(row.description_id, row.op_type_id));
+    event.category          = text_of(row.op_type_id);
+    event.track             = op_track(is_copy, row.gpu_id, row.queue_id);
     return event;
 }
 
@@ -446,10 +451,12 @@ rocpd_v2_reader::op_api_joins() const
 {
     // An operation may be linked more than once. The first link keeps one
     // output row per operation.
-    std::string joins = "LEFT JOIN rocpd_api_ops AO ON AO.rowid = (SELECT MIN(rowid) FROM "
-                        "rocpd_api_ops WHERE op_id = O.id) "
-                        "LEFT JOIN rocpd_api A ON A.id = AO.api_id";
-    if(m_has_kernel_api) joins += " LEFT JOIN rocpd_kernelapi K ON K.api_ptr_id = AO.api_id";
+    std::string joins =
+        "LEFT JOIN rocpd_api_ops AO ON AO.rowid = (SELECT MIN(rowid) FROM "
+        "rocpd_api_ops WHERE op_id = O.id) "
+        "LEFT JOIN rocpd_api A ON A.id = AO.api_id";
+    if(m_has_kernel_api)
+        joins += " LEFT JOIN rocpd_kernelapi K ON K.api_ptr_id = AO.api_id";
     if(m_has_copy_api) joins += " LEFT JOIN rocpd_copyapi C ON C.api_ptr_id = AO.api_id";
     return joins;
 }
@@ -459,10 +466,11 @@ rocpd_v2_reader::launching_api(size_t op_id)
 {
     const auto found = api_rows(
         *m_backend,
-        fmt::format("SELECT {} FROM rocpd_api_ops AO JOIN rocpd_api A ON A.id = AO.api_id "
-                    "WHERE AO.op_id = {} ORDER BY AO.rowid LIMIT 1",
-                    k_api_columns,
-                    op_id));
+        fmt::format(
+            "SELECT {} FROM rocpd_api_ops AO JOIN rocpd_api A ON A.id = AO.api_id "
+            "WHERE AO.op_id = {} ORDER BY AO.rowid LIMIT 1",
+            k_api_columns,
+            op_id));
     if(found.empty()) return std::nullopt;
     return found.front();
 }
@@ -478,8 +486,8 @@ rocpd_v2_reader::get_events(const reader_types::event_filter_t& filter)
     for(const event_type_t type : k_event_types)
     {
         if(!selects(filter, type)) continue;
-        const std::string sql =
-            event_select(type, time_where(is_op_type(type) ? "O" : "A", filter.time_window));
+        const std::string sql = event_select(
+            type, time_where(is_op_type(type) ? "O" : "A", filter.time_window));
         if(type == event_type_t::region)
         {
             for(const api_row_t& row : api_rows(*m_backend, sql))
@@ -512,7 +520,8 @@ rocpd_v2_reader::get_events_for_track(reader_types::track_info_ptr_t      track,
                                               topology->second.pid,
                                               topology->second.tid,
                                               time_where("A", filter.time_window));
-        for(const api_row_t& row : api_rows(*m_backend, event_select(event_type_t::region, where)))
+        for(const api_row_t& row :
+            api_rows(*m_backend, event_select(event_type_t::region, where)))
         {
             auto event  = region_event(row);
             event.track = track;
@@ -571,12 +580,13 @@ rocpd_v2_reader::get_event_id_span(reader_types::event_type_t type)
 }
 
 void
-rocpd_v2_reader::visit_track_events_in_id_range(const reader_types::track_info_ptr_t& track,
-                                                reader_types::event_type_t            type,
-                                                size_t                    id_begin,
-                                                size_t                    id_end,
-                                                reader_t::event_visitor_t visitor,
-                                                void*                     context)
+rocpd_v2_reader::visit_track_events_in_id_range(
+    const reader_types::track_info_ptr_t& track,
+    reader_types::event_type_t            type,
+    size_t                                id_begin,
+    size_t                                id_end,
+    reader_t::event_visitor_t             visitor,
+    void*                                 context)
 {
     // Only host threads are read in id ranges, and their rows are API calls.
     if(!track || type != event_type_t::region) return;
@@ -592,7 +602,10 @@ rocpd_v2_reader::visit_track_events_in_id_range(const reader_types::track_info_p
                     id_end));
     for(const api_row_t& row : api_rows(*m_backend, sql))
     {
-        visitor(context, { row.id, event_type_t::region }, row.start, row.end,
+        visitor(context,
+                { row.id, event_type_t::region },
+                row.start,
+                row.end,
                 text_of(row.name_id));
     }
 }
@@ -604,12 +617,14 @@ rocpd_v2_reader::get_counter_events_for_track(reader_types::track_info_ptr_t    
     if(!track || track->category != track_kind_t::pmc_agent) return {};
 
     reader_types::counter_timeline_event_list_t events;
-    for(const sample_point_t& sample : monitor_samples(*m_backend, *track, filter.time_window))
+    for(const sample_point_t& sample :
+        monitor_samples(*m_backend, *track, filter.time_window))
     {
-        events.push_back(reader_types::counter_timeline_event_t{ .unique_identifier = {},
-                                                                 .timestamp = sample.timestamp,
-                                                                 .value     = sample.value,
-                                                                 .track     = track });
+        events.push_back(
+            reader_types::counter_timeline_event_t{ .unique_identifier = {},
+                                                    .timestamp         = sample.timestamp,
+                                                    .value             = sample.value,
+                                                    .track             = track });
     }
     return events;
 }
@@ -620,7 +635,8 @@ rocpd_v2_reader::get_event_count(const reader_types::event_filter_t& filter)
     size_t total = 0;
     for(const event_type_t type : k_event_types)
     {
-        if(selects(filter, type)) total += count_of(*m_backend, count_select(type, filter.time_window));
+        if(selects(filter, type))
+            total += count_of(*m_backend, count_select(type, filter.time_window));
     }
     return total;
 }
@@ -646,11 +662,12 @@ rocpd_v2_reader::get_histogram(const histogram_grid_t& grid)
                     const auto topology = m_catalog->topology_by_track.find(track);
                     if(topology == m_catalog->topology_by_track.end()) return {};
                     return accumulate_overlaps(
-                        interval_rows(*m_backend,
-                                      fmt::format("SELECT start, end FROM rocpd_api WHERE "
-                                                  "pid = {} AND tid = {}",
-                                                  topology->second.pid,
-                                                  topology->second.tid)),
+                        interval_rows(
+                            *m_backend,
+                            fmt::format("SELECT start, end FROM rocpd_api WHERE "
+                                        "pid = {} AND tid = {}",
+                                        topology->second.pid,
+                                        topology->second.tid)),
                         grid);
                 }
                 case track_kind_t::kernel_dispatch_agent_queue:
@@ -658,18 +675,19 @@ rocpd_v2_reader::get_histogram(const histogram_grid_t& grid)
                     return accumulate_overlaps(
                         interval_rows(
                             *m_backend,
-                            fmt::format(
-                                "SELECT O.start, O.end FROM rocpd_op O WHERE O.gpuId = {} "
-                                "AND O.queueId = {} AND {}",
-                                track->agent_id,
-                                track->queue_id,
-                                rocpd_v2::op_kind_where(
-                                    "O",
-                                    track->category ==
-                                        track_kind_t::memory_copy_agent_queue))),
+                            fmt::format("SELECT O.start, O.end FROM rocpd_op O WHERE "
+                                        "O.gpuId = {} "
+                                        "AND O.queueId = {} AND {}",
+                                        track->agent_id,
+                                        track->queue_id,
+                                        rocpd_v2::op_kind_where(
+                                            "O",
+                                            track->category ==
+                                                track_kind_t::memory_copy_agent_queue))),
                         grid);
                 case track_kind_t::pmc_agent:
-                    return accumulate_samples(monitor_samples(*m_backend, *track, {}), grid);
+                    return accumulate_samples(monitor_samples(*m_backend, *track, {}),
+                                              grid);
                 default: return {};
             }
         });
@@ -682,8 +700,8 @@ rocpd_v2_reader::get_histogram(const histogram_grid_t& grid)
 reader_types::track_info_ptr_t
 rocpd_v2_reader::track_of(const reader_types::timeline_event_t& event)
 {
-    const auto type = event.unique_identifier.type;
-    const auto id   = event.unique_identifier.id;
+    const auto  type = event.unique_identifier.type;
+    const auto  id   = event.unique_identifier.id;
     std::string sql;
     if(type == event_type_t::region)
     {
@@ -691,21 +709,22 @@ rocpd_v2_reader::track_of(const reader_types::timeline_event_t& event)
     }
     else if(is_op_type(type))
     {
-        sql = fmt::format("SELECT gpuId, queueId, opType_id IN {} FROM rocpd_op WHERE id = {}",
-                          rocpd_v2::k_copy_op_types,
-                          id);
+        sql = fmt::format(
+            "SELECT gpuId, queueId, opType_id IN {} FROM rocpd_op WHERE id = {}",
+            rocpd_v2::k_copy_op_types,
+            id);
     }
     else
     {
         return {};
     }
-    const auto rows = m_backend
-                          ->create_read_statement_executor<location_row_t>(
-                              sql,
-                              &location_row_t::first,
-                              &location_row_t::second,
-                              &location_row_t::is_copy)()
-                          .to_vector();
+    const auto rows =
+        m_backend
+            ->create_read_statement_executor<location_row_t>(sql,
+                                                             &location_row_t::first,
+                                                             &location_row_t::second,
+                                                             &location_row_t::is_copy)()
+            .to_vector();
     if(rows.empty()) return {};
     const location_row_t& row = rows.front();
     if(type == event_type_t::region) return thread_track(row.first, row.second);
@@ -729,11 +748,11 @@ rocpd_v2_reader::get_region_details(const reader_types::timeline_event_t& event)
                           .to_vector();
     if(rows.empty()) return std::nullopt;
 
-    const region_detail_row_t& row = rows.front();
+    const region_detail_row_t&  row = rows.front();
     reader_types::region_data_t data;
-    data.start_timestamp = row.start;
-    data.end_timestamp   = row.end;
-    data.name            = std::string{ text_of(row.name_id) };
+    data.start_timestamp        = row.start;
+    data.end_timestamp          = row.end;
+    data.name                   = std::string{ text_of(row.name_id) };
     const std::string_view args = text_of(row.args_id);
     if(!args.empty())
     {
@@ -818,7 +837,8 @@ rocpd_v2_reader::get_kernel_dispatch_details(const reader_types::timeline_event_
     if(row.pid.has_value())
     {
         data.process_info = process_info(row.pid.value());
-        if(row.tid.has_value()) data.thread_info = thread_info(row.pid.value(), row.tid.value());
+        if(row.tid.has_value())
+            data.thread_info = thread_info(row.pid.value(), row.tid.value());
     }
     return data;
 }
@@ -828,12 +848,13 @@ rocpd_v2_reader::get_memory_copy_details(const reader_types::timeline_event_t& e
 {
     if(event.unique_identifier.type != event_type_t::memory_copy) return std::nullopt;
 
-    const std::string sql = fmt::format(
-        "SELECT O.start, O.end, O.gpuId, O.description_id, O.opType_id, {}, A.apiName_id, "
-        "A.pid, A.tid FROM rocpd_op O {} WHERE O.id = {}",
-        copy_api_columns(),
-        op_api_joins(),
-        event.unique_identifier.id);
+    const std::string sql =
+        fmt::format("SELECT O.start, O.end, O.gpuId, O.description_id, O.opType_id, {}, "
+                    "A.apiName_id, "
+                    "A.pid, A.tid FROM rocpd_op O {} WHERE O.id = {}",
+                    copy_api_columns(),
+                    op_api_joins(),
+                    event.unique_identifier.id);
     const auto rows = m_backend
                           ->create_read_statement_executor<copy_detail_row_t>(
                               sql,
@@ -858,8 +879,8 @@ rocpd_v2_reader::get_memory_copy_details(const reader_types::timeline_event_t& e
     data.size            = row.size.value_or(0);
     data.dst_address     = rocpd_v2::parse_address(row.dst);
     data.src_address     = rocpd_v2::parse_address(row.src);
-    data.name        = std::string{ text_of(op_name_id(row.description_id, row.op_type_id)) };
-    data.region_name = std::string{ text_of(row.api_name_id) };
+    data.name = std::string{ text_of(op_name_id(row.description_id, row.op_type_id)) };
+    data.region_name  = std::string{ text_of(row.api_name_id) };
     data.dst_agent_id = agent_info(row.gpu_id);
 
     if(const auto node = m_catalog->nodes_by_id.find(k_node_id);
@@ -870,7 +891,8 @@ rocpd_v2_reader::get_memory_copy_details(const reader_types::timeline_event_t& e
     if(row.pid.has_value())
     {
         data.process_info = process_info(row.pid.value());
-        if(row.tid.has_value()) data.thread_info = thread_info(row.pid.value(), row.tid.value());
+        if(row.tid.has_value())
+            data.thread_info = thread_info(row.pid.value(), row.tid.value());
     }
     return data;
 }
@@ -884,10 +906,10 @@ rocpd_v2_reader::get_call_stack(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != event_type_t::region) return {};
 
-    const auto source = api_rows(*m_backend,
-                                 event_select(event_type_t::region,
-                                              fmt::format(" AND A.id = {}",
-                                                          event.unique_identifier.id)));
+    const auto source =
+        api_rows(*m_backend,
+                 event_select(event_type_t::region,
+                              fmt::format(" AND A.id = {}", event.unique_identifier.id)));
     if(source.empty()) return {};
     const api_row_t& self = source.front();
 
@@ -895,17 +917,18 @@ rocpd_v2_reader::get_call_stack(const reader_types::timeline_event_t& event)
     // The latest start is the innermost frame.
     const auto callers = api_rows(
         *m_backend,
-        event_select(event_type_t::region,
-                     fmt::format(" AND A.pid = {} AND A.tid = {} AND A.start <= {} AND "
-                                 "A.end >= {} AND A.id != {} ORDER BY A.start DESC, A.end",
-                                 self.pid,
-                                 self.tid,
-                                 self.start,
-                                 self.end,
-                                 self.id)));
+        event_select(
+            event_type_t::region,
+            fmt::format(" AND A.pid = {} AND A.tid = {} AND A.start <= {} AND "
+                        "A.end >= {} AND A.id != {} ORDER BY A.start DESC, A.end",
+                        self.pid,
+                        self.tid,
+                        self.start,
+                        self.end,
+                        self.id)));
 
     reader_types::call_stack_t stack;
-    const auto add_frame = [&](const api_row_t& row) {
+    const auto                 add_frame = [&](const api_row_t& row) {
         reader_types::program_counter_info_t program_counter;
         program_counter.event_id = row.id;
         program_counter.function = std::string{ text_of(row.name_id) };

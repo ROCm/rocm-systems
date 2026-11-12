@@ -65,7 +65,7 @@ assign_depths(std::vector<ph_event_t>& events)
 
 TEST(track_file_store_test, a_window_keeps_a_long_event_from_an_earlier_checkpoint)
 {
-    cache_fixture_t fixture;
+    cache_fixture_t         fixture;
     std::vector<ph_event_t> events;
     events.push_back(make_event(1, 0, 10000, "long"));
     events.push_back(make_event(2, 10, 20, "early"));
@@ -81,13 +81,12 @@ TEST(track_file_store_test, a_window_keeps_a_long_event_from_an_earlier_checkpoi
         ASSERT_TRUE(store.begin_write());
         store.set_histogram_grid(0, 1000, 10);
         store.write_events(7, 0, 7, events);
-        store.write_samples(8,
-                             0,
-                             8,
-                             { ph_sample_t{ 0, 1.0 },
-                               ph_sample_t{ 100, 2.0 },
-                               ph_sample_t{ 200, 3.0 } },
-                             400);
+        store.write_samples(
+            8,
+            0,
+            8,
+            { ph_sample_t{ 0, 1.0 }, ph_sample_t{ 100, 2.0 }, ph_sample_t{ 200, 3.0 } },
+            400);
         ASSERT_TRUE(store.finish_write());
     }
 

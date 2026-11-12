@@ -21,11 +21,9 @@ term_matches(std::string_view text, std::string_view term, bool substring)
 {
     if(substring)
     {
-        return std::search(text.begin(),
-                           text.end(),
-                           term.begin(),
-                           term.end(),
-                           ascii_same) != text.end();
+        return std::search(
+                   text.begin(), text.end(), term.begin(), term.end(), ascii_same) !=
+               text.end();
     }
     return text.size() == term.size() &&
            std::equal(text.begin(), text.end(), term.begin(), ascii_same);

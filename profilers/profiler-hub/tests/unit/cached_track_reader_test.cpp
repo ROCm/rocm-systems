@@ -564,10 +564,10 @@ TEST_F(cached_track_reader_test, a_windowed_sample_request_is_served_from_the_wh
 
 TEST_F(cached_track_reader_test, a_window_past_the_last_sample_holds_the_last_value)
 {
-    m_state.counters   = { counter_event(10, 1.0), counter_event(40, 4.0) };
-    auto       reader  = make_reader();
-    const auto track   = make_track(4, track_kind_t::pmc_memory);
-    track->end_ts      = 100;
+    m_state.counters  = { counter_event(10, 1.0), counter_event(40, 4.0) };
+    auto       reader = make_reader();
+    const auto track  = make_track(4, track_kind_t::pmc_memory);
+    track->end_ts     = 100;
 
     const auto list = reader.samples(track, 30, 50);
 

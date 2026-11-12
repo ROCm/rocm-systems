@@ -3,9 +3,9 @@
 
 #include "profiler-hub/cpp/reader.hpp"
 
-#include "formats/trace_formats.hpp"
 #include "data_storage/backends/sqlite_api_policy.hpp"
 #include "data_storage/schema_version.hpp"
+#include "formats/trace_formats.hpp"
 
 #include <array>
 #include <cstdint>

@@ -40,17 +40,19 @@ public:
         if(table == "rocpd_api_ops" && tables.count("rocpd_api") != 0 &&
            tables.count("rocpd_op") != 0)
         {
-            return trim_statement_t{ row_kind_t::event,
-                                     full_copy(table) +
-                                         " WHERE api_id IN (SELECT id FROM rocpd_api) AND "
-                                         "op_id IN (SELECT id FROM rocpd_op)" };
+            return trim_statement_t{
+                row_kind_t::event,
+                full_copy(table) + " WHERE api_id IN (SELECT id FROM rocpd_api) AND "
+                                   "op_id IN (SELECT id FROM rocpd_op)"
+            };
         }
         if((table == "rocpd_kernelapi" || table == "rocpd_copyapi") &&
            tables.count("rocpd_api") != 0)
         {
-            return trim_statement_t{ row_kind_t::event_child,
-                                     full_copy(table) +
-                                         " WHERE api_ptr_id IN (SELECT id FROM rocpd_api)" };
+            return trim_statement_t{
+                row_kind_t::event_child,
+                full_copy(table) + " WHERE api_ptr_id IN (SELECT id FROM rocpd_api)"
+            };
         }
         return trim_statement_t{ row_kind_t::copy, full_copy(table) };
     }

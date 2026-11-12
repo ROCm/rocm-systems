@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "thread_pool.hpp"
 #include "../sql_cancel.hpp"
+#include "thread_pool.hpp"
 
 #include <tuple>
 #include <vector>

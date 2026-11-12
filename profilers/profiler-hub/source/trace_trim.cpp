@@ -28,15 +28,9 @@ table_guid(std::string_view table)
 {
     // Longer names first, so rocpd_pmc_event is not read as rocpd_event.
     constexpr std::string_view k_prefixes[] = {
-        "rocpd_pmc_event",
-        "rocpd_kernel_dispatch",
-        "rocpd_memory_allocate",
-        "rocpd_memory_copy",
-        "rocpd_hip_event",
-        "rocpd_region",
-        "rocpd_sample",
-        "rocpd_event",
-        "rocpd_arg",
+        "rocpd_pmc_event",   "rocpd_kernel_dispatch", "rocpd_memory_allocate",
+        "rocpd_memory_copy", "rocpd_hip_event",       "rocpd_region",
+        "rocpd_sample",      "rocpd_event",           "rocpd_arg",
     };
     for(const std::string_view prefix : k_prefixes)
     {
@@ -92,9 +86,10 @@ public:
 
     void execute(const std::string& sql) const
     {
-        const profiler_hub::running_sql activity{ interrupt_trim_connection,
-                                                  const_cast<sqlite_connection_t*>(this) };
-        const int                       rc = sqlite_api_policy::exec(m_db, sql.c_str());
+        const profiler_hub::running_sql activity{
+            interrupt_trim_connection, const_cast<sqlite_connection_t*>(this)
+        };
+        const int rc = sqlite_api_policy::exec(m_db, sql.c_str());
         if(rc == sqlite_api_policy::result_interrupt)
         {
             throw profiler_hub::sql_interrupted{};
@@ -127,7 +122,8 @@ read_master(const sqlite_connection_t& source)
     sqlite_api_policy::statement_t statement = nullptr;
     const char* sql = "SELECT type, name, tbl_name, sql FROM sqlite_master "
                       "WHERE sql IS NOT NULL ORDER BY rowid";
-    if(sqlite_api_policy::prepare(source.get(), sql, &statement) != sqlite_api_policy::result_ok)
+    if(sqlite_api_policy::prepare(source.get(), sql, &statement) !=
+       sqlite_api_policy::result_ok)
     {
         throw std::runtime_error(sqlite_api_policy::errmsg(source.get()));
     }
@@ -174,8 +170,10 @@ attach_sql(const std::string& source_path)
     escaped.reserve(source_path.size());
     for(const char ch : source_path)
     {
-        if(ch == '\'') escaped += "''";
-        else escaped += ch;
+        if(ch == '\'')
+            escaped += "''";
+        else
+            escaped += ch;
     }
     return "ATTACH DATABASE '" + escaped + "' AS oldDb";
 }
@@ -198,8 +196,10 @@ quote_ident(std::string_view name)
     std::string quoted = "\"";
     for(const char ch : name)
     {
-        if(ch == '"') quoted += "\"\"";
-        else quoted += ch;
+        if(ch == '"')
+            quoted += "\"\"";
+        else
+            quoted += ch;
     }
     quoted += '"';
     return quoted;
@@ -272,8 +272,10 @@ classify(file_group_t& group, const std::vector<master_row_t>& master)
             group.kept_tables.insert(row.name);
             group.tables.push_back(row);
         }
-        else if(row.type == "view") group.views.push_back(row);
-        else if(row.type == "index" || row.type == "trigger") group.indexes.push_back(row);
+        else if(row.type == "view")
+            group.views.push_back(row);
+        else if(row.type == "index" || row.type == "trigger")
+            group.indexes.push_back(row);
     }
 }
 
@@ -335,7 +337,8 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
         // another file that landed in the same table. Finish one phase for
         // every file before starting the next.
         constexpr size_t phase_count = static_cast<size_t>(row_kind_t::event_child) + 1;
-        std::vector<std::array<std::vector<planned_copy_t>, phase_count>> plans(groups.size());
+        std::vector<std::array<std::vector<planned_copy_t>, phase_count>> plans(
+            groups.size());
         size_t total = 0;
         for(size_t index = 0; index < groups.size(); ++index)
         {
@@ -351,10 +354,11 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
             }
             for(auto& phase : plans[index])
             {
-                std::sort(phase.begin(), phase.end(), [](const planned_copy_t& left,
-                                                          const planned_copy_t& right) {
-                    return left.name < right.name;
-                });
+                std::sort(phase.begin(),
+                          phase.end(),
+                          [](const planned_copy_t& left, const planned_copy_t& right) {
+                              return left.name < right.name;
+                          });
             }
         }
 
@@ -394,8 +398,8 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
                 if(copies.empty()) continue;
 
                 destination.execute("BEGIN");
-                destination.execute(
-                    attach_sql(std::filesystem::path{ groups[index].path }.generic_string()));
+                destination.execute(attach_sql(
+                    std::filesystem::path{ groups[index].path }.generic_string()));
                 for(const planned_copy_t& copy : copies)
                 {
                     if(cancelled(future))
@@ -403,7 +407,9 @@ trim_trace_files(const std::vector<trim_source_t>& inputs,
                         destination.execute("ROLLBACK");
                         throw std::runtime_error("cancelled");
                     }
-                    report(future, 0.05 + span * static_cast<double>(done), copy.name.c_str());
+                    report(future,
+                           0.05 + span * static_cast<double>(done),
+                           copy.name.c_str());
                     destination.execute(copy.sql);
                     ++done;
                 }

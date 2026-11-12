@@ -128,13 +128,13 @@ extern "C"
     {
         uint32_t    id;
         const char* track_name;
-        uint64_t    nid;         /**< Node id this track belongs to. */
-        uint64_t    pid;         /**< OS process id. Not rocpd_info_process.id. */
-        uint64_t    tid;         /**< OS thread id, or 0 if this track has no thread.
-                                       Not rocpd_info_thread.id. */
-        uint32_t    event_count; /**< Total events recorded on this track. */
-        uint64_t    agent_id;    /**< Owning device (agent) id, or 0 if not
-                                       device-specific. */
+        uint64_t    nid;              /**< Node id this track belongs to. */
+        uint64_t    pid;              /**< OS process id. Not rocpd_info_process.id. */
+        uint64_t    tid;              /**< OS thread id, or 0 if this track has no thread.
+                                            Not rocpd_info_thread.id. */
+        uint32_t event_count;         /**< Total events recorded on this track. */
+        uint64_t agent_id;            /**< Owning device (agent) id, or 0 if not
+                                            device-specific. */
         ph_track_category_t category; /**< What identity columns this track was
                                             derived from. */
         uint64_t queue_id;            /**< Owning queue id. Only meaningful for
@@ -148,15 +148,15 @@ extern "C"
         ph_value_range_t value_range; /**< Sample value range. Only valid for
                                             PH_TRACK_CATEGORY_PMC_AGENT tracks with
                                             at least one sample value. */
-        uint32_t nesting_depth; /**< Largest ph_event_t::nesting_depth of the track's
-                                      events; 0 for PMC tracks. */
+        uint32_t nesting_depth;  /**< Largest ph_event_t::nesting_depth of the track's
+                                       events; 0 for PMC tracks. */
         uint64_t process_row_id; /**< rocpd_info_process.id. Not pid. 0 if this
                                        track has no process. */
         uint64_t thread_row_id;  /**< rocpd_info_thread.id. Not tid. 0 if this
                                        track has no thread. */
-        uint64_t pmc_id; /**< rocpd_info_pmc.id for counter tracks, else 0. */
-        uint32_t source_index; /**< Index of the file and GUID this track was
-                                    read from. ph_get_trace_source() uses it. */
+        uint64_t pmc_id;         /**< rocpd_info_pmc.id for counter tracks, else 0. */
+        uint32_t source_index;   /**< Index of the file and GUID this track was
+                                      read from. ph_get_trace_source() uses it. */
     } ph_track_t;
 
     /**
@@ -475,7 +475,7 @@ extern "C"
         ph_string_filter_t   string_filter;
         uint32_t             has_source; /**< Non-zero to read one file and GUID.
                                               source_index selects it. */
-        uint32_t             source_index;
+        uint32_t source_index;
     } ph_event_filter_t;
 
     /** @brief One table row copied into caller-owned memory.

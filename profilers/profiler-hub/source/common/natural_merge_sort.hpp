@@ -40,10 +40,8 @@ natural_merge_sort(RandomIt first, RandomIt last, Compare comp)
         size_t i = 0;
         for(; i + 2 < bounds.size(); i += 2)
         {
-            std::inplace_merge(first + bounds[i],
-                               first + bounds[i + 1],
-                               first + bounds[i + 2],
-                               comp);
+            std::inplace_merge(
+                first + bounds[i], first + bounds[i + 1], first + bounds[i + 2], comp);
             merged.push_back(bounds[i + 2]);
         }
         if(merged.back() != bounds.back())

@@ -50,18 +50,22 @@ struct op_row_t
 };
 
 // Columns in op_row_t order for rocpd_op aliased as O.
-[[nodiscard]] std::string op_columns();
+[[nodiscard]] std::string
+op_columns();
 
 // Columns in api_row_t order for rocpd_api aliased as A.
 constexpr std::string_view k_api_columns =
     "A.id, A.start, A.end, A.apiName_id, A.pid, A.tid";
 
-[[nodiscard]] std::string op_kind_where(std::string_view alias, bool is_copy);
+[[nodiscard]] std::string
+op_kind_where(std::string_view alias, bool is_copy);
 
-[[nodiscard]] std::string quote_text(std::string_view text);
+[[nodiscard]] std::string
+quote_text(std::string_view text);
 
 // rpd stores addresses as hexadecimal text such as "0x7fb07c298000".
-[[nodiscard]] std::optional<size_t> parse_address(const std::optional<std::string>& text);
+[[nodiscard]] std::optional<size_t>
+parse_address(const std::optional<std::string>& text);
 }  // namespace rocpd_v2
 
 /**
@@ -152,14 +156,14 @@ public:
                                              uint64_t                    after_id,
                                              uint64_t                    last_id,
                                              ph_table_event*             rows,
-                                             uint32_t                    capacity) override;
+                                             uint32_t capacity) override;
     [[nodiscard]] bool     table_event_id_span(uint32_t  event_type,
                                                uint64_t& first_id,
                                                uint64_t& last_id) override;
     [[nodiscard]] bool     summarize_name_durations(
-        const resolved_event_query&           query,
-        uint32_t                              event_type,
-        std::vector<name_duration_summary_t>& rows) override;
+            const resolved_event_query&           query,
+            uint32_t                              event_type,
+            std::vector<name_duration_summary_t>& rows) override;
 
 private:
     void build_string_list(reader_catalog_t& catalog);
@@ -188,20 +192,21 @@ private:
     // call's kernel and copy arguments K and C.
     [[nodiscard]] std::string op_api_joins() const;
 
-    [[nodiscard]] reader_types::track_info_ptr_t thread_track(size_t pid,
-                                                              size_t tid) const;
-    [[nodiscard]] reader_types::track_info_ptr_t op_track(bool   is_copy,
-                                                          size_t gpu_id,
-                                                          size_t queue_id) const;
-    [[nodiscard]] reader_types::thread_info_ptr_t thread_info(size_t pid,
-                                                              size_t tid) const;
+    [[nodiscard]] reader_types::track_info_ptr_t   thread_track(size_t pid,
+                                                                size_t tid) const;
+    [[nodiscard]] reader_types::track_info_ptr_t   op_track(bool   is_copy,
+                                                            size_t gpu_id,
+                                                            size_t queue_id) const;
+    [[nodiscard]] reader_types::thread_info_ptr_t  thread_info(size_t pid,
+                                                               size_t tid) const;
     [[nodiscard]] reader_types::process_info_ptr_t process_info(size_t pid) const;
     [[nodiscard]] reader_types::agent_info_ptr_t   agent_info(size_t gpu_id) const;
 
     [[nodiscard]] std::string_view text_of(std::optional<size_t> string_id) const;
     // An operation without a description is named by its type.
-    [[nodiscard]] std::optional<size_t> op_name_id(std::optional<size_t> description_id,
-                                                   std::optional<size_t> op_type_id) const;
+    [[nodiscard]] std::optional<size_t> op_name_id(
+        std::optional<size_t> description_id,
+        std::optional<size_t> op_type_id) const;
     [[nodiscard]] size_t canonical_string_id(size_t string_id) const;
 
     [[nodiscard]] bool has_table(std::string_view name);
@@ -211,10 +216,11 @@ private:
     bool                                          m_has_copy_api{};
 };
 
-[[nodiscard]] std::unique_ptr<reader_t::impl> make_rocpd_v2_reader(
-    std::unique_ptr<profiler_hub::storage_t> storage,
-    std::shared_ptr<reader_catalog_t>        catalog);
+[[nodiscard]] std::unique_ptr<reader_t::impl>
+make_rocpd_v2_reader(std::unique_ptr<profiler_hub::storage_t> storage,
+                     std::shared_ptr<reader_catalog_t>        catalog);
 
-[[nodiscard]] std::unique_ptr<trim_schema_t> make_rocpd_v2_trim_schema();
+[[nodiscard]] std::unique_ptr<trim_schema_t>
+make_rocpd_v2_trim_schema();
 
 }  // namespace profiler_hub

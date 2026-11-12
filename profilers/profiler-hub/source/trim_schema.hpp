@@ -42,16 +42,17 @@ public:
     virtual ~trim_schema_t() = default;
 
     [[nodiscard]] virtual trim_statement_t statement_for(
-        std::string_view                      table,
+        std::string_view                       table,
         const std::unordered_set<std::string>& tables,
-        uint64_t                              window_start,
-        uint64_t                              window_end) const = 0;
+        uint64_t                               window_start,
+        uint64_t                               window_end) const = 0;
 };
 
 [[nodiscard]] std::unique_ptr<trim_schema_t>
 make_trim_schema(reader_types::trace_schema_t schema, version_t version);
 
 /** GUID suffix of a per-node table, or empty when @p table is unsuffixed. */
-[[nodiscard]] std::string table_guid(std::string_view table);
+[[nodiscard]] std::string
+table_guid(std::string_view table);
 
 }  // namespace profiler_hub

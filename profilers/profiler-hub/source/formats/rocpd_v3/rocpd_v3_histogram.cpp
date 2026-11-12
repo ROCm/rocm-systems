@@ -78,12 +78,12 @@ match_id(const std::string& column, size_t id)
 std::string
 agent_where(const duration_source_t& source, size_t nid, size_t agent_id, size_t queue_id)
 {
-    return fmt::format("{0}.nid = {1} AND {2} AND {3}",
-                       source.alias,
-                       nid,
-                       match_id(fmt::format("{}.{}", source.alias, source.agent_column),
-                                agent_id),
-                       match_id(fmt::format("{}.queue_id", source.alias), queue_id));
+    return fmt::format(
+        "{0}.nid = {1} AND {2} AND {3}",
+        source.alias,
+        nid,
+        match_id(fmt::format("{}.{}", source.alias, source.agent_column), agent_id),
+        match_id(fmt::format("{}.queue_id", source.alias), queue_id));
 }
 
 std::string

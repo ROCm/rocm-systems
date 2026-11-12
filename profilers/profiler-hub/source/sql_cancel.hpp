@@ -31,7 +31,8 @@ public:
 };
 
 /** Throws operation_cancelled when the future on this thread has been stopped. */
-void throw_if_cancelled();
+void
+throw_if_cancelled();
 
 /**
  * Makes SQL started on this thread interruptible by @p future.
@@ -71,6 +72,7 @@ private:
     bool       m_bound{ false };
 };
 
-[[nodiscard]] ph_future* current_sql_future() noexcept;
+[[nodiscard]] ph_future*
+current_sql_future() noexcept;
 
 }  // namespace profiler_hub

@@ -83,7 +83,7 @@ extern "C"
      * @param future Same contract as ph_ctx_create().
      * @return Same status values as ph_ctx_create().
      */
-    ph_result_t ph_ctx_create_files(ph_ctx_t*           ctx,
+    ph_result_t ph_ctx_create_files(ph_ctx_t*          ctx,
                                     const char* const* paths,
                                     uint32_t           path_count,
                                     ph_future_t        future);
@@ -98,7 +98,7 @@ extern "C"
      *        A later open of the same files reads the timeline from that
      *        cache. Table queries still read the trace database.
      */
-    ph_result_t ph_ctx_create_files_cached(ph_ctx_t*           ctx,
+    ph_result_t ph_ctx_create_files_cached(ph_ctx_t*          ctx,
                                            const char* const* paths,
                                            uint32_t           path_count,
                                            const char*        cache_directory,
@@ -106,12 +106,11 @@ extern "C"
 
     /**
      * @brief Folder created by ph_ctx_create_files_cached() for these files.
-     *        It is <cache_directory>/<folder>, and holds timeline/, catalog/, and summary.bin.
-     *        The folder name is <date>_<format>_<version>_<name>_<size>: the
-     *        newest last-write time to the second, the format and schema
-     *        version from the first file, the first file's name, and the total
-     *        size. The cache writer uses the same name, so @p paths must be the
-     *        same files in the same order.
+     *        It is <cache_directory>/<folder>, and holds timeline/, catalog/, and
+     * summary.bin. The folder name is <date>_<format>_<version>_<name>_<size>: the newest
+     * last-write time to the second, the format and schema version from the first file,
+     * the first file's name, and the total size. The cache writer uses the same name, so
+     * @p paths must be the same files in the same order.
      * @param cache_root Application configuration folder. Null or empty
      *        yields an empty path.
      * @param paths Source files. Null only when @p path_count is 0.
@@ -146,9 +145,9 @@ extern "C"
      * @param index Zero-based index, less than the count from
      *        ph_get_trace_source_count().
      */
-    ph_result_t ph_get_trace_source(ph_ctx_t            ctx,
-                                    uint32_t            index,
-                                    ph_trace_source_t*  source);
+    ph_result_t ph_get_trace_source(ph_ctx_t           ctx,
+                                    uint32_t           index,
+                                    ph_trace_source_t* source);
 
     /**
      * @brief Releases a context and all data obtained through it.
@@ -703,11 +702,11 @@ extern "C"
      *         query, PH_RESULT_CANCELLED if @p future was cancelled.
      */
     ph_result_t ph_event_query_summarize_durations(
-        ph_event_query_t                      query,
-        uint32_t                              event_type,
-        ph_name_duration_summary_callback_t   callback,
-        void*                                 user_data,
-        ph_future_t                           future);
+        ph_event_query_t                    query,
+        uint32_t                            event_type,
+        ph_name_duration_summary_callback_t callback,
+        void*                               user_data,
+        ph_future_t                         future);
 
     /**
      * @brief Looks up text the trace catalog already loaded.
@@ -742,10 +741,10 @@ extern "C"
      *         not loaded.
      * @note @p visitor must not free @p ctx or start another operation on it.
      */
-    ph_result_t ph_visit_text(ph_ctx_t           ctx,
-                              uint32_t           kind,
-                              ph_text_visitor_t  visitor,
-                              void*              user_data);
+    ph_result_t ph_visit_text(ph_ctx_t          ctx,
+                              uint32_t          kind,
+                              ph_text_visitor_t visitor,
+                              void*             user_data);
 
     /**
      * @brief Same as ph_visit_text() for one file and GUID.

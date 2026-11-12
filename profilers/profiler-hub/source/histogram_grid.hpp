@@ -177,8 +177,8 @@ accumulate_samples(const std::vector<Row>& rows, const histogram_grid_t& grid)
 template <typename BucketsOf>
 reader_types::histogram_t
 build_histogram(const reader_catalog_t& catalog,
-                const histogram_grid_t&  grid,
-                BucketsOf&&              buckets_of)
+                const histogram_grid_t& grid,
+                BucketsOf&&             buckets_of)
 {
     reader_types::histogram_t histogram;
     histogram.origin_ts    = grid.origin;
@@ -202,10 +202,13 @@ build_histogram(const reader_catalog_t& catalog,
 /** @brief One histogram per catalog track. The grid covers this catalog only. */
 template <typename BucketsOf>
 reader_types::histogram_t
-build_histogram(const reader_catalog_t& catalog, size_t max_buckets, BucketsOf&& buckets_of)
+build_histogram(const reader_catalog_t& catalog,
+                size_t                  max_buckets,
+                BucketsOf&&             buckets_of)
 {
-    return build_histogram(
-        catalog, make_histogram_grid(catalog, max_buckets), std::forward<BucketsOf>(buckets_of));
+    return build_histogram(catalog,
+                           make_histogram_grid(catalog, max_buckets),
+                           std::forward<BucketsOf>(buckets_of));
 }
 
 }  // namespace profiler_hub

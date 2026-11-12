@@ -55,8 +55,10 @@ quote_ident(std::string_view name)
     std::string quoted = "\"";
     for(const char ch : name)
     {
-        if(ch == '"') quoted += "\"\"";
-        else quoted += ch;
+        if(ch == '"')
+            quoted += "\"\"";
+        else
+            quoted += ch;
     }
     quoted += '"';
     return quoted;
@@ -95,13 +97,16 @@ public:
         const std::string end    = std::to_string(window_end);
         switch(role->kind)
         {
-            case row_kind_t::copy: return trim_statement_t{ role->kind, full_copy(table) };
+            case row_kind_t::copy:
+                return trim_statement_t{ role->kind, full_copy(table) };
             case row_kind_t::interval:
-                return trim_statement_t{
-                    role->kind,
-                    "INSERT INTO " + quoted + " SELECT * FROM oldDb." + quoted +
-                        " WHERE \"start\" < " + end + " AND \"end\" >= " + start };
-            case row_kind_t::sample: return sample_statement(*role, table, tables, start, end);
+                return trim_statement_t{ role->kind,
+                                         "INSERT INTO " + quoted +
+                                             " SELECT * FROM oldDb." + quoted +
+                                             " WHERE \"start\" < " + end +
+                                             " AND \"end\" >= " + start };
+            case row_kind_t::sample:
+                return sample_statement(*role, table, tables, start, end);
             case row_kind_t::event: return event_statement(*role, table, tables);
             case row_kind_t::event_child: return child_statement(*role, table, tables);
         }
@@ -109,21 +114,22 @@ public:
     }
 
 private:
-    static trim_statement_t sample_statement(const table_role_t&                    role,
-                                             std::string_view                       table,
-                                             const std::unordered_set<std::string>& tables,
-                                             const std::string&                     start,
-                                             const std::string&                     end)
+    static trim_statement_t sample_statement(
+        const table_role_t&                    role,
+        std::string_view                       table,
+        const std::unordered_set<std::string>& tables,
+        const std::string&                     start,
+        const std::string&                     end)
     {
         const std::string quoted = quote_ident(table);
-        std::string       sql    = "INSERT INTO " + quoted + " SELECT S.* FROM oldDb." +
-                           quoted + " S WHERE (S.\"timestamp\" >= " + start +
-                           " AND S.\"timestamp\" < " + end + ")";
+        std::string sql = "INSERT INTO " + quoted + " SELECT S.* FROM oldDb." + quoted +
+                          " S WHERE (S.\"timestamp\" >= " + start +
+                          " AND S.\"timestamp\" < " + end + ")";
         const std::string region = sibling(table, "rocpd_sample", "rocpd_region");
         if(!region.empty() && tables.count(region) != 0)
         {
-            sql += " OR S.\"timestamp\" IN (SELECT \"start\" FROM " + quote_ident(region) +
-                   ")";
+            sql += " OR S.\"timestamp\" IN (SELECT \"start\" FROM " +
+                   quote_ident(region) + ")";
         }
         return trim_statement_t{ role.kind, std::move(sql) };
     }
@@ -133,8 +139,8 @@ private:
                                             const std::unordered_set<std::string>& tables)
     {
         const char* sources[] = { "rocpd_kernel_dispatch", "rocpd_memory_allocate",
-                                  "rocpd_memory_copy",      "rocpd_hip_event",
-                                  "rocpd_region",           "rocpd_sample" };
+                                  "rocpd_memory_copy",     "rocpd_hip_event",
+                                  "rocpd_region",          "rocpd_sample" };
         std::vector<std::string> refs;
         for(const char* source : sources)
         {
@@ -144,12 +150,13 @@ private:
         if(refs.empty()) return trim_statement_t{ role.kind, full_copy(table) };
 
         const std::string quoted = quote_ident(table);
-        std::string       sql    = "INSERT INTO " + quoted + " SELECT DISTINCT E.* FROM oldDb." +
-                           quoted + " E WHERE ";
+        std::string sql = "INSERT INTO " + quoted + " SELECT DISTINCT E.* FROM oldDb." +
+                          quoted + " E WHERE ";
         for(size_t index = 0; index < refs.size(); ++index)
         {
             if(index != 0) sql += " OR ";
-            sql += "E.\"id\" IN (SELECT \"event_id\" FROM " + quote_ident(refs[index]) + ")";
+            sql +=
+                "E.\"id\" IN (SELECT \"event_id\" FROM " + quote_ident(refs[index]) + ")";
         }
         return trim_statement_t{ role.kind, std::move(sql) };
     }
@@ -166,10 +173,11 @@ private:
             return trim_statement_t{ role.kind, full_copy(table) };
         }
         const std::string quoted = quote_ident(table);
-        return trim_statement_t{
-            role.kind,
-            "INSERT INTO " + quoted + " SELECT X.* FROM oldDb." + quoted +
-                " X WHERE X.\"event_id\" IN (SELECT \"id\" FROM " + quote_ident(event) + ")" };
+        return trim_statement_t{ role.kind,
+                                 "INSERT INTO " + quoted + " SELECT X.* FROM oldDb." +
+                                     quoted +
+                                     " X WHERE X.\"event_id\" IN (SELECT \"id\" FROM " +
+                                     quote_ident(event) + ")" };
     }
 };
 

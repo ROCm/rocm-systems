@@ -25,13 +25,15 @@ constexpr double k_kib            = 1024.0;
 
 // Replaces characters that Windows does not allow in a file name, and trims
 // the trailing dots and spaces that Windows does not allow at the end.
-std::string safe_stem(const std::string& stem)
+std::string
+safe_stem(const std::string& stem)
 {
     std::string text = stem;
     for(char& character : text)
     {
         const auto byte = static_cast<unsigned char>(character);
-        if(byte < 0x20 || std::string_view{ "<>:\"/\\|?*" }.find(character) != std::string_view::npos)
+        if(byte < 0x20 ||
+           std::string_view{ "<>:\"/\\|?*" }.find(character) != std::string_view::npos)
         {
             character = '_';
         }
@@ -53,13 +55,15 @@ std::string safe_stem(const std::string& stem)
 }
 
 // Local time of a file-clock timestamp, to the second.
-std::string local_timestamp(std::filesystem::file_time_type time)
+std::string
+local_timestamp(std::filesystem::file_time_type time)
 {
     // file_time_type has no portable conversion to system_clock before C++20 clock_cast,
     // so shift it by the offset between the two clocks as they are now.
-    const auto system_time = std::chrono::system_clock::now() +
-                             std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                                 time - std::filesystem::file_time_type::clock::now());
+    const auto system_time =
+        std::chrono::system_clock::now() +
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            time - std::filesystem::file_time_type::clock::now());
     const std::time_t seconds = std::chrono::system_clock::to_time_t(system_time);
 
     std::tm local{};
@@ -73,9 +77,10 @@ std::string local_timestamp(std::filesystem::file_time_type time)
     return buffer;
 }
 
-std::string human_size(uint64_t bytes)
+std::string
+human_size(uint64_t bytes)
 {
-    const double value = static_cast<double>(bytes);
+    const double value      = static_cast<double>(bytes);
     char         buffer[32] = {};
     if(value >= k_kib * k_kib * k_kib)
     {
@@ -83,7 +88,8 @@ std::string human_size(uint64_t bytes)
     }
     else if(value >= k_kib * k_kib)
     {
-        std::snprintf(buffer, sizeof(buffer), "%.0fMB", std::ceil(value / (k_kib * k_kib)));
+        std::snprintf(
+            buffer, sizeof(buffer), "%.0fMB", std::ceil(value / (k_kib * k_kib)));
     }
     else
     {
@@ -92,7 +98,8 @@ std::string human_size(uint64_t bytes)
     return buffer;
 }
 
-std::string format_label(reader_types::trace_schema_t schema)
+std::string
+format_label(reader_types::trace_schema_t schema)
 {
     return schema == reader_types::trace_schema_t::rocpd ? "rocpd" : "unknown";
 }
@@ -100,13 +107,13 @@ std::string format_label(reader_types::trace_schema_t schema)
 }  // namespace
 
 std::string
-trace_cache_directory(std::string_view                    cache_root,
-                      const std::vector<std::string>&     source_paths)
+trace_cache_directory(std::string_view                cache_root,
+                      const std::vector<std::string>& source_paths)
 {
     if(cache_root.empty() || source_paths.empty()) return {};
 
-    uint64_t                              total_size  = 0;
-    std::filesystem::file_time_type       newest_time{};
+    uint64_t                        total_size = 0;
+    std::filesystem::file_time_type newest_time{};
     for(const std::string& source_path : source_paths)
     {
         const std::filesystem::path file{ source_path };
@@ -121,22 +128,21 @@ trace_cache_directory(std::string_view                    cache_root,
     const reader_types::file_probe_result_t probe = probe_file(source_paths.front());
     const reader_types::trace_schema_t      schema =
         probe.status == PH_RESULT_SUCCESS ? probe.trace_schema
-                                          : reader_types::trace_schema_t::unknown;
+                                               : reader_types::trace_schema_t::unknown;
     const version_t version =
         probe.status == PH_RESULT_SUCCESS ? probe.schema_version : version_t{ 0, 0, 0 };
 
     const std::filesystem::path first{ source_paths.front() };
-    std::string name = safe_stem(first.stem().string());
+    std::string                 name = safe_stem(first.stem().string());
     if(source_paths.size() > 1)
     {
         name += "+" + std::to_string(source_paths.size() - 1);
     }
 
-    const std::string folder = local_timestamp(newest_time) + "_" + format_label(schema) +
-                               "_v" + std::to_string(version.major) + "." +
-                               std::to_string(version.minor) + "." +
-                               std::to_string(version.patch) + "_" + name + "_" +
-                               human_size(total_size);
+    const std::string folder =
+        local_timestamp(newest_time) + "_" + format_label(schema) + "_v" +
+        std::to_string(version.major) + "." + std::to_string(version.minor) + "." +
+        std::to_string(version.patch) + "_" + name + "_" + human_size(total_size);
     return (std::filesystem::path{ cache_root } / folder).string();
 }
 

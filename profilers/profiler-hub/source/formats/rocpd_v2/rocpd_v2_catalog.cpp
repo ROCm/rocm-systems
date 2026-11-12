@@ -129,7 +129,8 @@ queue_ownership(data_storage::sqlite_backend& backend)
             &owner_row_t::gpu_id,
             &owner_row_t::queue_id)()
         .for_each([&](const owner_row_t& row) {
-            ownership.by_queue.emplace(gpu_queue_key_t{ row.gpu_id, row.queue_id }, row.pid);
+            ownership.by_queue.emplace(gpu_queue_key_t{ row.gpu_id, row.queue_id },
+                                       row.pid);
             ownership.by_gpu.emplace(row.gpu_id, row.pid);
         });
     return ownership;
@@ -155,12 +156,8 @@ rocpd_v2_reader::build_catalog_category(catalog_category_t category,
 {
     switch(category)
     {
-        case catalog_category_t::string_list:
-            build_string_list(catalog);
-            break;
-        case catalog_category_t::nodes:
-            build_nodes(catalog);
-            break;
+        case catalog_category_t::string_list: build_string_list(catalog); break;
+        case catalog_category_t::nodes: build_nodes(catalog); break;
         case catalog_category_t::processes:
             if(load_catalog_aggregates(catalog)) return;
             build_processes(catalog);
@@ -189,8 +186,7 @@ rocpd_v2_reader::build_catalog_category(catalog_category_t category,
         case catalog_category_t::stream_hardware_links:
         case catalog_category_t::code_objects:
         case catalog_category_t::kernel_symbols:
-        case catalog_category_t::streams:
-            break;
+        case catalog_category_t::streams: break;
     }
 }
 
@@ -224,10 +220,10 @@ rocpd_v2_reader::build_string_list(reader_catalog_t& catalog)
 void
 rocpd_v2_reader::build_nodes(reader_catalog_t& catalog)
 {
-    auto node       = std::make_shared<reader_types::node_info_t>();
-    node->node_id   = k_node_id;
-    node->hash      = std::hash<std::string>{}(database_path());
-    node->hostname  = std::filesystem::path(database_path()).stem().string();
+    auto node         = std::make_shared<reader_types::node_info_t>();
+    node->node_id     = k_node_id;
+    node->hash        = std::hash<std::string>{}(database_path());
+    node->hostname    = std::filesystem::path(database_path()).stem().string();
     node->system_name = node->hostname;
     catalog.nodes.push_back(node);
     catalog.nodes_by_id.emplace(node->node_id, node);
@@ -300,8 +296,8 @@ rocpd_v2_reader::build_agents(reader_catalog_t& catalog)
 void
 rocpd_v2_reader::build_queues(reader_catalog_t& catalog)
 {
-    const auto node     = catalog.nodes_by_id.find(k_node_id);
-    const auto owners   = queue_ownership(*m_backend);
+    const auto node   = catalog.nodes_by_id.find(k_node_id);
+    const auto owners = queue_ownership(*m_backend);
     m_backend
         ->create_read_statement_executor<gpu_queue_row_t>(
             "SELECT gpuId, queueId FROM rocpd_op GROUP BY gpuId, queueId ORDER BY gpuId, "
@@ -313,7 +309,8 @@ rocpd_v2_reader::build_queues(reader_catalog_t& catalog)
             queue->queue_id = row.queue_id;
             queue->nid      = k_node_id;
             queue->name     = fmt::format("GPU {} Queue {}", row.gpu_id, row.queue_id);
-            if(const auto owner = owners.by_queue.find(gpu_queue_key_t{ row.gpu_id, row.queue_id });
+            if(const auto owner =
+                   owners.by_queue.find(gpu_queue_key_t{ row.gpu_id, row.queue_id });
                owner != owners.by_queue.end())
             {
                 queue->pid          = owner->second;
@@ -335,9 +332,9 @@ rocpd_v2_reader::build_pmc_infos(reader_catalog_t& catalog)
             &monitor_key_row_t::device_id,
             &monitor_key_row_t::monitor_type)()
         .for_each([&](const monitor_key_row_t& row) {
-            auto pmc  = std::make_shared<reader_types::pmc_info_t>();
-            pmc->id   = next_id++;
-            pmc->name = row.monitor_type;
+            auto pmc    = std::make_shared<reader_types::pmc_info_t>();
+            pmc->id     = next_id++;
+            pmc->name   = row.monitor_type;
             pmc->symbol = row.monitor_type;
             if(const auto agent = catalog.agents_by_id.find(row.device_id);
                agent != catalog.agents_by_id.end())
@@ -356,7 +353,9 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
     const auto owners  = queue_ownership(*m_backend);
     size_t     next_id = 0;
 
-    const auto new_track = [&](std::string name, track_kind_t kind, size_t count,
+    const auto new_track = [&](std::string                  name,
+                               track_kind_t                 kind,
+                               size_t                       count,
                                const std::optional<size_t>& min_start,
                                const std::optional<size_t>& max_end) {
         auto track         = std::make_shared<reader_types::track_info_t>();
@@ -371,7 +370,8 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
         return track;
     };
 
-    std::unordered_map<size_t, std::unordered_map<size_t, reader_types::thread_info_ptr_t>>
+    std::unordered_map<size_t,
+                       std::unordered_map<size_t, reader_types::thread_info_ptr_t>>
         threads_by_pid;
     for(const auto& thread : catalog.threads)
     {
@@ -380,7 +380,8 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
 
     m_backend
         ->create_read_statement_executor<thread_track_row_t>(
-            "SELECT pid, tid, COUNT(*), MIN(start), MAX(end) FROM rocpd_api GROUP BY pid, "
+            "SELECT pid, tid, COUNT(*), MIN(start), MAX(end) FROM rocpd_api GROUP BY "
+            "pid, "
             "tid ORDER BY pid, tid",
             &thread_track_row_t::pid,
             &thread_track_row_t::tid,
@@ -426,8 +427,11 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
             &monitor_track_row_t::min_value,
             &monitor_track_row_t::max_value)()
         .for_each([&](const monitor_track_row_t& row) {
-            auto track = new_track(
-                row.monitor_type, track_kind_t::pmc_agent, row.count, row.min_start, row.max_end);
+            auto track      = new_track(row.monitor_type,
+                                   track_kind_t::pmc_agent,
+                                   row.count,
+                                   row.min_start,
+                                   row.max_end);
             track->agent_id = row.device_id;
             track->pmc_id   = next_pmc_id++;
             if(const auto owner = owners.by_gpu.find(row.device_id);
@@ -437,17 +441,18 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
             }
             if(row.min_value.has_value() && row.max_value.has_value())
             {
-                track->value_range =
-                    reader_types::value_range_t{ row.min_value.value(), row.max_value.value() };
+                track->value_range = reader_types::value_range_t{ row.min_value.value(),
+                                                                  row.max_value.value() };
             }
         });
 
     m_backend
         ->create_read_statement_executor<op_track_row_t>(
-            fmt::format("SELECT gpuId, queueId, opType_id IN {} AS is_copy, COUNT(*), "
-                        "MIN(start), MAX(end) FROM rocpd_op GROUP BY is_copy, gpuId, queueId "
-                        "ORDER BY is_copy, gpuId, queueId",
-                        rocpd_v2::k_copy_op_types),
+            fmt::format(
+                "SELECT gpuId, queueId, opType_id IN {} AS is_copy, COUNT(*), "
+                "MIN(start), MAX(end) FROM rocpd_op GROUP BY is_copy, gpuId, queueId "
+                "ORDER BY is_copy, gpuId, queueId",
+                rocpd_v2::k_copy_op_types),
             &op_track_row_t::gpu_id,
             &op_track_row_t::queue_id,
             &op_track_row_t::is_copy,
@@ -458,23 +463,26 @@ rocpd_v2_reader::build_tracks(reader_catalog_t& catalog)
             const bool is_copy = row.is_copy != 0;
             const auto kind    = is_copy ? track_kind_t::memory_copy_agent_queue
                                          : track_kind_t::kernel_dispatch_agent_queue;
-            auto track = new_track(fmt::format("{} [{}] Queue {}",
-                                               is_copy ? "Memory Copy" : "Kernel Dispatch",
-                                               row.gpu_id,
-                                               row.queue_id),
-                                   kind,
-                                   row.count,
-                                   row.min_start,
-                                   row.max_end);
+            auto       track =
+                new_track(fmt::format("{} [{}] Queue {}",
+                                      is_copy ? "Memory Copy" : "Kernel Dispatch",
+                                      row.gpu_id,
+                                      row.queue_id),
+                          kind,
+                          row.count,
+                          row.min_start,
+                          row.max_end);
             track->agent_id = row.gpu_id;
             track->queue_id = row.queue_id;
-            if(const auto owner = owners.by_queue.find(gpu_queue_key_t{ row.gpu_id, row.queue_id });
+            if(const auto owner =
+                   owners.by_queue.find(gpu_queue_key_t{ row.gpu_id, row.queue_id });
                owner != owners.by_queue.end())
             {
                 track->process_info = process_of(catalog, owner->second);
             }
             catalog.agent_queue_track_by_key.emplace(
-                agent_queue_track_key_t{ kind, k_node_id, row.gpu_id, row.queue_id }, track);
+                agent_queue_track_key_t{ kind, k_node_id, row.gpu_id, row.queue_id },
+                track);
         });
 }
 
