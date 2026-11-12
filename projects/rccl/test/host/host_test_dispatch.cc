@@ -44,6 +44,7 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -1207,6 +1208,9 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
     // here than in the narrow async-signal-safe window after it.
     const std::vector<std::string> strip = gtestVariablesToStrip();
     const std::string profile = childProfileFile(path);
+    // Read before the fork, so the child compares against the parent it was actually forked
+    // from rather than against whoever has adopted it by the time it looks.
+    const pid_t parent = getpid();
 
     const pid_t pid = fork();
     if (pid < 0) {
@@ -1214,11 +1218,29 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
         return -1;
     }
     if (pid == 0) {
+        // Die with the dispatcher. This covers the one case it cannot handle itself: a SIGKILL,
+        // from the runner's escalation or the OOM killer, after which there is no code of ours
+        // left to signal anybody. The getppid() check closes the race in which the parent died
+        // before the prctl took effect -- the signal would then already have been sent, to a
+        // process that had not asked for it yet.
+        //
+        // It reaches this child and no further: the attribute is per-process and is cleared in
+        // the children of a fork, so a binary's own forks are not covered by it. They are
+        // covered by the group kill below whenever the dispatcher is alive to send it, which
+        // leaves one residual -- a grandchild of a binary that was still running when the
+        // dispatcher was killed outright is reparented and survives. Nothing a process can set
+        // for itself fixes that; it needs a pid namespace or a cgroup, which is the harness's
+        // to give, not ours.
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (getppid() != parent) {
+            _exit(128 + SIGKILL);
+        }
         // Its own process group, so a timeout can signal the whole tree rather than the one pid:
         // a test binary forks too -- death tests, ProcessIsolatedTestRunner -- and those
         // grandchildren would otherwise survive the kill and keep the CI node. The cost is that
         // the children leave the terminal's foreground group, so an interactive Ctrl-C reaches
-        // the dispatcher alone; it signals them on the way out.
+        // the dispatcher alone; it signals them on the way out, and PR_SET_PDEATHSIG above
+        // covers the case where it never gets the chance.
         setpgid(0, 0);
         // In the child, on its own copy of the environment: what the dispatcher has already
         // decided must not be decided again over the case list this child was handed.
@@ -1869,12 +1891,22 @@ bool coverageExportRequested(const char *request)
 }
 
 void writeMergedCoverage(const std::string &directory, const std::vector<std::string> &binaries,
-                         const CommandFn &run)
+                         const CommandFn &run, const TerminatedFn &terminated = {})
 {
     if (directory.empty() || binaries.empty()) {
         return;
     }
     if (!coverageExportRequested(std::getenv(std::string(kCoverageExportEnv).c_str()))) {
+        return;
+    }
+    // A stopped run has nothing worth exporting and no time to do it in. The caller that asked
+    // for the stop is usually a watchdog counting the seconds to a SIGKILL, and this phase is
+    // llvm work measured in minutes over a run that did not finish. Said out loud, because a
+    // silently missing tracefile reads downstream as "this code is not covered".
+    if (terminated && terminated()) {
+        fmt::print(stderr, "host-test-dispatch: run was stopped -- skipping the coverage export;"
+                           " the children's profiles are untouched in {}\n",
+                   directory);
         return;
     }
 
@@ -1906,6 +1938,17 @@ void writeMergedCoverage(const std::string &directory, const std::vector<std::st
     std::vector<std::string> tracefiles;
     size_t exported = 0;
     for (const auto &[binary, profiles] : pending) {
+        // Checked every binary, not only at the start: this phase is long enough that a stop
+        // usually lands in the middle of it. Nothing already exported is written -- a tracefile
+        // holding some of the binaries is indistinguishable downstream from a tree whose other
+        // binaries covered nothing.
+        if (terminated && terminated()) {
+            fmt::print(stderr, "host-test-dispatch: run was stopped after {} of {} binaries --"
+                               " abandoning the coverage export rather than writing a partial"
+                               " {}\n",
+                       exported, pending.size(), kCoverageTracefile);
+            return;
+        }
         fmt::print("[{}/{}] {}\n", ++exported, pending.size(),
                    fs::path(binary).filename().string());
         std::fflush(stdout);
@@ -2453,7 +2496,7 @@ int main(int argc, char **argv)
 
     // After the report: every test has already run by this point, and the per-binary llvm
     // invocations below are long enough that a category timeout can land in the middle of them.
-    writeMergedCoverage(coverageDirectory(), ran, runShell);
+    writeMergedCoverage(coverageDirectory(), ran, runShell, terminated);
 
     return failures == 0 ? 0 : 1;
 }

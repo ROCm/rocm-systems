@@ -1728,6 +1728,48 @@ TEST(HostDispatchCoverageMicrotest, ProfilesAreReadFromTheDirectoryNamedAfterThe
               std::string::npos);
 }
 
+TEST(HostDispatchCoverageMicrotest, AStoppedRunExportsNothing)
+{
+    // The report is already written by the time this phase starts, so there is nothing here
+    // worth the runner's remaining grace: a stop is usually a watchdog counting down to SIGKILL,
+    // and this is llvm work measured in minutes over a run that did not finish.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroInit", 2);
+    FakeLlvm llvm;
+
+    writeMergedCoverage(dir.path(), {"/build/rccl-UnitTestsMicroInit"}, llvm.command(),
+                        [] { return true; });
+
+    EXPECT_TRUE(llvm.commands().empty()) << "a stopped run still ran " << llvm.commands().size()
+                                         << " llvm commands";
+    EXPECT_TRUE(mergedTracefile(dir.path()).empty());
+}
+
+TEST(HostDispatchCoverageMicrotest, AStopPartwayThroughWritesNoPartialTracefile)
+{
+    // A tracefile holding some of the binaries is indistinguishable downstream from a tree whose
+    // other binaries covered nothing, which is the one reading of this file that must never be
+    // wrong. Better to leave the profiles, which are untouched either way.
+    const ScopedUnset exportOn("RCCL_HOST_COVERAGE_EXPORT");
+    const ScopedDir dir("rccl-host-dispatch-coverage");
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroAlpha", 1);
+    seedProfiles(dir.path(), "/build/rccl-UnitTestsMicroBeta", 1);
+    FakeLlvm llvm;
+
+    int exported = 0;
+    writeMergedCoverage(dir.path(),
+                        {"/build/rccl-UnitTestsMicroAlpha", "/build/rccl-UnitTestsMicroBeta"},
+                        [&llvm, &exported](const std::string &command) {
+                            ++exported;
+                            return llvm.command()(command);
+                        },
+                        [&exported] { return exported >= 2; });   // stop after the first binary
+
+    EXPECT_TRUE(mergedTracefile(dir.path()).empty())
+        << "a run stopped partway wrote a tracefile covering only the binaries it reached";
+}
+
 TEST(HostDispatchCoverageMicrotest, ABinaryThatLeftNoProfilesIsPassedOverSilently)
 {
     // A binary excluded by the run's filter never ran, so it has nothing to export; invoking
@@ -2575,6 +2617,48 @@ TEST(HostDispatchSignalMicrotest, ASignalReachesWhatTheChildItselfForked)
     waitpid(pid, &status, 0);
 
     EXPECT_TRUE(waitUntilGone(grandchild)) << "grandchild " << grandchild << " outlived the kill";
+}
+
+TEST(HostDispatchSignalMicrotest, AChildDoesNotOutliveADispatcherThatIsKilledOutright)
+{
+    // The case the dispatcher cannot handle in software, because by then there is none of it
+    // left to run: a SIGKILL from the runner's escalation, or from the OOM killer. Giving each
+    // child its own process group took them out of reach of a killpg aimed at the dispatcher,
+    // so without PR_SET_PDEATHSIG the binaries keep running on the node with nobody waiting on
+    // them. Proved through a stand-in dispatcher, since this process must survive the test.
+    const pid_t dispatcher = fork();
+    ASSERT_GE(dispatcher, 0);
+    if (dispatcher == 0) {
+        // The stand-in: spawn a child exactly as the dispatcher does, then wait to be killed,
+        // never reaping or signalling it. _exit, not return, so gtest's own teardown does not
+        // run in a forked copy of the test binary.
+        spawnChild("/bin/sh", {"-c", "exec sleep 604"});
+        for (;;) {
+            pause();
+        }
+        _exit(0);
+    }
+
+    // The child's pid, read from the stand-in rather than passed back by it: the kernel already
+    // knows who its children are, and a pipe here would be a second thing to get right.
+    pid_t grandchild = -1;
+    for (int attempt = 0; attempt < 200 && grandchild < 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        const std::string children =
+            readFile(fmt::format("/proc/{}/task/{}/children", dispatcher, dispatcher));
+        if (!children.empty()) {
+            grandchild = static_cast<pid_t>(toLong(children, -1));
+        }
+    }
+    ASSERT_GT(grandchild, 0) << "the stand-in dispatcher never started a child";
+
+    ::kill(dispatcher, SIGKILL);
+    int discarded = 0;
+    waitpid(dispatcher, &discarded, 0);
+
+    EXPECT_TRUE(waitUntilGone(grandchild))
+        << "the child outlived the dispatcher that was killed outright";
+    ::kill(grandchild, SIGKILL);   // harmless if it is already gone
 }
 
 TEST(HostDispatchSignalMicrotest, AChildWithNoGroupOfItsOwnIsStillSignalled)
