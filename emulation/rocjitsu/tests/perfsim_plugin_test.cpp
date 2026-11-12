@@ -582,7 +582,7 @@ TEST_F(PerfsimPluginTest, InterestsRequireSynchronousInstructionInspection) {
   EXPECT_FALSE(group.observes_memory_instruction_routing());
   EXPECT_FALSE(group.observes_vgpr_reads());
   EXPECT_FALSE(group.observes_vgpr_writes());
-  EXPECT_FALSE(group.observes_sgpr_reads());
+  EXPECT_FALSE(group.observes_scalar_register_reads());
   EXPECT_FALSE(group.observes_scalar_register_writes());
   EXPECT_FALSE(group.observes_tensor_dma_issue());
   EXPECT_FALSE(group.observes_register_hazards());

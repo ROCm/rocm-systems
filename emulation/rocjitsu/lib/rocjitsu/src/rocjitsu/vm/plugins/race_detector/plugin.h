@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"

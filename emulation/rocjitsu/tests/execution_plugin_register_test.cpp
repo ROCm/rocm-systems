@@ -2691,7 +2691,7 @@ TEST(ExecutionPluginTest, RegisterObserverSnapshotsPreservePendingWaits) {
   public:
     bool observes_vgpr_reads() const override { return true; }
     bool observes_vgpr_writes() const override { return true; }
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool observes_scalar_register_writes() const override { return true; }
     bool supports_async_instructions() const override { return false; }
 
@@ -2819,7 +2819,7 @@ TEST(ExecutionPluginTest, ScalarRoundConvertAndPackObserversSeeCallerFpEnvironme
   class ScalarObserver final : public ExecutionPlugin {
   public:
     ScalarObserver() : ExecutionPlugin("scalar_fp_observer") {}
-    bool observes_sgpr_reads() const override { return true; }
+    bool observes_scalar_register_reads() const override { return true; }
     bool observes_scalar_register_writes() const override { return true; }
     bool supports_async_instructions() const override { return false; }
     void onAmdgpuReadScalarRegister(const Wavefront *, RegisterRef) override {

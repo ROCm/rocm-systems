@@ -317,7 +317,7 @@ TEST_F(PluginLoaderTest, RaceModuleUsesCoreRegisterChecking) {
   EXPECT_TRUE(group.value()->observes_register_hazards());
   EXPECT_FALSE(group.value()->observes_vgpr_reads());
   EXPECT_FALSE(group.value()->observes_vgpr_writes());
-  EXPECT_FALSE(group.value()->observes_sgpr_reads());
+  EXPECT_FALSE(group.value()->observes_scalar_register_reads());
   EXPECT_FALSE(group.value()->observes_scalar_register_writes());
   EXPECT_TRUE(group.value()->observes_memory_routing());
   EXPECT_TRUE(group.value()->observes_tensor_dma_issue());

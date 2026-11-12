@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+
 #include <algorithm>
 #include <format>
 #include <memory>

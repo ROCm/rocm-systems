@@ -422,7 +422,7 @@ public:
   bool observes_memory_instruction_routing() const override { return true; }
   bool observes_vgpr_reads() const override { return true; }
   bool observes_vgpr_writes() const override { return true; }
-  bool observes_sgpr_reads() const override { return true; }
+  bool observes_scalar_register_reads() const override { return true; }
   bool observes_scalar_register_writes() const override { return true; }
   bool supports_async_instructions() const override { return false; }
 
@@ -559,15 +559,17 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuReadSgpr(const amdgpu::Wavefront *wf, uint32_t physical_reg) override {
-    HookEvent e{HookEvent::READ_SGPR};
-    if (wf) {
+  void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
+    if (!wf || reg.cls != RegClass::SGPR)
+      return;
+    for (uint32_t offset = 0; offset < reg.width; ++offset) {
+      HookEvent e{HookEvent::READ_SGPR};
       e.dispatch_id = wf->dispatch_id();
       e.wg_id = wf->wg_id();
       e.wf_id = wf->wf_id();
+      e.physical_reg = wf->sgpr_alloc().base + reg.index + offset;
+      events.push_back(e);
     }
-    e.physical_reg = physical_reg;
-    events.push_back(e);
   }
 
   void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
