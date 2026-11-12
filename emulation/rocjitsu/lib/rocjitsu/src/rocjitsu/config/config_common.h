@@ -81,6 +81,32 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   return value;
 }
 
+inline constexpr int32_t kMinAsyncHelperThreads = -1;
+inline constexpr int32_t kMaxAsyncHelperThreads = 128;
+
+/// @brief Parse a complete signed 32-bit decimal value.
+inline std::optional<int32_t> parse_int32(std::string_view text) {
+  int32_t value = 0;
+  const std::from_chars_result result =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
+
+/// @brief Return whether an async_helper_threads value is in the accepted range.
+inline bool is_valid_async_helper_threads(int32_t value) {
+  return value >= kMinAsyncHelperThreads && value <= kMaxAsyncHelperThreads;
+}
+
+/// @brief Parse async_helper_threads and reject values outside the supported range.
+inline std::optional<int32_t> parse_async_helper_threads(std::string_view text) {
+  std::optional<int32_t> value = parse_int32(text);
+  if (!value || !is_valid_async_helper_threads(*value))
+    return std::nullopt;
+  return value;
+}
+
 /// @brief Read a config file into a string.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns File contents on success, or failure after emitting a diagnostic

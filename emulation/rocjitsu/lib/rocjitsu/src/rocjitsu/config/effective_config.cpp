@@ -120,6 +120,24 @@ bool is_valid_plugin_name(std::string_view name) {
   return true;
 }
 
+template <typename Value, typename ReadField>
+FailureOr<std::string> json_with_top_level_number(std::string_view json, std::string_view field,
+                                                  Value value, ReadField read_field,
+                                                  const util::DiagnosticEmitter &emit_error) {
+  FailureOr<std::string> rewritten =
+      set_top_level_field(json, field, std::to_string(value), emit_error);
+  if (rewritten.failed())
+    return Result::failure();
+
+  FailureOr<Value> applied = with_parsed_simulation_config_json(
+      rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error, std::move(read_field));
+  if (applied.failed())
+    return Result::failure();
+  if (applied.value() != value)
+    return emit_error.emit() << "cannot apply " << field << " to the simulation config";
+  return std::move(rewritten.value());
+}
+
 FailureOr<std::string> json_with_gpu_count(std::string_view json, uint32_t count,
                                            const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> vm = json_top_level_field(json, "vm", emit_error);
@@ -219,27 +237,51 @@ Result validate_system_gpu_count_override(std::string_view json, const LaunchOve
 
 FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
                                                    const util::DiagnosticEmitter &emit_error) {
-  FailureOr<std::string> rewritten =
-      set_top_level_field(json, kBudgetField, std::to_string(budget), emit_error);
-  if (rewritten.failed())
-    return Result::failure();
-
-  FailureOr<uint32_t> applied = with_parsed_simulation_config_json(
-      rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
+  return json_with_top_level_number(
+      json, kBudgetField, budget,
       [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
         return config->cpu_thread_budget();
-      });
-  if (applied.failed())
-    return Result::failure();
-  if (applied.value() != budget)
-    return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
-  return std::move(rewritten.value());
+      },
+      emit_error);
 }
 
 FailureOr<std::string> json_with_launch_overrides(std::string_view json,
                                                   const LaunchOverrides &overrides,
                                                   const util::DiagnosticEmitter &emit_error) {
   std::string rewritten(json);
+  if (overrides.num_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "num_threads", *overrides.num_threads,
+        [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
+          return config->num_threads();
+        },
+        emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
+  if (overrides.cpu_dispatch_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "cpu_dispatch_threads", *overrides.cpu_dispatch_threads,
+        [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
+          return config->cpu_dispatch_threads();
+        },
+        emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
+  if (overrides.async_helper_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "async_helper_threads", *overrides.async_helper_threads,
+        [](const fb::SimulationConfig *config) -> FailureOr<int32_t> {
+          return config->async_helper_threads();
+        },
+        emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
   if (overrides.exec_mode) {
     auto result =
         set_top_level_field(rewritten, "exec_mode", json_string(*overrides.exec_mode), emit_error);
