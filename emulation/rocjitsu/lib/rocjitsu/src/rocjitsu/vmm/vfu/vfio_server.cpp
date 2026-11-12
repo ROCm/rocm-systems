@@ -19,17 +19,19 @@
 #include "embedded_schema.h"
 
 #include <atomic>
+#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
-#include <exception>
 #include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
+#include <pthread.h>
 #include <stop_token>
 #include <sys/un.h>
 #include <thread>
@@ -176,17 +178,17 @@ bool validate_socket_paths(const std::vector<std::string> &socket_paths, std::si
       return false;
     }
 
-    try {
-      const std::string normalized =
-          std::filesystem::absolute(socket_path).lexically_normal().string();
-      if (!normalized_paths.insert(normalized).second) {
-        util::Logger::warn(
-            std::format("vfu: socket paths resolve to the same lexical path: {}", socket_path));
-        return false;
-      }
-    } catch (const std::exception &error) {
+    std::error_code error;
+    const std::filesystem::path absolute = std::filesystem::absolute(socket_path, error);
+    if (error) {
       util::Logger::warn(
-          std::format("vfu: cannot normalize socket path {}: {}", socket_path, error.what()));
+          std::format("vfu: cannot normalize socket path {}: {}", socket_path, error.message()));
+      return false;
+    }
+    const std::string normalized = absolute.lexically_normal().string();
+    if (!normalized_paths.insert(normalized).second) {
+      util::Logger::warn(
+          std::format("vfu: socket paths resolve to the same lexical path: {}", socket_path));
       return false;
     }
   }
@@ -195,9 +197,55 @@ bool validate_socket_paths(const std::vector<std::string> &socket_paths, std::si
 
 enum class ServingOutcome { Running, RequestedStop, Stopped, Failed };
 
+class ServingThread {
+public:
+  explicit ServingThread(VfioDeviceHost &host) : host_(host) {}
+  ~ServingThread() {
+    request_stop();
+    join();
+  }
+  ServingThread(const ServingThread &) = delete;
+  ServingThread &operator=(const ServingThread &) = delete;
+
+  int start() {
+    const int error = pthread_create(&thread_, nullptr, &serve, this);
+    started_ = error == 0;
+    return error;
+  }
+  void request_stop() { stop_.request_stop(); }
+  void join() {
+    if (!started_)
+      return;
+    [[maybe_unused]] const int error = pthread_join(thread_, nullptr);
+    assert(error == 0);
+    started_ = false;
+  }
+  ServingOutcome outcome() const { return outcome_.load(std::memory_order_acquire); }
+
+private:
+  static void *serve(void *opaque) noexcept {
+    auto &self = *static_cast<ServingThread *>(opaque);
+    const auto token = self.stop_.get_token();
+    const VfioDeviceHost::ServeResult result = self.host_.run(token);
+    const ServingOutcome reason =
+        result == VfioDeviceHost::ServeResult::Failed
+            ? ServingOutcome::Failed
+            : (token.stop_requested() ? ServingOutcome::RequestedStop : ServingOutcome::Stopped);
+    self.outcome_.store(reason, std::memory_order_release);
+    return nullptr;
+  }
+
+  VfioDeviceHost &host_;
+  std::stop_source stop_;
+  std::atomic<ServingOutcome> outcome_{ServingOutcome::Running};
+  pthread_t thread_{};
+  bool started_ = false;
+};
+
 int run_vfio_server_impl(const std::string &config_path,
                          const std::vector<std::string> &socket_paths, int ready_fd,
-                         std::optional<int> engine_exit_code_for_test) {
+                         std::optional<int> engine_exit_code_for_test,
+                         std::optional<std::size_t> serving_thread_failure_after = std::nullopt) {
   ReadinessPipe readiness(ready_fd);
   // Config loading and machine construction may create helper threads. Block
   // before either one so every thread in the server inherits the mask and a
@@ -207,19 +255,16 @@ int run_vfio_server_impl(const std::string &config_path,
     util::Logger::warn("vfu: cannot block the signals this server waits on");
     return 1;
   }
-  config::LoadedConfig loaded;
-  try {
-    util::StringDiagnostic diagnostic;
-    auto maybe_loaded = config::load_config(config_path, kEmbeddedSchema, diagnostic.emitter());
-    if (maybe_loaded.failed()) {
-      util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, diagnostic.message()));
-      return 1;
-    }
-    loaded = std::move(maybe_loaded.value());
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, error.what()));
+  util::StringDiagnostic load_diagnostic;
+  util::FailureOr<config::LoadedConfig> maybe_loaded =
+      config::load_config(config_path, kEmbeddedSchema, load_diagnostic.emitter());
+  if (maybe_loaded.failed()) {
+    util::Logger::warn(
+        std::format("vfu: cannot read {}: {}", config_path, load_diagnostic.message()));
     return 1;
   }
+  config::LoadedConfig loaded = std::move(maybe_loaded.value());
+
   SoC *soc = loaded.soc();
   if (soc == nullptr) {
     util::Logger::warn(std::format("vfu: {} describes no GPU to present", config_path));
@@ -254,19 +299,14 @@ int run_vfio_server_impl(const std::string &config_path,
   simdojo::SimulationEngine engine(engine_config);
 
   util::StringDiagnostic diagnostic;
-  VirtualMachine *machine_ptr = nullptr;
-  try {
-    auto machine = assemble_virtual_machine_topology(loaded, engine.topology(),
-                                                     /*daemon_mode=*/false, diagnostic.emitter());
-    if (machine.failed()) {
-      util::Logger::warn("vfu: cannot assemble the local node: ", diagnostic.message());
-      return 1;
-    }
-    machine_ptr = machine.value();
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot assemble the local node: {}", error.what()));
+  util::FailureOr<VirtualMachine *> machine =
+      assemble_virtual_machine_topology(loaded, engine.topology(),
+                                        /*daemon_mode=*/false, diagnostic.emitter());
+  if (machine.failed()) {
+    util::Logger::warn("vfu: cannot assemble the local node: ", diagnostic.message());
     return 1;
   }
+  VirtualMachine *machine_ptr = machine.value();
   if (machine_ptr->num_socs() != socket_paths.size()) {
     util::Logger::warn(std::format("vfu: assembled node has {} local GPU(s), expected {}",
                                    machine_ptr->num_socs(), socket_paths.size()));
@@ -296,32 +336,27 @@ int run_vfio_server_impl(const std::string &config_path,
     bool complete_ = true;
   } frontend_shutdown(pci_devices);
 
-  try {
-    traces.reserve(socket_paths.size());
-    pci_devices.reserve(socket_paths.size());
-    for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
-      SoC *local_soc = machine_ptr->soc(static_cast<uint32_t>(gpu_index));
-      if (local_soc == nullptr) {
-        util::Logger::warn(std::format("vfu: local GPU {} has no SoC", gpu_index));
-        return 1;
-      }
-      traces.push_back(std::make_unique<BarAccessTrace>(symbols));
-      const config::KfdDeviceConfig &identity =
-          loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
-      const std::string name = socket_paths.size() == 1 ? "pci" : std::format("pci{}", gpu_index);
-      auto *device = static_cast<GpuPciDevice *>(machine_ptr->add_child(
-          std::make_unique<GpuPciDevice>(name, gpu_pci_spec_from_config(identity, loaded.pci),
-                                         traces.back().get(), local_soc)));
-      pci_devices.push_back(device);
-      if (!device->usable())
-        return 1;
-    }
-    if (engine.create(diagnostic.emitter()).failed()) {
-      util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
+  traces.reserve(socket_paths.size());
+  pci_devices.reserve(socket_paths.size());
+  for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
+    SoC *local_soc = machine_ptr->soc(static_cast<uint32_t>(gpu_index));
+    if (local_soc == nullptr) {
+      util::Logger::warn(std::format("vfu: local GPU {} has no SoC", gpu_index));
       return 1;
     }
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot create the local GPU node: {}", error.what()));
+    traces.push_back(std::make_unique<BarAccessTrace>(symbols));
+    const config::KfdDeviceConfig &identity =
+        loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
+    const std::string name = socket_paths.size() == 1 ? "pci" : std::format("pci{}", gpu_index);
+    auto *device =
+        static_cast<GpuPciDevice *>(machine_ptr->add_child(std::make_unique<GpuPciDevice>(
+            name, gpu_pci_spec_from_config(identity, loaded.pci), traces.back().get(), local_soc)));
+    pci_devices.push_back(device);
+    if (!device->usable())
+      return 1;
+  }
+  if (engine.create(diagnostic.emitter()).failed()) {
+    util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
     return 1;
   }
 
@@ -387,59 +422,36 @@ int run_vfio_server_impl(const std::string &config_path,
     status = engine_status.code == 0 ? 1 : engine_status.code;
   }
 
-  // Declare hosts before threads so exceptional unwinding also joins every
-  // serving thread before destroying a host or stopping the engine.
+  // Declare hosts before threads so every serving thread is joined before
+  // destroying a host or stopping the engine.
   std::vector<std::unique_ptr<VfioDeviceHost>> hosts;
-  std::vector<std::unique_ptr<std::atomic<ServingOutcome>>> serving_outcomes;
-  std::vector<std::jthread> serving_threads;
+  std::vector<std::unique_ptr<ServingThread>> serving_threads;
   if (status == 0) {
-    try {
-      hosts.reserve(socket_paths.size());
-      for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
-        hosts.push_back(
-            std::make_unique<VfioDeviceHost>(socket_paths[gpu_index], *pci_devices[gpu_index]));
-        if (!hosts.back()->build()) {
-          status = 1;
-          break;
-        }
+    hosts.reserve(socket_paths.size());
+    for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
+      hosts.push_back(
+          std::make_unique<VfioDeviceHost>(socket_paths[gpu_index], *pci_devices[gpu_index]));
+      if (!hosts.back()->build()) {
+        status = 1;
+        break;
       }
-    } catch (const std::exception &error) {
-      util::Logger::warn(std::format("vfu: cannot build a PCI transport: {}", error.what()));
-      status = 1;
     }
   }
 
   if (status == 0) {
-    try {
-      serving_outcomes.reserve(hosts.size());
-      serving_threads.reserve(hosts.size());
-      for (const std::unique_ptr<VfioDeviceHost> &host : hosts) {
-        serving_outcomes.push_back(
-            std::make_unique<std::atomic<ServingOutcome>>(ServingOutcome::Running));
-        VfioDeviceHost *host_ptr = host.get();
-        std::atomic<ServingOutcome> *outcome = serving_outcomes.back().get();
-        // Each host has its own protocol loop; all inherit the blocked mask.
-        serving_threads.emplace_back([host_ptr, outcome](std::stop_token stop_token) {
-          try {
-            const VfioDeviceHost::ServeResult result = host_ptr->run(stop_token);
-            const ServingOutcome reason =
-                result == VfioDeviceHost::ServeResult::Failed
-                    ? ServingOutcome::Failed
-                    : (stop_token.stop_requested() ? ServingOutcome::RequestedStop
-                                                   : ServingOutcome::Stopped);
-            outcome->store(reason, std::memory_order_release);
-          } catch (const std::exception &error) {
-            util::Logger::warn(std::format("vfu: PCI serving failed: {}", error.what()));
-            outcome->store(ServingOutcome::Failed, std::memory_order_release);
-          } catch (...) {
-            util::Logger::warn("vfu: PCI serving failed with a non-standard exception");
-            outcome->store(ServingOutcome::Failed, std::memory_order_release);
-          }
-        });
+    serving_threads.reserve(hosts.size());
+    for (const std::unique_ptr<VfioDeviceHost> &host : hosts) {
+      const std::size_t gpu_index = serving_threads.size();
+      serving_threads.push_back(std::make_unique<ServingThread>(*host));
+      // Each host has its own protocol loop; all inherit the blocked mask.
+      const int error =
+          serving_thread_failure_after == gpu_index ? EAGAIN : serving_threads.back()->start();
+      if (error != 0) {
+        util::Logger::warn(std::format("vfu: cannot start serving thread for PCI function {}: {}",
+                                       gpu_index, std::strerror(error)));
+        status = 1;
+        break;
       }
-    } catch (const std::exception &error) {
-      util::Logger::warn(std::format("vfu: cannot start PCI serving threads: {}", error.what()));
-      status = 1;
     }
   }
 
@@ -450,8 +462,8 @@ int run_vfio_server_impl(const std::string &config_path,
     status = 1;
   }
   if (status == 0) {
-    for (std::size_t gpu_index = 0; gpu_index < serving_outcomes.size(); ++gpu_index) {
-      const ServingOutcome reason = serving_outcomes[gpu_index]->load(std::memory_order_acquire);
+    for (std::size_t gpu_index = 0; gpu_index < serving_threads.size(); ++gpu_index) {
+      const ServingOutcome reason = serving_threads[gpu_index]->outcome();
       if (reason == ServingOutcome::Failed ||
           (socket_paths.size() > 1 && reason != ServingOutcome::Running)) {
         util::Logger::warn(std::format("vfu: PCI function {} stopped before readiness", gpu_index));
@@ -497,8 +509,8 @@ int run_vfio_server_impl(const std::string &config_path,
       }
       bool session_ended = false;
       bool all_sockets_closed = socket_paths.size() > 1;
-      for (std::size_t gpu_index = 0; gpu_index < serving_outcomes.size(); ++gpu_index) {
-        const ServingOutcome outcome = serving_outcomes[gpu_index]->load(std::memory_order_acquire);
+      for (std::size_t gpu_index = 0; gpu_index < serving_threads.size(); ++gpu_index) {
+        const ServingOutcome outcome = serving_threads[gpu_index]->outcome();
         if (outcome == ServingOutcome::Failed) {
           util::Logger::warn(
               std::format("vfu: PCI function {} stopped serving the node", gpu_index));
@@ -581,12 +593,12 @@ int run_vfio_server_impl(const std::string &config_path,
   }
 
   // No callback may reach a host during detach or a frontend during teardown.
-  for (std::jthread &thread : serving_threads)
-    thread.request_stop();
-  for (std::jthread &thread : serving_threads)
-    thread.join();
-  for (const std::unique_ptr<std::atomic<ServingOutcome>> &outcome : serving_outcomes) {
-    const ServingOutcome reason = outcome->load(std::memory_order_acquire);
+  for (const auto &thread : serving_threads)
+    thread->request_stop();
+  for (const auto &thread : serving_threads)
+    thread->join();
+  for (const auto &thread : serving_threads) {
+    const ServingOutcome reason = thread->outcome();
     if (reason == ServingOutcome::Failed)
       status = 1;
   }
@@ -652,6 +664,13 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::vector<std::string> &socket_paths,
                                               int ready_fd, int exit_code) {
   return run_vfio_server_impl(config_path, socket_paths, ready_fd, exit_code);
+}
+
+int run_vfio_server_with_serving_thread_failure_for_test(
+    const std::string &config_path, const std::vector<std::string> &socket_paths, int ready_fd,
+    std::size_t successful_threads) {
+  return run_vfio_server_impl(config_path, socket_paths, ready_fd, std::nullopt,
+                              successful_threads);
 }
 
 } // namespace rocjitsu

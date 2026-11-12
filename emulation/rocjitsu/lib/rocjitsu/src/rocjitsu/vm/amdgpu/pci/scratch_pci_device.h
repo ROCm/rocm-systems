@@ -52,7 +52,7 @@ public:
                                    bool write) override;
   void dma_map(const simdojo::DmaRegion &region) override;
   void dma_unmap(const simdojo::DmaRegion &region) override;
-  void reset(simdojo::ResetKind kind) override;
+  util::Result reset(simdojo::ResetKind kind, util::DiagnosticEmitter diag = {}) override;
 
   /// @brief Return how many guest memory windows are currently mapped.
   [[nodiscard]] std::size_t mapped_regions() const {
