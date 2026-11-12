@@ -1683,11 +1683,11 @@ TEST_F(Gfx1250CounterCapacityRaceTest, LoadcntBelowCapacityKeepsOldestLoadPendin
   EXPECT_TRUE(vgpr_read(0, 0));
 }
 
-// Loads and stores use separate counters on gfx1250 (CDNA5 ISA 5.7.1), so a
-// full STOREcnt says nothing about a pending load.
+// Loads and stores use separate counters on gfx1250 (CDNA5 ISA 5.7.1), so even
+// a store issued against a full STOREcnt says nothing about a pending load.
 TEST_F(Gfx1250CounterCapacityRaceTest, StorecntPressureDoesNotCompleteALoad) {
   vmem_load(0, /*vgpr=*/0);
-  for (int index = 0; index < kCapacity; ++index)
+  for (int index = 0; index < kCapacity + 1; ++index)
     vmem_store(0);
   EXPECT_TRUE(vgpr_read(0, 0));
 }
@@ -1792,6 +1792,27 @@ TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesAdvancesDscnt) {
   for (int index = 0; index < kCapacity - 1; ++index)
     ds_read(0, kYoungerAddress);
   flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// The FLAT with EXEC zero also keeps its slot on both counters afterwards. A
+// read, 61 younger operations, the FLAT at issue 63 and an active operation at
+// issue 64 fill the counter, so the last issue completes the oldest read.
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatWithNoActiveLanesHoldsADscntSlot) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::NoActiveLanes);
+  ds_read(0, kYoungerAddress);
   EXPECT_FALSE(tensor_load_oldest());
 }
 
@@ -2025,6 +2046,17 @@ TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncLoadFillsAsynccnt) {
   for (int index = 0; index < kCapacity - 1; ++index)
     dtl_write(0, kYoungerAddress);
   exec_zero_async_load(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+// The EXEC-zero async load also keeps its ASYNCcnt slot afterwards: at issue 63
+// it lets an active async load at issue 64 complete the oldest one.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroAsyncLoadHoldsAnAsynccntSlot) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  exec_zero_async_load(0, kYoungerAddress);
+  dtl_write(0, kYoungerAddress);
   EXPECT_FALSE(ds_read(0, kOldestAddress));
 }
 
