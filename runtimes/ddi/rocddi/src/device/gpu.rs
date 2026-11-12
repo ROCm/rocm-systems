@@ -122,9 +122,6 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Returns a native interface or device-lifetime failure.
     pub fn supports_expert_scheduling(&self) -> Result<bool, Error> {
-        if self.info.gfx_major < 12 {
-            return Ok(false);
-        }
         self.driver.supports_expert_scheduling()
     }
 

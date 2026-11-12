@@ -346,7 +346,7 @@ fn copy_recipe(
     let transport = info.queues.copy?;
     match transport {
         GpuCopyTransport::User
-            if !info.queues.sdma
+            if info.queues.sdma.is_none()
                 || !matches!(protocol, SdmaProtocol::Gfx9)
                 || !cfg!(target_arch = "x86_64") =>
         {

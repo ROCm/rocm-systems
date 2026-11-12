@@ -402,6 +402,26 @@ fn rounded(value: u64, granularity: u64) -> Result<u64, u64> {
         .ok_or(RANGE)
 }
 
+fn native_extent(
+    size: u64,
+    address: Option<u64>,
+    limits: amdf_memory_construction_capabilities_t,
+) -> Result<(u64, u64), u64> {
+    let granularity = limits.native_byte_length_granularity;
+    if limits.byte_length_granularity == 0
+        || size % limits.byte_length_granularity != 0
+        || !granularity.is_power_of_two()
+        || limits.native_byte_length_prefix != 0
+    {
+        return Err(UNSUPPORTED);
+    }
+    let offset = address.map_or(0, |address| address % granularity);
+    Ok((
+        offset,
+        rounded(offset.checked_add(size).ok_or(RANGE)?, granularity)?,
+    ))
+}
+
 fn no_transition() -> amdf_cache_transition_t {
     amdf_cache_transition_t {
         kind: AMDF_CACHE_TRANSITION_KIND_NONE,
@@ -570,7 +590,66 @@ unsafe fn profile(
     {
         return Err(UNSUPPORTED);
     }
-    let page = instance.host_page_size;
+    let provider = endpoint
+        .map(|endpoint| {
+            use memory::device::{HostMappingPolicy, MemoryCapabilityRequest, MemoryKind};
+            let request = if registered {
+                MemoryCapabilityRequest::Registration(HostMappingPolicy::Fine)
+            } else {
+                MemoryCapabilityRequest::Allocation(if local {
+                    MemoryKind::DeviceLocal {
+                        host_visible,
+                        coherent: false,
+                        extended_coherent: false,
+                        uncached: false,
+                        contiguous: false,
+                    }
+                } else {
+                    MemoryKind::System
+                })
+            };
+            let owner = if local {
+                unsafe { &*scope.endpoint }
+            } else {
+                endpoint
+            };
+            instance
+                .native
+                .memory_capabilities(&owner.native, request)
+                .map_err(|error| native(&error))
+        })
+        .transpose()?;
+    let access_provider = if local {
+        let owner = unsafe { &*scope.endpoint };
+        let consumer = endpoint.ok_or(UNSUPPORTED)?;
+        Some(
+            instance
+                .native
+                .memory_capabilities(
+                    &consumer.native,
+                    memory::device::MemoryCapabilityRequest::Access {
+                        owner: &owner.native,
+                        kind: memory::device::MemoryKind::DeviceLocal {
+                            host_visible,
+                            coherent: false,
+                            extended_coherent: false,
+                            uncached: false,
+                            contiguous: false,
+                        },
+                    },
+                )
+                .map_err(|error| native(&error))?,
+        )
+    } else {
+        provider
+    };
+    if host_visible && provider.is_some_and(|cap| cap.host_cacheability.is_none()) {
+        return Err(UNSUPPORTED);
+    }
+    let page = provider.map_or(instance.host_page_size, |cap| cap.native.granularity);
+    let logical_alignment = provider.map_or(if registered { 1 } else { page }, |cap| {
+        cap.logical_alignment
+    });
     // Provider-owned host-visible storage uses a qualified cache recipe.
     // Registration can still expose borrowed pages without knowing their cache
     // mode; AMDF represents unavailable maintenance separately from mapping.
@@ -606,18 +685,26 @@ unsafe fn profile(
     } else {
         MAX_LENGTH
     };
+    let maximum = provider.map_or(maximum, |cap| maximum.min(cap.native.maximum_size));
     let construction = amdf_memory_construction_capabilities_t {
         maximum_byte_length: maximum,
-        byte_length_granularity: 1,
-        registered_host_pointer_alignment: u64::from(registered),
+        byte_length_granularity: provider.map_or(1, |cap| cap.logical_size_granularity),
+        registered_host_pointer_alignment: if registered { logical_alignment } else { 0 },
         registered_host_cacheability: if registered {
-            AMDF_HOST_CACHEABILITY_WRITE_BACK
+            match provider.and_then(|cap| cap.host_cacheability) {
+                Some(memory::device::HostCacheability::WriteCombined) => {
+                    AMDF_HOST_CACHEABILITY_WRITE_COMBINED
+                }
+                _ => AMDF_HOST_CACHEABILITY_WRITE_BACK,
+            }
         } else {
             AMDF_HOST_CACHEABILITY_UNKNOWN
         },
         placement_kinds: 0,
-        minimum_alignment: if registered { 1 } else { page },
-        maximum_alignment: MAX_ALIGNMENT,
+        minimum_alignment: logical_alignment,
+        maximum_alignment: provider.map_or(MAX_ALIGNMENT, |cap| {
+            MAX_ALIGNMENT.min(cap.maximum_alignment)
+        }),
         native_byte_length_granularity: page,
         native_byte_length_prefix: 0,
     };
@@ -658,7 +745,12 @@ unsafe fn profile(
                 maximum_byte_length: maximum,
                 byte_offset_granularity: 1,
                 byte_length_granularity: 1,
-                supported_access: AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+                supported_access: AMDF_MEMORY_MAP_FLAG_READ
+                    | if provider.is_none_or(|cap| cap.host_writable) {
+                        AMDF_MEMORY_MAP_FLAG_WRITE
+                    } else {
+                        0
+                    },
                 features: if host_only {
                     AMDF_HOST_MAPPING_FEATURE_FILE_IO
                 } else {
@@ -680,27 +772,28 @@ unsafe fn profile(
         let requested_access =
             memory::device::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
         let flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS
-            | if local {
-                0
-            } else {
+            | if access_provider.is_some_and(|cap| cap.host_coherent) {
                 AMDF_MEMORY_FLAG_HOST_COHERENT
+            } else {
+                0
             };
-        // KFD always installs readable GPU PTEs; WRITE and EXECUTE are
-        // independent additions. Queue storage uses these same native BOs.
-        let supported_flags = flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
-        if !requested_access.contains(memory::device::DeviceAccess::READ)
-            || !endpoint
-                .native
-                .supported_permissions
-                .contains(requested_access)
+        let cap = access_provider.ok_or(INTERNAL)?;
+        let supported_flags = flags
+            | if cap.queue_storage {
+                AMDF_MEMORY_FLAG_QUEUE_STORAGE
+            } else {
+                0
+            };
+        if !requested_access.contains(cap.required_access)
+            || !cap.supported_access.contains(requested_access)
             || request.flags & !supported_flags != 0
             || request.address_kinds & !1 != 0
         {
             return Err(UNSUPPORTED);
         }
         capabilities = amdf_memory_access_capabilities_t {
-            guaranteed_access: AMDF_MEMORY_ACCESS_READ,
-            supported_access: endpoint.native.supported_permissions.bits(),
+            guaranteed_access: cap.required_access.bits(),
+            supported_access: cap.supported_access.bits(),
             guaranteed_flags: flags,
             supported_flags,
             address_kinds: 1,
@@ -709,7 +802,7 @@ unsafe fn profile(
                 address_bit_count: endpoint.native.address_bit_count,
                 minimum_address: endpoint.native.minimum_address,
                 maximum_address: endpoint.native.maximum_address,
-                minimum_alignment: if registered { 1 } else { page },
+                minimum_alignment: logical_alignment,
             },
             ..Default::default()
         };
@@ -1184,7 +1277,7 @@ pub(crate) unsafe extern "C" fn create(
             return Err(UNSUPPORTED);
         }
         let alignment = create.minimum_alignment.max(limits.minimum_alignment);
-        let page = instance.host_page_size;
+        let page = limits.native_byte_length_granularity;
         let (registered_address, mut source_byte_offset, mut native_length) = if registered {
             let address = create.registered_host_pointer as usize;
             let requested_alignment = usize::try_from(alignment).map_err(|_| RANGE)?;
@@ -1195,16 +1288,12 @@ pub(crate) unsafe extern "C" fn create(
             {
                 return Err(INVALID);
             }
-            let source_byte_offset = address as u64 & (page - 1);
-            let native_length = rounded(
-                source_byte_offset
-                    .checked_add(create.byte_length)
-                    .ok_or(RANGE)?,
-                page,
-            )?;
+            let (source_byte_offset, native_length) =
+                native_extent(create.byte_length, Some(address as u64), limits)?;
             (Some(address), source_byte_offset, native_length)
         } else {
-            (None, 0, rounded(create.byte_length, page)?)
+            let (_, length) = native_extent(create.byte_length, None, limits)?;
+            (None, 0, length)
         };
         let slot = instance.owner_slot::<Memory>()?;
         let mut access_records =
@@ -2265,3 +2354,21 @@ pub(crate) use cache::{pair_info, scope_pair_info};
 #[cfg(all(test, target_arch = "x86_64"))]
 #[path = "memory_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod capability_geometry_tests {
+    use super::*;
+    #[test]
+    fn construction_uses_provider_units_and_checks_unrounded_logical_lengths() {
+        let mut limits = amdf_memory_construction_capabilities_t {
+            native_byte_length_granularity: 65536,
+            byte_length_granularity: 1,
+            ..Default::default()
+        };
+        assert_eq!(native_extent(1, None, limits), Ok((0, 65536)));
+        assert_eq!(native_extent(2, Some(65535), limits), Ok((65535, 131_072)));
+        limits.byte_length_granularity = 64;
+        assert_eq!(native_extent(1, None, limits), Err(UNSUPPORTED));
+        assert_eq!(native_extent(64, None, limits), Ok((0, 65536)));
+    }
+}

@@ -869,3 +869,39 @@ pub(crate) unsafe fn copy_queue_create_mask(
 
 #[cfg(test)]
 mod tests;
+
+/// Intersects HSA's packet-count policy with provider byte geometry.
+pub(crate) fn aql_queue_limits(info: &rocddi::topology::GpuInfo) -> Option<(u32, u32)> {
+    let controls = info.queues.aql?;
+    if !controls.ring_alignment.is_power_of_two() {
+        return None;
+    }
+    let minimum = controls
+        .minimum_ring_bytes
+        .max(controls.ring_alignment)
+        .div_ceil(64)
+        .max(64)
+        .checked_next_power_of_two()?;
+    let maximum = (controls.maximum_ring_bytes / 64).min(131_072);
+    if maximum < minimum {
+        return None;
+    }
+    let maximum = 1_u64 << maximum.ilog2();
+    Some((u32::try_from(minimum).ok()?, u32::try_from(maximum).ok()?))
+}
+
+#[cfg(test)]
+mod capability_tests {
+    #[test]
+    fn hsa_ring_limits_intersect_provider_geometry() {
+        let mut info = rocddi::topology::GpuInfo::default();
+        assert_eq!(super::aql_queue_limits(&info), None);
+        info.queues.aql = Some(rocddi::topology::GpuUserQueueCapabilities {
+            minimum_ring_bytes: 1 << 20,
+            maximum_ring_bytes: 3 << 20,
+            ring_alignment: 1 << 20,
+            ..rocddi::topology::GpuUserQueueCapabilities::default()
+        });
+        assert_eq!(super::aql_queue_limits(&info), Some((16384, 32768)));
+    }
+}

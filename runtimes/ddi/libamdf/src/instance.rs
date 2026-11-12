@@ -717,7 +717,9 @@ pub(crate) fn family(
     gpu_family(endpoint.gpu().ok_or(UNSUPPORTED)?, ordinal)
 }
 
-fn queue_families(gpu: &topology::GpuInfo) -> impl Iterator<Item = (u32, bool, bool)> {
+fn queue_families(
+    gpu: &topology::GpuInfo,
+) -> impl Iterator<Item = (u32, Option<topology::GpuUserQueueCapabilities>, bool)> {
     let queues = gpu.queues;
     [
         (AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, queues.aql, false),
@@ -733,7 +735,7 @@ fn queue_families(gpu: &topology::GpuInfo) -> impl Iterator<Item = (u32, bool, b
         ),
     ]
     .into_iter()
-    .filter(|(_, direct, kernel)| *direct || *kernel)
+    .filter(|(_, direct, kernel)| direct.is_some() || *kernel)
 }
 
 #[allow(
@@ -756,7 +758,7 @@ fn gpu_family(gpu: &topology::GpuInfo, ordinal: u32) -> Result<amdf_queue_family
     Ok(amdf_queue_family_info_t {
         ordinal,
         command_type,
-        publication_modes: if direct {
+        publication_modes: if direct.is_some() {
             AMDF_QUEUE_PUBLICATION_MODE_USER
         } else {
             0
@@ -777,6 +779,7 @@ fn gpu_family(gpu: &topology::GpuInfo, ordinal: u32) -> Result<amdf_queue_family
         } else if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
                 | if gpu.target_profile.supports_pm4_dispatch_scratch()
+                    && direct.is_some_and(|controls| controls.dispatch_scratch)
                     && gpu.xcc_count == 1
                     && gpu.shader_engine_count_per_xcc != 0
                     && gpu.maximum_scratch_wave_count_per_compute_unit != 0
@@ -814,53 +817,37 @@ fn gpu_family(gpu: &topology::GpuInfo, ordinal: u32) -> Result<amdf_queue_family
         } else {
             amdf_atomic_capabilities_t::default()
         },
-        user_queue_capabilities: if direct {
+        user_queue_capabilities: direct.map_or(0, |controls| {
             AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
-                | if pm4 {
-                    0
-                } else {
+                | if controls.device_producer {
                     AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
+                } else {
+                    0
                 }
-        } else {
-            0
-        },
-        producer_modes: if direct {
+        }),
+        producer_modes: direct.map_or(0, |controls| {
             AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE
-                | if aql {
+                | if controls.multiple_producers {
                     AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI
                 } else {
                     0
                 }
-        } else {
-            0
-        },
+        }),
         priority_capabilities: AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL
-            | if aql {
-                AMDF_QUEUE_PRIORITY_CAPABILITY_LOW | AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH
-            } else {
-                0
-            },
-        minimum_ring_byte_length: if !direct {
-            0
-        } else if pm4 {
-            4096
-        } else {
-            1024
-        },
-        maximum_ring_byte_length: if !direct {
-            0
-        } else if pm4 {
-            4096
-        } else {
-            1 << 31
-        },
-        ring_byte_length_alignment: if !direct {
-            0
-        } else if pm4 {
-            4096
-        } else {
-            1024
-        },
+            | direct.map_or(0, |controls| {
+                (if controls.low_priority {
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_LOW
+                } else {
+                    0
+                }) | (if controls.high_priority {
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH
+                } else {
+                    0
+                })
+            }),
+        minimum_ring_byte_length: direct.map_or(0, |controls| controls.minimum_ring_bytes),
+        maximum_ring_byte_length: direct.map_or(0, |controls| controls.maximum_ring_bytes),
+        ring_byte_length_alignment: direct.map_or(0, |controls| controls.ring_alignment),
         ..Default::default()
     })
 }
@@ -1599,14 +1586,27 @@ mod family_tests {
             assert_eq!(family.ring_byte_length_alignment, 0);
         }
         assert_eq!(gpu_family(&gpu, 2).err(), Some(RANGE));
-        gpu.queues.sdma = true;
+        gpu.queues.sdma = Some(topology::GpuUserQueueCapabilities {
+            minimum_ring_bytes: 65536,
+            maximum_ring_bytes: 65536,
+            ring_alignment: 65536,
+            ..topology::GpuUserQueueCapabilities::default()
+        });
         let family = gpu_family(&gpu, 0).unwrap();
         assert_eq!(
             family.publication_modes,
             AMDF_QUEUE_PUBLICATION_MODE_USER | AMDF_QUEUE_PUBLICATION_MODE_KERNEL
         );
-        assert_ne!(family.minimum_ring_byte_length, 0);
-        gpu.queues.aql = true;
+        assert_eq!(family.minimum_ring_byte_length, 65536);
+        assert_eq!(
+            family.user_queue_capabilities,
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
+        );
+        assert_eq!(
+            family.priority_capabilities,
+            AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL
+        );
+        gpu.queues.aql = Some(topology::GpuUserQueueCapabilities::default());
         assert_eq!(
             gpu_family(&gpu, 0).unwrap().command_type,
             AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
