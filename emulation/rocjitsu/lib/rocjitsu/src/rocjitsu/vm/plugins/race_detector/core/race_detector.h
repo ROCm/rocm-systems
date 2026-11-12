@@ -4,6 +4,7 @@
 #pragma once
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include <algorithm>
@@ -83,6 +84,15 @@ public:
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+
+  /// @brief Conservatively check an instruction's LDS intervals for conflicts.
+  /// @details The intervals must describe valid LDS byte ranges. False proves
+  /// that validateRead (or validateWrite, when isWrite) would report nothing
+  /// for any access by `wave` within `accessed`, so per-lane validation can be
+  /// skipped. Visits the 16-byte chunks of each interval, without scanning gaps
+  /// between intervals. Separate intervals can visit the same chunk.
+  bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
+                   MemoryOrderClass currentMemoryOrder) const;
 
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
