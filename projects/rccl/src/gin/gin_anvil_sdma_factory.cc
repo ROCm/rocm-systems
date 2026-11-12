@@ -82,9 +82,7 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id, u
 
   const int myDev = peers[static_cast<size_t>(myRank)].device_id;
 
-  // A peer's ordinal names a GPU on its own host, so a peer on another host is
-  // identified by host and ordinal and gets queues of its own; the destination
-  // is its fabric-mapped address, so no peer access is set up for it.
+  // A peer on another host is keyed by host and ordinal and gets no peer access.
   std::vector<char> sameHost(static_cast<size_t>(nRanks), 1);
   std::vector<uint64_t> remoteKeys(static_cast<size_t>(nRanks), 0);
   int remotePeers = 0;

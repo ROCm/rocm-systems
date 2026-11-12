@@ -488,10 +488,9 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   // and do not re-arm supported, which would let a new shared split reconnect.
   if (ginState->finalized) return ncclSuccess;
 
-  // How far Anvil SDMA reaches (gin_anvil_reach.h): on MI300/MI350 only this
-  // host, on MI450 also one fabric pod once every rank opts in. The opt-in vote
-  // is a bootstrap allgather, so it runs before pluginMutex, and only where the
-  // all-ranks mask and the topology, which every rank shares, allow a pod.
+  // Anvil SDMA reach is in gin_anvil_reach.h. The pod opt-in vote is a bootstrap
+  // allgather, so it runs before pluginMutex, and only where the all-ranks mask
+  // and the topology, which every rank shares, allow a pod.
   const GinAnvilSdmaReach anvilCapable = ginAnvilSdmaReachCapable(comm);
   GinAnvilSdmaReach anvilReach = anvilCapable;
   if (anvilCapable == GinAnvilSdmaReach::FabricPod && (BIT(NCCL_GIN_TYPE_ANVIL_SDMA) & globalBitMask)) {

@@ -314,6 +314,41 @@ static int ginAnvilBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) 
   return (bootstrapAllGather(ctx, buf, (int)perRankSize) == ncclSuccess) ? 0 : -1;
 }
 
+// The factory gathers one record per GIN-team rank, but bootstrapAllGather
+// writes one per communicator rank, and a NCCL_GIN_CONNECTION_RAIL team is
+// smaller. Gather into a comm->nRanks buffer and return the team's records.
+struct ginAnvilTeamGatherCtx {
+  struct ncclComm* comm;
+  int nranks;
+  int rank;
+};
+
+static int ginAnvilTeamAllgather(void* ctx, void* buf, size_t perRankSize) {
+  const auto* team = static_cast<const ginAnvilTeamGatherCtx*>(ctx);
+  struct ncclComm* comm = team->comm;
+  if (team->nranks == comm->nRanks) return ginAnvilBootstrapAllgather(comm->bootstrap, buf, perRankSize);
+
+  const long long stride =
+    comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL ? comm->contiguousRanksPerHost : 1;
+  char* teamRecords = static_cast<char*>(buf);
+  char* worldRecords = static_cast<char*>(calloc((size_t)comm->nRanks, perRankSize));
+  if (worldRecords == nullptr) return -1;
+  memcpy(worldRecords + (size_t)comm->rank * perRankSize, teamRecords + (size_t)team->rank * perRankSize,
+         perRankSize);
+  int ret = ginAnvilBootstrapAllgather(comm->bootstrap, worldRecords, perRankSize);
+  for (int pe = 0; ret == 0 && pe < team->nranks; pe++) {
+    const long long worldPeer = comm->rank + (long long)(pe - team->rank) * stride;
+    if (worldPeer < 0 || worldPeer >= comm->nRanks) {
+      WARN("GIN anvil-sdma: GIN peer %d maps to world rank %lld, outside [0, %d)", pe, worldPeer, comm->nRanks);
+      ret = -1;
+      break;
+    }
+    memcpy(teamRecords + (size_t)pe * perRankSize, worldRecords + (size_t)worldPeer * perRankSize, perRankSize);
+  }
+  free(worldRecords);
+  return ret;
+}
+
 void ncclGinAnvilSetInitContext(void* initCtx, struct ncclComm* comm) {
   static_cast<ginAnvilInitCtx*>(initCtx)->comm = comm;
 }
@@ -490,7 +525,11 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
 
   int numCh = ginAnvilSdmaNumChannels();
   struct ncclComm* comm = cctx->comm;
-  const uint64_t hostId = (comm && comm->peerInfo) ? comm->peerInfo[comm->rank].hostHash : 0;
+  // peerInfo's hostHash is getHostHash() + commHash. The remote-peer queues are
+  // process-wide and keyed by host, so the key must be the same for every
+  // communicator or no later one would reuse them.
+  const uint64_t hostId =
+    (comm && comm->peerInfo) ? comm->peerInfo[comm->rank].hostHash - comm->commHash : 0;
   // ncclGinSetDefaultBackend already removed this backend from a multi-host
   // communicator unless every rank opted in to the pod (RCCL_GIN_ANVIL_FABRIC_POD).
   const int remoteHostsOk =
@@ -499,8 +538,9 @@ static ncclResult_t ginAnvilConnect(void* ctx, void* handles[], int nranks, int 
   gin_anvil_sdma_handle_t h = nullptr;
   void* gpu_handles = nullptr;
   uint64_t* dirty = nullptr;
-  if (gin_anvil_sdma_create(nranks, rank, localDev, hostId, remoteHostsOk, ginAnvilBootstrapAllgather,
-                            cctx->comm->bootstrap, numCh, &h, &gpu_handles, &dirty) != 0) {
+  ginAnvilTeamGatherCtx teamGather{comm, nranks, rank};
+  if (gin_anvil_sdma_create(nranks, rank, localDev, hostId, remoteHostsOk, ginAnvilTeamAllgather, &teamGather,
+                            numCh, &h, &gpu_handles, &dirty) != 0) {
     WARN("GIN anvil-sdma: gin_anvil_sdma_create failed");
     delete cctx;
     return ncclSystemError;

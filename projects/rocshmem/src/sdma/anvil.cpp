@@ -180,7 +180,7 @@ static const std::string getBusId(int deviceId) {
 
 SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& localAgent,
                      uint32_t engineId, const EngineSelection& selection)
-    : remoteDeviceId_(remoteDeviceId), engineId_(engineId) {
+    : remoteDeviceId_(remoteDeviceId), engineId_(engineId), selection_(selection) {
   int originalDeviceId;
 
   ANVIL_CHECK_HIP_ERROR(hipGetDevice(&originalDeviceId));  // Save the current device

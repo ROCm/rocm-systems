@@ -365,6 +365,22 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeersOnDifferentHostsWithTheSameOrd
   destroyOut(&out);
 }
 
+// Two GPUs on the same remote host: the key must name the GPU as well as the host.
+TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeersOnTheSameHostWithDifferentOrdinalsGetSeparateQueues) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  g_peerTable = {{0, 0}, {0, 0x40}, {1, 0x40}};
+
+  CreateOut out{};
+  ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherPeerTable, 1, &out, /*remoteHostsOk=*/1), 0);
+  const std::vector<void*> h = queueHandles(out, 3);
+  EXPECT_NE(h[1], nullptr);
+  EXPECT_NE(h[2], nullptr);
+  EXPECT_NE(h[2], h[1]);
+  destroyOut(&out);
+}
+
 // Queues live in the process-global Anvil singleton and a later communicator
 // reuses them, so a second create must not take more queues for the same peer.
 TEST_F(GinAnvilSdmaFactoryTest, Create_RemotePeerQueueReusedByLaterCreate) {
@@ -422,6 +438,60 @@ TEST(AnvilEngineLoad, PreferredWithUnknownLoadUsesTheLowestPreferredEngine) {
   EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0xfff, {}), 0);
   EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0x0010, {}), 4);
   EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0, {}), -1);
+}
+
+// The AnvilEngineLoad cases pin the helpers; these pin that connect and
+// connectRemotePeer feed them this process's live queue load. Earlier cases leave
+// queues on the singleton, so the expected engine is computed from the load seen
+// just before each connect rather than assumed.
+TEST(AnvilEngineChoice, RemotePeerQueueGoesOnTheLeastLoadedUsableEngine) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  auto& anvil = sdma_anvil::anvil;
+  const uint64_t keys[] = {0xE5C0000000000001ull, 0xE5C0000000000002ull};
+  // The second connect's expected engine includes the first's queue in its load.
+  for (uint64_t key : keys) {
+    ASSERT_EQ(anvil.getRemotePeerQueue(key, 0), nullptr);
+    const int expected = sdma_anvil::leastLoadedUsableEngine(anvil.queuesPerEngine());
+    ASSERT_TRUE(anvil.connectRemotePeer(/*srcDeviceId=*/0, key, /*numChannels=*/1));
+    const sdma_anvil::SdmaQueue* q = anvil.getRemotePeerQueue(key, 0);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(q->engineId() % 2, 0u);
+    EXPECT_EQ(static_cast<int>(q->engineId()), expected);
+  }
+  for (uint64_t key : keys) anvil.disconnectRemotePeer(key);
+}
+
+TEST(AnvilEngineChoice, LocalPeerQueuesGoOnTheLeastLoadedPreferredEngine) {
+  if (gin_anvil_sdma_probe() <= 0) {
+    GTEST_SKIP() << "Anvil SDMA probe failed";
+  }
+  int ndev = 0;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  auto& anvil = sdma_anvil::anvil;
+  std::vector<int> dsts;
+  for (int d = 1; d < ndev && dsts.size() < 2; ++d) {
+    if (anvil.getSdmaQueue(0, d, 0) == nullptr) dsts.push_back(d);
+  }
+  if (dsts.size() < 2) GTEST_SKIP() << "needs two local GPUs that device 0 has no queue to yet";
+
+  int checked = 0;
+  for (int d : dsts) {
+    SCOPED_TRACE("0 -> " + std::to_string(d));
+    const std::vector<uint32_t> load = anvil.queuesPerEngine();
+    sdma_anvil::EnablePeerAccess(0, d);
+    ASSERT_TRUE(anvil.connect(0, d, /*numChannels=*/1));
+    const sdma_anvil::SdmaQueue* q = anvil.getSdmaQueue(0, d, 0);
+    ASSERT_NE(q, nullptr);
+    const sdma_anvil::EngineSelection& sel = q->selection();
+    if (!sel.usedPreferred) continue;  // HSA gave no mask; the OAM map chose
+    EXPECT_EQ(static_cast<int>(q->engineId()), sdma_anvil::leastLoadedPreferredEngine(sel.preferredMask, load))
+        << "mask=0x" << std::hex << sel.preferredMask;
+    ++checked;
+  }
+  for (int d : dsts) anvil.disconnectDevice(d);
+  if (checked == 0) GTEST_SKIP() << "HSA reported no preferred engine for these pairs";
 }
 
 // Outside a fabric pod (MI300, MI350, or MI450 without one) SDMA cannot reach

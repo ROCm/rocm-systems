@@ -10,16 +10,7 @@
 #include <cstdint>
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 
-// Which peers the Anvil SDMA GIN backend can serve, by GPU generation. An SDMA
-// engine copies only into memory its GPU can address:
-//   MI300X (gfx942), MI350 (gfx950): GPUs on the same host over xGMI or PCIe.
-//     There is no scale-up fabric between hosts, so a multi-host communicator
-//     needs a network backend (PROXY or rocSHMEM GDA).
-//   MI450 (gfx1250): GPUs on the same host, and, when every rank opts in with
-//     RCCL_GIN_ANVIL_FABRIC_POD=1 and RCCL_GIN_ANVIL_FABRIC_MEM=1, GPUs on other
-//     hosts of the same scale-up pod once their memory is fabric-mapped (MNNVL,
-//     one clique covering the communicator, cuMem). Anvil's peer tables cap that
-//     at NCCL_GIN_ANVIL_IPC_MAX_RANKS ranks.
+// Which peers the Anvil SDMA GIN backend can serve, per GPU generation: see src/gin/README.md.
 enum class GinAnvilArch : int { Other = 0, Mi300 = 1, Mi350 = 2, Mi450 = 3 };
 
 enum class GinAnvilSdmaReach : int {

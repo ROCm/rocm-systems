@@ -271,12 +271,15 @@ TEST_F(GinAnvilPluginTest, Connect_Success) {
   EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
 }
 
-// The factory tells cross-host peers apart by hostHash, so connect must pass this
-// rank's own entry, and 0 (every peer local) when peerInfo is not set up.
+// The factory tells cross-host peers apart by host, so connect must pass this
+// rank's own entry, and 0 (every peer local) when peerInfo is not set up. The
+// entry is hostHash less commHash: remote-peer queues outlive a communicator,
+// and a key that changed with commHash would never be reused.
 TEST_F(GinAnvilPluginTest, Connect_PassesOwnHostHash) {
+  constexpr uint64_t kHost = 0x2222;
   ncclPeerInfo peers[2] = {};
-  peers[0].hostHash = 0x1111;
-  peers[1].hostHash = 0x2222;
+  peers[0].hostHash = 0x1111 + mockComm_.comm.commHash;
+  peers[1].hostHash = kHost + mockComm_.comm.commHash;
   mockComm_.comm.rank = 1;
   mockComm_.comm.peerInfo = peers;
   void* ictx = nullptr;
@@ -284,14 +287,40 @@ TEST_F(GinAnvilPluginTest, Connect_PassesOwnHostHash) {
   void* coll = nullptr;
   connectColl(ictx, &coll);
   ASSERT_NE(coll, nullptr);
-  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), 0x2222u);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), kHost);
   EXPECT_EQ(GinAnvilPluginStubs::GetFactoryRemoteHostsOk(), 0);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+
+  // A second communicator on the same host has another commHash.
+  mockComm_.comm.commHash = 0xB0BUL;
+  peers[1].hostHash = kHost + mockComm_.comm.commHash;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), kHost);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
 
   mockComm_.comm.peerInfo = nullptr;
   connectColl(ictx, &coll);
   ASSERT_NE(coll, nullptr);
   EXPECT_EQ(GinAnvilPluginStubs::GetFactoryHostId(), 0u);
+  EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
+}
+
+// Under NCCL_GIN_CONNECTION_RAIL the GIN team is smaller than the communicator,
+// but bootstrapAllGather writes one record per communicator rank, so the
+// factory's team-sized gather has to go through a world-sized buffer.
+TEST_F(GinAnvilPluginTest, Connect_RailTeamGathersIntoWorldBuffer) {
+  setupFabricComm(4);
+  mockComm_.comm.globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.comm.contiguousRanksPerHost = 2;
+  mockComm_.comm.rank = 3;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, /*nranks=*/2, /*ginRank=*/1);
+  ASSERT_NE(coll, nullptr);
+  EXPECT_EQ(GinAnvilPluginStubs::GetWideAllGatherOverruns(), 0);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
   EXPECT_EQ(plugin_.finalize(ictx), ncclSuccess);
 }

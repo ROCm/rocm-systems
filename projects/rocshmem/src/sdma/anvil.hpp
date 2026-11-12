@@ -82,12 +82,15 @@ class SdmaQueue {
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
   uint32_t engineId() const { return engineId_; }
+  // How the engine was chosen, so a test can check the choice against the mask HSA reported.
+  const EngineSelection& selection() const { return selection_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
   uint32_t engineId_{0};
+  EngineSelection selection_;
   uint64_t* cachedWptr_{nullptr};
   uint64_t* committedWptr_{nullptr};
   void* queueBuffer_{nullptr};
@@ -132,6 +135,9 @@ class AnvilLib {
   bool connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels = 1);
   SdmaQueue* getRemotePeerQueue(uint64_t peerKey, int channel_idx = 0);
   void disconnectRemotePeer(uint64_t peerKey);
+  // This process's queues per engine, across both maps; empty when the engine total is unknown.
+  // Public for the same reason as queuesUsed(): it is the load the engine choice is made from.
+  std::vector<uint32_t> queuesPerEngine() const;
 
  private:
   /*
@@ -189,9 +195,6 @@ class AnvilLib {
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
   std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
   std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> remote_peer_channels_;
-
-  // This process's queues per engine, across both maps; empty when the engine total is unknown.
-  std::vector<uint32_t> queuesPerEngine() const;
 };
 
 extern AnvilLib& anvil;

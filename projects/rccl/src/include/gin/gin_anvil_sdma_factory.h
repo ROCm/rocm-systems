@@ -40,11 +40,10 @@ typedef struct {
  * buf[myRank] before invoking allgather; after the collective, buf[r] holds
  * rank r's device ordinal and host id.
  *
- * Peers on another host (a different host_id) are only reachable through
- * fabric-mapped memory (an MI450 pod). With remote_hosts_ok set, each such peer
+ * With remote_hosts_ok set, each peer on another host (a different host_id)
  * gets SDMA queues of its own on this GPU, keyed by its host and ordinal and
- * reused by later creates, and no peer access is enabled for it. Without it,
- * any such peer fails creation, which is the only safe outcome on MI300/MI350.
+ * reused by later creates, and no peer access; without it, such a peer fails
+ * creation.
  *
  * @param my_device_id  HIP ordinal for this rank (typically hipGetDevice).
  * @param my_host_id    Host identity for this rank; 0 makes every peer local.

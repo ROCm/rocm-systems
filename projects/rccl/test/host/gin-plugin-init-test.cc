@@ -432,7 +432,8 @@ struct AnvilReachCase {
   int nHosts;
   int nRanks;
   bool fabricMem;
-  bool podOptIn;  // this rank and every peer
+  bool localPodOptIn;  // this rank
+  bool peerPodOptIn;   // every other rank
   bool kept;
   int podVotes;
 };
@@ -453,8 +454,8 @@ TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
   comm_.nRanks = c.nRanks;
   g_anvilArch = c.arch;
   g_anvilFabricMem = c.fabricMem;
-  g_anvilPodOptIn = c.podOptIn;
-  peerPodOptIn_ = c.podOptIn;
+  g_anvilPodOptIn = c.localPodOptIn;
+  peerPodOptIn_ = c.peerPodOptIn;
 
   EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
                                      BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
@@ -477,22 +478,24 @@ TEST_P(GinAnvilReachTest, AnvilKeptOnlyWithinSdmaReach) {
 INSTANTIATE_TEST_SUITE_P(
     PerSystem, GinAnvilReachTest,
     ::testing::Values(
-        AnvilReachCase{"Mi300SingleHost", GinAnvilArch::Mi300, 1, 8, false, false, true, 0},
-        AnvilReachCase{"Mi300MultiHost", GinAnvilArch::Mi300, 2, 16, false, false, false, 0},
-        AnvilReachCase{"Mi300MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi300, 2, 16, true, true, false, 0},
-        AnvilReachCase{"Mi350SingleHost", GinAnvilArch::Mi350, 1, 8, false, false, true, 0},
-        AnvilReachCase{"Mi350MultiHost", GinAnvilArch::Mi350, 2, 16, false, false, false, 0},
-        AnvilReachCase{"Mi350MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi350, 2, 16, true, true, false, 0},
-        AnvilReachCase{"Mi450SingleHost", GinAnvilArch::Mi450, 1, 4, false, false, true, 0},
-        AnvilReachCase{"Mi450SingleHostWithFabricMem", GinAnvilArch::Mi450, 1, 4, true, true, true, 0},
-        AnvilReachCase{"Mi450MultiHostOutsidePod", GinAnvilArch::Mi450, 2, 8, false, true, false, 0},
-        AnvilReachCase{"Mi450FabricPodWithoutOptIn", GinAnvilArch::Mi450, 2, 8, true, false, false, 1},
-        AnvilReachCase{"Mi450FabricPod", GinAnvilArch::Mi450, 2, 8, true, true, true, 1},
+        AnvilReachCase{"Mi300SingleHost", GinAnvilArch::Mi300, 1, 8, false, false, false, true, 0},
+        AnvilReachCase{"Mi300MultiHost", GinAnvilArch::Mi300, 2, 16, false, false, false, false, 0},
+        AnvilReachCase{"Mi300MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi300, 2, 16, true, true, true, false, 0},
+        AnvilReachCase{"Mi350SingleHost", GinAnvilArch::Mi350, 1, 8, false, false, false, true, 0},
+        AnvilReachCase{"Mi350MultiHost", GinAnvilArch::Mi350, 2, 16, false, false, false, false, 0},
+        AnvilReachCase{"Mi350MultiHostWithFabricMemAndOptIn", GinAnvilArch::Mi350, 2, 16, true, true, true, false, 0},
+        AnvilReachCase{"Mi450SingleHost", GinAnvilArch::Mi450, 1, 4, false, false, false, true, 0},
+        AnvilReachCase{"Mi450SingleHostWithFabricMem", GinAnvilArch::Mi450, 1, 4, true, true, true, true, 0},
+        AnvilReachCase{"Mi450MultiHostOutsidePod", GinAnvilArch::Mi450, 2, 8, false, true, true, false, 0},
+        AnvilReachCase{"Mi450FabricPodWithoutOptIn", GinAnvilArch::Mi450, 2, 8, true, false, false, false, 1},
+        AnvilReachCase{"Mi450FabricPod", GinAnvilArch::Mi450, 2, 8, true, true, true, true, 1},
+        AnvilReachCase{"Mi450FabricPodOnlyPeersOptIn", GinAnvilArch::Mi450, 2, 8, true, false, true, false, 1},
+        AnvilReachCase{"Mi450FabricPodOnlyThisRankOptIn", GinAnvilArch::Mi450, 2, 8, true, true, false, false, 1},
         AnvilReachCase{"Mi450FabricPodAtRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS, true, true,
-                       true, 1},
+                       true, true, 1},
         AnvilReachCase{"Mi450FabricPodAboveRankCap", GinAnvilArch::Mi450, 4, NCCL_GIN_ANVIL_IPC_MAX_RANKS + 1, true,
-                       true, false, 0},
-        AnvilReachCase{"OtherArchMultiHost", GinAnvilArch::Other, 2, 4, true, true, false, 0}),
+                       true, true, false, 0},
+        AnvilReachCase{"OtherArchMultiHost", GinAnvilArch::Other, 2, 4, true, true, true, false, 0}),
     [](const ::testing::TestParamInfo<AnvilReachCase>& info) { return std::string(info.param.name); });
 
 // The pod exception does not override the all-ranks mask: a rank without Anvil
