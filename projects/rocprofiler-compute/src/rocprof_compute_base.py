@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 
 import config
-from argparser import build_parser, warn_deprecated_options
+from argparser import build_parser
 from pc_sampling.pc_sampling_profile import (
     PC_SAMPLING_DEFAULT_INTERVALS,
     pc_sampling_interval_limits,
@@ -264,7 +264,6 @@ class RocProfCompute:
             sys.argv[1:],
         )
         self.__args = self.__parser.parse_args()
-        warn_deprecated_options(sys.argv[1:])
 
         if self.__args.mode == "profile":
             self.handle_profile_args()

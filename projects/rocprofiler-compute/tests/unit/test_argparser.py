@@ -7,27 +7,16 @@ Unit tests for rocprof-compute general CLI options.
 
 import argparse
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
-from common import SUPPORTED_ARCHS
+from common import SUPPORTED_ARCHS, patch_console
 
-from argparser import (
-    DEPRECATED_OPTIONS,
-    CliHelpFormatter,
-    build_parser,
-    warn_deprecated_options,
-)
+from argparser import CliHelpFormatter, DeprecatedAction, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
-
-DEPRECATED_ALIASES = [
-    # (mode argv, old argv, new argv, dest, expected value)
-    (["profile"], ["--roof-only"], ["--roofline"], "roof_only", True),
-    (["profile"], ["--bench-only"], ["--roofline-bench-only"], "bench_only", True),
-    (["profile"], ["--device", "2"], ["--roofline-device", "2"], "device", 2),
-]  # fmt: skip
+REMOVAL = "is deprecated and will be removed in a future release."
 
 
 def build_args(argv, experimental=False):
@@ -53,10 +42,33 @@ def write_skills_readme(skills_dir):
     return readme
 
 
-def all_parsers():
-    """Return the top-level parser and the profile and analyze parsers."""
-    parser = build_parser(HOME, SUPPORTED_ARCHS, VERSION, ["--experimental"])
-    return [parser, *parser._subparsers._group_actions[0].choices.values()]
+def deprecated_option_parser():
+    """Return a parser with a renamed option and two wholly deprecated options."""
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(
+        "--new",
+        "--old",
+        dest="value",
+        metavar="<value>",
+        action=DeprecatedAction,
+        base_action="store",
+        deprecated_names=["--old"],
+        help="Set the value.",
+    )
+    parser.add_argument(
+        "--gone",
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice="Use --new instead.",
+        help="Turn it on.",
+    )
+    parser.add_argument(
+        "--retired",
+        action=DeprecatedAction,
+        base_action="store_true",
+        help="Turn it off.",
+    )
+    return parser
 
 
 # =============================================================================
@@ -274,49 +286,32 @@ def test_ml_api_options_reject_unknown_values(argv, capsys):
 
 
 @pytest.mark.parametrize(
-    ("mode", "old", "new", "dest", "expected"),
-    DEPRECATED_ALIASES,
-    ids=[alias[1][0] for alias in DEPRECATED_ALIASES],
-)
-def test_deprecated_alias_matches_new_name(mode, old, new, dest, expected):
-    assert getattr(build_args(mode), dest) != expected
-    assert getattr(build_args(mode + new), dest) == expected
-    assert getattr(build_args(mode + old), dest) == expected
-
-
-@pytest.mark.parametrize("mode", ["profile"])
-def test_deprecated_aliases_listed_in_help(mode, capsys):
-    with pytest.raises(SystemExit):
-        build_args([mode, "--help"])
-    out = capsys.readouterr().out
-    for alias_mode, old, new, _, _ in DEPRECATED_ALIASES:
-        if alias_mode == [mode]:
-            assert f"{new[0]}, {old[0]}" in out
-
-
-def test_deprecated_options_are_real_options():
-    option_strings = {
-        option for parser in all_parsers() for option in parser._option_string_actions
-    }
-    assert set(DEPRECATED_OPTIONS) <= option_strings
-
-
-@pytest.mark.parametrize(
-    ("argv", "warned"),
+    ("argv", "warnings"),
     [
-        (["profile", "--roof-only"], ["--roof-only"]),
-        (["profile", "--retain-rocpd-output=1"], ["--retain-rocpd-output"]),
-        # Options of the workload belong to the workload
-        (["profile", "-n", "x", "--", "./app", "--device", "1"], []),
-        (["profile", "--roofline-device", "1"], []),
+        (["--old", "1"], [call(f"--old {REMOVAL} Use --new instead.")]),
+        (["--new", "1"], []),
+        (["--gone"], [call(f"--gone {REMOVAL} Use --new instead.")]),
+        (["--retired"], [call(f"--retired {REMOVAL}")]),
     ],
-    ids=["old_name", "equals_form", "workload_options", "new_name"],
-)  # fmt: skip
-def test_warn_deprecated_options(argv, warned, caplog):
-    warn_deprecated_options(argv)
-    for option in warned:
-        assert f"{option} is deprecated" in caplog.text
-    assert caplog.text.count("is deprecated") == len(warned)
+    ids=["old_name", "new_name", "whole_option", "whole_option_without_advice"],
+)
+def test_deprecated_action_warns_only_for_deprecated_names(monkeypatch, argv, warnings):
+    mocks = patch_console(monkeypatch, "argparser", "warning")
+    deprecated_option_parser().parse_args(argv)
+    assert mocks["warning"].call_args_list == warnings
+
+
+def test_deprecated_alias_fills_the_same_dest(monkeypatch):
+    patch_console(monkeypatch, "argparser", "warning")
+    assert deprecated_option_parser().parse_args(["--old", "1"]).value == "1"
+
+
+def test_deprecated_action_adds_the_deprecation_to_the_help():
+    help_text = deprecated_option_parser().format_help()
+    assert "Set the value.\n" in help_text
+    assert "Deprecated alias: --old." in help_text
+    assert "DEPRECATED: Use --new instead." in help_text
+    assert "DEPRECATED: Will be removed in a future release." in help_text
 
 
 # =============================================================================
