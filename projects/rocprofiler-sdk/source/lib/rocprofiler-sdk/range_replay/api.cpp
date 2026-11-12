@@ -76,7 +76,12 @@ end_range()
 
         auto ctx = range_context_t{};
         if(!take_range(ctx)) return -1;
-        close_range(ctx, step.status, step.divergence_count);
+        // finish_pass copied its status before this fold. A decline published in that window
+        // (foreign dispatch, device write, executable unload) is in the record and must be what
+        // CLOSE reports. Statuses finish_pass returns without declining the record, such as
+        // NO_PASS_COUNT, stay as step.status while the record is still eligible.
+        const auto status = ctx.record.eligible() ? step.status : ctx.record.status();
+        close_range(ctx, status, step.divergence_count);
         return 0;
     }
 

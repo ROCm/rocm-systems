@@ -404,6 +404,10 @@ finish_pass(range_context_t& ctx)
     // checks below see settled memory. The writer locks are taken just before the restore.
     const auto epochs = submit_epochs(host);
     if(host.snapshot_taken) fence_all(host.agents);
+    // Writes the application made during the pass are already in this count. A tool callback that
+    // copies afterwards moves it, and that copy is not waited on by the compute-queue fence.
+    const auto writes_at_fence =
+        ctx.external ? ctx.external->owning_device_writes.load(std::memory_order_relaxed) : 0;
 
     if(pass > 0)
         execute_pass_phase_exit(ctx.plan, pass, ctx.agent_id, dispatch_count, host.pass_state);
@@ -415,6 +419,24 @@ finish_pass(range_context_t& ctx)
     auto finish = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
         host.local_context.reset();
         return step_result_t{0, status, divergence};
+    };
+
+    auto decline_if_callback_copied = [&]() {
+        if(ctx.external != nullptr &&
+           ctx.external->owning_device_writes.load(std::memory_order_relaxed) != writes_at_fence)
+            ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+    };
+
+    // PASS exit and the continuation callback run after the pass fence. Dispatches they submit
+    // advance the epoch and are fenced again here, before divergence or the restore observes
+    // memory.
+    auto settle_callback_gpu_work = [&]() {
+        if(executable_guard.owns_lock()) executable_guard.unlock();
+        auto guards = lock_after_fence(ctx, epochs);
+        guards.clear();
+        executable_guard.lock();
+        fold_external_decline(ctx);
+        decline_if_callback_copied();
     };
 
     fold_external_decline(ctx);
@@ -459,7 +481,11 @@ finish_pass(range_context_t& ctx)
         if(!allocations_unchanged(host))
             return finish(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
         if(!continue_replay)
+        {
+            settle_callback_gpu_work();
+            if(!ctx.record.eligible()) return finish(ctx.record.status());
             return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
+        }
     }
 
     const auto next = pass + 1;
@@ -467,6 +493,8 @@ finish_pass(range_context_t& ctx)
     {
         ROCP_WARNING << "range replay: host replay pass count exceeds the siglongjmp value range; "
                         "stopping";
+        settle_callback_gpu_work();
+        if(!ctx.record.eligible()) return finish(ctx.record.status());
         return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
     }
 
@@ -480,6 +508,13 @@ finish_pass(range_context_t& ctx)
     if(executable_guard.owns_lock()) executable_guard.unlock();
     auto guards = lock_after_fence(ctx, epochs);
     executable_guard.lock();
+    fold_external_decline(ctx);
+    decline_if_callback_copied();
+    if(!ctx.record.eligible())
+    {
+        guards.clear();
+        return finish(ctx.record.status());
+    }
 
     const auto restore_start  = phase_clock::now();
     const auto restore_status = restore_entry_state(ctx);
@@ -499,6 +534,9 @@ finish_pass(range_context_t& ctx)
         host.local_context = std::make_shared<kernel_replay::scoped_local_context_control>(
             context::get_active_contexts());
 
+    // Visible to the PASS enter callback. Leaving it at the previous pass made that callback's
+    // dispatches count as pass 0 and made host_track_memory capture regions on a re-executed pass.
+    host.pass       = next;
     host.pass_state = pass_context_state_t{};
     execute_pass_phase_enter(ctx.plan,
                              next,
@@ -508,7 +546,6 @@ finish_pass(range_context_t& ctx)
                              ctx.internal_corr_id,
                              ctx.ancestor_corr_id,
                              host.pass_state);
-    host.pass = next;
 
     return step_result_t{next, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, 0};
 }

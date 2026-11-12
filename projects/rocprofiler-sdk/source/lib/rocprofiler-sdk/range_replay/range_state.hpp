@@ -158,6 +158,11 @@ private:
 struct external_decline_t
 {
     std::atomic<uint32_t> reason = {ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED};
+    // Device writes from the range's own thread. They are part of the program a host range
+    // re-executes, so they are not a decline on their own. finish_pass snapshots this around the
+    // tool callbacks: a copy those callbacks submit runs after the pass fence, and the compute
+    // queue barrier does not wait for it.
+    std::atomic<uint64_t> owning_device_writes = {0};
 };
 
 // Device state of one GPU agent captured when a host-replay range opens.

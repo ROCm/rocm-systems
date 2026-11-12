@@ -534,7 +534,13 @@ note_device_write(uint64_t agent_key)
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            if(entry.host ? entry.thread_id == tid : entry.agent_key != agent_key) continue;
+            if(entry.host && entry.thread_id == tid)
+            {
+                if(entry.external)
+                    entry.external->owning_device_writes.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            if(!entry.host && entry.agent_key != agent_key) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
                                          ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);

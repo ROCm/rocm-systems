@@ -579,6 +579,32 @@ TEST(range_replay_host, allocation_change_after_initial_checks_declines_before_a
     mt::record_free(&second);
 }
 
+TEST(range_replay_host, device_write_from_a_continuation_callback_declines_before_restore)
+{
+    auto value   = 7;
+    auto ctx     = range_replay::range_context_t{};
+    ctx.external = std::make_shared<range_replay::external_decline_t>();
+    // Copies the application made during the pass are already counted and must not decline.
+    ctx.external->owning_device_writes.store(3);
+    ctx.plan.replay_requested   = true;
+    ctx.plan.indefinite         = true;
+    ctx.plan.user_data.ptr      = &ctx;
+    ctx.plan.replay_continue_cb = [](uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t data) {
+        auto& range = *static_cast<range_replay::range_context_t*>(data.ptr);
+        range.external->owning_device_writes.fetch_add(1);
+        return 1;
+    };
+    ctx.host.pass           = 1;
+    ctx.host.snapshot_taken = true;
+    ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+    ++value;
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+    EXPECT_EQ(value, 8) << "a callback copy must decline before the entry snapshot is restored";
+}
+
 TEST(range_replay_host, continuation_unload_is_folded_after_reacquiring_executable_lifetime)
 {
     auto value                  = 7;
