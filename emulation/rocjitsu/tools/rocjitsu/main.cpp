@@ -776,6 +776,33 @@ std::vector<char *> argv_pointers(std::vector<std::string> &args) {
   return pointers;
 }
 
+bool reject_hardware_dbt_overrides(const config::LaunchOverrides &overrides) {
+  if (overrides.empty())
+    return false;
+  if (overrides.exec_mode) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.gpus_per_node) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (!overrides.plugins.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.cpu_thread_budget) {
+    std::cerr
+        << "rocjitsu: --cpu-thread-budget cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  if (overrides.wait_checking) {
+    std::cerr << "rocjitsu: --wait-checking cannot be combined with hardware-backed dbt_guest\n";
+    return true;
+  }
+  return false;
+}
+
 /// @brief Resolve automatic host selection once for every DBT runtime layer.
 bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
                       const std::vector<KfdGpuOrdinal> &topology,
@@ -855,6 +882,9 @@ void print_usage() {
          "  rocjitsu --profile "
       << kDefaultProfile
       << " -- ./app          Run with a bundled profile config\n"
+         "  rocjitsu --exec-mode clocked --thread-budget-table\n"
+         "                                               Inspect clocked launch planning\n"
+         "  rocjitsu --gpus-per-node 2 -- ./app         Override the emulated GPU count\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach default -- ./app           Attach to a running daemon\n"
@@ -871,6 +901,13 @@ void print_usage() {
       << " outside attach mode.\n"
          "  --node <id>      Select one local node from a system manifest. Not available\n"
          "                    with --attach or dbt_guest mode.\n"
+         "  --exec-mode <mode>\n"
+         "                    Override the top-level config exec_mode: functional or clocked.\n"
+         "  --plugin <name>   Require an execution plugin for this launch. If the\n"
+         "                    config has no entry for it, built-in defaults are used.\n"
+         "                    Repeatable.\n"
+         "  --gpus-per-node <n>\n"
+         "                    Override the emulated GPU count for this launch.\n"
          "  --daemon         Run a daemon, optionally launching an application.\n"
          "  --attach <id_or_path>\n"
          "                    Attach to an existing daemon target: default, an ID under\n"
@@ -1028,6 +1065,21 @@ int main(int argc, char *argv[]) {
   const bool thread_budget_table = flags.thread_budget_table->value();
 
   config::LaunchOverrides overrides;
+  if (!flags.exec_mode->value().empty()) {
+    if (flags.exec_mode->value() != "functional" && flags.exec_mode->value() != "clocked") {
+      std::cerr << "rocjitsu: --exec-mode requires functional or clocked\n";
+      return 1;
+    }
+    overrides.exec_mode = flags.exec_mode->value();
+  }
+  overrides.plugins = flags.plugin->values();
+  if (flags.gpus_per_node->value()) {
+    if (*flags.gpus_per_node->value() == 0) {
+      std::cerr << "rocjitsu: --gpus-per-node requires a positive integer\n";
+      return 1;
+    }
+    overrides.gpus_per_node = flags.gpus_per_node->value();
+  }
   for (std::string_view assignment : flags.option->values())
     if (!apply_config_option(assignment, overrides))
       return 1;
@@ -1114,6 +1166,18 @@ int main(int argc, char *argv[]) {
 
   // Attaching joins a daemon that already built its machine from its own config,
   // so these overrides cannot change it.
+  if (overrides.exec_mode && attach_mode) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.gpus_per_node && attach_mode) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!overrides.plugins.empty() && attach_mode) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with --attach\n";
+    return 1;
+  }
   if (overrides.cpu_thread_budget && attach_mode) {
     std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
     return 1;
@@ -1298,6 +1362,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --node cannot be combined with dbt_guest mode\n";
     return 1;
   }
+  if (dbt_guest_mode &&
+      dbt_guest_config.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware &&
+      reject_hardware_dbt_overrides(overrides))
+    return 1;
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
   // it, not this config, is what the host VM is built from. Moving overrides onto
   // a copy would therefore both break that path and miss the config they must reach.
@@ -1306,6 +1374,21 @@ int main(int argc, char *argv[]) {
     std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
                              "simulator_config; set cpu_thread_budget in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.exec_mode &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with a dbt_guest simulator_config\n";
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.gpus_per_node &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with a dbt_guest simulator_config\n";
+    return 1;
+  }
+  if (dbt_guest_mode && !overrides.plugins.empty() &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with a dbt_guest simulator_config\n";
     return 1;
   }
   if (dbt_guest_mode && overrides.wait_checking &&
