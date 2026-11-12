@@ -4454,6 +4454,32 @@ module hip
     module procedure hipMemcpy3DBatchAsync_typed
   end interface
 
+  interface hipMemcpyWithAttributesAsync
+    function hipMemcpyWithAttributesAsync_(dst,src,mySize,attr,stream) &
+        bind(c, name="hipMemcpyWithAttributesAsync")
+      import
+      implicit none
+      integer(c_int) :: hipMemcpyWithAttributesAsync_
+      type(c_ptr),value :: dst
+      type(c_ptr),value :: src
+      integer(c_size_t),value :: mySize
+      type(hipMemcpyAttributes) :: attr
+      type(c_ptr),value :: stream
+    end function
+  end interface
+
+  interface hipMemcpy3DWithAttributesAsync
+    function hipMemcpy3DWithAttributesAsync_(op,flags,stream) &
+        bind(c, name="hipMemcpy3DWithAttributesAsync")
+      import
+      implicit none
+      integer(c_int) :: hipMemcpy3DWithAttributesAsync_
+      type(hipMemcpy3DBatchOp) :: op
+      integer(c_int64_t),value :: flags
+      type(c_ptr),value :: stream
+    end function
+  end interface
+
   interface hipMemcpy3DPeer
     function hipMemcpy3DPeer_(p) bind(c, name="hipMemcpy3DPeer")
       import
