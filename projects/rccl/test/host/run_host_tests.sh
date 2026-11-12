@@ -2,8 +2,7 @@
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
 # host-only microtests, the latter through rccl-UnitTestsHostAll, the front door
-# that discovers the rccl-UnitTestsMicro* binaries at run time. This script
-# therefore holds no list of them, and adding one needs no change here.
+# that runs the binaries the build recorded in micro/host_test_binaries.txt.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.

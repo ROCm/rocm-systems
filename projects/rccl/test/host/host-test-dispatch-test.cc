@@ -858,25 +858,6 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
 // is that nothing outside micro/ is picked up, since a wrong directory here runs nothing at all
 // and can still exit 0 on the way there.
 
-namespace {
-
-// An executable file named *name* under *dir*, parents created as needed. Executability is the
-// whole point: discoverBinaries() filters on isExecutableFile(), so a plain file would be
-// skipped for that reason rather than the one a test here means to demonstrate. Nothing runs
-// these, so the shebang body is only there to make them look like what they stand in for.
-std::string addExecutable(const ScopedDir &dir, const std::string &name)
-{
-    const std::filesystem::path file = std::filesystem::path(dir.path()) / name;
-    std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::ofstream(file) << "#!/bin/sh\n";
-    std::filesystem::permissions(file, std::filesystem::perms::owner_all,
-                                 std::filesystem::perm_options::add, ec);
-    return file.string();
-}
-
-}  // namespace
-
 TEST(HostDispatchLayoutMicrotest, TheFrontedBinariesAreTakenFromTheMicroSubdirectory)
 {
     // One layout everywhere: the front door at the top, everything it runs one level down in
@@ -885,16 +866,107 @@ TEST(HostDispatchLayoutMicrotest, TheFrontedBinariesAreTakenFromTheMicroSubdirec
               (std::filesystem::path("/opt/rocm/bin") / "micro").string());
 }
 
-TEST(HostDispatchLayoutMicrotest, ABinaryBesideTheFrontDoorIsNotFronted)
-{
-    // A stale copy left beside the front door by an earlier build is not in micro/, so it is not
-    // what runs -- the directory is where the binaries are put, never where they happen to be.
-    const ScopedDir tree("rccl-dispatch-test");
-    const std::string self = addExecutable(tree, "rccl-UnitTestsHostAll");
-    addExecutable(tree, "rccl-UnitTestsMicroInit");
-    addExecutable(tree, "micro/rccl-UnitTestsMicroCrypt");
+// ── the build's own list of what it fronts ──────────────────────────
 
-    EXPECT_EQ(discoverBinaries(binaryDirectory(tree.path()), self),
+
+namespace {
+
+// A file named *name* under *dir*, parents created as needed. Deliberately not executable:
+// nothing about which binaries are fronted depends on the mode bits any more, and a test here
+// that needed them would not run where /tmp is mounted noexec.
+void addFile(const ScopedDir &dir, const std::string &name, const std::string &contents = "")
+{
+    const std::filesystem::path file = std::filesystem::path(dir.path()) / name;
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream(file, std::ios::binary) << contents;
+}
+
+// A manifest naming *binaries*, written where the front door looks for it.
+void addManifest(const ScopedDir &dir, const std::vector<std::string> &binaries)
+{
+    std::string contents;
+    for (const std::string &binary : binaries) {
+        contents += binary + "\n";
+    }
+    addFile(dir, "micro/host_test_binaries.txt", contents);
+}
+
+}  // namespace
+
+TEST(HostDispatchManifestMicrotest, OnlyTheBinariesThisBuildProducedAreFronted)
+{
+    // The case this exists for: a renamed or disabled target leaves its executable in micro/,
+    // where a scan of the directory would still find it. Its cases would then run and be
+    // published as this build's, which is a lie no consumer of the report could detect.
+    const ScopedDir tree("rccl-dispatch-test");
+    addFile(tree, "micro/rccl-UnitTestsMicroCrypt");
+    addFile(tree, "micro/rccl-UnitTestsMicroStale");
+    addManifest(tree, {"rccl-UnitTestsMicroCrypt"});
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
+              std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
+}
+
+TEST(HostDispatchManifestMicrotest, ABinaryNamedOutsideTheConventionIsStillFronted)
+{
+    // The other half, and the one with no symptom at all: under a scan for a naming convention,
+    // a binary named anything else builds cleanly, is never found, and its cases are simply
+    // absent -- the shape of the bug that pointed a test config at the old host/ path. The
+    // manifest carries whatever name the build used, so the convention stops being load-bearing.
+    const ScopedDir tree("rccl-dispatch-test");
+    addManifest(tree, {"rccl-UnitTestsMicroCrypt", "rccl-HostTestsCrypt"});
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
+              (std::vector<std::string>{"rccl-UnitTestsMicroCrypt", "rccl-HostTestsCrypt"}));
+}
+
+TEST(HostDispatchManifestMicrotest, ABinaryTheManifestNamesButThatIsMissingWillNotList)
+{
+    // A name with no file behind it has to reach the report rather than quietly shrink the run.
+    // It needs no handling of its own: the listing is the first thing done to every binary, and
+    // this is what that listing says, which enumerate() already turns into a named failure (see
+    // ABinaryThatWillNotListIsReportedNotDropped).
+    const ScopedDir tree("rccl-dispatch-test");
+
+    EXPECT_FALSE(listTestsOutput((std::filesystem::path(tree.path()) / "rccl-UnitTestsMicroGone")
+                                     .string())
+                     .has_value());
+}
+
+TEST(HostDispatchManifestMicrotest, NoManifestFrontsNothing)
+{
+    // Guessing from the directory is exactly what the manifest replaced, so there is nothing to
+    // fall back to. main() turns the empty list into a diagnostic and a non-zero exit, which is
+    // the one safe reading: a run that cannot tell what it should have run has not passed.
+    const ScopedDir tree("rccl-dispatch-test");
+    addFile(tree, "micro/rccl-UnitTestsMicroCrypt");
+
+    EXPECT_TRUE(manifestBinaries(binaryDirectory(tree.path())).empty());
+}
+
+TEST(HostDispatchManifestMicrotest, ManifestLinesSurviveBeingCopiedThroughWindows)
+{
+    // The manifest is read wherever the tree was copied to, so a CRLF line ending must not turn
+    // every binary into a name that matches no file.
+    const ScopedDir tree("rccl-dispatch-test");
+    addFile(tree, "micro/host_test_binaries.txt",
+            "rccl-UnitTestsMicroCrypt\r\n\r\nrccl-UnitTestsMicroInit  \r\n");
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
+              (std::vector<std::string>{"rccl-UnitTestsMicroCrypt", "rccl-UnitTestsMicroInit"}));
+}
+
+TEST(HostDispatchManifestMicrotest, AManifestEntryThatIsAPathIsRefused)
+{
+    // Entries are joined onto the binary directory and then executed. Nothing the build writes
+    // is ever a path, so one here means the file is not the one the build wrote, and reaching
+    // out of the directory is the last thing to do about it.
+    const ScopedDir tree("rccl-dispatch-test");
+    addFile(tree, "micro/host_test_binaries.txt",
+            "../../../bin/rm\n/bin/rm\nrccl-UnitTestsMicroCrypt\n");
+
+    EXPECT_EQ(manifestBinaries(binaryDirectory(tree.path())),
               std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
 }
 

@@ -7,6 +7,8 @@ include(GNUInstallDirs)
 # Where the binaries rccl-UnitTestsHostAll runs live, relative to its location
 set(RCCL_MICRO_SUBDIR "micro")
 
+set(RCCL_MICRO_MANIFEST "host_test_binaries.txt")
+
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
@@ -1403,6 +1405,9 @@ function(rccl_add_micro_binary _name)
   target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
   set_target_properties(${_name} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
+  if(NOT _ramb_OBJECT)
+    set_property(GLOBAL APPEND PROPERTY RCCL_MICRO_BINARIES ${_name})
+  endif()
 endfunction()
 
 # =====================================================================
@@ -3416,20 +3421,28 @@ else()
     GTest::GTest Threads::Threads fmt::fmt-header-only)
 endif()
 
+get_property(_micro_binaries GLOBAL PROPERTY RCCL_MICRO_BINARIES)
+list(SORT _micro_binaries)
+string(REPLACE ";" "\n" _micro_manifest "${_micro_binaries}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFEST}"
+  "${_micro_manifest}\n")
+
+add_dependencies(rccl-UnitTestsHostAll ${_micro_binaries})
+
+if(BUILD_TESTS)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}/${RCCL_MICRO_MANIFEST}"
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+endif()
+
 # =====================================================================
-# Standalone-only tail: coverage, the runner's binary list, no CTest registration.
+# Standalone-only tail: coverage, no CTest registration.
 # =====================================================================
 if(BUILD_TESTS)
-  # In-RCCL-build path registers these binaries via CTest categories
-  # (rccl_register_test_categories, called inside rccl_add_micro_binary).
+  # The in-RCCL-build path registers one CTest entry, for rccl-UnitTestsHostAll above
+  # (rccl_register_test_categories). The binaries it fronts are deliberately not registered
+  # individually: running them is the front door's job, and two routes to the same cases would
+  # report them twice.
   return()
 endif()
 
 rccl_standalone_coverage()
-
-# run_host_tests.sh runs every binary listed here, so a new binary needs no runner edit.
-# rccl-UnitTestsHostAll is left out: it reruns every rccl-UnitTestsMicro* binary itself.
-set(_host_test_binaries ${HOST_TEST_BINARIES})
-list(REMOVE_ITEM _host_test_binaries rccl-UnitTestsHostAll)
-string(REPLACE ";" "\n" _host_test_binaries "${_host_test_binaries}")
-file(WRITE "${CMAKE_BINARY_DIR}/host_test_binaries.txt" "${_host_test_binaries}\n")

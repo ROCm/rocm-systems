@@ -51,8 +51,8 @@ A new binary is named in **one** place: `rccl_add_micro_binary()` (or
 `rccl_add_transport_micro_binary()`) in `test/host/CMakeLists.txt`. Everything
 that runs it finds it from the name alone — `run_host_tests.sh` goes through
 [`rccl-UnitTestsHostAll`](#rccl-unittestshostall--one-front-door-for-every-host-binary),
-which discovers its `rccl-UnitTestsMicro*` siblings at run time. (`lib/test_executor.py` discovers the
-same binaries by the same naming convention for its `llvm-cov --object` set.)
+which runs the binaries the build recorded beside it. (`lib/test_executor.py` discovers the
+same binaries by the `rccl-UnitTestsMicro*` naming convention for its `llvm-cov --object` set.)
 
 ## Units under test
 
@@ -1341,10 +1341,10 @@ under test tends to add another. Anything outside this directory that wants to
 copies drift: a new binary silently goes unrun, and its coverage silently goes
 unreported.
 
-`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the lists. It is not
-a test binary; it is a gtest-shaped front door that discovers its
-`rccl-UnitTestsMicro*` siblings **at run time** and forks the ones that own a
-selected case:
+`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the hand-kept lists.
+It is not a test binary; it is a gtest-shaped front door that reads the one
+list the build **generates** — `micro/host_test_binaries.txt`, written by
+`rccl_add_micro_binary()` — and forks the binaries that own a selected case:
 
 ```bash
 # Everything, as one report:
@@ -1584,8 +1584,9 @@ different `LLVM_PROFILE_FILE` around each binary in the loop this front door
 replaces.
 
 The script in this tree now goes through it: `run_host_tests.sh` runs
-`rccl-UnitTestsHostAll` (plus `rccl-HostUnitTests`, which is not fronted — its
-name carries no `rccl-UnitTestsMicro` prefix to be discovered on).
+`rccl-UnitTestsHostAll` (plus `rccl-HostUnitTests`, which is not fronted — it
+is not built by `rccl_add_micro_binary()`, so it is not in the list and does not
+live in `micro/`).
 `run_host_tests.sh coverage` builds its overall report from
 `host-coverage.lcov` plus the one binary the front door does not run, rather
 than unioning ~38 tracefiles of its own.
@@ -1626,10 +1627,10 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
 cmake --build build -j"$(nproc)"
 
-# Everything, through the front door: it discovers the rccl-UnitTestsMicro*
-# binaries in micro/ beside itself and merges their reports into one.
+# Everything, through the front door: it runs the binaries listed in
+# micro/host_test_binaries.txt beside it and merges their reports into one.
 ./build/rccl-UnitTestsHostAll --gtest_output=xml:host_tests_micro.xml
-./build/rccl-HostUnitTests          # not fronted: no rccl-UnitTestsMicro prefix
+./build/rccl-HostUnitTests          # not fronted: not in micro/
 
 # One binary's cases, by qualifier, without naming the binary's path:
 ./build/rccl-UnitTestsHostAll --gtest_filter='MicroInit/*'

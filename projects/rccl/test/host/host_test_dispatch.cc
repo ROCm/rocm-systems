@@ -6,9 +6,9 @@
 
 // rccl-UnitTestsHostAll -- one gtest-shaped front door for every host-only test binary.
 //
-// Discovers its rccl-UnitTestsMicro* siblings at run time, forks the ones owning a selected
-// case, and merges their reports into the one the caller asked for. What it is for, how the
-// case names are qualified, and how the coverage manifest is used: see MICROTEST_README.md,
+// Reads the list of binaries the build put beside it, forks the ones owning a selected case,
+// and merges their reports into the one the caller asked for. What it is for, how the case
+// names are qualified, and how the coverage manifest is used: see MICROTEST_README.md,
 // "rccl-UnitTestsHostAll".
 
 #include <gtest/gtest.h>
@@ -54,16 +54,19 @@ namespace rccl_host_dispatch {
 
 namespace fs = std::filesystem;
 
-// Binaries this dispatcher fronts: every sibling executable whose name starts with this. The
-// host tree's own naming convention is the registry; nothing enumerates the binaries by hand.
-constexpr std::string_view kBinaryPrefix = "rccl-UnitTestsMicro";
+// The binaries this dispatcher fronts, one name per line, written into their own directory by
+// the build that produced them (RCCL_MICRO_MANIFEST in test/host/CMakeLists.txt). The build is
+// the only thing that knows what it made, so it says so rather than leaving this process to
+// infer it from what happens to be lying in the directory. See manifestBinaries().
+constexpr std::string_view kBinaryManifest = "host_test_binaries.txt";
 
 // The subdirectory holding every binary this dispatcher fronts, in the build tree and in an
 // install alike. See binaryDirectory(), and RCCL_MICRO_SUBDIR in test/host/CMakeLists.txt.
 constexpr std::string_view kMicroSubdirectory = "micro";
 
 // Dropped from a binary's name to form the case-name qualifier, leaving e.g. "Micro",
-// "MicroInit-uncached". Kept distinct from kBinaryPrefix so the qualifier stays short.
+// "MicroInit-uncached". A name the strip does not apply to keeps its own name as the
+// qualifier, so the manifest is free to carry a binary named to any convention or none.
 constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 
 // The merged lcov tracefile written beside the .profraw files: the whole host tree's coverage
@@ -806,19 +809,6 @@ Options parseArgs(const std::vector<std::string> &args, std::string_view outputE
 
 // ── process and filesystem plumbing ─────────────────────────────────
 
-// Whether *path* is a regular file with an execute bit.
-//
-// The execute bit is asked of access() and not of the filesystem permissions: only access()
-// answers it for THIS process, which is what deciding whether we can exec the file needs.
-bool isExecutableFile(const fs::path &path)
-{
-    std::error_code ec;
-    if (!fs::is_regular_file(path, ec) || ec) {
-        return false;
-    }
-    return access(path.c_str(), X_OK) == 0;
-}
-
 // This executable's own path, resolved through /proc, or empty when that is unavailable.
 std::string selfPath()
 {
@@ -838,26 +828,33 @@ std::string selfDirectory(const char *argv0)
     return parent.empty() ? std::string(".") : parent.string();
 }
 
-// Every binary this dispatcher fronts, by name, in a stable order.
-//
-// Self-exclusion is by resolved path, not by name, so renaming this binary cannot make it
-// recurse into itself.
-std::vector<std::string> discoverBinaries(const std::string &directory, const std::string &self)
+// The binaries the build that produced *directory* says it put there, in the order it names
+// them; empty when there is no manifest.
+std::vector<std::string> manifestBinaries(const std::string &directory)
 {
-    std::vector<std::string> binaries;
-    std::error_code ec;
-    for (const fs::directory_entry &entry : fs::directory_iterator(directory, ec)) {
-        const std::string name = entry.path().filename().string();
-        if (!startsWith(name, kBinaryPrefix)) {
-            continue;
-        }
-        if (entry.path().string() == self || !isExecutableFile(entry.path())) {
-            continue;
-        }
-        binaries.push_back(name);
+    std::ifstream manifest((fs::path(directory) / kBinaryManifest).string());
+    if (!manifest) {
+        return {};
     }
-    std::sort(binaries.begin(), binaries.end());
-    return binaries;
+    std::vector<std::string> names;
+    std::string line;
+    while (std::getline(manifest, line)) {
+        // CRLF- and whitespace-tolerant: the file is read wherever the tree was copied to.
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        if (fs::path(line).filename() != fs::path(line)) {
+            fmt::print(stderr, "host-test-dispatch: ignoring \"{}\" in {}: a binary name, not a"
+                               " path, is expected on each line\n",
+                       line, kBinaryManifest);
+            continue;
+        }
+        names.push_back(line);
+    }
+    return names;
 }
 
 // Where the fronted binaries live, given the directory holding this executable.
@@ -1079,10 +1076,10 @@ using ListingFn = std::function<std::optional<std::string>(const std::string &)>
 // Every case every discovered binary holds, published name and all, in discovery order.
 //
 // A binary that will not list its cases is RECORDED, never skipped. Dropping it would be the
-// one failure this dispatcher must not have: discovery is what replaced the hand-kept binary
-// lists, so a binary that cannot start would otherwise disappear from the run entirely -- unrun,
-// unreported, absent from the coverage manifest -- and the run would still exit 0. The
-// hand-kept list it replaced caught exactly this, by checking each binary wrote a report.
+// one failure this dispatcher must not have: a binary that cannot start -- or that the build
+// says it made but that is not there -- would otherwise disappear from the run entirely,
+// unrun, unreported, absent from the coverage manifest, and the run would still exit 0. The
+// hand-kept list this replaced caught exactly this, by checking each binary wrote a report.
 Enumeration enumerate(const std::string &directory, const std::vector<std::string> &binaries,
                       const ListingFn &listing)
 {
@@ -2061,10 +2058,10 @@ int main(int argc, char **argv)
     if (options.help) {
         // Answered before anything is enumerated: listing the cases costs a fork per binary,
         // and a caller asking what the flags are has not asked for any of that. The binary
-        // names come from the directory scan alone, which is one readdir.
+        // names come from the manifest alone, which is one open.
         fmt::print("{} runs the host-only test binaries beside it, as one gtest suite.\n",
                    fs::path(argv[0]).filename().string());
-        for (const std::string &binary : discoverBinaries(directory, selfPath())) {
+        for (const std::string &binary : manifestBinaries(directory)) {
             fmt::print("  {}\n", binary);
         }
         fmt::print("\nCase names are qualified with the owning binary, e.g. MicroInit/Suite.Case,"
@@ -2090,11 +2087,13 @@ int main(int argc, char **argv)
     char *gtest_argv[] = {argv[0], nullptr};
     ::testing::InitGoogleTest(&gtest_argc, gtest_argv);
 
-    const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
+    const std::vector<std::string> binaries = manifestBinaries(directory);
     if (binaries.empty()) {
         fmt::print(stderr,
-                   "host-test-dispatch: no {}* binaries in {} -- nothing to run\n",
-                   kBinaryPrefix, directory);
+                   "host-test-dispatch: no {} in {} -- the build writes it beside the binaries"
+                   " it produced, so re-run cmake, or write the file yourself with one binary"
+                   " name per line.\n",
+                   kBinaryManifest, directory);
         return 1;
     }
 
@@ -2164,8 +2163,8 @@ int main(int argc, char **argv)
     // unknown number of them, so the run cannot be green whatever the rest of the tree does.
     for (const std::string &binary : enumeration.unlistable) {
         fragments.push_back(crashFragment(qualifierFor(binary),
-                                          "binary could not list its tests -- it likely failed "
-                                          "to start"));
+                                          "binary could not list its tests -- it is missing, or "
+                                          "failed to start"));
         ++failures;
     }
 
