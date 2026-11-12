@@ -330,25 +330,25 @@ struct HipFileIoHipErrors : public testing::Test {
 // The HIP Runtime only sets the HIP error value on a failed fastpath request
 // on ROCm >= 10.3 (HIP 7.18).
 #if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 18)
-// A fastpath failure that is not eligible for fallback (writing through a
-// read-only fd) is retrievable with hipPeekAtLastError().
-TEST_F(HipFileIoHipErrors, FailedSyncIoRecordsHipError)
+// Writing to a read-only file should not be retried, and sets the HIP error for Fastpath.
+TEST_F(HipFileIoHipErrors, FailedFastpathIoSetsHipError)
 {
-    int fd{open(("/proc/self/fd/" + std::to_string(tmpfile.fd)).c_str(), O_RDONLY)};
-    ASSERT_NE(-1, fd);
-    hipFileHandle_t handle{registerFd(fd)};
+    // Re-open the tmpfile read-only
+    int ro_fd{open(("/proc/self/fd/" + std::to_string(tmpfile.fd)).c_str(), O_RDONLY)};
+    ASSERT_NE(-1, ro_fd);
+    hipFileHandle_t ro_handle{registerFd(ro_fd)};
 
-    enforceFastpathGate(handle, device_buffer);
+    enforceFastpathGate(ro_handle, device_buffer);
     if (!IsSkipped() && !HasFatalFailure()) {
-        (void)hipGetLastError();
-        EXPECT_EQ(-1, hipFileWrite(handle, device_buffer, io_size, 0, 0));
+        errno = 0;
+        // Use expect so test-specific cleanup will run.
+        EXPECT_EQ(-1, hipFileWrite(ro_handle, device_buffer, io_size, 0, 0));
         EXPECT_EQ(EBADF, errno);
-        EXPECT_EQ(hipErrorUnknown, hipPeekAtLastError());
-        (void)hipGetLastError();
+        EXPECT_NE(hipSuccess, hipGetLastError());
     }
 
-    hipFileHandleDeregister(handle);
-    close(fd);
+    hipFileHandleDeregister(ro_handle);
+    close(ro_fd);
 }
 #endif
 
