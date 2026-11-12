@@ -27,6 +27,11 @@ inline void execute_interp(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64
       (exec_mask | (exec_mask >> 1) | (exec_mask >> 2) | (exec_mask >> 3)) & 0x1111111111111111ULL;
   if (Half && wave.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
+  const bool rdna3 = wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3;
+  if (!rdna3 || wave.ieee_mode())
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  if (rdna3 && !wave.dx10_clamp())
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
   const auto denorm32 = wave.fp_denorm_mode_f32();
   const auto denorm16 = wave.fp_denorm_mode_f16_f64();
   flags |= uint64_t(Half && P2 ? wave.fp_round_mode_f16_f64() : wave.fp_round_mode_f32()) << 24;

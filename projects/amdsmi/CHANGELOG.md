@@ -40,6 +40,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
+- **Added ``amd-smi metric --nic --rdma [idx]`` and the Python ``amdsmi_get_nic_rdma_port_statistics()``**.  
+  - Prints the RDMA hardware counters of each RDMA port of an AI-NIC. The Python function returns a dictionary of counter name to value.
+
+- **Added ``amd-smi metric --nic --sensors`` and ``amdsmi_get_nic_hwmon_sensors()``**.  
+  - Shows every temperature, voltage and power sensor of a NIC with its limits and alarm flags, as the ``sensors`` command does. Also available from Python.
+
+- **Added the FEC symbol-error histogram to ``metric --nic --port --extended``**.  
+  - ionic ports on a kernel that reports it now show ``FEC_SYMBOLS_ERR_0`` to ``FEC_SYMBOLS_ERR_15`` next to the existing FEC counters.
+
+- **Added debug logging of NIC reads**.  
+  - With ``RSMI_LOGGING`` set, each NIC read is logged with its source and result, and serial numbers and MAC addresses are masked to their last four characters.
+
+- **Added Broadcom ``bng_en`` NICs to NIC discovery**.  
+  - Broadcom NICs on the newer ``bng_en`` driver, such as the BCM57708, are now listed like ``bnxt_en`` NICs.
+
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
   - New API: `amdsmi_set_npm_limit()`.
@@ -81,7 +96,83 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           CUID_METADATA_STATUS: available
   ```
 
+- **Added `amdsmi_get_gpu_enumeration_info()` to the Rust API**.  
+  - Returns the DRM render node and card, HSA and HIP IDs, HIP UUID, OAM ID and physical accelerator ID; the HIP UUID is read with `hip_uuid()`.
+  - IDs the library cannot determine are `0xFFFFFFFF`, as in the C API.
+
+- **Added ``amdsmi_get_nic_type()`` and ``amdsmi_get_nic_capability()``**.  
+  - They report whether a NIC is an AI-NIC, a UALoE endpoint or another vendor's NIC, and which capabilities it has.
+
+- **Added ``amdsmi_get_nic_port_ifindex()``**.  
+  - It returns the full Linux interface index of a NIC port, including values above 255.
+
+- **Added ``amdsmi_get_nic_vendor_statistics_with_scope()``**.  
+  - It returns the default or the extended counter set of a NIC port, as chosen in the call. ``amdsmi_get_nic_vendor_statistics()`` returns the default set, and its Python function takes an optional ``scope``.
+
+- **``amdsmi_topo_get_link_type()`` now accepts NIC handles**.  
+  - For a NIC and a GPU, or two NICs, it reports whether they share a PCIe switch, share a NUMA node or sit on different NUMA nodes.
+
+- **Added ``TYPE`` to ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
+  - It shows ``AINIC``, ``UALoE`` or the vendor name, and ``N/A`` when the type is unknown.
+
+- **Added ``amdsmi_get_nic_telemetry()``**.  
+  - Reports a NIC's health state and port split, and ``amd-smi metric --nic`` shows them. Temperatures come from ``amdsmi_get_nic_hwmon_sensors()``.
+
+- **Added Rust ``amdsmi_get_nic_processor_handles()`` and ``amdsmi_get_nic_fw_info()``**.  
+  - NIC handles can now be obtained and used from Rust.
+
 ### Changed
+
+- **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``**.  
+  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. ``metric --nic --port --json`` now returns the default counter set, as text does; add ``--extended`` for the full set. Scripts that read ``ai_nic`` or the nested ``nic`` key must be updated.
+
+- **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
+  - They appear as rows with their BDF, and their other fields read ``N/A``. NIC indices are positional, so these rows renumber the AI-NIC cards after them; select a device by BDF where the identity has to be stable.
+
+- **``amd-smi list --json`` and ``--csv`` on a host with GPUs and NICs now print one document**.  
+  - NIC rows are no longer appended to the GPU rows in those formats, so the output stays valid JSON or CSV. Add ``--nic`` to list the NICs, which are the only document in that case. Human-readable output still shows both.
+
+- **``amdsmi_topo_get_link_type()`` now accepts a null ``hops`` for a GPU pair**.  
+  - It returned an invalid-argument status before; the hop count is simply not returned.
+
+- **``amd-smi static`` on a host with NICs now also prints the NIC section**.  
+  - This includes ``--csv``, so a script that reads the GPU-only table now finds NIC rows after it.
+
+- **Human-readable output indents list items that have no ``key: value`` form one level deeper**.  
+  - This applies to every command, not only the NIC ones, so a script that parses the text output sees the new indent.
+
+- **A bare ``--nic`` now selects every NIC**.  
+  - A command that takes ``--nic`` now accepts it with no value and reports every discovered NIC.
+
+- **``--nic`` is now accepted only by ``list``, ``static``, ``metric`` and ``firmware``**.  
+  - Other commands, such as ``reset``, now reject it instead of ignoring it and acting on every GPU.
+
+- **NIC queries a device cannot answer now return a not-supported status**.  
+  - They returned a not-yet-implemented status, so callers that compared against it must check the new one.
+
+- **NIC netlink queries now give up after 5 seconds**.  
+  - A stuck devlink or ethtool call returns an error instead of blocking the command.
+
+- **``amd-smi list --nic`` now notes when PCI VPD was unreadable**.  
+  - Without root, a note on stderr says that an ``N/A`` product name, part number or serial number may be unreadable VPD rather than missing. JSON and CSV output are unaffected.
+
+- **AI-NIC identity and telemetry fields now report values instead of ``N/A``**.  
+  - They are read from the port function, and on a card with more than one port they report port 0.
+
+- **``amd-smi firmware --nic`` now reports NIC firmware versions**.  
+  - ``amdsmi_get_nic_fw_info()`` is implemented, and the Python function returns a firmware name to version dictionary. A NIC reports at most 16 entries, and a version that repeats an earlier name shows its kind after it, for example ``fw.version (stored)``. The types and ``AMDSMI_MAX_NIC_FW`` keep their previous layout.
+
+- **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
+  - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library. A build without the libibverbs headers reads sysfs only, so more drivers show ``N/A``.
+
+- **``amdsmi_get_nic_port_info()`` now keeps ports whose driver is not loaded**.  
+  - A port with no driver now keeps its place in the list with its BDF and netdev, so later port indices no longer shift.
+
+- **``amd-smi`` now works on a host with NICs but no AMD GPU or CPU driver**.  
+  - For example ``list --nic`` runs there. A host with nothing to manage still exits with the drivers-not-loaded code.
+
+- **``amd-smi`` prints ``No AI NICs found`` when a bare ``--nic`` finds no NIC**.  
+  - This applies to ``list``, ``static``, ``metric`` and ``firmware``. A NIC ID, UUID or BDF that matches nothing reports ``Can not find a device`` instead.
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
   - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
@@ -153,6 +244,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_npm_info()` and `amdsmi_set_npm_limit()` now reject `amdsmi_node_handle` values not vended by `amdsmi_get_node_handle()`**.  
   - Previously any non-null handle was dereferenced directly; an unregistered/garbage handle now returns `AMDSMI_STATUS_INVAL` instead.
 
+- **``amdsmi_get_nic_port_statistics()`` and ``amdsmi_get_nic_vendor_statistics()`` are now implemented**.  
+  - They report per-port standard and vendor driver counters, and ``amd-smi metric --nic --port [--extended]`` shows them.
+
 - **NPM sysfs numeric reads (e.g. `cur_node_power_limit`, `max_node_power_limit`) now reject negative or malformed content**.  
   - Previously a leading `-` (e.g. `"-1"`) parsed successfully as `UINT64_MAX`; such content now fails with `RSMI_STATUS_UNEXPECTED_DATA`.
 
@@ -169,10 +263,20 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
+- **Baremetal reports Broadcom NICs as ``AMDSMI_PROCESSOR_TYPE_AMD_NIC``** (breaking).  
+  - ``amdsmi_get_processor_handles_by_type()`` no longer returns ``AMDSMI_PROCESSOR_TYPE_BRCM_NIC`` handles; ask for ``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` and use ``amdsmi_get_nic_type()`` to tell the vendors apart.
+
 ### Removed
+
+- **Removed the ``FW`` block from ``amd-smi static --nic``**.  
+  - It repeated the driver name and version, not firmware. Use ``amd-smi firmware --nic`` for firmware versions.
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
   These were CLI-internal (not part of the public `amdsmi` Python library), their exit-code behavior is superseded by the reworked CLI process exit codes described above.
+
+- **Removed the Broadcom NIC and switch device path** (breaking).  
+  - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch``, ``topology --nic_topo``, the ``BRCM_NIC`` CMake option and the Python and ``rsmi_*`` Broadcom NIC and switch functions are gone. Broadcom NICs appear through ``--nic`` like every other NIC.
+  - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
 ### Optimized
 
@@ -189,6 +293,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
+
+- **Fixed one failing NIC stopping every ``amd-smi`` command**.  
+  - A NIC whose summary cannot be read now shows ``N/A`` in the ``--nic`` choices instead of failing the command.
+
+- **Fixed ``amd-smi static --nic`` printing ``4294967295 Mb/s`` for a link that is down**.  
+  - A link speed, MTU, FEC mode or carrier the NIC could not report now reads ``N/A``.
 
 - **Fixed `amd-smi set`/`reset` on a GPU silently exiting `0` after a per-device failure.**  
   - A device error during GPU `set`/`reset` is now recorded, so the process exits with a non-zero code instead of reporting success.
@@ -273,11 +383,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
 
+- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
+  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, `metric`, `firmware`, `monitor`, and `topology` show the available devices with a note about the rest on stderr.
+
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
+
+- **Fixed AI-NICs missing from ``amd-smi list --nic`` and ``amd-smi metric --nic``**.  
+  - A host whose cards present a different upstream bridge device ID listed one NIC, or only the UALoE endpoints, instead of one per card. Every card present is now listed.
+
+- **Fixed ``amdsmi_get_nic_rdma_port_statistics()`` listing ``lifespan`` as a counter and reading only the first RDMA device**.  
+  - ``lifespan`` is the kernel's refresh interval, not a counter. The counters of every RDMA device are now read.
+
+- **Fixed ``--nic <ID>`` and ``--nic <UUID>`` failing with ``Invalid BDF format``**.  
+  - Only ID ``0`` worked. ID, UUID and BDF now select the matching NIC.
+
+- **Fixed ``amdsmi_init()`` failing on a host with GPUs or CPUs when NIC discovery failed**.  
+  - The GPUs and CPUs now initialize and the failure is written to the log. An init that asks only for NICs still reports it.
 
 ## amd_smi_lib for ROCm 10.1.0
 

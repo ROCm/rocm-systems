@@ -32,6 +32,7 @@
 
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -60,6 +61,8 @@ namespace rocjitsu::test {
 
 class ComputeUnitTestAccess {
 public:
+  static void tick_memory_pipelines(amdgpu::ComputeUnitCore &cu) { cu.tick_pipelines(); }
+
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
   }
@@ -140,27 +143,29 @@ public:
     raw_encoding_ = &encoding_;
     if (memory_wait_producer)
       flags_ |= MEMORY_WAIT_PRODUCER;
-    if (state->tag() == amdgpu::SCALAR_MEM) {
-      const auto &memory = *static_cast<const amdgpu::ScalarMemState *>(state.get());
+    // GCC 15.2 can warn about the vector downcast after inlining a scalar
+    // call when the downcast is guarded only by the pipeline tag.
+    const auto tag = state->tag();
+    if (const auto *scalar = dynamic_cast<const amdgpu::ScalarMemState *>(state.get());
+        tag == amdgpu::SCALAR_MEM && scalar) {
       if (additional_wait_counter_type) {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
              {*additional_wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}},
             false);
       } else {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
       }
-    } else if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::LOCAL_MEM) {
-      const auto &memory = *static_cast<const amdgpu::VectorMemState *>(state.get());
-      const auto completion_class = state->tag() == amdgpu::LOCAL_MEM
-                                        ? amdgpu::MemoryCompletionClass::LDS
-                                        : amdgpu::MemoryCompletionClass::VMEM;
+    } else if (const auto *vector = dynamic_cast<const amdgpu::VectorMemState *>(state.get());
+               (tag == amdgpu::GLOBAL_MEM || tag == amdgpu::LOCAL_MEM) && vector) {
+      const auto completion_class = tag == amdgpu::LOCAL_MEM ? amdgpu::MemoryCompletionClass::LDS
+                                                             : amdgpu::MemoryCompletionClass::VMEM;
       if (additional_wait_counter_type) {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class},
+        set_memory_issue_info({{vector->wait_counter_type, completion_class},
                                {*additional_wait_counter_type, completion_class}});
       } else {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class}});
+        set_memory_issue_info({{vector->wait_counter_type, completion_class}});
       }
     }
     set_data(std::move(state));
@@ -264,6 +269,7 @@ struct HookEvent {
   uint32_t cluster_size_x = 0;
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
+  BarrierKind barrier_kind = BarrierKind::Workgroup;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -565,12 +571,13 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs, BarrierKind kind) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();
       e.wg_id = wfs[0]->wg_id();
     }
+    e.barrier_kind = kind;
     events.push_back(e);
   }
 };
@@ -744,6 +751,11 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
+        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+      // These kernels use the 256-register allocation for ordinary VGPRs.
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+    }
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,

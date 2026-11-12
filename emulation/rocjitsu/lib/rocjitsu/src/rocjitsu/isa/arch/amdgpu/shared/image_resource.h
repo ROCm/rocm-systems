@@ -189,7 +189,7 @@ inline void execute_image_resource_info(Wavefront &wf, uint32_t resource, uint32
     descriptor[i] = read_scalar_selector(wf, resource + i);
   RegisterAccess regs(wf);
   const uint32_t base = wf.vgpr_alloc().base;
-  const auto lods = regs.read_vgpr_region(base + lod_vgpr, 1, wf.exec());
+  const auto lods = regs.read_vgpr_region(base + lod_vgpr, 1, wf.exec(), a16 ? 0x3 : 0xf);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(wf.exec() & (uint64_t{1} << lane)))
       continue;
