@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hsa-sys",
+    "crates/remapper-rewrite",
+    "crates/remapper-runtime",
+    "crates/remapper-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ROCm/rocm-systems"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1"
+log = "0.4"
+object = { version = "0.36", default-features = false, features = ["read", "elf", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+
+hsa-sys = { path = "crates/hsa-sys" }
+remapper-rewrite = { path = "crates/remapper-rewrite" }
+remapper-runtime = { path = "crates/remapper-runtime" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

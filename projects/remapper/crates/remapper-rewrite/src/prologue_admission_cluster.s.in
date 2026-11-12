@@ -1,0 +1,295 @@
+// Admission-control cluster variant of the binary workgroup remap prologue (gfx1250, wave32). As the cluster prologue
+// below, but table modes (2, 4) launch the captured clusters plus slack: the leader's k-th turn on a key runs
+// table[key][k] and decrements its shader engine's tiles-to-claim counter; a turn past the key's quota publishes the
+// park code (cluster id 0xffff) instead. Every member reads it after round 2 and parks: wave 0 polls its engine's
+// counter with scalar loads and the other waves wait at the workgroup barrier; the workgroup ends before the body
+// once the engine's tiles are all claimed, or after ${STALL_POLLS} polls without a claim (ending early only spends
+// slack; if slack runs out, tiles are missing and golden verification fails). Parked members never use the cluster
+// barrier again. Admission buffer (dwords): [0, 32) tiles to claim per SE, [32, 64) parked clusters, [64, 96) parked
+// clusters that found tiles still unclaimed, at control offset 56.
+//
+// Cluster variant of the binary workgroup remap prologue (gfx1250, wave32). With clusters, ttmp9 and ttmp7[15:0]
+// hold the cluster's X and Y position in the grid and ttmp6[7:0] the workgroup's position in its cluster
+// (wg_x | wg_y << 4). The prologue works with the flat cluster id y * ${CLUSTER_COUNT_X} + x and the 8-bit rank.
+// All workgroups of a cluster share one tile and each knows only its own location, so the cluster agrees through
+// tool-owned global memory and two rounds of the cluster barrier. It leaves the chosen cluster's X in ${R9}
+// (replaces ttmp9), its Y in the ttmp7 replacement when the body reads ttmp7, and ttmp6 ^ c in ${R6} for the body's
+// data rank sites. Multicast mask sites keep the hardware rank; XOR by c maps every multicast group (ranks agreeing
+// on the masked bits) onto a group.
+//
+// Control block (64 bytes, address appended to the kernarg segment at ${CTL_KERNARG_OFFSET}):
+//   0 mode, 4 max_k, 8 arrival*, 16 table*, 24 counters* (overflow, log count), 32 log*, 40 slot*, 48 mailbox*
+// Keys: SE when loc % 32 == ${TRACED_WGP}, ${NUM_SE} + SE otherwise.
+// table[key][k] = (cluster id, reference rank of the traced member). No stealing: a turn without an entry runs the
+// hardware id and increments the overflow counter, which marks the run as invalid.
+// The cluster barrier counts workgroups (MI400 guide 4.3.6.6): wave 0 of each workgroup signals, every wave waits.
+	.text
+	.p2align 8
+aegis_prologue:
+	// The descriptor's INST_PREF_SIZE now covers only this prologue; these restore the original body prefetch.
+${PREFETCH}
+	s_load_b64 ${CTL}, ${KERNARG}, ${CTL_KERNARG_OFFSET}
+	s_wait_kmcnt 0x0
+	s_load_b64 ${MODE_MAXK}, ${CTL}, 0x0
+	s_load_b256 ${PTRS}, ${CTL}, 0x8
+	s_load_b128 ${PTRS2}, ${CTL}, 0x28
+	s_bfe_u32 ${WAVE}, ttmp8, 0x50019
+${HWCID_INIT}
+	s_and_b32 ${HWRANK}, ttmp6, ${RANK_MASK}
+	s_mov_b32 ${CID}, ${CID_SRC}
+	s_mov_b32 ${C}, 0
+	s_wait_kmcnt 0x0
+	s_cmp_eq_u32 ${MODE}, 0
+	s_cbranch_scc1 .Lhave_tile
+	s_cmp_eq_u32 ${MODE}, 3
+	s_cbranch_scc1 .Lmark
+	s_cmp_lg_u32 ${WAVE}, 0
+	s_cbranch_scc1 .Lwait1
+	// Wave 0: location = (SE*2 + SA)*16 + WGP.
+	s_getreg_b32 ${HWID1}, hwreg(HW_REG_HW_ID1)
+	s_sendmsg_rtn_b32 ${SEAID}, 0x87
+	s_wait_kmcnt 0x0
+	s_lshr_b32 ${LOC}, ${SEAID}, 16
+	s_lshl_b32 ${LOC}, ${LOC}, 1
+	s_and_b32 ${TMP}, ${SEAID}, 15
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_lshl_b32 ${LOC}, ${LOC}, 1
+	s_bfe_u32 ${TMP}, ${HWID1}, 0x10010
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_lshl_b32 ${LOC}, ${LOC}, 4
+	s_bfe_u32 ${TMP}, ${HWID1}, 0x4000a
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_mov_b32 ${SAVE_EXEC}, exec_lo
+	s_mov_b32 exec_lo, 1
+	// Round 1. A member on its SE's traced WGP publishes slot[hw cluster] = valid | rank << 16 | loc.
+	s_and_b32 ${TMP}, ${LOC}, 31
+	s_cmp_lg_u32 ${TMP}, ${TRACED_WGP}
+	s_cbranch_scc1 .Lsignal1
+	s_lshl_b32 ${TMP}, ${HWRANK}, 16
+	s_or_b32 ${TMP}, ${TMP}, ${LOC}
+	s_bitset1_b32 ${TMP}, 31
+	s_lshl_b32 ${TMP2}, ${HWCID}, 2
+	v_mov_b32_e32 v1, ${TMP2}
+	v_mov_b32_e32 v2, ${TMP}
+	s_wait_alu 0x0
+	global_store_b32 v1, v2, ${SLOT} scope:SCOPE_DEV
+	s_wait_storecnt 0x0
+.Lsignal1:
+	s_barrier_signal -3
+.Lwait1:
+	s_barrier_wait -3
+	// Leader: wave 0 of the workgroup with hardware rank 0 takes the cluster's one turn.
+	s_or_b32 ${TMP}, ${WAVE}, ${HWRANK}
+	s_cmp_lg_u32 ${TMP}, 0
+	s_cbranch_scc1 .Lround2
+	s_lshl_b32 ${TMP2}, ${HWCID}, 2
+	v_mov_b32_e32 v1, ${TMP2}
+	s_wait_alu 0x0
+	global_load_b32 v2, v1, ${SLOT} scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	v_readfirstlane_b32 ${TMP}, v2
+	s_wait_alu 0x0
+	s_mov_b32 ${AR}, 0
+	s_cmp_lt_i32 ${TMP}, 0
+	s_cbranch_scc0 .Lfiller
+	s_bfe_u32 ${KEY}, ${TMP}, 0x50005
+	s_bfe_u32 ${AR}, ${TMP}, ${RANK_BFE}
+	s_branch .Lturn
+.Lfiller:
+	s_lshr_b32 ${KEY}, ${LOC}, 5
+	s_add_co_i32 ${KEY}, ${KEY}, ${NUM_SE}
+.Lturn:
+	// Turn: k = atomic_add(arrival[key], 1).
+	s_lshl_b32 ${TMP2}, ${KEY}, 2
+	v_mov_b32_e32 v1, ${TMP2}
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v3, v1, v2, ${ARRIVAL} th:TH_ATOMIC_RETURN scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	s_wait_xcnt 0x0
+	v_readfirstlane_b32 ${K}, v3
+	s_wait_alu 0x0
+	s_cmp_eq_u32 ${MODE}, 1
+	s_cbranch_scc1 .Llog
+	// Table: entry = table[key*max_k + k] = (cluster id, reference rank); cluster id == -1 is no entry.
+	s_cmp_ge_u32 ${K}, ${MAXK}
+	s_cbranch_scc1 .Lpark_mark
+	s_mul_i32 ${TMP2}, ${KEY}, ${MAXK}
+	s_add_co_i32 ${TMP2}, ${TMP2}, ${K}
+	s_lshl_b32 ${TMP2}, ${TMP2}, 3
+	s_load_b64 ${ENTRY}, ${TABLE}, ${TMP2} offset:0x0
+	s_wait_kmcnt 0x0
+	s_cmp_eq_u32 ${ENTRY_LO}, -1
+	s_cbranch_scc1 .Lpark_mark
+	s_mov_b32 ${CID}, ${ENTRY_LO}
+	s_xor_b32 ${C}, ${AR}, ${ENTRY_HI}
+	// Claim: one tile fewer for the key's shader engine (keys SE and NUM_SE + SE).
+	s_mov_b32 ${TMP2}, ${KEY}
+	s_cmp_lt_u32 ${TMP2}, ${NUM_SE}
+	s_cbranch_scc1 .Lclaim_se
+	s_sub_co_i32 ${TMP2}, ${TMP2}, ${NUM_SE}
+.Lclaim_se:
+	s_lshl_b32 ${TMP2}, ${TMP2}, 2
+	s_load_b64 ${ENTRY}, ${CTL}, 0x38
+	s_wait_kmcnt 0x0
+	v_mov_b32_e32 v1, ${TMP2}
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_sub_u32 v1, v2, ${ENTRY} scope:SCOPE_DEV
+	s_wait_xcnt 0x0
+	s_branch .Lchosen
+.Lpark_mark:
+	// Park: count it for the engine, and again if the engine still has unclaimed tiles (it holds WGPs).
+	s_mov_b32 ${TMP2}, ${KEY}
+	s_cmp_lt_u32 ${TMP2}, ${NUM_SE}
+	s_cbranch_scc1 .Lpark_se
+	s_sub_co_i32 ${TMP2}, ${TMP2}, ${NUM_SE}
+.Lpark_se:
+	s_lshl_b32 ${TMP2}, ${TMP2}, 2
+	s_load_b64 ${ENTRY}, ${CTL}, 0x38
+	s_wait_kmcnt 0x0
+	s_add_co_i32 ${TMP}, ${TMP2}, 0x80
+	v_mov_b32_e32 v1, ${TMP}
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v1, v2, ${ENTRY} scope:SCOPE_DEV
+	s_wait_xcnt 0x0
+	s_load_b32 ${TMP}, ${ENTRY}, ${TMP2} offset:0x0 scope:SCOPE_DEV
+	s_wait_kmcnt 0x0
+	s_cmp_eq_u32 ${TMP}, 0
+	s_cbranch_scc1 .Lpark_code
+	s_add_co_i32 ${TMP}, ${TMP2}, 0x100
+	v_mov_b32_e32 v1, ${TMP}
+	s_wait_alu 0x0
+	global_atomic_add_u32 v1, v2, ${ENTRY} scope:SCOPE_DEV
+	s_wait_xcnt 0x0
+.Lpark_code:
+	s_mov_b32 ${CID}, 0xffff
+	s_mov_b32 ${C}, 0
+	s_branch .Lpublish
+.Lchosen:
+	s_cmp_eq_u32 ${MODE}, 4
+	s_cbranch_scc1 .Lpublish
+.Llog:
+	// Log record (8 dwords, one per cluster) at an index taken from counters[1]: key, k, cluster id used,
+	// traced member's hardware rank, HW_ID1, SE/AID, hardware cluster id, rank xor.
+	v_mov_b32_e32 v1, 4
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v3, v1, v2, ${COUNTERS} th:TH_ATOMIC_RETURN scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	s_wait_xcnt 0x0
+	v_lshlrev_b32_e32 v1, 5, v3
+	v_mov_b32_e32 v2, ${KEY}
+	v_mov_b32_e32 v3, ${K}
+	v_mov_b32_e32 v4, ${CID}
+	v_mov_b32_e32 v5, ${AR}
+	s_wait_alu 0x0
+	global_store_b128 v1, v[2:5], ${LOG}
+	s_wait_xcnt 0x0
+	s_wait_alu 0x0
+	v_mov_b32_e32 v2, ${HWID1}
+	v_mov_b32_e32 v3, ${SEAID}
+	v_mov_b32_e32 v4, ${HWCID}
+	v_mov_b32_e32 v5, ${C}
+	s_wait_alu 0x0
+	global_store_b128 v1, v[2:5], ${LOG} offset:16
+	s_wait_xcnt 0x0
+.Lpublish:
+	// mailbox[hw cluster] = valid | c << 16 | cluster id.
+	s_lshl_b32 ${TMP}, ${C}, 16
+	s_or_b32 ${TMP}, ${TMP}, ${CID}
+	s_bitset1_b32 ${TMP}, 31
+	s_lshl_b32 ${TMP2}, ${HWCID}, 2
+	v_mov_b32_e32 v1, ${TMP2}
+	v_mov_b32_e32 v2, ${TMP}
+	s_wait_alu 0x0
+	global_store_b32 v1, v2, ${MAILBOX} scope:SCOPE_DEV
+	s_wait_storecnt 0x0
+.Lround2:
+	s_cmp_lg_u32 ${WAVE}, 0
+	s_cbranch_scc1 .Lwait2
+	s_mov_b32 exec_lo, ${SAVE_EXEC}
+	s_barrier_signal -3
+.Lwait2:
+	s_barrier_wait -3
+	// Every wave reads the cluster's choice.
+	s_mov_b32 ${SAVE_EXEC}, exec_lo
+	s_mov_b32 exec_lo, 1
+	s_lshl_b32 ${TMP2}, ${HWCID}, 2
+	v_mov_b32_e32 v1, ${TMP2}
+	s_wait_alu 0x0
+	global_load_b32 v2, v1, ${MAILBOX} scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	v_readfirstlane_b32 ${TMP}, v2
+	s_wait_alu 0x0
+	s_cmp_lt_i32 ${TMP}, 0
+	s_cbranch_scc1 .Lgot
+	// No valid choice (should not happen): run the hardware id and mark the run invalid.
+	s_mov_b32 ${TMP}, 0x80000000
+	s_or_b32 ${TMP}, ${TMP}, ${HWCID}
+	v_mov_b32_e32 v1, 0
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v1, v2, ${COUNTERS} scope:SCOPE_DEV
+.Lgot:
+	s_wait_storecnt 0x0
+	s_mov_b32 exec_lo, ${SAVE_EXEC}
+	s_and_b32 ${CID}, ${TMP}, 0xffff
+	s_bfe_u32 ${C}, ${TMP}, 0xf0010
+	s_cmp_eq_u32 ${CID}, 0xffff
+	s_cbranch_scc1 .Lpark
+	s_cmp_lg_u32 ${MODE}, 4
+	s_cbranch_scc1 .Lhave_tile
+	s_branch .Lmark
+.Lpark:
+	// Parked cluster member: wave 0 polls its engine's tiles-to-claim counter; the other waves wait for it.
+	s_cmp_lg_u32 ${WAVE}, 0
+	s_cbranch_scc1 .Lpark_done
+	s_load_b64 ${ADMP}, ${CTL}, 0x38
+	s_lshr_b32 ${TMP}, ${LOC}, 5
+	s_lshl_b32 ${TMP}, ${TMP}, 2
+	s_mov_b32 ${K}, 0
+	s_mov_b32 ${TMP2}, -1
+	s_wait_kmcnt 0x0
+.Lpark_poll:
+	s_load_b32 ${POLL}, ${ADMP}, ${TMP} offset:0x0 scope:SCOPE_DEV
+	s_wait_kmcnt 0x0
+	s_cmp_eq_u32 ${POLL}, 0
+	s_cbranch_scc1 .Lpark_done
+	s_cmp_eq_u32 ${POLL}, ${TMP2}
+	s_cselect_b32 ${K}, ${K}, 0
+	s_add_co_i32 ${K}, ${K}, 1
+	s_mov_b32 ${TMP2}, ${POLL}
+	s_cmp_ge_u32 ${K}, ${STALL_POLLS}
+	s_cbranch_scc1 .Lpark_done
+	s_sleep 127
+	s_branch .Lpark_poll
+.Lpark_done:
+${PARK_SYNC}
+	s_cmp_lg_u32 ${MODE}, 4
+	s_cbranch_scc1 .Lend
+	// A2 marker: this wave's workgroup ended in the prologue (stay resident briefly so the marker lands inside it).
+	s_or_b32 ${TMP}, ${WAVE}, 0xa2000000
+	s_mov_b32 m0, ${TMP}
+	s_ttracedata
+	s_sleep 4
+.Lend:
+	s_endpgm
+.Lmark:
+	// A1 identity marker: 0xA1000000 | ((cluster id * cluster size + flat logical rank) * waves + wave).
+	s_xor_b32 ${TMP}, ${HWRANK}, ${C}
+${FLAT_RANK}
+	s_lshl_b32 ${TMP2}, ${CID}, ${CLUSTER_SHIFT}
+	s_add_co_i32 ${TMP}, ${TMP}, ${TMP2}
+	s_mul_i32 ${TMP}, ${TMP}, ${NUM_WAVES}
+	s_add_co_i32 ${TMP}, ${TMP}, ${WAVE}
+	s_or_b32 ${TMP}, ${TMP}, 0xa1000000
+	s_mov_b32 m0, ${TMP}
+	s_ttracedata
+.Lhave_tile:
+${CLUSTER_IDS}
+	s_xor_b32 ${R6}, ttmp6, ${C}
+${PRELOAD}
+	s_wait_alu 0x0
+	s_branch 0

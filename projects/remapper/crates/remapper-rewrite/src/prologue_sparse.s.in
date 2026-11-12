@@ -1,0 +1,132 @@
+// Sparse-launch variant of the binary workgroup remap prologue for gfx1250 (wave32). The replayer dispatches one
+// workgroup per WGP; each looks up its location in a one-entry-per-location table. A real entry makes the workgroup
+// run the original body as that logical workgroup (${R9} replaces ttmp9, ${R7} replaces ttmp7); a FAKE entry ends it
+// here, before the body. Only user SGPRs, v0 and the ttmp registers are live at entry.
+//
+// Control block (64 bytes, address appended to the kernarg segment at ${CTL_KERNARG_OFFSET}):
+//   0 mode, 4 max_k (1), 8 arrival*, 16 table*, 24 counters* (overflow, log count), 32 log*
+// Modes: 0 off, 2 table (logs), 4 mark table, 5 probe (logs; every workgroup ends as FAKE). A second arrival at a
+// location or a location without an entry also ends as FAKE and increments the overflow counter.
+	.text
+	.p2align 8
+aegis_prologue:
+	s_load_b64 ${CTL}, ${KERNARG}, ${CTL_KERNARG_OFFSET}
+	s_wait_kmcnt 0x0
+	s_load_b64 ${MODE_MAXK}, ${CTL}, 0x0
+	s_load_b256 ${PTRS}, ${CTL}, 0x8
+	s_bfe_u32 ${WAVE}, ttmp8, 0x50019
+	s_mov_b32 ${T9}, -2
+	s_mov_b32 ${T7}, 0
+	s_wait_kmcnt 0x0
+	s_cmp_lg_u32 ${WAVE}, 0
+	s_cbranch_scc1 .Lsync
+	// Wave 0: location = (SE*2 + SA)*16 + WGP, SE = XCC*2 + SE-in-XCC (message 0x87: XCC [19:16], SE [3:0]).
+	s_getreg_b32 ${HWID1}, hwreg(HW_REG_HW_ID1)
+	s_sendmsg_rtn_b32 ${SEAID}, 0x87
+	s_wait_kmcnt 0x0
+	s_bfe_u32 ${LOC}, ${SEAID}, 0x40010
+	s_lshl_b32 ${LOC}, ${LOC}, 1
+	s_and_b32 ${TMP}, ${SEAID}, 15
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_lshl_b32 ${LOC}, ${LOC}, 1
+	s_bfe_u32 ${TMP}, ${HWID1}, 0x10010
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_lshl_b32 ${LOC}, ${LOC}, 4
+	s_bfe_u32 ${TMP}, ${HWID1}, 0x4000a
+	s_add_co_i32 ${LOC}, ${LOC}, ${TMP}
+	s_mov_b32 ${SAVE_EXEC}, exec_lo
+	s_mov_b32 exec_lo, 1
+	// Arrival: k = atomic_add(arrival[loc], 1); the launch is expected to put exactly one workgroup on each WGP.
+	s_lshl_b32 ${TMP}, ${LOC}, 2
+	v_mov_b32_e32 v1, ${TMP}
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v3, v1, v2, ${ARRIVAL} th:TH_ATOMIC_RETURN scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	s_wait_xcnt 0x0
+	v_readfirstlane_b32 ${K}, v3
+	s_wait_alu 0x0
+	s_cmp_eq_u32 ${MODE}, 5
+	s_cbranch_scc1 .Llog
+	s_cmp_lg_u32 ${K}, 0
+	s_cbranch_scc1 .Loverflow
+	// Entry = table[loc] = (ttmp9, ttmp7) of the logical workgroup, FAKE (-2) or no entry (-1).
+	s_lshl_b32 ${TMP}, ${LOC}, 3
+	s_load_b64 ${ENTRY}, ${TABLE}, ${TMP} offset:0x0
+	s_wait_kmcnt 0x0
+	s_cmp_eq_u32 ${ENTRY_LO}, -1
+	s_cbranch_scc1 .Loverflow
+	s_mov_b32 ${T9}, ${ENTRY_LO}
+	s_mov_b32 ${T7}, ${ENTRY_HI}
+	s_branch .Lchosen
+.Loverflow:
+	v_mov_b32_e32 v1, 0
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v1, v2, ${COUNTERS} scope:SCOPE_DEV
+.Lchosen:
+	s_cmp_eq_u32 ${MODE}, 2
+	s_cbranch_scc0 .Lpublish
+.Llog:
+	// Log record (8 dwords) at an index taken from counters[1]: loc, k, ttmp9 and ttmp7 used, HW_ID1, SE/AID,
+	// hardware ttmp9 and ttmp7.
+	v_mov_b32_e32 v1, 4
+	v_mov_b32_e32 v2, 1
+	s_wait_alu 0x0
+	global_atomic_add_u32 v3, v1, v2, ${COUNTERS} th:TH_ATOMIC_RETURN scope:SCOPE_DEV
+	s_wait_loadcnt 0x0
+	s_wait_xcnt 0x0
+	v_lshlrev_b32_e32 v1, 5, v3
+	v_mov_b32_e32 v2, ${LOC}
+	v_mov_b32_e32 v3, ${K}
+	v_mov_b32_e32 v4, ${T9}
+	v_mov_b32_e32 v5, ${T7}
+	s_wait_alu 0x0
+	global_store_b128 v1, v[2:5], ${LOG}
+	s_wait_xcnt 0x0
+	s_wait_alu 0x0
+	v_mov_b32_e32 v2, ${HWID1}
+	v_mov_b32_e32 v3, ${SEAID}
+	v_mov_b32_e32 v4, ttmp9
+	v_mov_b32_e32 v5, ttmp7
+	s_wait_alu 0x0
+	global_store_b128 v1, v[2:5], ${LOG} offset:16
+	s_wait_xcnt 0x0
+.Lpublish:
+${PUBLISH}
+	s_wait_storecnt 0x0
+	s_mov_b32 exec_lo, ${SAVE_EXEC}
+.Lsync:
+${SYNC}
+	s_cmp_eq_u32 ${T9}, -2
+	s_cbranch_scc0 .Lreal
+	s_cmp_lg_u32 ${MODE}, 4
+	s_cbranch_scc1 .Lend
+	// A2 marker: this wave's workgroup ended in the prologue. Thread trace can report the marker up to ~100
+	// clocks after a wave that ends right away, outside its residency, so stay resident a little longer.
+	s_or_b32 ${TMP}, ${WAVE}, 0xa2000000
+	s_mov_b32 m0, ${TMP}
+	s_ttracedata
+	s_sleep 4
+.Lend:
+	s_endpgm
+.Lreal:
+	s_cmp_lg_u32 ${MODE}, 4
+	s_cbranch_scc1 .Lhave_tile
+	// A1 identity marker: 0xA1000000 | (linear workgroup * waves + wave).
+${UID}
+	s_mul_i32 ${TMP}, ${TMP}, ${NUM_WAVES}
+	s_add_co_i32 ${TMP}, ${TMP}, ${WAVE}
+	s_or_b32 ${TMP}, ${TMP}, 0xa1000000
+	s_mov_b32 m0, ${TMP}
+	s_ttracedata
+.Lhave_tile:
+	s_mov_b32 ${R9}, ${T9}
+	s_mov_b32 ${R7}, ${T7}
+${PRELOAD}
+	s_wait_alu 0x0
+	// The descriptor's INST_PREF_SIZE now covers only this prologue. Prefetch the body here, as the original
+	// descriptor did at wave start, and only in workgroups that run it: early prefetch from the ending workgroups
+	// would warm the instruction cache for the real ones.
+${PREFETCH}
+	s_branch 0

@@ -1,0 +1,21 @@
+[package]
+name = "remapper-rewrite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "gfx1250 code-object rewrite and placement tables for the workgroup remapper"
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+object.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+blake3 = "1"
+
+[lints]
+workspace = true
