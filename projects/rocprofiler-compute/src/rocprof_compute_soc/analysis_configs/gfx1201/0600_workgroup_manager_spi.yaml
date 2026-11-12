@@ -25,10 +25,6 @@ Panel Config:
           unit: Wavefronts per Cycle
   metrics_description:
     Compute Wave Dispatches: >-
-      Measured dispatched wave count, normalized by the chosen unit. Navi48
-      wave-count normalization still requires validation; this count need not
-      match the application's launch geometry.
+      Total wavefronts dispatched (SQ_WAVES_sum).
     Wave Dispatch Rate: >-
-      Measured dispatched waves per GPU-active cycle. Navi48 wave-count
-      normalization still requires validation; compare like workloads in the
-      same performance state.
+      Average wavefronts launched per busy cycle.

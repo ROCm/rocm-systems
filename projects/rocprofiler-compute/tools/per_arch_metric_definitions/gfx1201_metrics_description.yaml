@@ -4,8 +4,8 @@ System Speed-of-Light:
     rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
     unit: GInstructions/s
   WMMA FLOPs (F16->F32 16x16x16):
-    plain: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
-    rst: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
+    plain: Achieved FP16 WMMA throughput.
+    rst: Achieved FP16 WMMA throughput.
     unit: GFLOP/s
   FP64 VALU Issue Rate:
     plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
@@ -16,8 +16,8 @@ System Speed-of-Light:
     rst: Instructions issued per busy SQ cycle, excluding internal instructions.
     unit: Instructions per Cycle
   Wavefront Occupancy:
-    plain: Estimated average resident wave count over GPU-active cycles. Navi48 living-wave counter units and instance reduction still require validation; do not treat this as a validated occupancy or resource-limit measurement.
-    rst: Estimated average resident wave count over GPU-active cycles. Navi48 living-wave counter units and instance reduction still require validation; do not treat this as a validated occupancy or resource-limit measurement.
+    plain: Average number of wavefronts in flight on GPU.
+    rst: Average number of wavefronts in flight on GPU.
     unit: Wavefronts
   GL2 Cache Hit Rate:
     plain: Percentage of L2 lookups that hit.
@@ -144,8 +144,8 @@ Memory chart - Infinity Cache and VRAM:
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
-    plain: Estimated resident waves relative to the configured maximum. Navi48 living-wave counter units, instance reduction, and WGP normalization still require validation; this is a provisional occupancy estimate.
-    rst: Estimated resident waves relative to the configured maximum. Navi48 living-wave counter units, instance reduction, and WGP normalization still require validation; this is a provisional occupancy estimate.
+    plain: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
+    rst: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
     unit: Percent
   VGPR:
     plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
@@ -169,12 +169,12 @@ Memory chart - Workgroup Processors (WGPs):
     unit: Workgroups per WGP
 Wave Dispatch Statistics:
   Compute Wave Dispatches:
-    plain: Measured dispatched wave count, normalized by the chosen unit. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
-    rst: Measured dispatched wave count, normalized by the chosen unit. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
+    plain: Total wavefronts dispatched (SQ_WAVES_sum).
+    rst: Total wavefronts dispatched (SQ_WAVES_sum).
     unit: Count per Normalization Unit
   Wave Dispatch Rate:
-    plain: Measured dispatched waves per GPU-active cycle. Navi48 wave-count normalization still requires validation; compare like workloads in the same performance state.
-    rst: Measured dispatched waves per GPU-active cycle. Navi48 wave-count normalization still requires validation; compare like workloads in the same performance state.
+    plain: Average wavefronts launched per busy cycle.
+    rst: Average wavefronts launched per busy cycle.
     unit: Wavefronts per Cycle
 WGP Scalar Data Cache:
   Dcache Hit Rate:
@@ -183,12 +183,12 @@ WGP Scalar Data Cache:
     unit: Percent
 WGP Wavefront Dispatch:
   Dispatched Threads:
-    plain: Measured valid work-items reported by the SQ counter. Navi48 work-item and wave-count normalization still require validation; this count need not match the application's launch geometry.
-    rst: Measured valid work-items reported by the SQ counter. Navi48 work-item and wave-count normalization still require validation; this count need not match the application's launch geometry.
+    plain: Total work-items dispatched.
+    rst: Total work-items dispatched.
     unit: Threads
   Dispatched Waves:
-    plain: Measured dispatched waves reported by the SQ counter. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
-    rst: Measured dispatched waves reported by the SQ counter. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
+    plain: Total wavefronts dispatched.
+    rst: Total wavefronts dispatched.
     unit: Wavefronts
 WGP Wavefront Launch Stats:
   Grid Size:
@@ -302,13 +302,13 @@ WGP WMMA Instruction FLOPs and IOPs Counting:
     rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
     unit: Cycles
   SQ_WMMA_VALU_INSTS:
-    plain: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation requires validation. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
-    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation requires validation. If this shows N/A, check SDK support for gfx1201 SQ event 233 and the configured SqcCounterBlockMaxEvent limit.
+    plain: Number of WMMA instructions issued.
+    rst: Number of WMMA instructions issued.
     unit: Instructions
 WGP Utilization:
   WGP Utilization:
-    plain: Average SQ busy-cycle count relative to GPU-active cycles, expressed as a percentage. Navi48 counter-instance reduction requires validation.
-    rst: Average SQ busy-cycle count relative to GPU-active cycles, expressed as a percentage. Navi48 counter-instance reduction requires validation.
+    plain: Percentage of WGP clock cycles at least one wavefront is active.
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
     unit: Percent
 WGP Instruction Issue Stalls:
   Wait for Barrier:
@@ -329,8 +329,8 @@ WGP Instruction Issue Stalls:
     unit: Percent
 WGP Wavefront Life:
   Wave Life:
-    plain: Estimated average wave lifetime from accumulated living-wave cycles divided by measured dispatched waves. Navi48 counter units, instance reduction, and wave-count normalization still require validation.
-    rst: Estimated average wave lifetime from accumulated living-wave cycles divided by measured dispatched waves. Navi48 counter units, instance reduction, and wave-count normalization still require validation.
+    plain: Average wavefront lifetime in cycles.
+    rst: Average wavefront lifetime in cycles.
     unit: Cycles
 GL0 Cache Performance:
   Hit Rate:

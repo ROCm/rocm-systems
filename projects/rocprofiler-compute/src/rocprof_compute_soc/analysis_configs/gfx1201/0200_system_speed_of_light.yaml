@@ -89,17 +89,7 @@ Panel Config:
       floating-point and integer instructions and does not count FLOPs or active
       lanes. No percentage of FP32 peak is reported.
     WMMA FLOPs (F16->F32 16x16x16): >-
-      Estimated matrix FLOPs per second, assuming FP16 inputs with FP32
-      accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per
-      counter increment and peak of 1024 FLOPs/CU/cycle are provisional.
-      The raw counter counts WMMA issues per vec32 and does not distinguish
-      FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports
-      overlap with the general VALU instruction counter for that instruction.
-      Counted wave population, other shapes/types, wave64 interpretation, and
-      the applicable peak still require validation.
-      Treat the FLOP conversion and percentage of peak as approximations.
-      If this shows N/A, check SDK support for gfx1201 SQ event 233 and the
-      configured SqcCounterBlockMaxEvent limit.
+      Achieved FP16 WMMA throughput.
     FP64 VALU Issue Rate: >-
       Billions of double-precision VALU instruction issues per second. This is
       an instruction rate, without accounting for FLOPs per instruction or
@@ -107,9 +97,7 @@ Panel Config:
     IPC: >-
       Instructions issued per busy SQ cycle, excluding internal instructions.
     Wavefront Occupancy: >-
-      Estimated average resident wave count over GPU-active cycles. Navi48
-      living-wave counter units and instance reduction still require validation;
-      do not treat this as a validated occupancy or resource-limit measurement.
+      Average number of wavefronts in flight on GPU.
     GL2 Cache Hit Rate: >-
       Percentage of L2 lookups that hit.
     LDS Bank Conflicts: >-

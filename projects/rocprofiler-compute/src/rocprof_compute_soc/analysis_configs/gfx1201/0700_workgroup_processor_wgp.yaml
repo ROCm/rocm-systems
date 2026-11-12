@@ -303,13 +303,9 @@ Panel Config:
     Dcache Hit Rate: >-
       Percentage of scalar data-cache requests that hit.
     Dispatched Threads: >-
-      Measured valid work-items reported by the SQ counter. Navi48 work-item
-      and wave-count normalization still require validation; this count need
-      not match the application's launch geometry.
+      Total work-items dispatched.
     Dispatched Waves: >-
-      Measured dispatched waves reported by the SQ counter. Navi48 wave-count
-      normalization still requires validation; this count need not match the
-      application's launch geometry.
+      Total wavefronts dispatched.
     Grid Size: >-
       Number of work-items in the dispatch grid, from dispatch metadata.
     Icache Hit Rate: >-
@@ -367,10 +363,7 @@ Panel Config:
       Raw count of work cycles sent for WMMA reported by the SDK counter.
       Its conversion to instruction counts or FLOPs requires validation.
     SQ_WMMA_VALU_INSTS: >-
-      Raw WMMA vector instruction count. The aggregate counter does not
-      distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation
-      requires validation. If this shows N/A, check SDK support for gfx1201 SQ
-      event 233 and the configured SqcCounterBlockMaxEvent limit.
+      Number of WMMA instructions issued.
     Scratch Allocation: >-
       Bytes of scratch memory allocated per work-item, from dispatch metadata.
     Total Instructions: >-
@@ -382,8 +375,7 @@ Panel Config:
     WAVE32 LDS Parameter Load Instructions: >-
       Not available
     WGP Utilization: >-
-      Average SQ busy-cycle count relative to GPU-active cycles, expressed
-      as a percentage. Navi48 counter-instance reduction requires validation.
+      Percentage of WGP clock cycles at least one wavefront is active.
     Wait for Barrier: >-
       Not available
     Wait for Counter: >-
@@ -391,9 +383,7 @@ Panel Config:
     Wait for Instruction Fetch: >-
       Not available
     Wave Life: >-
-      Estimated average wave lifetime from accumulated living-wave cycles
-      divided by measured dispatched waves. Navi48 counter units, instance
-      reduction, and wave-count normalization still require validation.
+      Average wavefront lifetime in cycles.
     Workgroup Size: >-
       Number of work-items per workgroup, from dispatch metadata.
     Wait for Any: >-

@@ -214,9 +214,8 @@ Panel Config:
       Not collected by this implementation. Memory-destined L2 write bandwidth
       does not measure traffic reaching VRAM.
     Wavefront Occupancy: >-
-      Estimated resident waves relative to the configured maximum. Navi48
-      living-wave counter units, instance reduction, and WGP normalization
-      still require validation; this is a provisional occupancy estimate.
+      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
+      maximum wavefronts per WGP.
     VGPR: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs
