@@ -64,6 +64,7 @@ test_categories:
       - "RmaProxyReadyTest.*"
       # plugin/rma.cc
       - "RmaPluginInitTest.*"
+      - "RmaInternalBackendTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
       # tuning/cost_model.cc

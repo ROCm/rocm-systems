@@ -5,6 +5,8 @@
  * See LICENSE.txt for more license information
  *************************************************************************/
 
+#include <atomic>
+
 #include "common_cast.h"
 #include "connect_cast.h"
 
@@ -411,6 +413,9 @@ struct IbCastRmaIbProxyCtx {
   int nContexts;
 };
 
+// [RCCL] Each RMA context takes its own top-half chId, so on AINIC it gets its own uDMA pipeline; never sent to peer.
+static std::atomic<unsigned> ibCastRmaContextChIds{0};
+
 ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** ginCtx) {
   ncclResult_t ret = ncclSuccess;
   struct CastIbGinCollComm* cComm = (struct CastIbGinCollComm*)collComm;
@@ -449,6 +454,9 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
+    ncclNet_ctxt_t chCtxt = {};
+    chCtxt.chId =
+      (MAXCHANNELS - 1) - (int)(ibCastRmaContextChIds.fetch_add(1, std::memory_order_relaxed) % (MAXCHANNELS / 2));
 
     for (int i = 0; i < nranks; i += rankStride) {
       int connectPeer = (cComm->rank + i) % nranks;
@@ -456,11 +464,12 @@ ncclResult_t IbCastRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
       do {
         if (gc->fullSendComm[connectPeer] == NULL)
           NCCLCHECKGOTO(IbCastConnectImpl(cComm->ctx, cComm->dev, handles + NCCL_NET_HANDLE_MAXSIZE * connectPeer,
-                                          &gc->fullSendComm[connectPeer], NULL,
+                                          &gc->fullSendComm[connectPeer], (ncclNetDeviceHandle_t**)&chCtxt,
                                           ncclParamCastGinIbTc() != -1 ? ncclParamCastGinIbTc() : ncclParamIbCastTc()),
                         ret, end);
         if (gc->fullRecvComm[acceptPeer] == NULL)
-          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], NULL), ret, end);
+          NCCLCHECKGOTO(netIbCast.accept(lComm, &gc->fullRecvComm[acceptPeer], (ncclNetDeviceHandle_t**)&chCtxt), ret,
+                        end);
       } while ((gc->fullSendComm[connectPeer] == NULL) || (gc->fullRecvComm[acceptPeer] == NULL));
       NCCLCHECKGOTO(IbCastGinIbP2PBarrier(cComm), ret, end);
     }

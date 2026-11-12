@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -587,6 +588,7 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
 
   std::vector<struct IbCastRmaIbProxyCtx*> contexts_;
   std::vector<int> connectPeers_, acceptPeers_;
+  std::vector<int> connectChIds_, acceptChIds_;  // the channel id each call passed, or -1 for none
   std::deque<ZeroedPtr<ncclIbSendComm>> peerSends_;
   std::deque<ZeroedPtr<ncclIbRecvComm>> peerRecvs_;
   struct ncclIbListenComm lComm_ {};
@@ -618,18 +620,22 @@ class NetIbCastGinContextMicrotest : public NetIbCastGinRingMicrotest {
     return ncclSuccess;
   }
   HookOf<decltype(g_ibCastConnectImpl)> connect_{
-      g_ibCastConnectImpl, [this](void* ctx, int, void* handle, void** sendComm, ncclNetDeviceHandle_t**, int tc) {
+      g_ibCastConnectImpl,
+      [this](void* ctx, int, void* handle, void** sendComm, ncclNetDeviceHandle_t** devHandle, int tc) {
         const struct ncclIbHandle* h = (const struct ncclIbHandle*)handle;
         EXPECT_TRUE(h->isRMA);
         connectPeers_.push_back((int)(h->magic - 0x100));
+        connectChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
         *sendComm = peerSends_[connectPeers_.size() - 1].get();
         return ncclSuccess;
       }};
-  HookOf<decltype(g_ibCastAccept)> accept_{g_ibCastAccept, [this](void*, void** recvComm, ncclNetDeviceHandle_t**) {
-                                             acceptPeers_.push_back(0);
-                                             *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
-                                             return ncclSuccess;
-                                           }};
+  HookOf<decltype(g_ibCastAccept)> accept_{
+      g_ibCastAccept, [this](void*, void** recvComm, ncclNetDeviceHandle_t** devHandle) {
+        acceptPeers_.push_back(0);
+        acceptChIds_.push_back(devHandle ? ((ncclNet_ctxt_t*)devHandle)->chId : -1);
+        *recvComm = peerRecvs_[acceptPeers_.size() - 1].get();
+        return ncclSuccess;
+      }};
 };
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachContext) {
@@ -656,6 +662,45 @@ TEST_F(NetIbCastGinContextMicrotest, CreateContext_ConnectsToEveryPeerInEachCont
   EXPECT_EQ(gc[0].fullRecvComm[0], peerRecvs_[1].get());  // accepted second, after itself
   EXPECT_EQ(closeListen_.calls, 1);
   EXPECT_EQ(sends_.size(), 8u * 3);  // 8 barriers of nranks - 1 steps
+}
+
+// On AINIC the channel id picks a QP's uDMA pipeline (connect.cc reads it only in AINIC mode).
+// Every context passes its own id from the top half of the range, the same one for all of its
+// peers, on connect and accept alike.
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_EachContextPassesItsOwnTopRangeChannelId) {
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(3, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(connectChIds_.size(), 12u);
+  ASSERT_EQ(acceptChIds_.size(), 12u);
+  std::set<int> ids;
+  for (int c = 0; c < 3; c++) {
+    const int id = connectChIds_[4 * c];
+    EXPECT_GE(id, MAXCHANNELS / 2) << c;
+    EXPECT_LT(id, MAXCHANNELS) << c;
+    for (int p = 0; p < 4; p++) {
+      EXPECT_EQ(connectChIds_[4 * c + p], id) << c << " " << p;
+      EXPECT_EQ(acceptChIds_[4 * c + p], id) << c << " " << p;
+    }
+    ids.insert(id);
+  }
+  EXPECT_EQ(ids.size(), 3u);
+}
+
+// After MAXCHANNELS / 2 contexts the ids wrap back to the top of the range, so they never leave its
+// top half (nor the range nccl_channel_ud_map covers).
+TEST_F(NetIbCastGinContextMicrotest, CreateContext_ChannelIdsWrapWithinTheTopHalf) {
+  cComm_.allGather = HandleAllGather;
+  char ring[4 * sizeof(int)];
+  base_ = ring;
+  ibCastRmaContextChIds.store(MAXCHANNELS / 2 - 1);  // the last context before the wrap
+  void* ctx = nullptr;
+  ASSERT_EQ(Create(2, 1, &ctx), ncclSuccess);
+  ASSERT_EQ(connectChIds_.size(), 8u);
+  EXPECT_EQ(connectChIds_[0], MAXCHANNELS / 2);
+  EXPECT_EQ(connectChIds_[4], MAXCHANNELS - 1);
 }
 
 TEST_F(NetIbCastGinContextMicrotest, CreateContext_RankStride_ConnectsOnlyToThatStride) {
