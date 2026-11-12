@@ -46,6 +46,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "hip",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "bindings/fortran",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "hipother",
       "url": "ROCm/hipother",
       "branch": "develop",
@@ -149,6 +158,15 @@
       "url": "ROCm/rocprofiler-sdk",
       "branch": "amd-staging",
       "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "monorepo_source_of_truth": true
+    },
+    {
+      "name": "roctx",
+      "url": "ROCm/rocm-systems",
+      "branch": "develop",
+      "category": "bindings/fortran",
       "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "monorepo_source_of_truth": true
