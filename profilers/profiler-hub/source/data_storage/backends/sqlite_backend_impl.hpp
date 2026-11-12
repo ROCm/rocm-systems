@@ -161,6 +161,18 @@ database_backend<SqlitePolicy>::database_backend(std::string    db_path,
                                 "database open failed!");
     }
 
+    for(const auto* pragma : { "PRAGMA cache_size = -16384",    // ~16MB page cache
+                               "PRAGMA temp_store = MEMORY" })  // no disk temp b-trees
+    {
+        try
+        {
+            execute(pragma);
+        } catch(const std::exception& err)
+        {
+            LOG_ERROR("Failed to apply '{}': {}", pragma, err.what());
+        }
+    }
+
     validate_sqlite3_result(
         SqlitePolicy::prepare(m_sqlite3, "BEGIN TRANSACTION", &m_begin_stmt),
         "BEGIN TRANSACTION",
@@ -193,10 +205,13 @@ database_backend<SqlitePolicy>::discover_uuids()
     {
         std::string uuid;
     };
+    // The uuid is the suffix of rocpd_metadata_<uuid>. It may itself contain
+    // underscores (hyphens in the guid are stored as underscores), so it cannot
+    // be taken as the text after the last underscore of an arbitrary table.
     auto uuid_query_executor = create_read_statement_executor<uuid_result>(
-        "SELECT DISTINCT replace(name, rtrim(name, replace(name, '_', '')), '') "
-        "AS guid "
-        "FROM sqlite_master WHERE type='table' AND name LIKE 'rocpd_%';",
+        "SELECT substr(name, length('rocpd_metadata_') + 1) "
+        "FROM sqlite_master WHERE type = 'table' "
+        "AND name LIKE 'rocpd_metadata\\_%' ESCAPE '\\'",
         &uuid_result::uuid);
 
     auto result = uuid_query_executor().to_vector();
@@ -248,8 +263,16 @@ template <typename SqlitePolicy>
 void
 database_backend<SqlitePolicy>::execute(const std::string& query)
 {
+    const profiler_hub::running_sql activity{ &database_backend::interrupt_callback, this };
     validate_sqlite3_result(
         SqlitePolicy::exec(m_sqlite3, query.c_str()), "Failed to execute query:", query);
+}
+
+template <typename SqlitePolicy>
+void
+database_backend<SqlitePolicy>::interrupt() noexcept
+{
+    SqlitePolicy::interrupt(m_sqlite3);
 }
 
 template <typename SqlitePolicy>

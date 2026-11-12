@@ -8,10 +8,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include <profiler-hub/shared_types.hpp>
+#include <profiler-hub/c/profiler_hub_types.h>
+#include <profiler-hub/cpp/shared_types.hpp>
+#include <profiler-hub/cpp/version.hpp>
 
 namespace profiler_hub::reader_types
 {
@@ -31,7 +34,8 @@ enum class event_type_t
     memory_copy,
     memory_allocate,
     sample,
-    pmc_event
+    pmc_event,
+    hip_event
 };
 
 struct time_window_t
@@ -115,6 +119,8 @@ using node_info_list_t = std::vector<node_info_ptr_t>;
 
 struct process_info_t
 {
+    size_t id{};  ///< rocpd_info_process.id. Not the OS pid.
+
     std::optional<size_t> ppid{};
     size_t                pid{};
     std::optional<size_t> init{};
@@ -133,6 +139,8 @@ using process_info_list_t = std::vector<process_info_ptr_t>;
 
 struct agent_info_t
 {
+    size_t id{};  ///< rocpd_info_agent.id. Not type_index.
+
     std::string           agent_type;
     size_t                type_index;
     std::optional<size_t> absolute_index{};
@@ -154,6 +162,8 @@ using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_t
 {
+    size_t id{};  ///< rocpd_info_pmc.id
+
     std::string                   name{};
     std::shared_ptr<agent_info_t> agent_info;
 
@@ -181,6 +191,8 @@ using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
 
 struct thread_info_t
 {
+    size_t id{};  ///< rocpd_info_thread.id. Not the OS tid.
+
     std::optional<size_t> parent_process_id{};
     size_t                thread_id{};
     std::string           name{};
@@ -198,6 +210,8 @@ using thread_info_list_t = std::vector<thread_info_ptr_t>;
 struct stream_info_t
 {
     size_t      stream_id{};
+    size_t      nid{};  ///< rocpd_info_node.id
+    size_t      pid{};  ///< rocpd_info_process.id. Not the OS pid.
     std::string name{};
     std::string extdata{};
 
@@ -211,6 +225,8 @@ using stream_info_list_t = std::vector<stream_info_ptr_t>;
 struct queue_info_t
 {
     size_t      queue_id{};
+    size_t      nid{};  ///< rocpd_info_node.id
+    size_t      pid{};  ///< rocpd_info_process.id. Not the OS pid.
     std::string name{};
     std::string extdata{};
 
@@ -262,10 +278,66 @@ struct kernel_symbol_info_t
 using kernel_symbol_info_ptr_t  = std::shared_ptr<kernel_symbol_info_t>;
 using kernel_symbol_info_list_t = std::vector<kernel_symbol_info_ptr_t>;
 
+/** @brief Distinguishes the identity columns a track was derived from.
+ *         Needed because `agent_id` alone can't tell a kernel-dispatch
+ *         per-agent+queue track apart from a PMC per-agent track once both
+ *         set it. */
+enum class track_kind_t
+{
+    thread,                       ///< (nid,pid,tid)-based; derived from the
+                                  ///< duration-event tables, untagged rows only.
+    thread_sample,                ///< Same (nid,pid,tid) family, but events
+                                  ///< explicitly tagged with a named
+                                  ///< rocpd_sample.track_id.
+    pmc_agent,                    ///< PMC/counter samples split by agent_id.
+    pmc_kernel,                   ///< PMC values attached to kernel dispatches.
+    pmc_memory,                   ///< Memory-activity counters, one per agent.
+    kernel_dispatch_agent_queue,  ///< Kernel dispatches, by (nid,agent_id,queue_id).
+    memory_allocate_agent_queue,  ///< Memory allocations, by (nid,agent_id,queue_id).
+    memory_copy_agent_queue,      ///< Memory copies, by (nid,dst_agent_id,queue_id).
+    // One merged track per (nid,pid,stream_id), combining kernel-dispatch +
+    // memory-allocate + memory-copy + hip-event rows on that stream -- matches
+    // optiq's actual behavior (a single kRocProfVisDmStreamTrack per stream,
+    // not one per event type).
+    stream,
+    hip_event_agent_queue,  ///< HIP events, by (nid,agent_id,queue_id).
+};
+
+struct value_range_t
+{
+    double min{};
+    double max{};
+};
+
 struct track_info_t
 {
-    std::string name{};
-    std::string extdata{};
+    size_t       id{};
+    std::string  name{};
+    std::string  extdata{};
+    size_t       event_count{};
+    size_t       agent_id{};
+    size_t       queue_id{};
+    size_t       stream_id{};
+    track_kind_t category{ track_kind_t::thread };
+
+    // Raw rocpd_info_process.id (FK), as stored in the event tables' pid
+    // column -- distinct from process_info->pid (the OS pid). Only set for
+    // track_kind_t::stream, where it's needed to filter event queries;
+    // process_info->pid can't be used for that since it's the resolved OS
+    // pid, not the FK.
+    size_t db_pid{};
+
+    // rocpd_info_pmc.id for sample and kernel counters. Memory-activity
+    // tracks use a synthetic id, because that series is derived in memory
+    // from rocpd_memory_allocate and is not a rocpd_info_pmc row.
+    size_t pmc_id{};
+
+    size_t start_ts{};  ///< Nanosecond timestamp of the track's earliest event.
+    size_t end_ts{};    ///< Nanosecond timestamp of the track's latest event.
+
+    /// Smallest/largest sample value. Only set for track_kind_t::pmc_agent
+    /// tracks that have at least one non-NULL sample value.
+    std::optional<value_range_t> value_range;
 
     std::shared_ptr<node_info_t>    node_info;
     std::shared_ptr<process_info_t> process_info;
@@ -274,6 +346,29 @@ struct track_info_t
 
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
 using track_info_list_t = std::vector<track_info_ptr_t>;
+
+/**
+ * @brief One distinct stream-to-hardware relationship found in the event
+ *        tables. category says which operation produced it. stream_track and
+ *        hardware_track are null when that side has no matching track, which
+ *        includes a memory allocation whose agent or queue was not recorded.
+ *        pid is the process-table id stored on the event row, the same value
+ *        as track_info_t::db_pid, not process_info_t::pid.
+ */
+struct stream_hardware_link_t
+{
+    track_kind_t          category{ track_kind_t::kernel_dispatch_agent_queue };
+    size_t                nid{};
+    size_t                pid{};
+    size_t                stream_id{};
+    std::optional<size_t> agent_id;
+    std::optional<size_t> queue_id;
+
+    track_info_ptr_t stream_track;
+    track_info_ptr_t hardware_track;
+};
+
+using stream_hardware_link_list_t = std::vector<stream_hardware_link_t>;
 
 // --------------------- Call Stack & Source Context (string-owning) -------
 
@@ -287,6 +382,7 @@ struct address_range_info_t
 
 struct program_counter_info_t
 {
+    size_t                event_id{};  ///< Region row id of this frame. 0 if unknown.
     std::string           function;
     std::string           filename;
     std::optional<size_t> line_number;
@@ -480,8 +576,8 @@ struct timeline_event_t
     timestamp_ns_t start_timestamp;
     timestamp_ns_t end_timestamp;
 
-    std::string display_name;
-    std::string category;
+    std::string_view display_name;
+    std::string_view category;
 
     track_info_ptr_t track;
 };
@@ -493,11 +589,61 @@ struct counter_timeline_event_t
     unique_timeline_event_id_t unique_identifier;
 
     timestamp_ns_t timestamp;
-    size_t         value;
+    double         value;
 
     track_info_ptr_t track;
 };
 
 using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
+
+struct histogram_bucket_t
+{
+    size_t bucket_index{};
+    size_t event_count{};
+    double value{};
+};
+
+using histogram_bucket_list_t = std::vector<histogram_bucket_t>;
+
+struct track_histogram_t
+{
+    track_info_ptr_t        track;
+    histogram_bucket_list_t buckets;
+};
+
+using track_histogram_list_t = std::vector<track_histogram_t>;
+
+struct histogram_t
+{
+    timestamp_ns_t         origin_ts{};
+    timestamp_ns_t         bucket_size{};
+    size_t                 bucket_count{};
+    track_histogram_list_t tracks;
+};
+
+/** @brief Trace schema family stored inside a recognized file. */
+enum class trace_schema_t
+{
+    unknown,
+    rocpd,
+};
+
+/** @brief Schema family and version of a probed file. Selects its reader. */
+struct trace_format_t
+{
+    trace_schema_t          schema{ trace_schema_t::unknown };
+    profiler_hub::version_t version{ 0, 0, 0 };
+};
+
+/** @brief What a path contains, and whether a reader can open it. */
+struct file_probe_result_t
+{
+    ph_result_t             status{ PH_RESULT_UNSUPPORTED_FILE };
+    trace_schema_t          trace_schema{ trace_schema_t::unknown };
+    profiler_hub::version_t schema_version{ 0, 0, 0 };
+    std::string              uuid;
+    std::vector<std::string> uuids;
+    std::string              message;
+};
 
 }  // namespace profiler_hub::reader_types
