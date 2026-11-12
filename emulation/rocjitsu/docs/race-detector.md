@@ -383,6 +383,10 @@ wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
+For a DS or FLAT instruction, the plugin first merges the active lanes' byte
+ranges into intervals and checks the chunk counts under them. When no chunk can
+hold a conflict, it skips the per-lane checks. The same intervals become the
+instruction's event.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
