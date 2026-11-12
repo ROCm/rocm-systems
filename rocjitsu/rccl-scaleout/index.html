@@ -16,7 +16,7 @@
         <link rel="prev" href="../configuration/">
       
       
-        <link rel="next" href="../race-detector/">
+        <link rel="next" href="../same-host-pod-rccl-gate/">
       
       
         
@@ -568,6 +568,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Same-host pod RCCL gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1541,6 +1569,205 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pod qualification
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Pod qualification
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261014/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-14)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261015/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-15)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261019/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-19)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stock-driver-hardware-path-20261014/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stock-driver hardware path
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../unpatched-amdgpu-pod-ablation-20261015/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unpatched AMDGPU ablation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1606,6 +1833,15 @@
 
 
 <h1 id="two-node-rccl-net-smoke-unqualified-control">Two-node RCCL NET smoke (unqualified control)<a class="headerlink" href="#two-node-rccl-net-smoke-unqualified-control" title="Permanent link">&para;</a></h1>
+<p>This is a control only. The active exit gate is the four-node, two-GPU-per-node
+mixed P2P/IPC and NET workload in
+<a href="../same-host-pod-rccl-gate/">Same-host pod RCCL gate</a>, run in both VFIO and
+emulated KFD modes.
+The <a href="../same-host-pod-rccl-result-20261015/">2026-10-15 record</a> reports a
+historical local pass with a zero-patch guest driver and standard VFIO-user
+peer transport. See
+<a href="../same-host-pod-rccl-gate/#qualification-status">the gate's qualification status</a>
+for the current tree.</p>
 <p><code>configs/gfx1250_mi455x_kmd_2node_net.json</code> is a schematic system
 manifest with one gfx1250 GPU on each of two nodes. Its network link records
 intended reachability. The GPUs have distinct KFD identities and each node
@@ -1625,11 +1861,10 @@ local mode and a gfx950 two-node NET control passed. A clean build of pre-PR
 ancestor <code>6d9350d62f</code> reproduced the single-daemon SIGBUS, so this is a known
 daemon prerequisite rather than evidence of a manifest regression. At that
 tested revision, <code>AMDKFD_IOC_EXPORT_DMABUF</code> returned a daemon-local descriptor
-number without transferring the descriptor to the client. This branch still
-does not transfer exported descriptors through the RPC <code>shared_handle</code> and
-SCM_RIGHTS path. Bypassing the bad close in the earlier run exposed a separate
-<code>hipHostMalloc</code> failure, so descriptor transfer alone cannot qualify this
-recipe. Treat the command below
+number without transferring the descriptor to the client. The current daemon
+transfers exported descriptors to clients through SCM_RIGHTS. Bypassing the
+bad close in the earlier run exposed a separate <code>hipHostMalloc</code> failure, so
+descriptor transfer alone cannot qualify this recipe. Treat the command below
 as a reproduction recipe until a passing gfx1250 NET rank run and its logs
 are recorded.</p>
 <h2 id="build-and-run">Build and run<a class="headerlink" href="#build-and-run" title="Permanent link">&para;</a></h2>

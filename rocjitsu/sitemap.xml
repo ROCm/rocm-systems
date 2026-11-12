@@ -125,11 +125,35 @@
          <lastmod>2026-11-12</lastmod>
     </url>
     <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-gate/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-result-20261014/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-result-20261015/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-result-20261019/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/simdojo/</loc>
          <lastmod>2026-11-12</lastmod>
     </url>
     <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/stock-driver-hardware-path-20261014/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
          <loc>https://rocm.github.io/rocm-systems/rocjitsu/style/</loc>
+         <lastmod>2026-11-12</lastmod>
+    </url>
+    <url>
+         <loc>https://rocm.github.io/rocm-systems/rocjitsu/unpatched-amdgpu-pod-ablation-20261015/</loc>
          <lastmod>2026-11-12</lastmod>
     </url>
     <url>

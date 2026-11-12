@@ -741,6 +741,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Same-host pod RCCL gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../race-detector/" class="md-nav__link">
         
   
@@ -1702,6 +1730,205 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pod qualification
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Pod qualification
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261014/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-14)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261015/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-15)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../same-host-pod-rccl-result-20261019/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RCCL result (2026-10-19)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stock-driver-hardware-path-20261014/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stock-driver hardware path
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../unpatched-amdgpu-pod-ablation-20261015/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Unpatched AMDGPU ablation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1983,7 +2210,7 @@ DBT guest configs select the guest and host targets and execution backend.</p>
 </tr>
 <tr>
 <td><code>gfx1250_mi455x_kmd_4node_2gpu_if.json</code></td>
-<td>Four nodes with two local GPUs and Infinity Fabric routes per node</td>
+<td>Four-node, two-GPU-per-node mixed P2P/NET fixture; see the <a href="../same-host-pod-rccl-gate/#run-this-gate">same-host RCCL gate</a></td>
 </tr>
 <tr>
 <td><code>gfx1251_synthetic.json</code></td>
@@ -2639,8 +2866,14 @@ cache hierarchy. The daemon manages all GPUs and routes KFD ioctls
 to the correct device based on <code>gpu_id</code>.</p>
 <p><code>configs/gfx950_mi350x_kmd_2gpu.json</code> is the default multi-GPU
 configuration for RCCL tests. <code>configs/gfx1250_mi455x_kmd_4gpu.json</code>
-provides a four-GPU daemon topology for explicit multi-GPU runs.
-When the selected ROCm compiler parses <code>gfx1250</code>, its HIP runtime advertises
+provides a four-GPU daemon topology through legacy GPU replication.
+<code>configs/gfx1250_mi455x_4gpu_scaleup.json</code> is a separate explicit system
+manifest. It connects four GPUs using one abstract switch for functional
+testing. The four-GPU shape and links are simulator choices; they do not
+describe a physical tray, switch, bandwidth, timing, or peer-memory
+coherence. KFD peer discovery stays off until the routed data and coherence
+paths qualify separately.</p>
+<p>When the selected ROCm compiler parses <code>gfx1250</code>, its HIP runtime advertises
 that target, and its RCCL library exists, the build also produces
 <code>tests/hip_rccl_gfx1250_test</code>. This is a compilation gate for the numerically
 checked CDNA5 rank workload; its runtime payload and data checks need separate
