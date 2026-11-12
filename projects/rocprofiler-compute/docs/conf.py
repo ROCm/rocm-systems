@@ -190,7 +190,7 @@ rdna_gfx1201_section_map = {
     "navi48-memory-chart-gl0-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
     "navi48-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
     "navi48-memory-chart-gl2-gfx1201": "Memory chart - GL2 Cache (L2)",
-    "navi48-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "navi48-memory-chart-ea-to-dram-gfx1201": "Memory chart - L2 to Memory",
     "navi48-memory-chart-infinity-cache-gfx1201": (
         "Memory chart - Infinity Cache and VRAM"
     ),
@@ -209,7 +209,7 @@ rdna_gfx1201_section_map = {
     "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
     "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
     "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
-    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - L2 to Memory",
     "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
 }
 
