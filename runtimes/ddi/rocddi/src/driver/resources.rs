@@ -11,8 +11,8 @@
 #[cfg(test)]
 use super::test_driver::{TestAllocation, TestDriver, TestQueue};
 use super::{
-    AllocationOperations, DeviceDriverState, GpuDriverRef, GpuInstrumentationOperations,
-    GpuKernelQueueOperations, GpuUserQueueOperations, KfdAllocation, KfdDriver, KfdKernelQueue,
+    AllocationOperations, DeviceDriverState, GpuDriverRef, GpuKernelQueueOperations,
+    GpuPcSamplingOperations, GpuUserQueueOperations, KfdAllocation, KfdDriver, KfdKernelQueue,
     KfdPcSampling, KfdQueue, VirtualMemoryOperations,
 };
 use crate::Error;

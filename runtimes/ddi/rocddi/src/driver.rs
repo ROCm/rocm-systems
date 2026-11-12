@@ -403,21 +403,30 @@ pub(crate) trait PcSamplingResource {
     fn relinquish_adopted(&mut self) -> Result<(), Error>;
 }
 
-/// GPU queries and controls shared across operating-system drivers.
-///
-/// Allocation, virtual memory, queue, and instrumentation capabilities are
-/// independent. A GPU backend need not implement them to expose these queries.
-pub(crate) trait GpuDriver: Driver {
+/// Native fault-mode query, independent of allocation or queue services.
+pub(crate) trait GpuFaultModeOperations: Driver {
     /// Queries the process-wide XNACK mode without changing it.
     fn xnack_enabled(&self, device: &Self::DeviceState) -> Result<bool, Error>;
+}
+
+/// VM-scoped cache controls, independent of memory availability queries.
+pub(crate) trait GpuCacheControlOperations: Driver {
     /// Sets the native VM's persisting L2 reservation in bytes.
     fn set_persisting_l2_cache_size(
         &self,
         device: &Self::DeviceState,
         size_bytes: u32,
     ) -> Result<(), Error>;
+}
+
+/// Live device memory availability; a query does not reserve capacity.
+pub(crate) trait GpuMemoryQueryOperations: Driver {
     /// Queries currently available device memory in bytes.
     fn available_memory(&self, device: &Self::DeviceState) -> Result<u64, Error>;
+}
+
+/// Validated hardware surface facts for image layout consumers.
+pub(crate) trait GpuSurfaceOperations: Driver {
     /// Returns the layout capabilities needed by GPU image consumers.
     fn surface_config(
         &self,
@@ -426,7 +435,7 @@ pub(crate) trait GpuDriver: Driver {
 }
 
 /// Direct GPU queues and their queue-specific memory resources.
-pub(crate) trait GpuUserQueueOperations: GpuDriver + AllocationOperations {
+pub(crate) trait GpuUserQueueOperations: AllocationOperations {
     /// Direct GPU queue retained by this driver's activated device state.
     type UserQueue: UserQueueResource<DeviceState = Self::DeviceState>;
     /// Reports whether this driver can use expert scheduling on the device.
@@ -453,7 +462,7 @@ pub(crate) trait GpuUserQueueOperations: GpuDriver + AllocationOperations {
 }
 
 /// Kernel-mediated GPU submission queues, independent of direct queues.
-pub(crate) trait GpuKernelQueueOperations: GpuDriver {
+pub(crate) trait GpuKernelQueueOperations: Driver {
     /// Native queue that accepts driver-mediated command submissions.
     type KernelQueue: KernelQueueResource;
     /// Returns the number of native SDMA engines available for submission.
@@ -466,12 +475,16 @@ pub(crate) trait GpuKernelQueueOperations: GpuDriver {
     ) -> Result<Owned<Self::KernelQueue>, Error>;
 }
 
-/// GPU counters, sampling, stream monitoring, and trap instrumentation.
-pub(crate) trait GpuInstrumentationOperations: GpuDriver {
-    /// Native PC sampling registration retained by this driver instance.
-    type PcSampling: PcSamplingResource;
+/// Correlated device clocks, independent of instrumentation registrations.
+pub(crate) trait GpuClockOperations: Driver {
     /// Reads correlated GPU and system clock counters.
     fn clock_counters(&self, device: &Self::DeviceState) -> Result<ClockCounters, Error>;
+}
+
+/// Native PC sampling registration and capability negotiation.
+pub(crate) trait GpuPcSamplingOperations: Driver {
+    /// Native registration retained by this driver instance.
+    type PcSampling: PcSamplingResource;
     /// Lists supported or currently available native PC sampling modes.
     fn pc_sampling_configurations(
         &self,
@@ -485,6 +498,10 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         request: PcSamplingRequest,
         existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<Owned<Self::PcSampling>, Error>;
+}
+
+/// Native trap registration; callers retain all reachable backing.
+pub(crate) trait GpuTrapOperations: Driver {
     /// Installs handler code and memory addresses for GPU traps.
     ///
     /// # Safety
@@ -497,6 +514,10 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         handler_address: u64,
         memory_address: u64,
     ) -> Result<(), Error>;
+}
+
+/// Exclusive stream performance monitoring and destination lifetime.
+pub(crate) trait GpuSpmOperations: Driver {
     /// Acquires exclusive access to stream performance monitoring.
     fn spm_acquire(&self, device: &Self::DeviceState) -> Result<(), Error>;
     /// Releases the stream performance monitor acquired by this owner.
