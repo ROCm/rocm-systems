@@ -20,7 +20,7 @@ Panel Config:
           value: 8192 * SUM(SQ_WMMA_VALU_INSTS_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $WMMAF16Flops_empirical_peak
-        VALU FLOPs (F64):
+        VALU FLOPs (FP64):
           value: SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
           peak: $FP64Flops_empirical_peak
@@ -75,7 +75,7 @@ Panel Config:
       every WMMA issue, and the counter does not separate FP16, BF16, FP8,
       and BF8, so the achieved rate is not FP16-only.
       V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
-    VALU FLOPs (F64): >-
+    VALU FLOPs (FP64): >-
       64-bit floating-point operations per second on the VALU.
     GL0 Cache BW (TCP Cache): >-
       Achieved bandwidth at the GL0 vector cache (TCP Cache). Counts 128 bytes

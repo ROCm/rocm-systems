@@ -57,6 +57,17 @@ class TestValuDualIssueDetector:
         assert ValuDualIssueDetector.faq_url in msg
         assert "SQ_ACTIVE_INST_VALU2" not in msg
 
+    def test_check_emits_valu_flops_fp64_warning_above_peak(self):
+        """VALU FLOPs (FP64) above peak emits the FLOPs-flavored warning."""
+        detector = ValuDualIssueDetector(gpu_arch="gfx1201", raw_pmc_df=pd.DataFrame())
+        with patch("utils.metrics.common.console_warning") as console_warning_mock:
+            detector.check("VALU FLOPs (FP64)", value=600.0, peak=400.0)
+        console_warning_mock.assert_called_once()
+        msg = console_warning_mock.call_args.args[0]
+        assert "VALU FLOPs can exceed the peak value" in msg
+        assert ValuDualIssueDetector.faq_url in msg
+        assert "SQ_ACTIVE_INST_VALU2" not in msg
+
     def test_check_appends_valu2_suffix_on_gfx950(self):
         """gfx950 with non-zero SQ_ACTIVE_INST_VALU2 appends the confirmation."""
         raw_pmc_df = pd.DataFrame({"SQ_ACTIVE_INST_VALU2": [0, 1, 2]})
