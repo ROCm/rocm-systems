@@ -12,6 +12,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
+#include <atomic>
 // The fabric LSA AllToAll lane needs the Anvil SDMA backend and librccl's lane
 // headers; an install without either keeps -D 3 on gin.put.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX) && \
@@ -401,6 +402,26 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+// RCCL_TESTS_A2A_LANE_LOG names the -D 3 lane RunColl took, once per lane, so a
+// test can tell the fabric LSA lane from the gin.put fallback it silently takes.
+enum class AlltoAllGinLane { GinPut, Lsa };
+
+static void alltoallReportLane(AlltoAllGinLane lane) {
+  static const char* const kLaneNames[] = {"gin-put", "lsa"};
+  // Read once: RunColl is on the timed path.
+  static const bool enabled = getenv("RCCL_TESTS_A2A_LANE_LOG") != nullptr;
+  if (!enabled || !is_main_proc) return;
+  // -t N host threads reach this concurrently; fetch_or prints each lane once.
+  static std::atomic<unsigned> reported{0};
+  const unsigned bit = 1u << (unsigned)lane;
+  if (reported.fetch_or(bit, std::memory_order_relaxed) & bit) return;
+  // Leading '#' keeps this out of the results table, like #[bcast-tier].
+  printf("#[a2a-lane] %s\n", kLaneNames[(unsigned)lane]);
+  fflush(stdout);
+}
+#endif
+
 #if ALLTOALL_GIN_FABRIC_LSA
 using ::gin::fabric::ginFabricLsaA2ALaunchConfig;
 using ::gin::fabric::ginFabricA2ASelectAlgo;
@@ -779,10 +800,12 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         if (AlltoAllGinFabricAlgoHost((ncclDevComm*)comm, count * wordSize(type)) == GinFabricA2AAlgo::Lsa) {
           TESTCHECK(AlltoAllLaunchGinLsa(sendbuff, sendoffset, recvbuff, recvoffset, count * wordSize(type),
                                          (ncclDevComm*)comm, stream));
+          alltoallReportLane(AlltoAllGinLane::Lsa);
           return testSuccess;
         }
 #endif
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+        alltoallReportLane(AlltoAllGinLane::GinPut);
         return testSuccess;
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
