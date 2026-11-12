@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use rocddi::device::gpu::queue::{
     KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
+    QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, store_ordered_mmio64,
 };
 use rocddi::device::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::device::{
@@ -1171,7 +1171,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     unsafe {
         (&*(transport.write_index_host_address as *const AtomicU64))
             .store(PACKET_BYTES as u64, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, PACKET_BYTES as u64);
+        store_ordered_mmio64(transport.doorbell_host_address, PACKET_BYTES as u64);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -1344,7 +1344,7 @@ fn gfx1201_aql_barrier(
         (&*(transport.ring_host_address as *const AtomicU16))
             .store(BARRIER_HEADER, Ordering::Release);
         (&*(transport.write_index_host_address as *const AtomicU64)).store(1, Ordering::Release);
-        ring_doorbell(transport.doorbell_host_address, 0);
+        store_ordered_mmio64(transport.doorbell_host_address, 0);
     }
 
     let deadline = Instant::now() + Duration::from_secs(10);
