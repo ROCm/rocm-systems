@@ -69,6 +69,7 @@ static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 static constexpr gin_sdma_allgather::ArchSdmaThreshold kGatherSdmaThresholdByArch[] = {
   {"gfx942", 128u << 20},
+  {"gfx950", 32u << 20},
   {"gfx1250", 512u << 10},
 };
 
