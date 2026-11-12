@@ -4,21 +4,6 @@ Panel Config:
   title: Workgroup Manager (SPI)
   data source:
   - metric_table:
-      id: 601
-      title: SPI Utilization
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        SPI Busy:
-          avg: 100 * SUM(GRBM_SPI_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
-          unit: Percent
-  - metric_table:
       id: 602
       title: Wave Dispatch Statistics
       header:
@@ -43,8 +28,6 @@ Panel Config:
       Measured dispatched wave count, normalized by the chosen unit. Navi48
       wave-count normalization still requires validation; this count need not
       match the application's launch geometry.
-    SPI Busy: >-
-      Percentage of GPU-active cycles with the shader input processor busy.
     Wave Dispatch Rate: >-
       Measured dispatched waves per GPU-active cycle. Navi48 wave-count
       normalization still requires validation; compare like workloads in the

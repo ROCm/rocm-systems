@@ -51,7 +51,7 @@ def test_gfx1201_wmma_counter_collection_hint(navi48_soc):
 @pytest.mark.parametrize(
     "filter_blocks, expected_passes",
     [
-        pytest.param([], (1, 2), id="full-profile"),
+        pytest.param([], (1, 1), id="full-profile"),
         pytest.param(["17.1.0"], (1, 1), id="gpu-busy-only"),
     ],
 )

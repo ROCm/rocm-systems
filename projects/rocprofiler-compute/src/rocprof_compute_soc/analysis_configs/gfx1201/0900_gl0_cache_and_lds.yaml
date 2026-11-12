@@ -4,21 +4,6 @@ Panel Config:
   title: GL0 Cache (TCP Cache)
   data source:
   - metric_table:
-      id: 901
-      title: GL0 Utilization
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        GL0 Busy (TCP):
-          avg: 100 * SUM(TCP_GATE_EN2) / SUM(GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))
-          min: MIN(100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
-          max: MAX(100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
-          unit: Percent
-  - metric_table:
       id: 902
       title: GL0 Request Statistics
       header:
@@ -32,16 +17,6 @@ Panel Config:
           avg: SUM(TCP_REQ_sum) / SUM($denom)
           min: MIN(TCP_REQ_sum / $denom)
           max: MAX(TCP_REQ_sum / $denom)
-          unit: (Count + $normUnit)
-        Read Requests:
-          avg: SUM(TCP_REQ_READ_sum) / SUM($denom)
-          min: MIN(TCP_REQ_READ_sum / $denom)
-          max: MAX(TCP_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
-        Write Requests:
-          avg: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
-          min: MIN(TCP_REQ_WRITE_sum / $denom)
-          max: MAX(TCP_REQ_WRITE_sum / $denom)
           unit: (Count + $normUnit)
         Miss Requests:
           avg: SUM(TCP_REQ_MISS_sum) / SUM($denom)
@@ -64,31 +39,6 @@ Panel Config:
           max: MAX(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
           unit: Percent
   - metric_table:
-      id: 906
-      title: GL0-GL1 Interface
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        GL1 Read Requests:
-          avg: SUM(TCP_GL1_REQ_READ_sum) / SUM($denom)
-          min: MIN(TCP_GL1_REQ_READ_sum / $denom)
-          max: MAX(TCP_GL1_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
-        GL1 Read 128B Requests:
-          avg: SUM(TCP_GL1_REQ_READ_128B_sum) / SUM($denom)
-          min: MIN(TCP_GL1_REQ_READ_128B_sum / $denom)
-          max: MAX(TCP_GL1_REQ_READ_128B_sum / $denom)
-          unit: (Count + $normUnit)
-        GL1 Write Requests:
-          avg: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
-          min: MIN(TCP_GL1_REQ_WRITE_sum / $denom)
-          max: MAX(TCP_GL1_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
-  - metric_table:
       id: 908
       title: GL0 Stalls
       header:
@@ -103,42 +53,14 @@ Panel Config:
           min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
           max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
           unit: (Cycles + $normUnit)
-        GL1 Back Pressure:
-          avg: SUM(TCP_GL1_TCP_BACK_PRESSURE_sum) / SUM($denom)
-          min: MIN(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
-          max: MAX(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
-          unit: (Cycles + $normUnit)
-        Data FIFO Stall:
-          avg: SUM(TCP_DATA_FIFO_STALL_sum) / SUM($denom)
-          min: MIN(TCP_DATA_FIFO_STALL_sum / $denom)
-          max: MAX(TCP_DATA_FIFO_STALL_sum / $denom)
-          unit: (Cycles + $normUnit)
   metrics_description:
-    Data FIFO Stall: >-
-      TCP data-FIFO stall counter, normalized by the chosen unit.
-    GL0 Busy (TCP): >-
-      TCP clock-enabled count relative to GPU-active cycles in this
-      configuration, expressed as a percentage. Counter-instance and WGP
-      normalization on Navi48 still require validation.
-    GL1 Back Pressure: >-
-      TCP back-pressure counter from GL1, normalized by the chosen unit.
-    GL1 Read 128B Requests: >-
-      128-byte read requests TCP sends to GL1, normalized by the chosen unit.
-    GL1 Read Requests: >-
-      Read requests TCP sends to GL1, normalized by the chosen unit.
-    GL1 Write Requests: >-
-      Write requests TCP sends to GL1, normalized by the chosen unit.
     Hit Rate: >-
       Percentage of TCP requests that do not miss in the vector GL0 cache.
     Miss Requests: >-
       Vector GL0 cache requests reported as misses, normalized by the chosen
       unit.
-    Read Requests: >-
-      Vector GL0 cache read requests, normalized by the chosen unit.
     TA Req Stall: >-
       TCP request-stall counter toward the texture addresser, normalized by
       the chosen unit.
     Total Requests: >-
       Total vector GL0 cache requests, normalized by the chosen unit.
-    Write Requests: >-
-      Vector GL0 cache write requests, normalized by the chosen unit.

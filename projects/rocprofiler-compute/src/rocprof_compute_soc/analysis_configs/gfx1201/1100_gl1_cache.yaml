@@ -19,36 +19,6 @@ Panel Config:
           max: None
           unit: Percent
   - metric_table:
-      id: 1102
-      title: GL1 Cache Utilization
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        GL1 Cache Busy:
-          avg: 100 * SUM(GL1C_BUSY) / SUM(GL1C_CYCLE)
-          min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
-          max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
-          unit: Percent
-        GL1 Cache Starve:
-          avg: 100 * SUM(GL1C_STARVE) / SUM(GL1C_CYCLE)
-          min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
-          max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
-          unit: Percent
-        GL2 Request Credit Stall:
-          avg: SUM(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum) / SUM($denom)
-          min: MIN(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
-          max: MAX(GL1C_STALL_GL1_GL2_REQ_CREDITS_sum / $denom)
-          unit: (Cycles + $normUnit)
-        GL2 Data Credit Stall:
-          avg: SUM(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum) / SUM($denom)
-          min: MIN(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
-          max: MAX(GL1C_STALL_GL1_GL2_DATA_CREDITS_sum / $denom)
-          unit: (Cycles + $normUnit)
-  - metric_table:
       id: 1103
       title: GL1 Cache Request Statistics
       header:
@@ -63,103 +33,17 @@ Panel Config:
           min: MIN(GL1C_REQ_sum / $denom)
           max: MAX(GL1C_REQ_sum / $denom)
           unit: (Count + $normUnit)
-        Read Requests:
-          avg: SUM(GL1C_REQ_READ_sum) / SUM($denom)
-          min: MIN(GL1C_REQ_READ_sum / $denom)
-          max: MAX(GL1C_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
-        Write Requests:
-          avg: SUM(GL1C_REQ_WRITE_sum) / SUM($denom)
-          min: MIN(GL1C_REQ_WRITE_sum / $denom)
-          max: MAX(GL1C_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
         Miss Requests:
           avg: None
           min: None
           max: None
           unit: (Count + $normUnit)
-  - metric_table:
-      id: 1104
-      title: GL1 Cache Request Bandwidth
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        Read Bytes:
-          avg: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-            * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM($denom)
-          min: MIN((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-            * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
-          max: MAX((GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum
-            * 128 + GL1C_REQ_READ_256B_sum * 256) / $denom)
-          unit: (Bytes + $normUnit)
-        Write Bytes:
-          avg: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM($denom)
-          min: MIN((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
-          max: MAX((GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum
-            * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
-          unit: (Bytes + $normUnit)
-  - metric_table:
-      id: 1106
-      title: GL1-GL2 Interface
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        GL2 Read Requests:
-          avg: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
-          min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
-          unit: (Count + $normUnit)
-        GL2 Read 128B Requests:
-          avg: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
-          min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
-          unit: (Count + $normUnit)
-        GL2 Write Requests:
-          avg: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
-          min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
-          max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
-          unit: (Count + $normUnit)
   metrics_description:
-    GL1 Cache Busy: >-
-      Percentage of GL1 counted cycles marked busy. GL1 combines writes
-      between WGPs and L2 on Navi48.
-    GL1 Cache Starve: >-
-      GL1 starvation counter as a percentage of GL1 counted cycles.
-    GL2 Data Credit Stall: >-
-      GL1 stalls waiting for L2 data credits, normalized by the chosen unit.
-    GL2 Read 128B Requests: >-
-      128-byte read requests GL1 sends to L2, normalized by the chosen unit.
-    GL2 Read Requests: >-
-      Read requests GL1 sends to L2, normalized by the chosen unit.
-    GL2 Request Credit Stall: >-
-      GL1 stalls waiting for L2 request credits, normalized by the chosen unit.
-    GL2 Write Requests: >-
-      Write requests GL1 sends to L2, normalized by the chosen unit.
     Hit Rate: >-
       Not available on gfx1201. The write-combining GL1 stage has no hit-rate
       measurement in this configuration.
     Miss Requests: >-
       Not available on gfx1201. This configuration does not collect GL1
       miss-request counters.
-    Read Bytes: >-
-      Read bytes requested from GL1, derived from the 32, 64, 128, and
-      256-byte request counts and normalized by the chosen unit.
-    Read Requests: >-
-      GL1 read requests, normalized by the chosen unit.
     Total Requests: >-
       Total GL1 requests, normalized by the chosen unit.
-    Write Bytes: >-
-      Write bytes requested from GL1, derived from the 32, 64, 128, and
-      256-byte request counts and normalized by the chosen unit.
-    Write Requests: >-
-      GL1 write requests, normalized by the chosen unit.

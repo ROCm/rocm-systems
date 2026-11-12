@@ -7,7 +7,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201), including Radeon RX 9070. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical GDDR6 bandwidth are unavailable. `Wave Dependency Wait` is the percentage of wave cycles spent waiting for anything, such as pending memory operations or prior instruction results. `Wave Issue Wait` is the percentage of wave cycles spent waiting for any instruction to issue.
+* Added Linux GPU metrics and Memory Chart support for Navi48 (gfx1201), including Radeon RX 9070. Profiling requires the `STABLE_STD` performance level. Infinity Cache hit rate and physical GDDR6 bandwidth are unavailable.
 
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 

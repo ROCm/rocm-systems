@@ -56,8 +56,6 @@ UNPORTED_COUNTERS = [
 
 # (counter, SDK block, event) retained or remapped for the Navi48 port.
 EVENT_MAPPINGS = [
-    ("SQ_WAIT_INST_ANY", "SQ", 26),
-    ("SQ_WAIT_ANY", "SQ", 27),
     ("SQ_INST_CYCLES_VALU", "SQ", 99),
     ("SQ_WMMA_VALU_INSTS", "SQ", 233),
     ("SQ_INST_CYCLES_VALU_WMMA", "SQ", 256),
@@ -65,17 +63,12 @@ EVENT_MAPPINGS = [
     ("SQ_LDS_IDX_ACTIVE", "SQ", 293),
     ("SQC_SMEM_LOAD_DWORDS", "SQ", 370),
     ("SQG_WAVE_CYCLES", "SQG", 16),
-    ("GL1C_GL2_RET_32B", "GL1C", 67),
-    ("GL1C_GL1_RET_32B", "GL1C", 69),
-    ("GL1C_STALL_BUFFER_FULL", "GL1C", 72),
     ("GL2C_WRITE", "GL2C", 6),
     ("GL2C_WRITE_SECTORS", "GL2C", 101),
-    ("GL2C_EA_RDREQ_256B", "GL2C", 149),
     ("GL2C_EA_RDREQ_DRAM", "GL2C", 165),
     ("GL2C_EA_WRREQ_DRAM", "GL2C", 166),
     ("GL2C_EA_RDREQ_DRAM_32B", "GL2C", 167),
     ("GL2C_EA_WRREQ_DRAM_32B", "GL2C", 168),
-    ("GC_EA_SE_DRAM_RD_CMD_POP", "GCEA_SE", 11),
 ]
 
 
@@ -86,22 +79,6 @@ def dispatch_rate_evaluator():
         pd.DataFrame({
             "Start_Timestamp": [100000, 200000, 300000],
             "End_Timestamp": [101000, 202000, 304000],
-            "GL2C_READ_32_REQ_sum": [1, 0, 2],
-            "GL2C_READ_64_REQ_sum": [2, 1, 0],
-            "GL2C_READ_128_REQ_sum": [0, 2, 1],
-            "GL2C_READ_256_REQ_sum": [1, 3, 4],
-            "GL2C_WRITE_32_REQ_sum": [0, 2, 1],
-            "GL2C_WRITE_64_REQ_sum": [1, 0, 2],
-            "GL2C_WRITE_128_REQ_sum": [2, 1, 0],
-            "GL2C_WRITE_256_REQ_sum": [1, 0, 3],
-            "GL2C_EA_RDREQ_32B_sum": [10, 0, 0],
-            "GL2C_EA_RDREQ_64B_sum": [0, 10, 0],
-            "GL2C_EA_RDREQ_128B_sum": [0, 0, 10],
-            "GL2C_EA_RDREQ_256B_sum": [0, 0, 20],
-            "GL2C_EA_WRREQ_32B_sum": [0, 5, 0],
-            "GL2C_EA_WRREQ_64B_sum": [0, 0, 10],
-            "GL2C_EA_WRREQ_128B_sum": [5, 0, 0],
-            "GL2C_EA_WRREQ_256B_sum": [10, 20, 30],
             "SQC_LDS_LOAD_DWORDS_sum": [20, 30, 40],
             "SQC_LDS_STORE_DWORDS_sum": [7, 11, 13],
             "SQC_LDS_ATOMIC_DWORDS_sum": [2, 3, 5],
@@ -118,8 +95,6 @@ def wait_domain_evaluator():
     """Same-dispatch counters that expose the unvalidated SQ/SQG ratio."""
     return MetricEvaluator(
         pd.DataFrame({
-            "SQ_WAIT_ANY_sum": [1711739396, 1696050988, 1764241951],
-            "SQ_WAIT_INST_ANY_sum": [1711739396, 1696050988, 1764241951],
             "SQG_WAVE_CYCLES_sum": [1123998562, 1158838422, 1056240211],
             "SQ_WAVES_sum": [543208, 543160, 543144],
         }),
@@ -273,17 +248,6 @@ def test_gfx1201_valu_cycles_reports_raw_total_without_peak(
     )
 
 
-@pytest.mark.parametrize("metric", ["Wave Dependency Wait", "Wave Issue Wait"])
-def test_gfx1201_sol_wait_percentages_use_wave_cycles(wait_domain_evaluator, metric):
-    expression = panel_metric("0200_system_speed_of_light.yaml", 201, metric)["value"]
-    waits = 1711739396 + 1696050988 + 1764241951
-    cycles = 1123998562 + 1158838422 + 1056240211
-
-    assert wait_domain_evaluator.eval_expression(build_eval_string(expression)) == (
-        pytest.approx(100 * waits / cycles)
-    )
-
-
 @pytest.mark.parametrize(
     "filename, table_id, metric, statistic",
     [
@@ -308,48 +272,6 @@ def test_gfx1201_wait_mitigation_preserves_wave_life(wait_domain_evaluator):
     ) == pytest.approx(3339077195 / 1629512)
 
 
-@pytest.mark.parametrize(
-    ("request_metric", "fabric_metric", "request_rates", "fabric_rate"),
-    [
-        pytest.param(
-            "GL2 Cache Read BW",
-            "GL2-Fabric Read BW",
-            {"avg": 2720 / 7e-6, "min": 304e6, "max": 544e6},
-            7360 / 7e-6,
-            id="read",
-        ),
-        pytest.param(
-            "GL2 Cache Write BW",
-            "GL2-Fabric Write BW",
-            {"avg": 1696 / 7e-6, "min": 96e6, "max": 576e6},
-            16800 / 7e-6,
-            id="write",
-        ),
-    ],
-)
-def test_gfx1201_gl2_request_bandwidth_uses_size_weighted_output_fifo_counters(
-    dispatch_rate_evaluator, request_metric, fabric_metric, request_rates, fabric_rate
-):
-    # Requests carry 416/1088/1216 read bytes or 576/192/928 write bytes.
-    # Avg divides total bytes by total duration; min/max use each dispatch's rate.
-    request_definition = panel_metric("1300_gl2_cache.yaml", 1304, request_metric)
-    actual_rates = {
-        statistic: dispatch_rate_evaluator.eval_expression(
-            build_eval_string(request_definition[statistic])
-        )
-        for statistic in request_rates
-    }
-    assert request_definition["unit"] == "Bytes/s"
-    assert actual_rates == pytest.approx(request_rates)
-
-    fabric_definition = panel_metric(
-        "0200_system_speed_of_light.yaml", 201, fabric_metric
-    )
-    assert dispatch_rate_evaluator.eval_expression(
-        build_eval_string(fabric_definition["value"])
-    ) == pytest.approx(fabric_rate)
-
-
 def test_gfx1201_lds_bandwidth_counts_four_bytes_per_load_store_and_atomic_dword(
     dispatch_rate_evaluator,
 ):
@@ -360,19 +282,6 @@ def test_gfx1201_lds_bandwidth_counts_four_bytes_per_load_store_and_atomic_dword
     assert dispatch_rate_evaluator.eval_expression(
         build_eval_string(definition["value"])
     ) == pytest.approx(524 / 7e-6)
-
-
-def test_gfx1201_sol_gl2_bandwidth_reports_fifo_rate_against_l2_interface_peak(
-    dispatch_rate_evaluator,
-):
-    definition = panel_metric("0200_system_speed_of_light.yaml", 201, "GL2 Cache BW")
-
-    assert definition["unit"] == "Bytes/s"
-    assert definition["peak"] == "$total_l2_chan * 128 * $max_sclk * 1e6"
-    assert definition["pct_of_peak"] is True
-    assert dispatch_rate_evaluator.eval_expression(
-        build_eval_string(definition["value"])
-    ) == pytest.approx(2720 / 7e-6)
 
 
 @pytest.mark.parametrize(

@@ -136,7 +136,6 @@ def test_gfx1201_memory_demand_belongs_to_l2():
         "Infinity Cache Hit Rate",
         "GDDR6 Read Bandwidth",
         "GDDR6 Write Bandwidth",
-        "GL0-GL1 Write Bandwidth",
         "ICache-GL1 Read Bandwidth",
         "DCache-GL1 Read Bandwidth",
     ],

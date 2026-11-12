@@ -18,7 +18,7 @@
       {"metric_id": "3.4.2", "title": "Bank Conflict", "category": "stall", "bar": true}
     ]},
     {"id": "l0", "title": "GL0", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
-      {"metric_id": "3.3.2", "title": "Hit Rate", "category": "hit", "bar": true}
+      {"metric_id": "3.3.0", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
     {"id": "l1", "title": "SQC", "column": 1, "row": 0, "order": 2, "style": "panel"},
     {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "style": "panel", "parent": "l1", "content": [
@@ -29,16 +29,10 @@
       {"metric_id": "3.2.2", "title": "Load BW", "category": "read", "bar": false}
     ]},
 
-    {"id": "gl1", "title": "GL1", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.6.0", "title": "Util", "category": "util", "bar": true},
-      {"metric_id": "3.6.1", "title": "Req Credit Stall", "category": "stall", "bar": true},
-      {"metric_id": "3.6.2", "title": "Data Credit Stall", "category": "stall", "bar": true},
-      {"metric_id": "3.6.3", "title": "Buffer Full", "category": "stall", "bar": true}
-    ]},
+    {"id": "gl1", "title": "GL1", "column": 2, "row": 0, "order": 0, "style": "panel"},
 
     {"id": "l2", "title": "GL2", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.8.0", "title": "Util", "category": "util", "bar": true},
-      {"metric_id": "3.8.1", "title": "Hit Rate", "category": "hit", "bar": true},
+      {"metric_id": "3.8.0", "title": "Hit Rate", "category": "hit", "bar": true},
       {"metric_id": "3.9.0", "title": "Memory Read Req", "category": "read", "bar": false},
       {"metric_id": "3.9.1", "title": "Memory Write Req", "category": "write", "bar": false},
       {"metric_id": "3.9.2", "title": "Memory Read BW", "category": "read", "bar": false},
@@ -57,24 +51,12 @@
   "arrows": [
     {"from": "cu", "to": "lds", "direction": "both", "metric_id": "3.4.0", "title": "LDS", "category": "neutral", "style": "inline", "group": "Request"},
 
-    {"from": "cu", "to": "l0", "direction": "backward", "metric_id": "3.3.0", "title": "Read", "category": "read", "style": "inline"},
-    {"from": "cu", "to": "l0", "direction": "forward", "metric_id": "3.3.1", "title": "Write", "category": "write", "style": "inline"},
-
     {"from": "cu", "to": "icache", "direction": "backward", "metric_id": "3.1.0", "title": "ICACHE", "category": "read", "style": "inline"},
 
     {"from": "cu", "to": "dcache", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"},
 
-    {"from": "l0", "to": "gl1", "direction": "backward", "metric_id": "3.5.0", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "l0", "to": "gl1", "direction": "forward", "metric_id": "3.5.1", "title": "Write BW", "category": "write", "style": "stacked"},
-
     {"from": "icache", "to": "gl1", "direction": "backward", "metric_id": "3.1.2", "title": "ICache Read BW", "category": "read", "style": "stacked"},
 
-    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "DCache Read BW", "category": "read", "style": "stacked"},
-
-    {"from": "gl1", "to": "l2", "direction": "backward", "metric_id": "3.7.0", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "gl1", "to": "l2", "direction": "forward", "metric_id": "3.7.1", "title": "Write BW", "category": "write", "style": "stacked"},
-
-    {"from": "l2", "to": "infinity_cache", "direction": "backward", "metric_id": "3.8.2", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "l2", "to": "infinity_cache", "direction": "forward", "metric_id": "3.8.3", "title": "Write BW", "category": "write", "style": "stacked"}
+    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "DCache Read BW", "category": "read", "style": "stacked"}
   ]
 }

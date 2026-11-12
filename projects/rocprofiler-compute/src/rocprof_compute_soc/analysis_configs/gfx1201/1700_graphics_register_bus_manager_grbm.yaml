@@ -18,27 +18,6 @@ Panel Config:
           min: MIN(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
           max: MAX(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
           unit: Percent
-        CP Busy:
-          avg: 100 * SUM(GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_CP_BUSY / GRBM_GUI_ACTIVE)
-          unit: Percent
-        GL2C Busy:
-          avg: 100 * SUM(GRBM_GL2C_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_GL2C_BUSY / GRBM_GUI_ACTIVE)
-          unit: Percent
-        TA Busy:
-          avg: 100 * SUM(GRBM_TA_BUSY) / SUM(GRBM_GUI_ACTIVE)
-          min: MIN(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
-          max: MAX(100 * GRBM_TA_BUSY / GRBM_GUI_ACTIVE)
-          unit: Percent
   metrics_description:
-    CP Busy: >-
-      Percentage of GPU-active cycles with the command processor busy.
-    GL2C Busy: >-
-      Percentage of GPU-active cycles with GL2 cache busy.
     GPU Busy: >-
       Percentage of GRBM counted cycles with the GPU active.
-    TA Busy: >-
-      Percentage of GPU-active cycles with the texture addresser busy.
