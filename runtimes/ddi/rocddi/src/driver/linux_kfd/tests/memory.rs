@@ -603,7 +603,12 @@ fn ais_uses_the_mapped_vram_handle_and_preserves_native_failure() {
     let failure = allocation
         .ais_transfer(4, 256, 512, 16384, uapi::AIS_WRITE)
         .unwrap_err();
-    assert_eq!(failure.native_error_code(), Some(errno::EIO));
+    assert_eq!(
+        failure
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
     allocation.free().unwrap();
     drop(allocation);
     fixture.exhausted();
@@ -2602,7 +2607,11 @@ fn terminal_hardware_loss_survives_a_second_event_poll_error() {
     };
     assert!(exception.memory_lost);
     assert_eq!(
-        subscription.poll().unwrap_err().native_error_code(),
+        subscription
+            .poll()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
         Some(errno::EIO)
     );
     fixture.memory_wait_errno.store(0, Ordering::Release);
@@ -2632,7 +2641,12 @@ fn failed_memory_event_creation_reclaims_every_returned_event_id() {
         }),
     ));
     let error = LossEvent::create(kfd).err().unwrap();
-    assert_eq!(error.native_error_code(), Some(errno::EIO));
+    assert_eq!(
+        error
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
     assert_eq!(*destroyed.lock().unwrap(), [20, 19]);
 }
 
@@ -2865,7 +2879,11 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         lost: AtomicBool::new(false),
     }));
     assert_eq!(
-        bindings.shutdown().unwrap_err().native_error_code(),
+        bindings
+            .shutdown()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
         Some(errno::EIO)
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());
