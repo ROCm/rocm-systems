@@ -20,18 +20,8 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// Events are allocated with monotonically increasing IDs. Callers access
 /// event data through typed accessors indexed by EventId. The registry
-/// periodically trims a prefix of dead events to bound memory growth.
-///
-/// An event is trimmable when it can never be accessed again:
-///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
-///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
-///     events that touch no LDS bytes, such as a tensor transfer that moves no
-///     data. These have left the per-wave queue and were never
-///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
-///     so they don't need to wait for s_barrier.
-///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
-///     retired, because retireEvent must still remove them from
-///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
+/// periodically trims a prefix of RETIRED events. Callers must drop references
+/// from wave queues and LDS conflict lists before the next event allocation.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -88,7 +78,7 @@ public:
     entries_[index(id)].status = EventStatus::WAVE_COMPLETE;
   }
 
-  /// Transition → RETIRED (s_barrier flushed this event).
+  /// End the event's lifetime once neither counter progress nor peers need it.
   void markRetired(EventId id) { entries_[index(id)].status = EventStatus::RETIRED; }
 
   // -- Typed accessors (all inline) --
@@ -147,7 +137,6 @@ public:
   }
   MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
-  bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   const InstructionSnapshot &instruction(EventId id) const {
     return entries_[index(id)].instruction;
   }
@@ -176,16 +165,10 @@ public:
 private:
   int index(EventId id) const { return id.value - base_offset_; }
 
-  static bool isEntryTrimmable(const EventInfo &e) {
-    if (e.status == EventStatus::RETIRED)
-      return true;
-    return e.status == EventStatus::WAVE_COMPLETE && e.ldsIntervals.empty();
-  }
-
   void tryTrimEvents() {
     int trimCount = 0;
     int size = static_cast<int>(entries_.size());
-    while (trimCount < size && isEntryTrimmable(entries_[trimCount]))
+    while (trimCount < size && entries_[trimCount].status == EventStatus::RETIRED)
       trimCount++;
 
     if (trimCount < size / 2)

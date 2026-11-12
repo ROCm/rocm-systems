@@ -2633,10 +2633,7 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       race.applyWaitCounter(global_counter, 0);
       EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
       race.applyWaitCounter(WaitCounterType::DSCNT, 0);
-      // A single-wave workgroup retires a completed event with LDS bytes at once;
-      // one without LDS bytes stays wave-complete until the registry trims it.
-      EXPECT_EQ(events.status(event),
-                test.has_lds ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
+      EXPECT_EQ(events.status(event), EventStatus::RETIRED);
     }
   }
 }
@@ -2684,7 +2681,7 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
 
   auto *state = static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
   const auto &registry = state->race_state->getDetector()->events();
-  EXPECT_EQ(registry.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(registry.status(EventId{0}), EventStatus::RETIRED);
   EXPECT_EQ(registry.status(EventId{1}), EventStatus::ACTIVE);
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
@@ -2749,12 +2746,8 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
   execute_wait(*f.plugin_group_, *wf, 0xbfc80101u); // s_wait_loadcnt_dscnt 0x101.
 
   // Both ordered counter domains prove the oldest mixed-order event complete.
-  EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(events.status(EventId{0}), EventStatus::RETIRED);
   EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
-  auto *state = static_cast<RaceWavefrontState *>(wf->plugin_state(plugin_ptr->slot_index()));
-  const auto &registry = state->race_state->getDetector()->events();
-  EXPECT_EQ(registry.status(EventId{0}), EventStatus::WAVE_COMPLETE);
-  EXPECT_EQ(registry.status(EventId{1}), EventStatus::ACTIVE);
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
@@ -2836,7 +2829,7 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
     EXPECT_FALSE(events.hasPendingWaitCounter(event, first));
     EXPECT_TRUE(events.hasPendingWaitCounter(event, second));
     apply_wait(second);
-    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(events.status(event), EventStatus::RETIRED);
   };
 
   verify_wait_order(/*storecnt_first=*/true);
@@ -3411,7 +3404,7 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   ASSERT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
   const auto event = state->race_state->getWaveMemoryEvents().front();
   execute_wait(*f.plugin_group_, *producer, legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
-  EXPECT_FALSE(state->race_state->getDetector()->events().isTrimmable(event));
+  EXPECT_EQ(state->race_state->getDetector()->events().status(event), EventStatus::WAVE_COMPLETE);
   const std::array<uint32_t, 1> nop_words{S_NOP};
   auto nop = decoder->decode_window(nop_words);
   ASSERT_TRUE(nop.succeeded());
@@ -3433,7 +3426,7 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
                             "       ... 0 instructions not recorded ...\n"),
             std::string::npos);
   state->race_state->flushBarrierPendingEvents();
-  EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
+  EXPECT_EQ(state->race_state->getDetector()->events().status(event), EventStatus::RETIRED);
 }
 
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {

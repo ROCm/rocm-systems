@@ -176,18 +176,12 @@ void WaveRaceState::satisfyOldestCounterObligations(int count, amdgpu::WaitCount
       satisfied += detector->events().pendingCounterIncrement(eventId, waitCounter);
       eventComplete = detector->satisfyEventWaitCounter(eventId, waitCounter);
       if (eventComplete) {
-        detector->markEventWaveComplete(eventId);
-        // Trimmable WAVE_COMPLETE events may be removed from the registry
-        // immediately. Only keep non-trimmable events for later barrier retire;
-        // otherwise a later barrier could try to retire stale EventIds. A
-        // completed LDS event is kept only so that other waves can still race
-        // with it, so a single-wave workgroup retires it now.
-        if (!detector->events().isTrimmable(eventId)) {
-          if (detector->hasSingleWave())
-            detector->retireEvent(eventId);
-          else
-            barrierPendingEvents.push_back(eventId);
-        }
+        // Only completed LDS bytes can still conflict with another wave.
+        if (!detector->hasSingleWave() && !detector->events().ldsIntervals(eventId).empty()) {
+          detector->markEventWaveComplete(eventId);
+          barrierPendingEvents.push_back(eventId);
+        } else
+          detector->retireEvent(eventId);
       }
     }
     if (!eventComplete)

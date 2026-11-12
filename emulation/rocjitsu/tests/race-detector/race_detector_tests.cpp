@@ -120,10 +120,7 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndOnlyLdsIntervals) {
     }
     wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 1);
     wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 1);
-    // A single-wave workgroup retires a completed event with LDS bytes at once;
-    // one without LDS bytes stays wave-complete until the registry trims it.
-    EXPECT_EQ(events.status(EventId{0}),
-              lds_mask != 0 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(events.status(EventId{0}), EventStatus::RETIRED);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
     wave.applyWaitCounter(amdgpu::WaitCounterType::LOADCNT, 0);
     wave.applyWaitCounter(amdgpu::WaitCounterType::DSCNT, 0);
@@ -842,7 +839,7 @@ TEST(RaceDetector, TensorDma_WaitedTransferWithRangesWaitsForABarrier) {
   RaceTestBuilder b(/*numWaves=*/2);
   b.tensorStoreFromLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
-  EXPECT_FALSE(b.events().isTrimmable(EventId{0}));
+  EXPECT_EQ(b.events().status(EventId{0}), EventStatus::WAVE_COMPLETE);
   b.barrier();
   EXPECT_EQ(b.events().status(EventId{0}), EventStatus::RETIRED);
 }
@@ -1155,7 +1152,7 @@ TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
   // barrier. Later loads alone could not show that, since they are newer.
   const EventId empty{0};
   ASSERT_EQ(b.events().totalAllocated(), 1);
-  EXPECT_TRUE(b.events().isTrimmable(empty));
+  EXPECT_EQ(b.events().status(empty), EventStatus::RETIRED);
   b.barrier();
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.tensorLoadToLds(/*wave=*/0, {{.address = 64, .bytes = 16}});
@@ -1469,7 +1466,7 @@ TEST(RaceDetector, CounterOnlyIssueDoesNotOverRetireYoungerLdsEffect) {
   b.counterIssue(0, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
   b.globalToLds(0, {0}, 4, 1);
   b.waitcnt(0, 1);
-  EXPECT_EQ(b.events().status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(b.events().status(EventId{0}), EventStatus::RETIRED);
   b.checkLdsRead(0, 0, 0, 4);
   EXPECT_TRUE(b.hasLdsRace(0));
 }
@@ -1539,12 +1536,11 @@ TEST(RaceDetector, MixedCountersRetireIndependently) {
       b.ldsRead(0, 0, 0, 4);
       b.counterIssue(0, amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::UNORDERED);
       b.waitcnt(0, vmWait ? 0 : -1, lgkmWait ? 0 : -1);
-      EXPECT_EQ(b.events().status(EventId{0}),
-                vmWait ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE);
+      EXPECT_EQ(b.events().status(EventId{0}), vmWait ? EventStatus::RETIRED : EventStatus::ACTIVE);
       EXPECT_EQ(b.events().status(EventId{1}),
                 lgkmWait ? EventStatus::RETIRED : EventStatus::ACTIVE);
       EXPECT_EQ(b.events().status(EventId{2}),
-                lgkmWait ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE);
+                lgkmWait ? EventStatus::RETIRED : EventStatus::ACTIVE);
       b.checkLdsWrite(0, 0, 0, 4, MemoryOrderClass::UNORDERED);
       EXPECT_EQ(b.hasLdsRace(0), !lgkmWait);
     }
@@ -1559,7 +1555,7 @@ TEST(RaceDetector, EventRegistry_NarrowWindow) {
   for (int i = 0; i < 1000; ++i) {
     SCOPED_TRACE(i);
     b.waitcnt(0, window - 1);
-    EXPECT_EQ(b.events().status(EventId{i}), EventStatus::WAVE_COMPLETE);
+    EXPECT_EQ(b.events().status(EventId{i}), EventStatus::RETIRED);
     EXPECT_EQ(b.events().status(EventId{i + 1}), EventStatus::ACTIVE);
     EXPECT_EQ(b.events().status(EventId{i + window - 1}), EventStatus::ACTIVE);
     b.counterIssue(0, amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);

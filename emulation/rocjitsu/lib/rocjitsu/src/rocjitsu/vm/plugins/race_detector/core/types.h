@@ -55,9 +55,9 @@ inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId)
 
 /// Status of a memory event in the race detection lifecycle.
 enum class EventStatus {
-  ACTIVE,        // Pending; in flight.
-  WAVE_COMPLETE, // Owning-wave wait passed; retained until retirement if needed.
-  RETIRED        // Fully retired; no longer referenced.
+  ACTIVE,        // At least one counter obligation remains unsatisfied.
+  WAVE_COMPLETE, // All obligations satisfied; retained LDS evidence for peers.
+  RETIRED        // No counter or peer evidence remains necessary.
 };
 
 /// An LDS conflict reported without depending on the plugin's output format.

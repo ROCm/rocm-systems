@@ -356,7 +356,7 @@ wait can complete a prefix. That does not prove that an overlapping tensor load
 and store access LDS in order before the wait. Their LDS accesses are therefore
 checked as unordered.
 
-LDS events have three states:
+Race-analysis events have three states:
 
 1. **ACTIVE** — not every counter obligation has been satisfied. A conflicting
    peer access is checked regardless of whether execution already wrote the
@@ -367,15 +367,15 @@ LDS events have three states:
    wave can reuse the bytes, but completed LDS evidence remains available for
    checks by unsynchronized peers. This is not a claim that execution is still
    physically in flight.
-1. **RETIRED** — a resolved workgroup barrier orders the completed access with
-   peer waves, so the event leaves the LDS read/write lists. A single-wave
-   workgroup retires completed LDS events immediately. Events without LDS bytes
-   also need no barrier once complete.
+1. **RETIRED** — neither counter progress nor peer checks need the event. A
+   resolved workgroup barrier retires completed LDS evidence. Events without
+   LDS bytes or peer waves go directly from **ACTIVE** to **RETIRED** when all
+   counter obligations are satisfied; they need no barrier.
 
-The event registry trims only a completed or retired prefix. One older pending
-event can therefore retain many later completed records even after those records
-have left the LDS conflict lists. Logical completion and reclaiming registry
-storage are separate.
+The event registry trims only a retired prefix. One older pending event can
+therefore retain many later retired records even after those records have left
+the LDS conflict lists. Logical retirement and reclaiming registry storage are
+separate.
 
 The adapter and memory pipeline read the same `MemoryIssueInfo` selected by
 routing; the plugin does not infer FLAT's counter domains from addresses again.

@@ -117,7 +117,7 @@ public:
   void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
                             uint32_t lane);
 
-  /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
+  /// Retire completed LDS evidence ordered with peer waves by a workgroup barrier.
   void flushBarrierPendingEvents();
 
   const std::vector<EventId> &getWaveMemoryEvents() const { return waveMemoryEvents; }
