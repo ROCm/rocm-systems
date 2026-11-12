@@ -545,6 +545,21 @@ TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_OneRoceHca_AddsOnePhysicalAndO
   EXPECT_EQ(g_ibCastReportMatchingSchemeCalls, 1);
 }
 
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_RequestedCap_OverridesThePortLimit) {
+  params_.Set("RCCL_IB_MAX_MSG_SIZE", 4 * 1024 * 1024);
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 1024 * 1024;
+  ASSERT_EQ(Init(), ncclSuccess);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 4u * 1024u * 1024u);
+}
+
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_UnsetMaxMsgSize_UsesTheSmallerPort) {
+  World().AddHca("ionic_0").ports[0].max_msg_sz = 4u * 1024u * 1024u;
+  World().AddHca("ionic_1").ports[0].max_msg_sz = 2u * 1024u * 1024u;
+  ASSERT_EQ(Init(), ncclSuccess);
+  ASSERT_EQ(IbCastNDevs, 2);
+  EXPECT_EQ(IbCastMaxPostSendBytes, 2u * 1024u * 1024u);
+}
+
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_SecondCall_OnlyTakesAReference) {
   World().AddHca("ionic_0");
   ASSERT_EQ(Init(), ncclSuccess);
