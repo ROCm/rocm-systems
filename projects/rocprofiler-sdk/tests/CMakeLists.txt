@@ -125,9 +125,6 @@ add_subdirectory(rocattach)
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
 
-# late-start tracing validation tests
-add_subdirectory(late-start-tracing)
-
 # multiple anytime tool configuration validation tests
 add_subdirectory(multi-tool-test)
 

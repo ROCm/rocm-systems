@@ -23,9 +23,10 @@
 #
 # Anytime tool configuration integration tests
 #
-# Each subdirectory is a self-contained execute + validate test pair that exercises
-# registering a rocprofiler-sdk tool at a controlled point during a running process via
-# rocprofiler_force_configure (the "anytime" initialization path).
+# Each subdirectory is a self-contained test for registering a rocprofiler-sdk tool at a
+# controlled point during a running process, rather than before it starts. Most do it
+# through rocprofiler_force_configure (the "anytime" initialization path); the rest cover
+# a tool which never makes that call and has to be discovered by rocprofiler-sdk instead.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -54,3 +55,10 @@ add_subdirectory(early-hiprccl-late-hiprcclmemcpy)
 # is unavailable.
 add_subdirectory(early-hip-late-rocdecode)
 add_subdirectory(early-hip-late-rocjpeg)
+
+# Tracing started after the runtimes registered their API tables.
+add_subdirectory(late-start-tracing)
+
+# A tool which never calls rocprofiler_force_configure and is registered only because
+# rocprofiler-sdk looks for clients again after it was loaded.
+add_subdirectory(late-client-discovery)
