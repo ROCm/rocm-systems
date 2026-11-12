@@ -28,7 +28,8 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
     std::vector<std::string>{}.swap(store.cats);
     std::vector<std::string>{}.swap(store.names);
 
-    auto node = std::make_shared<reader_types::node_info_t>();
+    auto node      = std::make_shared<reader_types::node_info_t>();
+    node->hostname = store.host_name;
     catalog.nodes.push_back(node);
     catalog.nodes_by_id.emplace(node->node_id, node);
 

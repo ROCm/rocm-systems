@@ -449,6 +449,10 @@ public:
         {
             m_dev_name = s;
         }
+        else if(m_depth == 1 && m_k1 == "host_name")
+        {
+            m_t.host_name = s;
+        }
         return true;
     }
 

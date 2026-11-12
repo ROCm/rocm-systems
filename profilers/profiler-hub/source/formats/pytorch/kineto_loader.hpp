@@ -82,6 +82,7 @@ struct loaded_trace_t
     std::map<std::int64_t, std::string>
         device_json;  // each deviceProperties entry as text
     std::map<std::int64_t, std::string> lane_names;
+    std::string                         host_name;
     bool                                gzip{};
     load_diag_t                         diag{};
 };
