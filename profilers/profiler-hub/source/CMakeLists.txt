@@ -93,8 +93,12 @@ if(PROFILER_HUB_ENABLE_PYTORCH_KINETO)
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_format.hpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_loader.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_probe.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/kineto_probe.hpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_catalog.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_catalog.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_source.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_source.hpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_store.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/pytorch/pytorch_store.hpp
     )

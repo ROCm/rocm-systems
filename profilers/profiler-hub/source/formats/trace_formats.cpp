@@ -6,6 +6,10 @@
 #include "common/debug.hpp"
 #include "formats/rocpd/rocpd_probe.hpp"
 #include "formats/rocpd/rocpd_source.hpp"
+#if PROFILER_HUB_ENABLE_PYTORCH_KINETO
+#    include "formats/pytorch/kineto_probe.hpp"
+#    include "formats/pytorch/pytorch_source.hpp"
+#endif
 #if PROFILER_HUB_ENABLE_ROCPD_V2
 #include "formats/rocpd_v2/rocpd_v2_reader.hpp"
 #endif
@@ -45,6 +49,20 @@ open_rocpd_source(const source_request_t& request)
 {
     return std::make_unique<rocpd_source>(request);
 }
+
+#if PROFILER_HUB_ENABLE_PYTORCH_KINETO
+bool
+pytorch_supports(version_t /*version*/)
+{
+    return true;
+}
+
+std::unique_ptr<format_source>
+open_pytorch_source(const source_request_t& request)
+{
+    return std::make_unique<pytorch::pytorch_source>(request);
+}
+#endif
 
 std::unique_ptr<reader_t::impl>
 make_rocpd_reader(version_t                                version,
@@ -113,7 +131,19 @@ format_entries()
                                              open_rocpd_source,
                                              make_rocpd_reader,
                                              make_rocpd_trim,
-                                             trim_rocpd } };
+                                             trim_rocpd },
+#if PROFILER_HUB_ENABLE_PYTORCH_KINETO
+                                           { "pytorch",
+                                             trace_schema_t::pytorch_kineto,
+                                             pytorch_supports,
+                                             pytorch::kineto_prefix_matches,
+                                             pytorch::probe_kineto,
+                                             open_pytorch_source,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr }
+#endif
+    };
     return entries;
 }
 
@@ -160,7 +190,7 @@ make_reader_impl(const trace_format_t&                    format,
                  std::shared_ptr<reader_catalog_t>        catalog)
 {
     const format_entry_t* entry = find_format(format.schema, format.version);
-    if(entry == nullptr)
+    if(entry == nullptr || entry->make_reader == nullptr)
     {
         throw std::invalid_argument{ "no reader for trace schema version " +
                                      std::to_string(format.version.major) };
@@ -172,7 +202,7 @@ std::unique_ptr<trim_schema_t>
 make_trim_schema(reader_types::trace_schema_t schema, version_t version)
 {
     const format_entry_t* entry = find_format(schema, version);
-    if(entry == nullptr) return nullptr;
+    if(entry == nullptr || entry->make_trim == nullptr) return nullptr;
     return entry->make_trim(version);
 }
 

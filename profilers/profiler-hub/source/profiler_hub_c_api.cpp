@@ -64,10 +64,17 @@ void
 copy_probe_result(const profiler_hub::reader_types::file_probe_result_t& result,
                   ph_file_probe_t*                                       probe)
 {
-    probe->trace_schema =
-        result.trace_schema == profiler_hub::reader_types::trace_schema_t::rocpd
-            ? PH_TRACE_SCHEMA_ROCPD
-            : PH_TRACE_SCHEMA_UNKNOWN;
+    probe->trace_schema = PH_TRACE_SCHEMA_UNKNOWN;
+    switch(result.trace_schema)
+    {
+        case profiler_hub::reader_types::trace_schema_t::rocpd:
+            probe->trace_schema = PH_TRACE_SCHEMA_ROCPD;
+            break;
+        case profiler_hub::reader_types::trace_schema_t::pytorch_kineto:
+            probe->trace_schema = PH_TRACE_SCHEMA_PYTORCH_KINETO;
+            break;
+        case profiler_hub::reader_types::trace_schema_t::unknown: break;
+    }
     probe->schema_version = { result.schema_version.major,
                               result.schema_version.minor,
                               result.schema_version.patch };
@@ -968,8 +975,13 @@ ph_event_query_read(ph_event_query_t  query,
                 return PH_RESULT_CANCELLED;
             }
             const profiler_hub::sql_cancel_scope cancel{ future };
+            bool                                 declined = false;
             *count = query->ctx->read_table_events(
-                query->query, event_type, after_id, last_id, rows, capacity);
+                query->query, event_type, after_id, last_id, rows, capacity, declined);
+            if(declined)
+            {
+                return PH_RESULT_UNSUPPORTED_FILE;
+            }
             if(future != nullptr && future->stop_token().stop_requested())
             {
                 return PH_RESULT_CANCELLED;
@@ -1002,12 +1014,18 @@ ph_event_query_id_span(ph_event_query_t query,
             return PH_RESULT_CANCELLED;
         }
         const profiler_hub::sql_cancel_scope cancel{ future };
-        uint64_t first = 0;
-        uint64_t last  = 0;
-        if(query->ctx->table_event_id_span(query->query, event_type, first, last))
+        uint64_t                             first    = 0;
+        uint64_t                             last     = 0;
+        bool                                 declined = false;
+        if(query->ctx->table_event_id_span(
+               query->query, event_type, first, last, declined))
         {
             *first_id = first;
             *last_id  = last;
+        }
+        if(declined)
+        {
+            return PH_RESULT_UNSUPPORTED_FILE;
         }
         return PH_RESULT_SUCCESS;
     });

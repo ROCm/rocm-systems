@@ -515,6 +515,26 @@ reader_catalog_t::memory_activity_id_span(uint64_t& first_id, uint64_t& last_id)
 }
 
 void
+reader_catalog_t::add_memory_activity_track(reader_types::track_info_ptr_t       track,
+                                            std::vector<memory_activity_point_t> points)
+{
+    if(!track || points.empty()) return;
+    if(!m_memory_activity_has_ids)
+    {
+        m_memory_activity_first_id = points.front().id;
+        m_memory_activity_last_id  = points.front().id;
+        m_memory_activity_has_ids  = true;
+    }
+    for(const memory_activity_point_t& point : points)
+    {
+        m_memory_activity_first_id = std::min(m_memory_activity_first_id, point.id);
+        m_memory_activity_last_id  = std::max(m_memory_activity_last_id, point.id);
+    }
+    m_memory_activity.emplace(track->id, std::move(points));
+    tracks.push_back(std::move(track));
+}
+
+void
 reader_catalog_t::publish_memory_activity_pmc_infos()
 {
     uint64_t next_id = 1;

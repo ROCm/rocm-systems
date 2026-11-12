@@ -626,6 +626,7 @@ enum class trace_schema_t
 {
     unknown,
     rocpd,
+    pytorch_kineto,
 };
 
 /** @brief Schema family and version of a probed file. Selects its reader. */

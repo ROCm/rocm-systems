@@ -65,7 +65,8 @@ extern "C"
     ph_result_t ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future);
 
     /**
-     * @brief One SQLite file and the GUID of the tables read from it.
+     * @brief One trace file and the GUID of the tables read from it. guid is
+     *        empty for a format that has none.
      * @note path and guid point into the context that produced them. They
      *       stay valid until that context is freed.
      */
@@ -77,8 +78,8 @@ extern "C"
 
     /**
      * @brief Opens every trace file and creates one context for all of them.
-     * @param paths SQLite trace files. A file with several rocpd metadata
-     *        tables becomes one source per GUID. Must not be null.
+     * @param paths Trace files of any supported format. A rocpd file with
+     *        several metadata tables becomes one source per GUID. Must not be null.
      * @param path_count Number of entries in @p paths. Must be greater than zero.
      * @param future Same contract as ph_ctx_create().
      * @return Same status values as ph_ctx_create().
@@ -568,9 +569,9 @@ extern "C"
      * @note Cancellation is cooperative and does not require the future to be
      *       attached. A synchronous call such as ph_event_query_read observes
      *       the stop without attaching the future, so the same future can be
-     *       reused. The SQLite statement that call is running is interrupted.
+     *       reused. The read that call is running is interrupted.
      *       An asynchronous operation that has not started is skipped. A
-     *       running one stops at its next check, or when its statement is
+     *       running one stops at its next check, or when its read is
      *       interrupted, and ends with PH_FUTURE_CANCELLED. Cancelling an
      *       operation that already ended does not change its result.
      */
@@ -641,7 +642,7 @@ extern "C"
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it, so the same future can be reused.
      *        ph_future_cancel requests the stop this call observes and
-     *        interrupts the SQLite statement reading the page.
+     *        interrupts the read of the page.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null, @p capacity is 0, or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
@@ -663,7 +664,7 @@ extern "C"
      * @param last_id Out parameter. Set to 0 if the table is empty.
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it. ph_future_cancel requests the stop
-     *        this call observes and interrupts its SQLite statement.
+     *        this call observes and interrupts its read.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
@@ -691,11 +692,11 @@ extern "C"
         void*                             user_data);
 
     /**
-     * @brief Aggregates matching events by display name inside SQLite.
+     * @brief Aggregates matching events by display name.
      *        Durations are end minus start, in trace ticks.
      * @param future Optional cancellation source. This synchronous call does
      *        not attach or complete it. ph_future_cancel requests the stop
-     *        this call observes and interrupts its SQLite statement.
+     *        this call observes and interrupts its read.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_ARGUMENT if a
      *         pointer is null or @p event_type is unknown,
      *         PH_RESULT_INVALID_CONTEXT if the query has no trace,
