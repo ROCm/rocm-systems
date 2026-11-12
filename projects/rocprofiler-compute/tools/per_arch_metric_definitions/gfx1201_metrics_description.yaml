@@ -180,14 +180,6 @@ Roofline Performance Rates:
     plain: 64-bit floating-point operations per second on the VALU.
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
-  GL2 Cache BW:
-    plain: Achieved bandwidth between the GL1 and GL2 caches.
-    rst: Achieved bandwidth between the GL1 and GL2 caches.
-    unit: Bytes/s
-  GL1 Cache BW:
-    plain: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches.
-    rst: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches.
-    unit: Bytes/s
   GL0 Cache BW (TCP Cache):
     plain: Achieved bandwidth at the GL0 vector cache (TCP Cache).
     rst: Achieved bandwidth at the GL0 vector cache (TCP Cache).
@@ -205,14 +197,6 @@ Roofline Performance Rates:
     rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
     unit: Bytes/s
 Roofline Plot Points:
-  AI L2:
-    plain: Arithmetic intensity relative to GL1-to-GL2 traffic.
-    rst: Arithmetic intensity relative to GL1-to-GL2 traffic.
-    unit: FLOPs/Byte
-  AI L1:
-    plain: Arithmetic intensity relative to GL0-to-GL1 traffic.
-    rst: Arithmetic intensity relative to GL0-to-GL1 traffic.
-    unit: FLOPs/Byte
   AI L0:
     plain: Arithmetic intensity relative to GL0 (TCP) requests.
     rst: Arithmetic intensity relative to GL0 (TCP) requests.

@@ -299,26 +299,13 @@ def test_roofline_mem_levels_plots_mall_where_the_arch_opts_in() -> None:
 def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
     """Each gfx1201 AI row divides the VALU plus WMMA FLOPs by its level's bytes.
 
-    AI L1 uses the sized GL1C request buckets, AI L0 counts 128 bytes per
-    TCP_REQ, and AI GDDR6 uses 32-byte DRAM-destined granules.
+    AI L0 counts 128 bytes per TCP_REQ, and AI GDDR6 uses 32-byte
+    DRAM-destined granules.
     """
     metrics = gfx1201_roofline_metrics("Roofline Plot Points")
     counters = {
         "SQ_INSTS_VALU_sum": [100],
         "SQ_WMMA_VALU_INSTS_sum": [2],
-        "GL1C_GL2_REQ_READ_32B_sum": [1],
-        "GL1C_GL2_REQ_READ_64B_sum": [2],
-        "GL1C_GL2_REQ_READ_128B_sum": [3],
-        "GL1C_GL2_REQ_WRITE_32B_sum": [4],
-        "GL1C_GL2_REQ_WRITE_64B_sum": [5],
-        "GL1C_REQ_READ_32B_sum": [1],
-        "GL1C_REQ_READ_64B_sum": [2],
-        "GL1C_REQ_READ_128B_sum": [3],
-        "GL1C_REQ_READ_256B_sum": [4],
-        "GL1C_REQ_WRITE_32B_sum": [5],
-        "GL1C_REQ_WRITE_64B_sum": [6],
-        "GL1C_REQ_WRITE_128B_sum": [7],
-        "GL1C_REQ_WRITE_256B_sum": [8],
         "TCP_REQ_sum": [9],
         "GL2C_EA_RDREQ_DRAM_32B_sum": [10],
         "GL2C_EA_WRREQ_DRAM_32B_sum": [11],
@@ -331,10 +318,7 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         {},
     )
     flops = 32 * (100 - 2) + 8192 * 2
-    l1_bytes = 1 * 32 + 2 * 64 + 3 * 128 + 4 * 256 + 5 * 32 + 6 * 64 + 7 * 128 + 8 * 256
     expected_bytes = {
-        "AI L2": 1 * 32 + 2 * 64 + 3 * 128 + 4 * 32 + 5 * 64,
-        "AI L1": l1_bytes,
         "AI L0": 128 * 9,
         "AI LDS": (20 - 4) * 4 * 32,
         "AI GDDR6": 32 * (10 + 11),
@@ -346,10 +330,8 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         ), metric
 
     # The same results with every number worked out by hand: 19,520 FLOPs over
-    # 992, 5,056, 1,152, 2,048 and 672 bytes.
+    # 1,152, 2,048 and 672 bytes.
     by_hand = {
-        "AI L2": 19.677419,
-        "AI L1": 3.860759,
         "AI L0": 16.944444,
         "AI LDS": 9.53125,
         "AI GDDR6": 29.047619,
@@ -399,7 +381,7 @@ def test_extract_ai_metrics_reads_the_gddr6_point_into_its_own_field() -> None:
     leaves ai_hbm at 0.0, and an MI table with AI HBM does the reverse."""
     gfx1201 = _extract_ai_metrics(
         pd.DataFrame({
-            "Metric": ["AI GDDR6", "AI L2", "Performance (GFLOPs)"],
+            "Metric": ["AI GDDR6", "AI L0", "Performance (GFLOPs)"],
             "Value": [3.5, 2.0, 100.0],
         })
     )
@@ -412,7 +394,7 @@ def test_extract_ai_metrics_reads_the_gddr6_point_into_its_own_field() -> None:
 
     assert gfx1201["ai_gddr6"] == 3.5
     assert gfx1201["ai_hbm"] == 0.0
-    assert gfx1201["ai_l2"] == 2.0
+    assert gfx1201["ai_l0"] == 2.0
     assert mi["ai_hbm"] == 4.5
     assert mi["ai_gddr6"] == 0.0
 
