@@ -130,7 +130,7 @@ binaries instead of exposing portable state to assert.
 | `graph` | 5 |
 | `graph_batch_mem_op` | 4 |
 | `graph_capture` | 4 |
-| `graph_child` | 3 |
+| `graph_child` | 8 |
 | `graph_clone` | 3 |
 | `graph_debug` | 2 |
 | `graph_event` | 3 |
