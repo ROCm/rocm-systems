@@ -210,6 +210,8 @@ All tests support the same set of arguments :
   * `-D,--device_implementation <implementation number>` Enable device implementation (default: 0, use NCCL implementation; requires -R 2 if > 0).
   * `-V,--device_cta_count <number>` Set number of CTAs for device implementation (default: 16).
   * `-x,--cta_policy <0/1/2>` Set CTA policy (NCCL_CTA_POLICY_DEFAULT (0), NCCL_CTA_POLICY_EFFICIENCY (1), NCCL_CTA_POLICY_ZERO (2)) (default: do not set).
+  * `reduce_perf` (single node only):
+    * `-D 3` reads every rank's input through LSA pointers and reduces it into the root's buffer.
 * RCCL Reporter output
   * `-X,--rccl_output_file <file>` RCCL Reporter output file for csv/json (used with -Z). Default : disabled.
   * `-Z,--rccl_output_format <csv|json>` Set RCCL Reporter output format (csv or json). Default : disabled.
