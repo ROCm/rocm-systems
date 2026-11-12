@@ -14,8 +14,9 @@ int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out
   out->clear();
 
   std::map<uint32_t, std::shared_ptr<IOLink>> neighbors;
-  if (DiscoverIOLinksPerNode(gpu_kfd_node_indx, &neighbors) != 0) {
-    return 0;
+  int ret = DiscoverIOLinksPerNode(gpu_kfd_node_indx, &neighbors);
+  if (ret != 0) {
+    return ret;
   }
 
   for (const auto& kv : neighbors) {

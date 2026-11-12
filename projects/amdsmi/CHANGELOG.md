@@ -72,6 +72,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
+- **Added `amdsmi_get_gpu_cpu_links()` to report a GPU's directly-connected CPU link(s) (package id and link type)**.  
+  - On MI450, `amd-smi xgmi --metric` and `--link-status` now show a `CPU(PKG<n>)` column per connected CPU package.
+
 - **Added Component Unified ID (CUID) reporting APIs**.  
   - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
   - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.

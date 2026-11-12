@@ -3950,6 +3950,9 @@ amdsmi_status_t amdsmi_get_gpu_cpu_links(amdsmi_processor_handle processor_handl
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+#ifdef ENABLE_WSL_BACKEND
+  if (device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
 
   // Discover the raw KFD-level links with our own query-then-fetch, separate
   // from the caller's buffer: some raw entries get dropped below if their

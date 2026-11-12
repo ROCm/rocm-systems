@@ -168,15 +168,15 @@ class XgmiCommands:
             )
             column_header = ""
             if gpu_gpu_resolvable:
-                # lstrip: GPU0's own rjust(13) left-pad has no preceding
-                # column to visually separate from, same as the legacy
-                # (pre-CPU-column) header this replaces.
-                column_header += "".join(f"GPU{d['gpu']}".rjust(13) for d in xgmi_values).lstrip()
+                column_header += "".join(f"GPU{d['gpu']}".rjust(13) for d in xgmi_values)
             if distinct_package_ids:
                 column_header += "".join(
                     f"CPU(PKG{package_id})".rjust(13) for package_id in distinct_package_ids
                 )
-            self.logger.table_header = link_metrics_header + column_header
+            # lstrip: the first column's own rjust(13) left-pad has no
+            # preceding column to visually separate from, same as the
+            # legacy (pre-CPU-column) header this replaces.
+            self.logger.table_header = link_metrics_header + column_header.lstrip()
 
             # Populate dictionary according to format
             for xgmi_dict in xgmi_values:

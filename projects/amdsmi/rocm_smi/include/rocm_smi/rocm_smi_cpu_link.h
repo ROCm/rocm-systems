@@ -27,6 +27,9 @@ struct GpuCpuLink {
 // additionally report *reachability* to a second, non-directly-connected
 // CPU via the fabric -- that's not a real physical link, so only io_links
 // are checked; a GPU has exactly one directly-connected CPU).
+// Returns 0 on success (including zero links found), matching
+// DiscoverIOLinksPerNode's non-zero-on-failure convention -- a non-zero
+// return means io_links discovery itself failed, not "no CPU link exists".
 int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out);
 
 }  // namespace amd::smi

@@ -5875,7 +5875,9 @@ rsmi_status_t rsmi_topo_get_cpu_links(uint32_t dv_ind, uint32_t* num_links,
   }
 
   std::vector<amd::smi::GpuCpuLink> cpu_links;
-  amd::smi::DiscoverGpuCpuLinks(kfd_node->node_index(), &cpu_links);
+  if (amd::smi::DiscoverGpuCpuLinks(kfd_node->node_index(), &cpu_links) != 0) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
 
   uint32_t capacity = *num_links;
   *num_links = static_cast<uint32_t>(cpu_links.size());
