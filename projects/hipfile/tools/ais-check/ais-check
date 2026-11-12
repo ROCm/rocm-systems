@@ -35,6 +35,13 @@ NVMe in any combination, as long as every RAID layer runs a pass-through
 personality (linear, raid0, raid1, raid10) rather than a parity one (raid4,
 raid5, raid6). Any other interposing layer (multipath, dm-crypt, loopback)
 breaks the direct P2P-DMA path and forces the compatibility fallback.
+
+NFS mounts are also listed, with their server/export as DEVICE and nfs as
+BACKING. Only proto=rdma or proto=rdma6 passes the NFS transport check; other
+or missing protocols report HIPFILE=no and are not probed. RDMA mounts are
+probed by opening a temporary file with O_DIRECT. If the probe rejects
+O_DIRECT, HIPFILE is no; otherwise it remains unverified because RDMA device
+capability checks are not implemented.
 """
 
 # pylint: enable=invalid-name
@@ -559,10 +566,10 @@ def parse_mountinfo():
 
 def fs_supported(mount):
     """
-    Mirror mountinfo.cpp: True if the filesystem type/journaling qualifies.
+    Mirror mountinfo.cpp: True if the filesystem and its mount options qualify.
 
     ext4 qualifies only with data=ordered (the default when no data= option is
-    present); xfs always qualifies.
+    present); xfs always qualifies. NFS requires proto=rdma or proto=rdma6.
     """
     if mount.fstype == "xfs":
         return True
@@ -573,6 +580,8 @@ def fs_supported(mount):
         # also lives in /proc/fs/ext4/<dev>/options, but we deliberately mirror
         # the C reference so our verdict matches what hipFile decides at runtime.
         return data is None or data == "ordered"
+    if mount.fstype in ("nfs", "nfs4"):
+        return mount.option("proto") in ("rdma", "rdma6")
     return False
 
 
@@ -915,14 +924,28 @@ def tri(value, unknown="?"):
 
 
 def collect(mounts):
-    """Build a list of result rows for the block-backed mounts."""
+    """Build a list of result rows for block-backed and NFS mounts."""
     rows = []
     for m in mounts:
         if m.fstype in PSEUDO_FSTYPES:
             continue
-        # Only consider local block devices. Network filesystems (NFS
-        # "server:/export", CIFS "//server/share", sshfs, ...) are not
-        # block-backed.
+        if m.fstype in ("nfs", "nfs4"):
+            # RDMA transport and O_DIRECT are necessary, but device capability
+            # is unverified. NFS does not use local block-device resolution.
+            supported_fs = fs_supported(m)
+            odirect = probe_odirect(m.mountpoint) if supported_fs else None
+            rows.append(
+                {
+                    "mountpoint": m.mountpoint,
+                    "fstype": m.fstype,
+                    "device": m.source,
+                    "backing": "nfs",
+                    "odirect": odirect,
+                    "capable": False if not supported_fs or odirect is False else None,
+                }
+            )
+            continue
+        # Other network filesystems (CIFS, sshfs, ...) are not listed.
         if not m.source.startswith("/dev/"):
             continue
 
@@ -979,7 +1002,7 @@ def print_volume_table(rows):
 
 def capable_volumes():
     """
-    Enumerate block-backed mounts and score them for hipFile capability.
+    Enumerate block-backed and NFS mounts and report hipFile capability.
 
     Returns (rows, any_capable) where rows is the list of per-volume result
     dicts and any_capable is True if at least one volume is confidently capable.
@@ -999,10 +1022,14 @@ def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "O_DIRECT/HIPFILE columns are probed by opening a temp file with "
-            "O_DIRECT on each volume.\nThis needs write access to the mountpoint "
-            "(typically root); without it the result is\nshown as 'unverified' "
-            "rather than supported/unsupported. Re-run as root to verify."
+            "Eligible block-backed filesystems and NFS/RDMA mounts are probed "
+            "by opening\na temp file with O_DIRECT. This needs write access to the mountpoint; "
+            "without it the result is shown as\n'unverified' rather than "
+            "supported/unsupported.\nNFS requires proto=rdma or proto=rdma6; "
+            "other or missing protocols report\nHIPFILE=no and are not probed. "
+            "NFS/RDMA mounts report HIPFILE=no if O_DIRECT\nis rejected; "
+            "otherwise HIPFILE remains 'unverified' pending RDMA device\n"
+            "capability checks, including when run as root."
         ),
     )
     output_group = parser.add_mutually_exclusive_group()
@@ -1048,7 +1075,7 @@ def main():
         if volume_rows:
             print_volume_table(volume_rows)
         else:
-            print("No block-backed volumes found.")
+            print("No block-backed or NFS volumes found.")
 
         print()
         print("AIS support in:")

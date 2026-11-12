@@ -107,6 +107,50 @@ def test_default_output_lists_components(monkeypatch, capsys, stub_checks, ais_c
     assert "Linux host 6.6.0" in out
 
 
+@pytest.mark.parametrize(
+    "local_capable_proto",
+    [
+        (capable, proto)
+        for capable in (False, True)
+        for proto in ("rdma", "rdma6", "tcp")
+    ],
+)
+def test_nfs_listing_preserves_exit_status(
+    monkeypatch, capsys, stub_checks, ais_check, local_capable_proto
+):
+    local_capable, proto = local_capable_proto
+    scan_volumes = ais_check.capable_volumes
+    stub_checks()
+    monkeypatch.setattr(ais_check, "capable_volumes", scan_volumes)
+    mounts = [
+        ais_check.Mount(
+            "0:42", "/mnt/nfs", "nfs4", "server:/export", f"rw,proto={proto}"
+        )
+    ]
+    if local_capable:
+        mounts.append(ais_check.Mount("259:0", "/data", "xfs", "/dev/nvme0n1", "rw"))
+
+    def backing_storage(devno):
+        assert devno == "259:0"
+        return "nvme", "nvme0n1"
+
+    def probe_odirect(mountpoint):
+        assert mountpoint == "/data" or (
+            mountpoint == "/mnt/nfs" and proto in ("rdma", "rdma6")
+        )
+        return True
+
+    monkeypatch.setattr(ais_check, "parse_mountinfo", lambda: mounts)
+    monkeypatch.setattr(ais_check, "backing_storage", backing_storage)
+    monkeypatch.setattr(ais_check, "probe_odirect", probe_odirect)
+
+    assert _run(monkeypatch, ais_check, []) == int(not local_capable)
+    out = capsys.readouterr().out
+    assert "server:/export" in out
+    assert "No block-backed" not in out
+    assert ("nvme0n1" in out) is local_capable
+
+
 def test_quiet_suppresses_output(monkeypatch, capsys, stub_checks, ais_check):
     stub_checks()
     rc = _run(monkeypatch, ais_check, ["-q"])

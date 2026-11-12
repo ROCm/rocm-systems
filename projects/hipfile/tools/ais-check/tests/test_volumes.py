@@ -6,7 +6,9 @@
 
 # pylint: disable=missing-function-docstring,redefined-outer-name,unused-argument
 
+import errno
 from collections import namedtuple
+from unittest.mock import Mock, mock_open
 
 import pytest
 
@@ -39,6 +41,45 @@ def test_fs_supported_ext4_data_mode(ais_check, options, expected):
 
 def test_fs_supported_other_fs_rejected(ais_check):
     assert ais_check.fs_supported(_mount(ais_check, fstype="btrfs")) is False
+
+
+@pytest.mark.parametrize("fstype", ["nfs", "nfs4"])
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        ("rw,proto=rdma", True),
+        ("ro,proto=rdma6,vers=4.2", True),
+        ("rw,proto=tcp", False),
+        ("rw,proto=tcp6", False),
+        ("rw,proto=udp", False),
+        ("rw,proto=udp6", False),
+        ("rw", False),
+        ("rw,proto", False),
+        ("rw,proto=", False),
+        ("rw,mountproto=rdma", False),
+        ("rw,proto=rdma-extra", False),
+        ("rw,proto=rdma6-extra", False),
+    ],
+)
+def test_fs_supported_nfs_transport(ais_check, fstype, options, expected):
+    mount = _mount(ais_check, fstype=fstype, options=options)
+    assert ais_check.fs_supported(mount) is expected
+
+
+@pytest.mark.parametrize("proto", ["rdma", "rdma6", "tcp"])
+def test_nfs_transport_from_mountinfo_super_options(ais_check, monkeypatch, proto):
+    mountinfo = (
+        "42 25 0:42 / /mnt/nfs rw,relatime shared:7 - "
+        f"nfs4 server:/export rw,vers=4.2,proto={proto},addr=192.0.2.1\n"
+    )
+    mocked_open = mock_open(read_data=mountinfo)
+    monkeypatch.setattr("builtins.open", mocked_open)
+
+    mounts = ais_check.parse_mountinfo()
+
+    mocked_open.assert_called_once_with("/proc/self/mountinfo", "r", encoding="utf-8")
+    assert len(mounts) == 1
+    assert ais_check.fs_supported(mounts[0]) is (proto in ("rdma", "rdma6"))
 
 
 def test_fstype_label_folds_ext4_journal_mode(ais_check):
@@ -562,7 +603,126 @@ def test_collect_skips_pseudo_and_non_block(ais_check, monkeypatch):
     assert rows[0]["capable"] is True
 
 
-def test_collect_skips_network_mount_before_resolution(ais_check, monkeypatch):
+@pytest.mark.parametrize("fstype", ["nfs", "nfs4"])
+@pytest.mark.parametrize(
+    "source_options_capable",
+    [
+        ("server:/export", "rw,proto=tcp", False),
+        ("[2001:db8::1]:/export", "ro,proto=tcp6", False),
+        ("[2001:db8::1]:/export", "ro", False),
+    ],
+)
+def test_collect_lists_non_rdma_nfs_without_probing(
+    ais_check, monkeypatch, capsys, fstype, source_options_capable
+):
+    def fail_probe(*_args):
+        raise AssertionError("NFS listing must not resolve block devices or probe I/O")
+
+    monkeypatch.setattr(ais_check, "backing_storage", fail_probe)
+    monkeypatch.setattr(ais_check, "probe_odirect", fail_probe)
+    monkeypatch.setattr(ais_check.subprocess, "run", fail_probe)
+    source, options, capable = source_options_capable
+    mount = ais_check.Mount("0:42", "/mnt/nfs", fstype, source, options)
+    monkeypatch.setattr(ais_check, "parse_mountinfo", lambda: [mount])
+
+    rows, any_capable = ais_check.capable_volumes()
+
+    assert rows == [
+        {
+            "mountpoint": "/mnt/nfs",
+            "fstype": fstype,
+            "device": source,
+            "backing": "nfs",
+            "odirect": None,
+            "capable": capable,
+        }
+    ]
+    assert any_capable is False
+    ais_check.print_volume_table(rows)
+    assert capsys.readouterr().out.splitlines()[1].split() == [
+        "/mnt/nfs",
+        fstype,
+        source,
+        "nfs",
+        "unverified",
+        "no" if capable is False else "unverified",
+    ]
+
+
+def _assert_probe_io(ais_check, probe_io, error):
+    probe_io.open.assert_called_once()
+    path, flags, mode = probe_io.open.call_args.args
+    assert path.startswith("/mnt/nfs/.ais-odirect-")
+    assert flags == (
+        ais_check.os.O_RDWR
+        | ais_check.os.O_CREAT
+        | ais_check.os.O_EXCL
+        | ais_check.os.O_CLOEXEC
+        | ais_check.os.O_DIRECT
+    )
+    assert mode == 0o600
+    if error is None:
+        probe_io.close.assert_called_once_with(42)
+    else:
+        probe_io.close.assert_not_called()
+    probe_io.unlink.assert_called_once_with(path)
+
+
+@pytest.mark.parametrize(
+    "fstype_proto",
+    [(fstype, proto) for fstype in ("nfs", "nfs4") for proto in ("rdma", "rdma6")],
+)
+@pytest.mark.parametrize(
+    "probe_result",
+    [
+        (None, True, None),
+        (errno.EINVAL, False, False),
+        (errno.EACCES, None, None),
+        (errno.EROFS, None, None),
+        (errno.ENOSPC, None, None),
+    ],
+)
+def test_collect_probes_rdma_nfs(
+    ais_check, monkeypatch, capsys, fstype_proto, probe_result
+):
+    fstype, proto = fstype_proto
+    error, odirect, capable = probe_result
+    mount = ais_check.Mount(
+        "0:42", "/mnt/nfs", fstype, "server:/export", f"rw,proto={proto}"
+    )
+    monkeypatch.setattr(ais_check, "parse_mountinfo", lambda: [mount])
+
+    def fail_resolution(*_args):
+        raise AssertionError("NFS probing must not resolve block devices or run tools")
+
+    monkeypatch.setattr(ais_check, "backing_storage", fail_resolution)
+    monkeypatch.setattr(ais_check.subprocess, "run", fail_resolution)
+    probe_io = Mock()
+    probe_io.open.return_value = 42
+    probe_io.open.side_effect = OSError(error, "probe failed") if error else None
+    monkeypatch.setattr(ais_check.os, "open", probe_io.open)
+    monkeypatch.setattr(ais_check.os, "close", probe_io.close)
+    monkeypatch.setattr(ais_check.os, "unlink", probe_io.unlink)
+
+    rows, any_capable = ais_check.capable_volumes()
+
+    _assert_probe_io(ais_check, probe_io, error)
+    assert rows[0]["odirect"] is odirect
+    assert rows[0]["capable"] is capable
+    assert any_capable is False
+    ais_check.print_volume_table(rows)
+    assert capsys.readouterr().out.splitlines()[1].split()[-2:] == [
+        {True: "yes", False: "no", None: "unverified"}[odirect],
+        "no" if capable is False else "unverified",
+    ]
+
+
+@pytest.mark.parametrize(
+    "fstype,source", [("cifs", "//server/share"), ("fuse.sshfs", "server:/export")]
+)
+def test_collect_skips_other_network_mounts_before_resolution(
+    ais_check, monkeypatch, fstype, source
+):
     def _fail_backing(devno):
         raise AssertionError("backing_storage must not run on a non-block mount")
 
@@ -572,9 +732,8 @@ def test_collect_skips_network_mount_before_resolution(ais_check, monkeypatch):
     monkeypatch.setattr(ais_check, "backing_storage", _fail_backing)
     monkeypatch.setattr(ais_check, "probe_odirect", _fail_probe)
 
-    # NFS export: virtual device (major 0) and a "server:/export" source.
-    nfs = ais_check.Mount("0:42", "/mnt/nfs", "nfs4", "server:/export", "rw")
-    assert ais_check.collect([nfs]) == []
+    mount = ais_check.Mount("0:42", "/mnt/network", fstype, source, "rw")
+    assert ais_check.collect([mount]) == []
 
 
 def test_collect_unsupported_fs_not_probed(ais_check, monkeypatch):
