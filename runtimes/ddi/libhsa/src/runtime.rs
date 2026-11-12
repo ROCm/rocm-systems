@@ -431,8 +431,8 @@ impl HsaState {
                 cleanup_failed: !pending.cleanup(),
             });
         }
-        let host = topology.host.cpu.clone().unwrap_or_else(|| CpuInfo {
-            name: "CPU".to_owned(),
+        let host = topology.host.cpu.clone().unwrap_or(CpuInfo {
+            name: None,
             compute_units: 0,
         });
         match Self::create_with_session(
