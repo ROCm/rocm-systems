@@ -589,6 +589,63 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   return true;
 }
 
+std::vector<uint32_t> AnvilLib::usableEngineIds() const {
+  std::vector<uint32_t> ids;
+  for (uint32_t e = 0; e < numSdmaEnginesTotal_; ++e) {
+    if (isUsableSdmaEngine(static_cast<int>(e))) ids.push_back(e);
+  }
+  return ids;
+}
+
+int AnvilLib::engineFor(int srcDeviceId, int dstDeviceId) {
+  const int n = static_cast<int>(gpuAgentsByHipDev_.size());
+  if (srcDeviceId < 0 || srcDeviceId >= n || dstDeviceId < 0 || dstDeviceId >= n ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)]) ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(dstDeviceId)])) {
+    return -1;
+  }
+  const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
+  return isUsableSdmaEngine(selection.engineId) ? selection.engineId : -1;
+}
+
+SdmaQueue* AnvilLib::createPoolQueue(int srcDeviceId, int poolId, uint32_t engineId) {
+  if (srcDeviceId < 0 || srcDeviceId >= static_cast<int>(gpuAgentsByHipDev_.size()) ||
+      !hsaAgentIsValid(gpuAgentsByHipDev_[static_cast<size_t>(srcDeviceId)])) {
+    LOG_ERROR("anvil: no HSA agent mapped for HIP device %d, cannot create pool queue",
+              srcDeviceId);
+    return nullptr;
+  }
+  if (queueBudgetExceeded(queuesUsedTotal_, 1, usableSdmaEngines(numSdmaEnginesTotal_),
+                          numSdmaQueuesPerEngine_)) {
+    LOG_TRACE("anvil: pool queue on engine %u skipped, budget of %u queues per engine reached",
+              engineId, numSdmaQueuesPerEngine_);
+    return nullptr;
+  }
+  EngineSelection selection{};
+  selection.engineId = static_cast<int>(engineId);
+  selection.srcDeviceId = srcDeviceId;
+  selection.dstDeviceId = srcDeviceId;
+  selection.numSdmaEngines = numSdmaEngines_;
+  selection.numSdmaXgmiEngines = numSdmaXgmiEngines_;
+  selection.numSdmaEnginesTotal = numSdmaEnginesTotal_;
+  // The queue only names a remote device for its failure log; a pool queue has none, so name src.
+  auto queue = std::make_unique<SdmaQueue>(srcDeviceId, srcDeviceId, getHipGpuAgent(srcDeviceId),
+                                           engineId, selection);
+  lastQueueStatus_ = queue->createStatus();
+  if (!queue->valid()) return nullptr;
+  auto& vec = sdma_channels_[poolId];
+  vec.emplace_back(std::move(queue));
+  queuesUsedTotal_ += 1;
+  return vec.back().get();
+}
+
+void AnvilLib::trimPool(int poolId, size_t keep) {
+  auto it = sdma_channels_.find(poolId);
+  if (it == sdma_channels_.end()) return;
+  releaseQueues(it->second, keep);
+  if (it->second.empty()) sdma_channels_.erase(it);
+}
+
 void AnvilLib::releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep) {
   // createSdmaQueue stores only valid queues and charges each one, so every popped entry is
   // credited back.

@@ -124,6 +124,22 @@ class AnvilLib {
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              const EngineSelection& selection, int* channelIdx = nullptr);
 
+  // A queue on one GPU can copy to any destination address, so a caller can keep a pool of queues
+  // spread over every usable engine and point many peers at it, instead of one engine per
+  // destination device. Pool ids are negative so they never collide with a HIP device id; each
+  // pool is released with disconnectDevice(poolId) and read back with getSdmaQueue(src, poolId, i).
+  int allocPoolId() { return --lastPoolId_; }
+  // Usable (even) engine ids on this node's GPUs, ascending. Empty when the engine count is unknown.
+  std::vector<uint32_t> usableEngineIds() const;
+  // The engine connect() would pick for src -> dst, or -1 if dst is not a mapped local device or
+  // the pick is not usable.
+  int engineFor(int srcDeviceId, int dstDeviceId);
+  // Create one queue on engineId of srcDeviceId's GPU and append it to the pool. Returns nullptr if
+  // the queue budget is exhausted or KFD refuses the queue; nothing is charged in that case.
+  SdmaQueue* createPoolQueue(int srcDeviceId, int poolId, uint32_t engineId);
+  // Drop pool queues past the first `keep`, crediting them back to the budget.
+  void trimPool(int poolId, size_t keep);
+
  private:
   /*
    * OAM MAP
@@ -161,6 +177,7 @@ class AnvilLib {
   // unconstrained engine.
   uint32_t queuesUsedTotal_{0};
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
+  int lastPoolId_{0};
   // Selection in progress, so getOamId can report why the map was consulted without the caller
   // threading the same values back down.
   EngineSelection selection_;

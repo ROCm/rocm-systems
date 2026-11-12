@@ -301,25 +301,46 @@ __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases
                                        MPI_Comm thread_comm) {
   MPI_Comm shmcomm = MPI_COMM_NULL;
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm, &shmcomm);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
+
+  // shmcomm is the IPC pod, which vmm_fabric can stretch over several nodes. SDMA needs the
+  // node-local part of it (local rank i runs on HIP device i) and each local rank's pod position.
+  MPI_Comm nodecomm = MPI_COMM_NULL;
+  mpilib_ftable_.Comm_split_type(shmcomm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodecomm);
+  int local_size = 0;
+  int local_rank = 0;
+  mpilib_ftable_.Comm_size(nodecomm, &local_size);
+  mpilib_ftable_.Comm_rank(nodecomm, &local_rank);
+  std::vector<int> local_pod_index(local_size);
+  local_pod_index[local_rank] = shm_rank;
+  mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, local_pod_index.data(), 1, MPI_INT,
+                           nodecomm);
+  mpilib_ftable_.Comm_free(&nodecomm);
+
+  sdmaImpl_.sdmaHostInit(my_pe, local_size, local_rank, shm_size, shm_rank, local_pod_index,
+                         [&](int *values) {
     mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, values, 1, MPI_INT, shmcomm);
   });
 }
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        TcpBootstrap *bootstrap) {
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+  std::vector<int> shm_ranks;
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap, &shm_ranks);
 
-  // SDMA connects via local HIP device ordinals (hipDeviceCanAccessPeer, engine-pinned KFD
-  // queues), which only exist within this process own node. shm_size/shm_rank come from the
-  // fabric pod, which vmm_fabric can legitimately span multiple nodes -- so SDMA must use its
-  // own node-local group instead of the pod.
-  std::vector<int> local_ranks = bootstrap->getLocalRanks();
-  int local_size = static_cast<int>(local_ranks.size());
-  int local_rank = static_cast<int>(std::find(local_ranks.begin(), local_ranks.end(), my_pe) -
-                                    local_ranks.begin());
-  sdmaImpl_.sdmaHostInit(my_pe, local_size, local_rank, [&](int *values) {
-    bootstrap->groupAllGather(values, sizeof(int), local_ranks);
+  // shm_ranks is the IPC pod, which vmm_fabric can stretch over several nodes. SDMA needs the
+  // node-local part of it (local rank i runs on HIP device i) and each local rank's pod position.
+  std::vector<int> local_pod_index;
+  int local_rank = 0;
+  for (int world_rank : bootstrap->getLocalRanks()) {
+    auto it = std::find(shm_ranks.begin(), shm_ranks.end(), world_rank);
+    if (it == shm_ranks.end()) continue;
+    if (world_rank == my_pe) local_rank = static_cast<int>(local_pod_index.size());
+    local_pod_index.push_back(static_cast<int>(it - shm_ranks.begin()));
+  }
+
+  sdmaImpl_.sdmaHostInit(my_pe, static_cast<int>(local_pod_index.size()), local_rank, shm_size,
+                         shm_rank, local_pod_index, [&](int *values) {
+    bootstrap->groupAllGather(values, sizeof(int), shm_ranks);
   });
 }
 
