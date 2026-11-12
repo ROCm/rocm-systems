@@ -47,6 +47,7 @@
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/clr/hipamd/src/hrr/                                         @ROCm/clr-reviewers @ROCm/hrr-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
+/bindings/fortran/hip/                                                @ROCm/rocm-fortran-maintainers @ROCm/hip-reviewers
 /projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
