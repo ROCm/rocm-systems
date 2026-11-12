@@ -2836,7 +2836,10 @@ TEST_F(NetIbCastConnectSharingMicrotest, Ainic_ScalesSharedQpDepthByTheMultiplie
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
-  EXPECT_EQ(verbs_.CreateOf(s->base.qps[0].qp)->attr.cap.max_send_wr, 2u * NET_IB_MAX_REQUESTS * 3);
+  // Shared QP: 3 units of ordinary request slots, plus one split-chain WR
+  // amortized across them (IbCastDataSendQueueDepth, no post cap).
+  EXPECT_EQ(verbs_.CreateOf(s->base.qps[0].qp)->attr.cap.max_send_wr,
+            3u * (2u * (NET_IB_MAX_REQUESTS - 1) + 1u));
   EXPECT_EQ(verbs_.CreateOf(r->base.qps[0].qp)->attr.cap.max_recv_wr, (uint32_t)NET_IB_MAX_REQUESTS * 3);
   cqeCap_ = 1;  // below one multiple: the depth never drops under 1x
   ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
