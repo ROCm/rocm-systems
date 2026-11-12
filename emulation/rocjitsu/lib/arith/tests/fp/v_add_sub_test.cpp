@@ -334,13 +334,15 @@ namespace {
 
 using rocjitsu::arith::test::CapturedGfx11;
 
-// gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): a signaling NaN source is
-// returned unquieted, after NEG and the SUB sign flip, also under directed rounding and OMOD.
+// gfx1100 lanes from the MODE.IEEE-clear corpus (hw1100-noieee), plus AbsA/AbsB from a W7900
+// probe: a signaling NaN source is returned unquieted, after ABS, NEG and the SUB sign flip, also
+// under directed rounding and OMOD.
 const CapturedGfx11 add_f16_lanes[] = {
     {"E32Mode00", 0, 0x100, 0x63377c01, 0x12680000, 0, 0xa5a57c01},
     {"E32RoundDown", 0, 0x15a, 0xaabb0000, 0xd5d77c01, 0, 0xa5a57c01},
     {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0x2d450000, 0x452b7c01, 0, 0xa5a5fc01},
     {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0xc9457c01, 0xba620000, 0, 0xa5a57c01},
+    {"AbsA", RJ_ARITH_ALU_ABS_A, 0x1f0, 0xa5a5fc01, 0xa5a53c00, 0, 0xa5a57c01},
     {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xaf2ec100, 0xfd498000, 0, 0xfd49a5a5},
 };
@@ -349,6 +351,7 @@ const CapturedGfx11 sub_f16_lanes[] = {
     {"E32RoundDownSubtrahend", 0, 0x15a, 0x7a990000, 0x0e867c01, 0, 0xa5a5fc01},
     {"NegB", RJ_ARITH_ALU_NEG_B, 0x1f0, 0xadab0000, 0xb5ff7c01, 0, 0xa5a57c01},
     {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x76637c01, 0xb7bd0000, 0, 0xa5a57c01},
+    {"AbsB", RJ_ARITH_ALU_ABS_B, 0x1f0, 0xa5a53c00, 0xa5a5fc01, 0, 0xa5a5fc01},
     {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0x1f0,
      0xa6ec83ff, 0xfce20000, 0, 0x7ce2a5a5},
 };
