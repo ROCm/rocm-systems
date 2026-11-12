@@ -31,6 +31,37 @@ constexpr std::array kMixedOrderGenericFlatLoadObligations{
 
 } // namespace
 
+TEST(RaceDetector, CounterBoundsDoNotInterpretInstructionEncodings) {
+  using amdgpu::WaitCounterType;
+  const std::pair<WaitCounterType, int> cases[] = {
+      {WaitCounterType::VMCNT, 63},     {WaitCounterType::LGKMCNT, 15},
+      {WaitCounterType::EXPCNT, 7},     {WaitCounterType::VSCNT, 63},
+      {WaitCounterType::LOADCNT, 63},   {WaitCounterType::STORECNT, 63},
+      {WaitCounterType::DSCNT, 63},     {WaitCounterType::KMCNT, 31},
+      {WaitCounterType::TENSORCNT, 63}, {WaitCounterType::ASYNCCNT, 63},
+      {WaitCounterType::SAMPLECNT, 63},
+  };
+  for (const auto [counter, bound] : cases) {
+    SCOPED_TRACE(static_cast<unsigned>(counter));
+    RaceDetector detector(
+        1, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+        1024);
+    auto &wave = detector.getWaveRaceState(0);
+    // Bypass admission to distinguish a numeric bound from an encoded no-wait
+    // field. The decoder, not this counter-progress API, interprets sentinels.
+    for (int i = 0; i <= bound; ++i)
+      wave.registerCounterEvent(testInstruction(i),
+                                CounterObligations{counter, MemoryOrderClass::VMEM});
+    wave.applyWaitCounter(counter, -1);
+    EXPECT_EQ(wave.getWaveMemoryEvents().size(), bound + 1);
+    wave.applyWaitCounter(counter, bound);
+    ASSERT_EQ(wave.getWaveMemoryEvents().size(), bound);
+    EXPECT_EQ(wave.getWaveMemoryEvents().front(), EventId{1});
+    wave.applyWaitCounter(counter, 0);
+    EXPECT_TRUE(wave.getWaveMemoryEvents().empty());
+  }
+}
+
 TEST(RaceDetector, MixedFlatLdsReadRequiresBothCounterWaits) {
   for (bool vmcnt_first : {false, true}) {
     SCOPED_TRACE(vmcnt_first ? "vmcnt first" : "lgkmcnt first");
