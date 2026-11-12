@@ -135,6 +135,10 @@ TEST(LdsTest, FourDwordTransfersClipAtWholeElements) {
       EXPECT_EQ(lds.read8(static_cast<uint32_t>(addrs[0]) + i), i < valid_bytes / 4 * 4 ? 0xAB : 0)
           << valid_bytes << ":" << i;
 
+    // An incomplete dword must read as zero even when its in-bounds bytes are nonzero.
+    for (uint32_t i = valid_bytes / 4 * 4; i < valid_bytes; ++i)
+      lds.write8(static_cast<uint32_t>(addrs[0]) + i, 0xD7);
+
     std::array<uint8_t, 16> dst;
     dst.fill(0xEE);
     lds.vector_load(addrs.data(), 1, 4, 4, dst.data());
