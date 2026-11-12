@@ -34,7 +34,7 @@ deviceLib:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_syncthreads_count:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [synchronization, P0]
   Unit_syncthreads_or:
     <<: *level_default
@@ -259,7 +259,7 @@ deviceLib:
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [types, P0]
   Unit_bf16_basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types, P0]
   Unit_bf16_conversion_to_integral_type:
     <<: *level_default

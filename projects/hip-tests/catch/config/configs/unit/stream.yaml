@@ -65,7 +65,7 @@ stream:
       reason: "AIRUNTIME-2744 - asan test disabled temporarily until PR #5287 is merged; needs to be re-triaged"
     tags: [memory]
   Unit_hipStreamAttachMemAsync_UseCase:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - disabled due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged"
@@ -185,7 +185,7 @@ stream:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamWaitValue_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - fails on amd_windows (gfx110X): REQUIRE(false) 'illegal memory access' in hipStreamValue.cc; corrupts the GPU queue so subsequent stream/event tests cascade with 0xc0000409 and the shard hits the 120min timeout. Disabled pending re-triage."
@@ -461,7 +461,7 @@ stream:
     <<: *level_default
     tags: [memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl, nvidia]
       reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because the variant is skipped; needs to be re-triaged on nvidia. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."

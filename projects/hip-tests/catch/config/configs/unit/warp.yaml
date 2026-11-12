@@ -25,7 +25,7 @@ warp:
     <<: *level_default
     tags: [deviceLib, intrinsic, shuffle]
   Unit_hipShflSync:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [deviceLib, intrinsic, shuffle]
   Unit_hipVoteSync_Any:
     <<: *level_default

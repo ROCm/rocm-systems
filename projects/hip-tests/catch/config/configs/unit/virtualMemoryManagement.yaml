@@ -103,7 +103,7 @@ virtualMemoryManagement:
   Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
     <<: *level_default
   Unit_hipMemCreate_ChkWithKerLaunch:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -131,7 +131,7 @@ virtualMemoryManagement:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_wsl) FAILs 1/1 variants."
   Unit_hipMemCreate_HostNuma_ChkDev2HstMemcpy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test; uses libnuma and unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX), so it is never built or run on native Windows."
@@ -257,7 +257,7 @@ virtualMemoryManagement:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipMemSetGetAccess_Capture: *level_default
   Unit_hipMemSetAccessHostDevice_hostalloc:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated (SWDEV-555665). gfx1201 (amd_windows) FAILs with {Unknown expression after the reported line} -> {Unknown expression after the reported line}; gfx1201 (amd_wsl) FAILs 1/1 variants."

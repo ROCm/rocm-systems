@@ -86,7 +86,7 @@ executionctx:
   Unit_hipExecutionCtxResourceSplit_Sanity:
     level: [*level_0, *level_default]
   Unit_hipExecutionCtxResourceSplit_By_Count_Sanity:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipExecutionCtxResourceSplit_Negative:
     <<: *level_default
   Unit_hipExecutionCtxResourceSplit_Functional:
@@ -105,13 +105,13 @@ executionctx:
   Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
     level: [*level_0, *level_default]
   Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipExecutionCtxSmAlignment_PropagatesThroughSplit:
     <<: *level_default
   Unit_hipExecutionCtxSmAlignment_GreenCtxPreservesAlignment:
     <<: *level_default
   Unit_hipDeviceGetExecutionCtx_Sanity:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipDeviceGetExecutionCtx_Consistent:
     <<: *level_default
   Unit_hipDeviceGetExecutionCtx_MultiDevice:
@@ -119,7 +119,7 @@ executionctx:
   Unit_hipDeviceGetExecutionCtx_GetDevice_RoundTrip:
     level: [*level_0, *level_default]
   Unit_hipDeviceGetExecutionCtx_GetId:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipDeviceGetExecutionCtx_Negative:
     <<: *level_default
   Unit_hipDeviceGetExecutionCtx_KernelLaunch_Functional:

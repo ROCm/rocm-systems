@@ -1,7 +1,7 @@
 ---
 memory:
   Unit_hipMemcpy2DToArray_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1209,7 +1209,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipGetProcAddress_MemoryApisMallocFree:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [P1]
   Unit_hipGetProcAddress_MemoryApisRegisterUnReg:
     <<: *level_default
@@ -1337,7 +1337,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipDeviceGetMemPool_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipDeviceGetMemPool_Functional:
     <<: *level_default
@@ -1920,7 +1920,7 @@ memory:
     <<: *level_default
     tags: [P1]
   Unit_hipMalloc3D_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - hipMemGetInfo doesn't report updated memory immediately after hipFree under ASAN; needs to be re-triaged on asan."

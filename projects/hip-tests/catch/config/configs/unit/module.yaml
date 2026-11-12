@@ -67,7 +67,7 @@ module:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [launch]
   Unit_hipModuleLoadDataEx_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
@@ -346,7 +346,7 @@ module:
       reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-167; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [resource, image]
   Unit_hipFuncSetAttribute_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [function, P0]
   Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr:
     <<: *level_default

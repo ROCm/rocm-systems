@@ -361,7 +361,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddMemcpyNode1D_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [node, P0]
   Unit_hipGraphAddMemcpyNode1D_Negative_Parameters:
     <<: *level_default
@@ -511,7 +511,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphInstantiate_functionalScenarios:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphExecUpdate_Negative_Basic:
     <<: *level_default
@@ -1154,7 +1154,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]

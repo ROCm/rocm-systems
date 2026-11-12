@@ -82,14 +82,15 @@ math:
   Unit_Device_atan2_atan2f_Negative_RTC:
     <<: *level_default
     tags: [deviceLib]
-  Unit_Device_sincos_Accuracy_Positive_float: *level_default
+  Unit_Device_sincos_Accuracy_Positive_float:
+    level: [*level_0, *level_default]
   Unit_Device_sincos_Accuracy_Positive_double: *level_default
   Unit_Device_sincos_sincosf_Negative_RTC:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device_sincospi_Accuracy_Positive_float: *level_default
   Unit_Device_sincospi_Accuracy_Positive_double:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux): double special-value ULP miss (sincospi). gfx1201 (amd_wsl) FAIL: false -> false. Also needs to be re-triaged on nvidia_linux."
@@ -218,7 +219,7 @@ math:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device_remquo_Accuracy_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_linux, nvidia_linux, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1030 (amd_linux): both sections 0-ULP miss (remquo special values). gfx1201 (amd_wsl) FAIL: ULP accuracy, result not within 0 ULPs (2/2 variants). Also needs to be re-triaged on nvidia_linux."
@@ -544,7 +545,7 @@ math:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device_ilogbf_Accuracy_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test; unit/CMakeLists.txt gates add_subdirectory(math) under if(UNIX), so it is never built or run on native Windows."

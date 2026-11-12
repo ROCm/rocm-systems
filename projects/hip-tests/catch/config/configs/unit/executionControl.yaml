@@ -1,7 +1,7 @@
 ---
 executionControl:
   Unit_hipFuncGetAttributes_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_linux, amd_windows, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated; relates to defect EXSWHTEC-242. gfx1030 (amd_linux) FAIL 3/3: attr.constSizeBytes != kConstSizeBytes. gfx1201 (amd_windows) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128. gfx1201 (amd_wsl) FAIL: attr.constSizeBytes == kConstSizeBytes -> 18446744073709551615 (0xffffffffffffffff) == 128."
@@ -103,7 +103,7 @@ executionControl:
     <<: *level_default
     tags: [attributes, kernel, P1]
   Unit_hipFuncSetSharedMemConfig_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     unsupported:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - not built on amd_wsl: hipFuncSetSharedMemConfig tests are compiled only on non-AMD (NVIDIA) platforms per the HIP_PLATFORM gate in unit/executionControl/CMakeLists.txt."

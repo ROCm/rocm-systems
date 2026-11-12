@@ -40,7 +40,7 @@ event:
     <<: *level_default
     tags: [synchronization]
   Unit_hipEventRecord:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FLAKY: passed then failed within 10 runs."
