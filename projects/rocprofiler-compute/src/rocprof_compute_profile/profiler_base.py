@@ -360,7 +360,6 @@ class RocProfCompute_Base:
             encoding="utf-8",
         ) as f:
             args_dict = dict(vars(self.__args))
-            args_dict["config_dir"] = str(args_dict["config_dir"])
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
             yaml.dump(args_dict, f)
