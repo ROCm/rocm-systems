@@ -5,6 +5,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -300,11 +301,6 @@ std::optional<AqlPacketDiagnostic> validate_cluster_shape(const DispatchEntry &d
   return std::nullopt;
 }
 
-uint32_t aligned_lds_bytes_per_workgroup(const DispatchEntry &entry) {
-  // Match ComputeUnitCore::allocate_lds()/can_accept_workgroup() granularity for all dispatches.
-  return util::align_up(entry.group_segment_fixed_size, 256u);
-}
-
 bool any_active_wavefronts(const std::vector<ComputeUnitCore *> &cus) {
   return std::ranges::any_of(cus, [](const auto *cu) { return cu->has_active_wfs(); });
 }
@@ -314,7 +310,6 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
                              std::vector<PlannedWorkgroup> &plan, size_t &planned_next_cu) {
   plan.clear();
   uint32_t cluster_size = entry.cluster_size();
-  const uint32_t lds_bytes_per_wg = aligned_lds_bytes_per_workgroup(entry);
   constexpr auto kU32Max = std::numeric_limits<uint32_t>::max();
   std::vector<uint32_t> planned_per_cu(cus.size(), 0);
   size_t last_cu_idx = next_cu;
@@ -330,7 +325,8 @@ bool plan_cluster_workgroups(const DispatchEntry &entry, uint32_t cluster_base_l
 
       uint32_t reserved_wgs = planned_per_cu[cu_idx] + 1;
       uint64_t reserved_wfs = static_cast<uint64_t>(entry.wfs_per_workgroup) * reserved_wgs;
-      uint64_t reserved_lds = static_cast<uint64_t>(lds_bytes_per_wg) * reserved_wgs;
+      uint64_t reserved_lds =
+          lds_allocation_bytes(cu->arch(), entry.group_segment_fixed_size) * reserved_wgs;
       if (reserved_wfs > kU32Max || reserved_lds > kU32Max)
         continue;
       if (!cu->can_accept_workgroup(static_cast<uint32_t>(reserved_wfs),
@@ -634,36 +630,19 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   uint32_t sys_idx = pkt.num_user_sgprs;
   const rj_code_arch_t arch = cu->arch();
   const auto properties = isa_properties(arch);
-  {
-    if (!properties.uses_ttmp_workgroup_ids) {
-      if (pkt.enable_wg_id_x)
-        cu->write_sgpr(sbase + sys_idx++, wg_id_x);
-      if (pkt.enable_wg_id_y)
-        cu->write_sgpr(sbase + sys_idx++, wg_id_y);
-      if (pkt.enable_wg_id_z)
-        cu->write_sgpr(sbase + sys_idx++, wg_id_z);
-    }
-    if (pkt.enable_wg_info) {
-      // CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
-      // With ordered append disabled, the term is the wave index. CDNA3/4
-      // reserve that field as zero. CDNA1-4 and RDNA1-3.5 have first-wave
-      // [31]; CDNA3/4 and RDNA2-3.5 also carry wave ID [24:20]. The CDNA3/4
-      // manuals list a 34-bit concatenation: [24:20] assumes their 14-bit
-      // zero field is the 12-bit ordered-append slot, matching RDNA2/3.
-      // That position is not hardware-qualified on gfx942/gfx950. RDNA4
-      // supplies its wave ID in TTMP8 and leaves those SGPR bits clear.
-      uint32_t info = pkt.wfs_per_workgroup;
-      if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
-        info |= wf_index_in_wg << 6;
-      if (!properties.uses_ttmp_workgroup_ids) {
-        info |= wf_index_in_wg == 0 ? 1u << 31 : 0;
-        if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-            arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-            arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-          info |= wf_index_in_wg << 20;
-      }
-      cu->write_sgpr(sbase + sys_idx++, info);
-    }
+  if (!properties.uses_ttmp_workgroup_ids) {
+    if (pkt.enable_wg_id_x)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
+    if (pkt.enable_wg_id_y)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
+    if (pkt.enable_wg_id_z)
+      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+  }
+  if (pkt.enable_wg_info) {
+    cu->write_sgpr(sbase + sys_idx,
+                   ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup, wf_index_in_wg,
+                                                        wf_index_in_wg));
+    ++sys_idx;
   }
   if (properties.uses_ttmp_workgroup_ids) {
     // The ordinary TTMP ABI uses grid coordinates. Targets advertising the
@@ -843,6 +822,8 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                                                              : scratch_outcome;
 
     wf->set_scratch_base(wave_scratch);
+    if (cu->arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+      wf->set_status_raw(wf->status_raw() | (1u << 29)); // SCRATCH_EN
     wf->set_scratch_lane_size(pkt.private_segment_fixed_size);
     // CDNA compiler-generated functions use s32 as the private stack pointer
     // and s33 as its current frame value for explicit scratch SADDR operands.
@@ -2511,9 +2492,9 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       Wavefront *wf = wg_wavefronts[w];
       wf->set_accum_vgpr_base(entry.accum_vgpr_base);
       wf->set_lds_base(lds_base);
-      wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
+      wf->set_lds_size(lds_workgroup_window_bytes(cu->arch(), entry.group_segment_fixed_size));
       wf->set_lds(placement.lds);
-      wf->set_dispatch_id(entry.dispatch_id);
+      wf->set_workgroup_dispatch(entry.dispatch_id, entry.wfs_per_workgroup);
       wf->set_queue_packet_id(entry.queue_packet_id);
       wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
@@ -3335,6 +3316,8 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.wgp_mode = RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE);
   dp.group_segment_fixed_size =
       RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE) * 512;
+  if (arch_is_rdna(arch) && dp.group_segment_fixed_size > arch_lds_bytes(arch))
+    return emit_error.emit() << "PM4 launch exceeds the workgroup LDS limit";
   for (uint32_t i = 0; i < 3; ++i)
     if (!(regs[kPm4ComputeNumThreadX + i] & 0xffff) ||
         (regs[kPm4ComputeNumThreadX + i] & 0xffff) > 1024)
@@ -4243,13 +4226,12 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       lds_capacity =
           std::max<uint64_t>(lds_capacity, static_cast<uint64_t>(cu->config().lds_size_kb) * 1024u);
   }
-  const uint64_t aligned_lds =
-      (static_cast<uint64_t>(dp.group_segment_fixed_size) + 255u) & ~uint64_t{255u};
+  const uint64_t aligned_lds = lds_allocation_bytes(arch, dp.group_segment_fixed_size);
   if (dp.wgp_mode && lds_capacity == 0) {
     return {.status = AqlAdmissionStatus::Unsupported,
             .diagnostic = AqlPacketDiagnostic::WgpTopologyUnavailable};
   }
-  if (aligned_lds > lds_capacity) {
+  if (aligned_lds > lds_capacity || (arch_is_rdna(arch) && aligned_lds > arch_lds_bytes(arch))) {
     return {.status = AqlAdmissionStatus::Malformed,
             .diagnostic = AqlPacketDiagnostic::LdsCapacityExceeded};
   }

@@ -88,7 +88,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       if (!op)
         continue;
       if (auto ref = op->to_register_ref())
-        effects.defs.expand(wave_sized_register(*op, *ref, wave_size));
+        effects.defs.expand(inst.wave_sized_destination(*op, *ref, wave_size));
     }
   }
   inst.implicit_defs(effects.defs);

@@ -3174,6 +3174,35 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
 }
 
+TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
+  struct Case {
+    std::array<uint32_t, 2> words;
+    std::string_view assembly;
+  };
+  const Case cases[] = {
+      {{0xdd089fff, 0x00660201}, "global_atomic_add v1, v2, flat_scratch offset:-1"},
+      {{0xdd089fff, 0x006a0201}, "global_atomic_add v1, v2, vcc offset:-1"},
+      {{0xe0503000, 0x00010100}, "buffer_load_dword v1, v[0:1], s[4:7], s0 idxen offen"},
+      {{0xe9783000, 0x00010100},
+       "tbuffer_load_format_x v1, v[0:1], s[4:7], s0 format:47 idxen offen"},
+      {{0xe104c000, 0x03010200}, "buffer_atomic_cmpswap v[2:3], off, s[4:7], s3 glc scc"},
+      {{0xe9786000, 0x01610100},
+       "tbuffer_load_format_x v1, v0, s[4:7], s1 format:47 idxen glc slc scc"},
+      {{0xdc704000, 0x00040200}, "scratch_store_dword off, v2, s4"},
+      {{0xde508000, 0x027f0002}, "global_load_dword v2, v[2:3], off scc"},
+      {{0xdc50a000, 0x007f0002}, "global_load_dword v[2:3], off lds"},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.assembly);
+    auto inst = decoder->decode_window(test.words);
+    ASSERT_TRUE(inst.succeeded());
+    EXPECT_EQ(inst.value()->disassemble(), test.assembly);
+  }
+}
+
 TEST(Cdna3DecodeTest, DsDisassemblyPreservesEncodedOffsets) {
   struct Case {
     uint32_t words[2];

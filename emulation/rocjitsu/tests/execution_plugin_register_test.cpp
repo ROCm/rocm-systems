@@ -45,6 +45,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -125,6 +126,51 @@ static_assert(amdgpu::mma_f32_native_width_supported(16, 4));
 static_assert(amdgpu::mma_f32_native_width_supported(16, 8));
 static_assert(amdgpu::mma_f32_native_width_supported(16, 16));
 static_assert(!amdgpu::mma_f32_native_width_supported(16, 32));
+
+TEST(ExecutionPluginTest, Gfx11TfeRequiresTheWholeDestinationBeforeReadingAddressOperands) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    Wave32PluginFixture fixture(arch);
+    auto *observer = fixture.attach_ordering_plugin();
+    auto *wave = fixture.cu->dispatch_wf(0, 0, 104, 32, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    fixture.cu->write_sgpr(wave->sgpr_alloc().base + 3, 0x20014000);
+    auto decoder = Decoder::create(arch);
+    for (bool typed : {false, true}) {
+      for (uint8_t first : {30, 31}) {
+        SCOPED_TRACE(testing::Message() << arch << " typed " << typed << " vdata " << +first);
+        const auto words =
+            typed ? rdna3::build_mtbuf(rdna3::kTbufferLoadFormatXMtbuf, {.format = 20,
+                                                                         .vaddr = 4,
+                                                                         .vdata = first,
+                                                                         .tfe = 1,
+                                                                         .offen = 1,
+                                                                         .soffset = 12})
+                  : rdna3::build_mubuf(
+                        rdna3::kBufferLoadB32Mubuf,
+                        {.vaddr = 4, .vdata = first, .tfe = 1, .offen = 1, .soffset = 12});
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        observer->events.clear();
+        ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        std::set<uint32_t> scalar_reads, vector_reads;
+        for (const auto &event : observer->events) {
+          if (event.kind == HookEvent::READ_SGPR)
+            scalar_reads.insert(event.physical_reg - wave->sgpr_alloc().base);
+          if (event.kind == HookEvent::READ_VGPR)
+            vector_reads.insert(event.physical_reg - wave->vgpr_alloc().base);
+        }
+        if (first == 30) {
+          EXPECT_EQ(vector_reads, std::set<uint32_t>{4});
+          EXPECT_EQ(scalar_reads, (std::set<uint32_t>{0, 1, 2, 3, 12}));
+        } else {
+          EXPECT_TRUE(vector_reads.empty());
+          EXPECT_TRUE(scalar_reads.empty());
+        }
+      }
+    }
+  }
+}
 
 TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
   if constexpr (!util::has_stdx_simd) {

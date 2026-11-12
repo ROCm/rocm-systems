@@ -274,6 +274,11 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
+  void set_workgroup_dispatch(uint32_t id, uint32_t wave_count) {
+    set_dispatch_id(id);
+    set_status_raw((status_raw() & ~kStatusInTgMask) | (wave_count > 1 ? kStatusInTgMask : 0u));
+  }
+
   /// @brief Return the wrapped AQL ring slot associated with this wave.
   /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
   /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
@@ -391,6 +396,12 @@ public:
   /// @brief Return the aligned LDS allocation size for this workgroup.
   uint32_t lds_size() const { return lds_size_; }
 
+  /// Whether a complete access lies inside this workgroup's LDS allocation.
+  bool contains_lds_range(uint64_t address, uint32_t bytes) const {
+    const uint64_t end = uint64_t{lds_base_} + lds_size_;
+    return address >= lds_base_ && address <= end && bytes <= end - address;
+  }
+
   /// @brief Set the aligned LDS allocation size for this workgroup.
   void set_lds_size(uint32_t size) { lds_size_ = size; }
 
@@ -462,6 +473,11 @@ public:
   /// Active lanes for memory planning, including GFX10 destination suppression.
   uint64_t memory_exec(const Instruction &inst) const;
   void observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const;
+
+  /// Resolve one RDNA2 DS input word against the logical VGPR allocation.
+  [[nodiscard]] uint32_t ds_source_vgpr(uint32_t physical_reg) const {
+    return vgpr_alloc_.contains(physical_reg) ? physical_reg : vgpr_alloc_.base;
+  }
 
   /// @brief Return the instruction-facing compute-unit service view.
   /// @returns Narrow view over the owning compute unit.
@@ -632,8 +648,11 @@ public:
   uint64_t shared_aperture_base() const { return shared_aperture_base_; }
   uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
   uint64_t private_aperture_base() const { return private_aperture_base_; }
+  bool flat_pointer32() const { return flat_pointer32_; }
   uint64_t private_aperture_limit() const { return private_aperture_limit_; }
-  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl) {
+  bool use_wave_apertures() const { return flat_pointer32_ || aperture_override_; }
+  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl, bool override_launch) {
+    aperture_override_ = override_launch;
     shared_aperture_base_ = sb;
     shared_aperture_limit_ = sl;
     private_aperture_base_ = pb;
@@ -962,6 +981,12 @@ public:
   /// @brief Read the trap status register (TRAPSTS / EXCP flags).
   uint32_t trapsts() const { return trapsts_; }
 
+  /// Completing a faulting memory response latches MEM_VIOL independently of trap delivery.
+  void latch_memory_violation() { trapsts_ |= 1u << 8; }
+  /// A scratch B64 atomic raises an unmaskable aperture violation at VMEM completion.
+  void request_unmaskable_memory_trap() { pending_memory_trap_ = true; }
+  bool memory_trap_pending() const { return pending_memory_trap_; }
+
   /// @brief Write the trap status register.
   void set_trapsts(uint32_t val) { trapsts_ = val; }
 
@@ -1131,9 +1156,8 @@ public:
 
   void halt(CpCompletionNotice notice = CpCompletionNotice::Send);
 
-  /// @brief End program execution. If all memory ops are drained, halts
-  /// immediately. Otherwise, transitions to ENDING and lets the memory
-  /// pipeline drain remaining ops before halting.
+  /// End program execution. Halt immediately if memory has drained, or enter
+  /// ENDING until the memory pipeline completes the outstanding work.
   void end() {
     if (wait_counters_.empty())
       halt();
@@ -1198,6 +1222,8 @@ public:
     shared_aperture_limit_ = 0;
     private_aperture_base_ = 0;
     private_aperture_limit_ = 0;
+    flat_pointer32_ = false;
+    aperture_override_ = false;
     named_barrier_id_ = 0;
     barrier_complete_.fill(false);
     waiting_barrier_bit_ = kNoBarrierWait;
@@ -1216,6 +1242,7 @@ public:
     for (auto &t : ttmp_)
       t = 0;
     trapsts_ = 0;
+    pending_memory_trap_ = false;
     pending_alu_causes_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
@@ -1345,6 +1372,8 @@ private:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
+  bool flat_pointer32_ = false;
+  bool aperture_override_ = false;
   static constexpr uint8_t kNoBarrierWait = 0xff;
   uint32_t named_barrier_id_ = 0; ///< Currently joined named barrier.
   /// Completion bits: named, workgroup, workgroup trap, cluster, cluster trap.
@@ -1367,8 +1396,9 @@ private:
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
   WaitCounters wait_counters_; ///< Outstanding memory operation counters.
 
-  uint32_t ttmp_[16] = {};                     ///< Trap temporary registers (TTMP0-15).
-  uint32_t trapsts_ = 0;                       ///< Trap status register (EXCP flags).
+  uint32_t ttmp_[16] = {}; ///< Trap temporary registers (TTMP0-15).
+  uint32_t trapsts_ = 0;   ///< Trap status register (EXCP flags).
+  bool pending_memory_trap_ = false;
   uint32_t pending_alu_causes_ = 0;            ///< EXCP causes from the current instruction.
   uint32_t sleep_cycles_ = 0;                  ///< Cycles left on an in-flight S_SLEEP.
   bool in_trap_handler_ = false;               ///< Executing the configured trap-handler shader.
