@@ -453,8 +453,12 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                                 HsaAmdClockCounters {
                                     gpu_clock_counter: counters.gpu,
                                     cpu_clock_counter: counters.host,
-                                    system_clock_counter: counters.system,
-                                    system_clock_frequency: counters.system_frequency,
+                                    system_clock_counter: counters
+                                        .system
+                                        .map_or(0, |sample| sample.ticks),
+                                    system_clock_frequency: counters
+                                        .system
+                                        .map_or(0, |sample| sample.info.frequency_hz),
                                 },
                             ),
                             Err(error) => map_error(error),

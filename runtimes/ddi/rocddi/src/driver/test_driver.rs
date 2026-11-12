@@ -641,9 +641,11 @@ impl super::GpuClockOperations for TestDriver {
         Ok(crate::device::gpu::profiling::ClockCounters {
             gpu: 17,
             host: 29,
-            system: 41,
-            system_frequency: 1_000_000,
-            gpu_frequency: 25_000_000,
+            system: None,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: 25_000_000,
+                counter_bit_count: 64,
+            },
         })
     }
 }

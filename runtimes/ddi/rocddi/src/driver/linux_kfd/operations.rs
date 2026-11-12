@@ -247,9 +247,18 @@ impl GpuClockOperations for LinuxKfdDriver {
         Ok(ClockCounters {
             gpu: counters.gpu_clock_counter,
             host: counters.cpu_clock_counter,
-            system: counters.system_clock_counter,
-            system_frequency: counters.system_clock_frequency,
-            gpu_frequency: device.gpu_counter_frequency_hz,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: device.gpu_counter_frequency_hz,
+                counter_bit_count: 0,
+            },
+            system: Some(crate::device::gpu::profiling::SystemClockSample {
+                domain: crate::device::gpu::profiling::SystemClockDomain::BootTime,
+                ticks: counters.system_clock_counter,
+                info: crate::host::clock::ClockInfo {
+                    frequency_hz: counters.system_clock_frequency,
+                    counter_bit_count: 64,
+                },
+            }),
         })
     }
 }

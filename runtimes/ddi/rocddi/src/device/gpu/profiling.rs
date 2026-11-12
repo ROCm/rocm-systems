@@ -12,20 +12,72 @@ use crate::driver::{self, Driver, PcSamplingResource};
 use crate::memory::storage::{Owned, Shared};
 use std::num::NonZeroU32;
 
-/// Correlated device and system clocks returned by the native driver.
+/// Optional native system-clock domain, separate from the host profiling clock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SystemClockDomain {
+    /// Boot time including suspended intervals; Linux KFD's auxiliary sample.
+    BootTime,
+}
+
+/// Native auxiliary sample with an explicitly identified domain and rate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SystemClockSample {
+    /// Meaning of the native counter; frequency equality does not equate epochs.
+    pub domain: SystemClockDomain,
+    /// Counter value in the stated domain.
+    pub ticks: u64,
+    /// Counter rate and known width.
+    pub info: crate::host::clock::ClockInfo,
+}
+
+/// One fresh correlation in the originating activated device's clock domain.
+///
+/// The primary host sample must use exactly [`crate::host::clock`]'s epoch and
+/// units; providers convert their native host representation before publication.
+/// The device source is scoped to the originating owner, never inferred from
+/// equal frequencies. These samples retain no calibration across suspend,
+/// reset, loss, or source restart. Deadlines use `std::time::Instant`, not these
+/// profiling counters. Sampling itself establishes no completion or ordering.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClockCounters {
-    /// GPU timestamp counter.
+    /// GPU timestamp, in the same native domain as this owner's queue timestamps.
     pub gpu: u64,
-    /// Host timestamp counter sampled by the native driver.
+    /// Device counter rate and width (zero width means unknown).
+    pub gpu_info: crate::host::clock::ClockInfo,
+    /// Normalized host profiling clock sample taken with the device counter.
     pub host: u64,
-    /// System timestamp counter sampled with the GPU counter.
-    pub system: u64,
-    /// System timestamp frequency in hertz.
-    pub system_frequency: u64,
-    /// GPU timestamp frequency in hertz reported by the native device.
-    pub gpu_frequency: u64,
+    /// Optional auxiliary native system sample. Absence is not a zero counter.
+    pub system: Option<SystemClockSample>,
+}
+
+impl ClockCounters {
+    /// Converts a device tick from this uninterrupted epoch to host profiling
+    /// units. For a known width, the caller must establish that the tick is
+    /// less than half a counter period from this sample; this helper cannot
+    /// determine its age. Unknown widths do not guess wrap; ties are rejected.
+    ///
+    /// # Errors
+    /// Reports invalid or unknown rates, ambiguous intervals, and overflow.
+    pub fn to_host(self, tick: u64) -> Result<u64, Error> {
+        let delta = self.gpu_info.tick_delta(self.gpu, tick)?;
+        let magnitude = u64::try_from(delta.unsigned_abs()).map_err(|_| Error::Operation {
+            kind: crate::ErrorKind::InvalidData,
+            detail: "device clock interval overflow",
+        })?;
+        let scaled = self
+            .gpu_info
+            .scale_interval(magnitude, crate::host::clock::info().frequency_hz)?;
+        (if delta >= 0 {
+            self.host.checked_add(scaled)
+        } else {
+            self.host.checked_sub(scaled)
+        })
+        .ok_or(Error::Operation {
+            kind: crate::ErrorKind::InvalidData,
+            detail: "host clock correlation overflow",
+        })
+    }
 }
 
 /// Scalar progress reported by an SPM destination update, including on error.
@@ -290,5 +342,36 @@ impl GpuDevice<'_> {
         // SAFETY: The public caller retains both potentially reachable
         // destinations until a successful unset or conclusive teardown.
         unsafe { self.driver.spm_set_destination(size, timeout, destination) }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod clock_tests {
+    use super::*;
+
+    #[test]
+    fn correlation_uses_primary_host_domain_without_an_auxiliary_clock() {
+        let sample = ClockCounters {
+            gpu: 250,
+            host: 1000,
+            system: None,
+            gpu_info: crate::host::clock::ClockInfo {
+                frequency_hz: 100_000_000,
+                counter_bit_count: 8,
+            },
+        };
+        assert_eq!(sample.to_host(3).unwrap(), 1090);
+        assert_eq!(sample.to_host(240).unwrap(), 900);
+        assert!(sample.to_host(122).is_err());
+        assert!(
+            ClockCounters {
+                host: u64::MAX,
+                ..sample
+            }
+            .to_host(3)
+            .is_err()
+        );
+        assert!(ClockCounters { host: 0, ..sample }.to_host(240).is_err());
     }
 }

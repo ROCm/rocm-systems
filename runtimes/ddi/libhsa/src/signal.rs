@@ -45,7 +45,6 @@ use crate::api::signal::wait::*;
 #[cfg(test)]
 use crate::api::signal::{atomic::*, core::*};
 use ipc::{ImportedIpcSignal, OwnedIpcSignal};
-pub(crate) use wait::set_system_frequency;
 #[cfg(test)]
 use wait::*;
 

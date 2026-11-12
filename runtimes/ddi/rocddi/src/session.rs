@@ -1516,7 +1516,8 @@ mod portable_tests {
         let gpu = device.gpu().unwrap();
         let clocks = gpu.clock_counters().unwrap();
         assert_eq!(clocks.gpu, 17);
-        assert_eq!(clocks.system_frequency, 1_000_000);
+        assert!(clocks.system.is_none());
+        assert_eq!(clocks.gpu_info.frequency_hz, 25_000_000);
         assert_eq!(
             gpu.pc_sampling_configurations(
                 crate::device::gpu::profiling::PcSamplingConfigurationSet::Supported
