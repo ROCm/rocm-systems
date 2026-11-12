@@ -407,3 +407,35 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+## Fault injection
+
+The independent offline fault-injection library can remove a qualified complete
+barrier from an AMDGPU code object. It uses Instrumentor's instruction-replacement
+path and does not require the ConSan compiler, runtime, or analyzer. See
+[Fault injection](fault-injection.md) for its architecture, library interface,
+current features, target/wave coverage, and limitations.
+
+Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
+then execution/capture → analyze. Do not reuse pristine prepared artifacts or
+capture bindings. Drop uses branch-to-NOP trampolines, so emitted ELF file
+offsets and CFG block boundaries can differ from the pristine image. Preparation
+must discover the mutant's entries and instructions. Preparation may reject a
+target or program profile that the mutation library admits.
+
+Fresh preparation currently requires a **single-kernel code object** and rejects
+any remaining `s_barrier*` instruction in the analyzed scope. A sibling-preserving
+multi-kernel mutant or a Drop that leaves another barrier in that scope therefore
+cannot use this path. The mutant must also satisfy ConSan's other target, entry,
+instruction, native-LDS and resource restrictions, enforced by
+[input qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/input.cpp) and
+the [LDS classifier](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp).
+Acyclic trampoline returns can be admitted, but true CFG cycles remain rejected
+and native LDS access PCs must increase along every executed path. Mutation
+admission and detector admission remain independent decisions.
+
+Mutation success reports emission after input qualification. It establishes
+neither execution nor detector qualification: removing a barrier does not prove
+that a race occurs, that a particular execution observes it, or that ConSan
+reports it. Qualify those stages separately using the normal capture and analysis
+workflow.
