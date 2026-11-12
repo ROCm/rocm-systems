@@ -407,9 +407,11 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
           std::string::npos);
       EXPECT_NE(report.find("pending counters"), std::string::npos);
     }
-    EXPECT_EQ(report.find("Waves 1 and 0 have not synchronized this access.\n") !=
-                  std::string::npos,
-              test.owner == 1);
+    EXPECT_EQ(
+        report.find(
+            "The detector observed no synchronization between waves 1 and 0 for this access.\n") !=
+            std::string::npos,
+        test.owner == 1);
     EXPECT_EQ(report.find("lane -1"), std::string::npos);
   }
 }
@@ -489,7 +491,7 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
             "  Current access: write at PC 0x200.\n"
             "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
             "  Wait requirements satisfied for this operation in wave 1.\n"
-            "  Waves 1 and 0 have not synchronized this access.\n");
+            "  The detector observed no synchronization between waves 1 and 0 for this access.\n");
 }
 
 TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {

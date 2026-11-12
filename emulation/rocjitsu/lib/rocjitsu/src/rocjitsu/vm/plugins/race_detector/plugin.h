@@ -57,7 +57,7 @@ private:
 };
 
 /// @brief Return the memory instruction recorded as the exact conflict.
-/// @brief Returns failure if the detector no longer holds the conflicting event.
+/// Returns failure if the detector no longer holds the conflicting event.
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
 inline constexpr size_t kTraceHistorySize = 256;
@@ -90,7 +90,7 @@ util::FailureOr<std::string> formatTrace(
 
 /// @brief Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and
-/// synchronization state, with counter names for `arch`.
+/// synchronization observed by the detector, with counter names for `arch`.
 /// @throws std::out_of_range if `events` no longer holds the conflicting event.
 /// @throws std::invalid_argument for an architecture without a wait-counter model.
 /// @throws std::logic_error if the event is already retired.
