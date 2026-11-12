@@ -397,9 +397,9 @@ class Bench_base(ABC):
     # Benchmarking kernel methods
     # -----------------------------------------------------------------------------
 
-    # Device-memory bandwidth benchmark. Defaults keep every HBM architecture
-    # on the HBM_bw entry point and the HBM test key. gfx1201 passes DRAM_bw
-    # and the VRAM label, and registers the result under the VRAM test key.
+    # Device-memory bandwidth benchmark. The defaults are the HBM_bw kernel and
+    # HBM label that MI and gfx1250 use. gfx1201 passes the DRAM_bw kernel and
+    # the VRAM label.
     def hbm_bw_benchmark(
         self, device: int, kernel_name: str = "HBM_bw", label: str = "HBM"
     ) -> float:

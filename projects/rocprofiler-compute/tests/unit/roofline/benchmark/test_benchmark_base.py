@@ -21,28 +21,19 @@ from unittest import mock
 import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
-import roofline.benchmark.gfx12.benchmark_gfx12_base as benchmark_gfx12_base
+import roofline.benchmark.gfx12.benchmark_gfx1201 as benchmark_gfx1201
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
-from roofline.benchmark.gfx12.benchmark_gfx12_base import (
-    CACHE_ELEMENT_BYTES,
-    ResidentReadRoof,
-    dram_pin_bandwidth_gbps,
-    percent_of_ceiling,
-    pipe_bandwidth_gbps,
-    resident_stream_plan,
-    shader_clock_hz,
-)
 from roofline.benchmark.gfx12.benchmark_gfx1201 import (
+    CACHE_ELEMENT_BYTES,
     CACHE_LOADS_IN_FLIGHT,
     CACHE_WORKGROUPS_PER_CU,
     DRAM_BUS_BITS,
     DRAM_GBPS_PER_PIN,
     GL0_CAPACITY_BYTES,
-    GL0_INSTANCES,
+    GL0_PER_MULTIPROCESSOR,
     GL0_READ_BYTES_PER_CLOCK,
     GL2_BANKS,
-    GL2_CAPACITY_BYTES,
     GL2_HIT_RETURN_BYTES_PER_CLOCK,
     INFINITY_CACHE_BYTES,
     L0_LOADS_IN_FLIGHT,
@@ -54,6 +45,12 @@ from roofline.benchmark.gfx12.benchmark_gfx1201 import (
     L2_ROOF,
     L2_WORKING_SET_BYTES,
     MALL_WORKING_SET_DIVISOR,
+    ResidentReadRoof,
+    dram_pin_bandwidth_gbps,
+    percent_of_ceiling,
+    pipe_bandwidth_gbps,
+    resident_stream_plan,
+    shader_clock_hz,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 
@@ -282,12 +279,13 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
         assert bench.tests[level].keywords == {"label": level, "roof": roof}
     assert L0_ROOF == ResidentReadRoof(
         L0_WORKING_SET_BYTES,
-        GL0_INSTANCES,
+        GL0_PER_MULTIPROCESSOR,
         GL0_READ_BYTES_PER_CLOCK,
         "GL0 read return",
         L0_WORKGROUPS_PER_CU,
         L0_LOADS_IN_FLIGHT,
         "cache_l0_bw",
+        instances_per_multiprocessor=True,
     )
     for roof, working_set in (
         (L1_ROOF, L1_WORKING_SET_BYTES),
@@ -314,7 +312,8 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
 
     assert L0_WORKING_SET_BYTES <= GL0_CAPACITY_BYTES
     assert GL0_CAPACITY_BYTES < L1_WORKING_SET_BYTES < L2_WORKING_SET_BYTES
-    assert L2_WORKING_SET_BYTES < GL2_CAPACITY_BYTES
+    # 6 MB is the smallest Navi 48 GL2.
+    assert L2_WORKING_SET_BYTES < 6 * 1024 * 1024
     for working_set in (
         L0_WORKING_SET_BYTES,
         L1_WORKING_SET_BYTES,
@@ -326,9 +325,10 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
         assert element_count & (element_count - 1) == 0
 
     # 2.97 GHz, the boost the cache spec comparison used. Decimal GB/s.
-    assert pipe_bandwidth_gbps(GL0_INSTANCES, GL0_READ_BYTES_PER_CLOCK, 2.97e9) == (
-        pytest.approx(24330.24)
-    )
+    # 32 multiprocessors are 64 CUs, each with one GL0.
+    assert pipe_bandwidth_gbps(
+        GL0_PER_MULTIPROCESSOR * 32, GL0_READ_BYTES_PER_CLOCK, 2.97e9
+    ) == pytest.approx(24330.24)
     assert pipe_bandwidth_gbps(
         GL2_BANKS, GL2_HIT_RETURN_BYTES_PER_CLOCK, 2.97e9
     ) == pytest.approx(12165.12)
@@ -426,11 +426,9 @@ def test_device_memory_benchmark_defaults_to_the_hbm_kernel_and_label(
 
 
 def test_resident_stream_plan_sizes_whole_grid_steps_and_the_pass_count():
-    """HIP reports 28 multiprocessors on an RX 9070, so one grid step is 112
-    workgroups x 256 threads x 16 unrolled 16-byte loads, 7,340,032 bytes. The
-    32 MiB half of the Infinity Cache holds four steps, 29,360,128 bytes, which
-    takes 1,170 passes to reach 34,351,349,760 bytes: the figures the RX 9070
-    benchmark log reports."""
+    """With 28 multiprocessors, one grid step is 112 workgroups x 256 threads x
+    16 unrolled 16-byte loads, 7,340,032 bytes. A 32 MiB set holds four steps,
+    29,360,128 bytes, which takes 1,170 passes to reach 34,351,349,760 bytes."""
     step = 7_340_032
 
     workgroups, steps, buffer_bytes, passes, total = resident_stream_plan(
@@ -502,7 +500,7 @@ def fake_gfx12_runtime(monkeypatch):
         HIPDeviceMemory=FakeMemory,
     )
     monkeypatch.setattr(benchmark_base, "hip", fake_hip)
-    monkeypatch.setattr(benchmark_gfx12_base, "hip", fake_hip)
+    monkeypatch.setattr(benchmark_gfx1201, "hip", fake_hip)
 
     def record_launch(func, grid, block, shared_mem_size, stream, args):
         launches.append((
@@ -543,6 +541,25 @@ def test_gfx1201_cache_roof_reports_the_fastest_launch_at_its_measured_clock(
     log = capsys.readouterr().out
     assert "L1 BW, GPU ID: 0" in log
     assert "GL2 hit return ceiling:12165.1 GB/sec (282.4% at 2970 MHz)" in log
+
+
+def test_gfx1201_l0_ceiling_follows_the_reported_multiprocessor_count(
+    fake_gfx12_runtime, monkeypatch, capsys
+):
+    """Navi 48 boards differ in CU count. With 24 multiprocessors, 48 CUs, the
+    GL0 read return at 2.97 GHz is 48 x 128 B x 2.97e9, 18,247.68 GB/s."""
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+    launches = fake_gfx12_runtime(bench)
+    monkeypatch.setattr(
+        benchmark_gfx1201.hip,
+        "hipGetDeviceProperties",
+        lambda device: SimpleNamespace(multiProcessorCount=24),
+    )
+
+    bench.tests["L0"](0)
+
+    assert launches[0][1] == [L0_WORKGROUPS_PER_CU * 24, 1, 1]
+    assert "GL0 read return ceiling:18247.7 GB/sec" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

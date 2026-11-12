@@ -346,7 +346,7 @@ def test_gfx1201_dram_destined_rows_compare_one_value_with_both_roofs() -> None:
     peaks, since no counter separates the two."""
     rates = gfx1201_roofline_metrics("Roofline Performance Rates")
     dram = rates["VRAM BW"]
-    infinity_cache = rates["DRAM-Destined BW (Infinity Cache Peak)"]
+    infinity_cache = rates["L2 to Memory BW (Infinity Cache Peak)"]
 
     assert dram["value"] == infinity_cache["value"]
     assert "GL2C_EA_RDREQ_DRAM_32B_sum" in dram["value"]
@@ -371,7 +371,7 @@ def test_gfx1201_dram_rate_counts_32_byte_requests_per_second() -> None:
         {},
     )
 
-    for row in ("VRAM BW", "DRAM-Destined BW (Infinity Cache Peak)"):
+    for row in ("VRAM BW", "L2 to Memory BW (Infinity Cache Peak)"):
         expression = build_eval_string(rates[row]["value"])
         assert evaluator.eval_expression(expression) == pytest.approx(4.8e7), row
 
