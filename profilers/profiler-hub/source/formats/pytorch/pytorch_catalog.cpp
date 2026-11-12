@@ -42,6 +42,12 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
             agent_by_id.emplace(source.agent_id, nullptr);
         }
     }
+    // Every deviceProperties entry is an agent, also one no event is on; an event device
+    // without an entry still gets one. Entries match devices by id and nothing else.
+    for(const auto& entry : store.device_names)
+    {
+        agent_by_id.emplace(static_cast<std::uint64_t>(entry.first) + 1, nullptr);
+    }
     // A memory event names its device: a GPU is an agent like the stream tracks' ones,
     // and CPU memory (device type 0) gets a CPU agent.
     bool cpu_memory = false;
@@ -82,6 +88,11 @@ fill_catalog(reader_catalog_t& catalog, pytorch_store_t& store)
         agent->absolute_index    = device;
         agent->name              = "GPU " + std::to_string(device);
         agent->node_info         = node;
+        const auto name = store.device_names.find(static_cast<std::int64_t>(device));
+        const auto json = store.device_json.find(static_cast<std::int64_t>(device));
+        if(name != store.device_names.end()) agent->product_name = name->second;
+        agent->user_name = agent->product_name;
+        agent->extdata   = json != store.device_json.end() ? json->second : "{}";
         catalog.agents.push_back(agent);
         catalog.agents_by_id.emplace(agent_id, agent);
     }
