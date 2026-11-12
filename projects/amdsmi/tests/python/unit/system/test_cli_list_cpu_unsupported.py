@@ -7,11 +7,11 @@
 ``--cpu`` and ``--core`` are accepted by the shared device-argument group used
 by every subcommand (see ``AMDSMIParser._add_device_arguments``). ``list --cpu``
 reports the model name, BIOS model name and cores per socket by default; with
-``-e`` it also reports family/model/stepping (formatted as hex). family and model come
+``-e`` it also reports family/model (formatted as hex). family and model come
 from the amd-smi APIs (``amdsmi_get_cpu_family``/``amdsmi_get_cpu_model``), the
 model name and cores from ``amdsmi_get_cpu_model_name``/
-``amdsmi_get_cpu_cores_per_socket``, stepping from ``/proc/cpuinfo`` and the BIOS
-model name from the SMBIOS table, both via ``AMDSMIHelpers``. ``list --core`` is still not serviced
+``amdsmi_get_cpu_cores_per_socket`` and the BIOS model name from the SMBIOS
+table via ``AMDSMIHelpers``. ``list --core`` is still not serviced
 and is rejected up front with ``AmdSmiCommandNotSupportedException``
 (``COMMAND_NOT_SUPPORTED`` exit code).
 
@@ -124,10 +124,9 @@ class _FakeLogger:
 
 
 class _FakeHelpers:
-    def __init__(self, family=26, model=17, stepping=2, bios_model_name="N/A"):
+    def __init__(self, family=26, model=17, bios_model_name="N/A"):
         self._family = family
         self._model = model
-        self._stepping = stepping
         self._bios_model_name = bios_model_name
 
     def check_required_groups(self):
@@ -143,9 +142,6 @@ class _FakeHelpers:
 
     def get_output_format(self):
         return "human"
-
-    def get_cpu_stepping(self):
-        return self._stepping
 
     def get_cpu_bios_model_name(self, cpu_id):
         return self._bios_model_name
@@ -163,7 +159,6 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self,
         family=26,
         model=17,
-        stepping=2,
         model_name=_MODEL_NAME,
         cores=16,
         bios_model_name=_BIOS_MODEL_NAME,
@@ -180,7 +175,7 @@ class TestCliListCpuIdentification(unittest.TestCase):
         }
         commands = module.ListDevicesCommands()
         commands.helpers = _FakeHelpers(
-            family=family, model=model, stepping=stepping, bios_model_name=bios_model_name
+            family=family, model=model, bios_model_name=bios_model_name
         )
         commands.logger = _FakeLogger()
         commands.group_check_printed = False
@@ -196,7 +191,7 @@ class TestCliListCpuIdentification(unittest.TestCase):
         self.assertEqual(commands.logger.stored["cores_per_socket"], 16)
         self.assertEqual(commands.logger.stored["family"], "0x1A")
         self.assertEqual(commands.logger.stored["model"], "0x11")
-        self.assertEqual(commands.logger.stored["stepping"], "0x2")
+        self.assertNotIn("stepping", commands.logger.stored)
 
     def test_core_flag_raises_command_not_supported(self):
         commands = self._make_commands()
@@ -220,7 +215,6 @@ class TestCliListCpuIdentification(unittest.TestCase):
         commands.list_devices(args)
         self.assertEqual(commands.logger.stored["family"], "N/A")
         self.assertEqual(commands.logger.stored["model"], "N/A")
-        self.assertEqual(commands.logger.stored["stepping"], "0x2")
 
     def test_cpu_flag_reports_model_name_bios_model_name_and_cores(self):
         commands = self._make_commands()
