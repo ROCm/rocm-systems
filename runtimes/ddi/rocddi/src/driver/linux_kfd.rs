@@ -30,9 +30,11 @@ use crate::device::gpu::profiling::{
 };
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
-    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
-    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations,
-    KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
+    AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector,
+    GpuCacheControlOperations, GpuClockOperations, GpuFaultModeOperations,
+    GpuKernelQueueOperations, GpuMemoryQueryOperations, GpuPcSamplingOperations, GpuSpmOperations,
+    GpuSurfaceOperations, GpuTrapOperations, GpuUserQueueOperations, KernelQueueResource,
+    UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
 use crate::memory::interop::linux::{

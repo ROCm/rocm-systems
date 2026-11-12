@@ -48,7 +48,7 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
         .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
 }
 
-impl GpuDriver for LinuxKfdDriver {
+impl GpuFaultModeOperations for LinuxKfdDriver {
     fn xnack_enabled(&self, device: &DeviceState) -> Result<bool, Error> {
         self.ensure_open()?;
         device.vm.check()?;
@@ -58,7 +58,9 @@ impl GpuDriver for LinuxKfdDriver {
             .xnack_enabled()
             .map_err(|source| native_error("KFD XNACK mode query", source))
     }
+}
 
+impl GpuMemoryQueryOperations for LinuxKfdDriver {
     fn available_memory(&self, device: &DeviceState) -> Result<u64, Error> {
         self.ensure_open()?;
         device
@@ -67,7 +69,9 @@ impl GpuDriver for LinuxKfdDriver {
             .available_memory(device.native.gpu_id)
             .map_err(|source| native_error("KFD available memory query", source))
     }
+}
 
+impl GpuCacheControlOperations for LinuxKfdDriver {
     fn set_persisting_l2_cache_size(
         &self,
         device: &DeviceState,
@@ -87,7 +91,9 @@ impl GpuDriver for LinuxKfdDriver {
             }
         })
     }
+}
 
+impl GpuSurfaceOperations for LinuxKfdDriver {
     fn surface_config(
         &self,
         device: &DeviceState,
@@ -230,9 +236,7 @@ impl GpuKernelQueueOperations for LinuxKfdDriver {
     }
 }
 
-impl GpuInstrumentationOperations for LinuxKfdDriver {
-    type PcSampling = KfdPcSampling;
-
+impl GpuClockOperations for LinuxKfdDriver {
     fn clock_counters(&self, device: &DeviceState) -> Result<ClockCounters, Error> {
         self.ensure_open()?;
         let counters = device
@@ -248,6 +252,10 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
             gpu_frequency: device.gpu_counter_frequency_hz,
         })
     }
+}
+
+impl GpuPcSamplingOperations for LinuxKfdDriver {
+    type PcSampling = KfdPcSampling;
 
     fn pc_sampling_configurations(
         &self,
@@ -384,7 +392,9 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
             None => KfdPcSampling::create(device.vm.clone(), device.native.gpu_id, request),
         }
     }
+}
 
+impl GpuTrapOperations for LinuxKfdDriver {
     #[allow(unsafe_code)]
     unsafe fn set_trap_handler(
         &self,
@@ -399,7 +409,9 @@ impl GpuInstrumentationOperations for LinuxKfdDriver {
             .set_trap_handler(device.native.gpu_id, handler_address, memory_address)
             .map_err(|source| native_error("KFD trap handler update", source))
     }
+}
 
+impl GpuSpmOperations for LinuxKfdDriver {
     fn spm_acquire(&self, device: &DeviceState) -> Result<(), Error> {
         let mut args = uapi::Spm {
             operation: uapi::SPM_OP_ACQUIRE,
