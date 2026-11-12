@@ -5416,14 +5416,18 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
         << report;
     EXPECT_NE(report.find("  ==>  0x1000  ds_write_b32 v0, v1"), std::string::npos) << report;
     if (complete) {
-      EXPECT_NE(report.find("Wait requirements satisfied for this operation in wave 0.\n  Waves 0 "
-                            "and 1 have not synchronized this access."),
+      EXPECT_NE(report.find("Wait requirements satisfied for this operation in wave 0.\n  "
+                            "The detector observed no synchronization between waves 0 and 1 "
+                            "for this access."),
                 std::string::npos)
           << report;
       EXPECT_EQ(report.find("pending counters"), std::string::npos);
     } else {
       EXPECT_NE(report.find("pending counters: lgkmcnt."), std::string::npos) << report;
-      EXPECT_NE(report.find("Waves 0 and 1 have not synchronized this access."), std::string::npos)
+      EXPECT_NE(
+          report.find(
+              "The detector observed no synchronization between waves 0 and 1 for this access."),
+          std::string::npos)
           << report;
     }
     auto *state = static_cast<RaceWavefrontState *>(reader->plugin_state(plugin->slot_index()));

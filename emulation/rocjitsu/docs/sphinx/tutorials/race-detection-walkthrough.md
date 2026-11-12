@@ -107,7 +107,7 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RA
   Current access: read at PC 0x73aee4951728.
   Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
   Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
-  Waves 1 and 0 have not synchronized this access.
+  The detector observed no synchronization between waves 1 and 0 for this access.
        PC              Instruction
   ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
        Execution trace below is for wave 0.
@@ -132,10 +132,10 @@ Each field tells you something specific:
     same address without an intervening barrier.
 
 The completion line says that wave 1's store still has an unsatisfied
-`lgkmcnt` wait requirement. The synchronization line says that waves 1 and 0
-have not synchronized this access. These are separate conditions: satisfying
-the store's wait requirement in wave 1 would not order wave 0's read after
-the store. A missing barrier alone does not tell us whether the store's
+`lgkmcnt` wait requirement. The synchronization line says that the detector
+observed no synchronization between waves 1 and 0 for this access. These are
+separate conditions: satisfying the store's wait requirement in wave 1 would
+not order wave 0's read after the store. A missing barrier alone does not tell us whether the store's
 wait requirements have been satisfied. The kernel needs `__syncthreads()`
 between the write and the cross-wave read either way.
 

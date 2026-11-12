@@ -110,7 +110,7 @@ Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]: read-after-write (RA
   Current access: read at PC 0x73aee4951728.
   Conflict: transfer from VGPRs into LDS at PC 0x73aee495171c, wave 1.
   Completion for wave 1 is not guaranteed; pending counters: lgkmcnt.
-  Waves 1 and 0 have not synchronized this access.
+  The detector observed no synchronization between waves 1 and 0 for this access.
        PC              Instruction
   ==>  0x73aee495171c  ds_write_b32 v0, v1  ; <-- wave 1
        Execution trace below is for wave 0.
@@ -178,10 +178,12 @@ updates of LDS, with returned VGPR values mentioned when applicable.
 For a pending event, the report lists the completion counters that remain unsatisfied, using
 the architectural wait names for the target. Internal GFX11 subsets are
 displayed as their covering `vmcnt`, `vscnt`, or `lgkmcnt` domains. When the
-event belongs to another wave, the report also states that the two waves have
-not synchronized the access. Completion and inter-wave synchronization are
-separate conditions; one wait instruction is not a universal fix for every
-reported hazard.
+event belongs to another wave, the report also states that the detector observed
+no synchronization between the waves for this access. This can be a false
+positive when the kernel uses a synchronization mechanism the detector does not
+observe, such as an LDS barrier phase wait; see [Limitations](#limitations).
+Completion and inter-wave synchronization are separate conditions; one wait
+instruction is not a universal fix for every reported hazard.
 
 Each trace row is disassembled from its own captured bytes, so code rewrites or
 unmapping do not change the reported instructions. Within the reporting wave,
@@ -191,9 +193,10 @@ identical PCs and encodings are not distinguished.
 
 When the conflict belongs to another wave, the reporting wave's trace starts at
 its own latest execution of the same instruction. Waves usually run the same
-code, so this shows the path from that instruction to the racing access, where
-synchronization is missing. If the reporting wave never ran that instruction,
-the report shows up to its last 16 instructions, limited by `trace_context`.
+code, so this shows the path from that instruction to the reported access,
+including any intervening waits or barriers. If the reporting wave never ran
+that instruction, the report shows up to its last 16 instructions, limited by
+`trace_context`.
 
 The instruction table follows the reporting wave's execution order. An event
 from another wave, or one older than the trace window, is shown separately.

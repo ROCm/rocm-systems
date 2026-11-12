@@ -409,7 +409,8 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     throw std::logic_error("race violation references a retired memory event");
   }
   if (owner != v.wave)
-    oss << "  Waves " << owner << " and " << v.wave << " have not synchronized this access.\n";
+    oss << "  The detector observed no synchronization between waves " << owner << " and " << v.wave
+        << " for this access.\n";
   return oss.str();
 }
 
