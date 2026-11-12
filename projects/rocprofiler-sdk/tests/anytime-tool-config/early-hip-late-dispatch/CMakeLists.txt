@@ -78,3 +78,44 @@ rocprofiler_add_integration_validate_test(
     ARGS --tool-a-input ${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-dispatch-tool-a.json
          --tool-b-input ${CMAKE_CURRENT_BINARY_DIR}/early-hip-late-dispatch-tool-b.json
          --phase1-count 24 --phase2-count 40)
+
+#
+# Same workload and same late tool, but with NO tool preloaded.
+#
+# Above, Tool A holds rocprofiler-sdk in the process from the start, so HSA queues are
+# intercepted at hsa_queue_create. Here nothing loads the SDK until the late tool calls
+# rocprofiler_force_configure(), by which point the application's queues already exist and
+# are reachable only by doorbell discovery. The late tool therefore records phase-2
+# dispatches only if those queues are adopted into the queue controller when discovered.
+#
+set(no-early-tool-late-dispatch-env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$<TARGET_FILE_DIR:rocprofiler-sdk-json-tool-late>:$ENV{LD_LIBRARY_PATH}"
+    "ROCPROFILER_SDK_TEST_LIB_DIR=$<TARGET_FILE_DIR:rocprofiler-sdk-json-tool-late>"
+    "ROCPROFILER_TOOL_LATE_OUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/no-early-tool-late-dispatch-tool-b.json"
+    "ROCPROFILER_TOOL_DISABLE_PERFETTO=1")
+
+# No PRELOAD, and no Tool A output to validate.
+rocprofiler_add_integration_execute_test(
+    anytime-no-early-tool-late-dispatch
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_early_hip_late_dispatch.py
+    DEPENDS rocprofiler-sdk-json-tool-late python-hip-kernels
+    TIMEOUT 120
+    LABELS "integration-tests;anytime-tool-config"
+    ENVIRONMENT "${no-early-tool-late-dispatch-env}"
+    SKIP_REGULAR_EXPRESSION "test skipped"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP anytime-no-early-tool-late-dispatch)
+
+rocprofiler_add_integration_validate_test(
+    anytime-no-early-tool-late-dispatch
+    TEST_PATHS validate_no_early_tool.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests;anytime-tool-config"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_REQUIRED anytime-no-early-tool-late-dispatch
+    ARGS --tool-b-input
+         ${CMAKE_CURRENT_BINARY_DIR}/no-early-tool-late-dispatch-tool-b.json
+         --phase2-count 40)

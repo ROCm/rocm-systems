@@ -457,7 +457,11 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
-  ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
+  // The strict target is not a member of the gfx12-5 generic family: code
+  // compiled for the family does not run on it.  An empty generic name keeps
+  // the family out of the agent's supported ISA list and makes a generic code
+  // object fail the compatibility check.
+  ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "")
   ISAREG_ENTRY_GEN("gfx1251",                12, 5, 1, unsupported, unsupported, 32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 

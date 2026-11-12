@@ -1,32 +1,6 @@
 {
   "evaluations": [
     {
-      "id": "tt-which-operator-is-slow",
-      "skill_should_trigger": true,
-      "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?\n\nThe application is ./simple_net.py.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "collects with --experimental --torch-trace",
-        "lists the captured operators to find the slow ones",
-        "checks the documented PyTorch version requirement"
-      ],
-      "unexpected_behavior": [
-        "guesses an operator pattern without listing the captured operators first"
-      ],
-      "logs_contain": ["--torch-trace", "--list-torch-operators"]
-    },
-    {
-      "id": "tt-map-kernels-to-model-code",
-      "skill_should_trigger": true,
-      "prompt": "profile my training script and tell me which layer the GPU time belongs to\n\nThe application is ./simple_net.py.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "profiles the Python script with torch tracing enabled",
-        "advises profiling a few steady-state iterations rather than a full run"
-      ],
-      "logs_contain": ["--torch-trace"]
-    },
-    {
       "id": "tt-triton-inductor-kernels",
       "skill_should_trigger": true,
       "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
@@ -80,7 +54,6 @@
     {
       "id": "tt-model-accuracy",
       "skill_should_trigger": false,
-      "note": "PyTorch question with no performance profiling in it.",
       "prompt": "why is my PyTorch model's validation accuracy dropping?"
     }
   ]

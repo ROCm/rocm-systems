@@ -195,7 +195,7 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
   static int64_t paramStaging = rcclParamCeArStagingBytes();
   comm->ceColl.ceArMaxBytes     = rcclCeArNonRegCap(comm);
-  comm->ceColl.ceArStagingBytes = (paramStaging >= 0) ? (size_t)paramStaging : (size_t)NCCL_CE_AR_STAGING_BYTES;
+  comm->ceColl.ceArStagingBytes = ncclCeArStagingBytes(paramStaging);
 
   int i = 0;
   int targetStreams = 0;
@@ -3326,8 +3326,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
   }
-  const size_t chunkBytes =
-    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  const size_t chunkBytes = ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;
@@ -3624,8 +3623,7 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     WARN("CE ReduceScatter: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
   }
-  const size_t chunkBytes =
-    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  const size_t chunkBytes = ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;

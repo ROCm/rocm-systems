@@ -24,6 +24,10 @@ namespace wsl {
 namespace thunk {
 
 #if defined(WIN32)
+
+struct WaitQueue;
+struct WaitEntry;
+
 /**
  ***********************************************************************************************************************
  * @brief Interrupt based event for HSA signals implementation (Windows)
@@ -39,9 +43,14 @@ class EventWin final : public HsaEvent {
   // @note: No virtual methods are allowed in this class, unless THUNK will expose it to the user.
 
   bool Init(const HsaEventDescriptor& event_desc, const wchar_t* pName = nullptr);
-  bool Set() const;
+  bool Set();
   bool Reset() const;
   bool Wait(std::chrono::duration<float> timeout) const;
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                            uint32_t num_elems, bool wait_all, uint32_t msec);
+
+  static HSAKMT_STATUS QueryMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                           uint32_t num_elems, bool wait_all);
 
   typedef void* EventHandle;
 
@@ -59,6 +68,16 @@ class EventWin final : public HsaEvent {
 
   EventWin(const EventWin&) = delete;
   EventWin& operator=(const EventWin&) = delete;
+
+  bool AddWaitEntry(WaitEntry* ent);
+  void RemoveWaitEntry(WaitEntry* ent);
+  void Signal();
+
+  static void OnKmdEvent(PTP_CALLBACK_INSTANCE _instance, void* ctx, PTP_WAIT _wait,
+                         TP_WAIT_RESULT _wait_result);
+  std::atomic_uint64_t cur_waiting_age_, cur_age_, refcnt_;
+  std::atomic<WaitQueue*> qhead_;
+  PTP_WAIT tpwait_obj_;
 };
 
 using Event = EventWin;
@@ -83,8 +102,8 @@ class EventLnx final : public HsaEvent {
   bool Set() const;
   bool Reset() const;
   bool Wait(std::chrono::duration<float> timeout) const;
-  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
-                                            bool wait_all, uint32_t msec);
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                            uint32_t num_elems, bool wait_all, uint32_t msec);
 
  private:
   int efd_;

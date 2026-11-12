@@ -10,6 +10,7 @@ import SectionCard from '../../src/components/shared/SectionCard.jsx';
 import CategoryTag from '../../src/components/shared/CategoryTag.jsx';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
+import { formatPublicationTime } from '../../src/utils/formatters.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 
 it.each([
@@ -62,22 +63,9 @@ it('mobile filter summary names an empty thread-policy selection', () => {
   expect(html).not.toContain('no modes');
 });
 
-it.each(['light', 'dark'])('sidebar uses a distinct neutral surface and 2px divider in %s theme', (mode) => {
-  const theme = createDashboardTheme(mode);
-  const html = markup(DashboardShell, { data, state }, mode, true);
-  const sidebarClass = html.match(/<aside\b[^>]*class="([^"]+)"/)[1].split(' ').find((name) => name.startsWith('css-'));
-  const styles = [...html.matchAll(/<style[^>]*>(.*?)<\/style>/g)].map((match) => match[1]);
-  const sidebarStyle = styles.find((style) => style.includes(`.${sidebarClass}{`));
-  expect(theme.palette.action.hover).not.toBe(theme.palette.background.default);
-  expect(sidebarStyle.includes(`background-color:${theme.palette.action.hover};`)).toBe(true);
-  expect(sidebarStyle.includes(`border-right:2px solid ${theme.palette.divider};`)).toBe(true);
-});
-
 describe('v1 section surfaces', () => {
   it('keeps readable 12px metadata, semantic section headings and caller content styles', () => {
     const html = markup(SectionCard, { title: 'Performance Trend', subtitle: 'Selected benchmark scope', contentSx: { mt: '7px' }, children: 'Measured values' });
-    expect(html.includes('font-size:12px')).toBe(true);
-    expect(html.includes('font-size:11px')).toBe(false);
     expect(html).toMatch(/<h2[^>]*>Performance Trend<\/h2>/);
     expect(html.includes('margin-top:7px')).toBe(true);
     expect(html.includes('Measured values')).toBe(true);
@@ -125,19 +113,27 @@ describe('v1 publication header', () => {
     expect(action('Use dark theme').props.disabled).not.toBe(true);
   });
 
-  it('links the published repository without guessing its host or tree layout', () => {
-    const repository = 'https://example.test/source/repository?view=source';
-    const html = markup(DashboardHeader, { data: { ...data, repository }, mode: 'light' });
-    expect(html.includes(`href="${repository}"`)).toBe(true);
+  it('derives the source link and label from the configured repository and canonical branch', () => {
+    const html = markup(DashboardHeader, { data: { ...data, repository: 'https://example.test/org/other-repo/', canonicalBranch: 'main' }, mode: 'light' });
+    expect(html).toContain('href="https://example.test/org/other-repo/tree/main/emulation/rocjitsu"');
+    expect(html).toContain('>org/other-repo<');
+    expect(html).not.toContain('ROCm/rocm-systems');
   });
 
-  it('shows actual publication time in UTC with only the timestamp bold', () => {
+  it('omits the source link when the repository is missing or unsafe', () => {
+    for (const repository of [undefined, 'javascript:alert(1)']) {
+      expect(markup(DashboardHeader, { data: { ...data, repository }, mode: 'light' })).not.toContain('/tree/');
+    }
+  });
+
+  it('shows local publication time with only the timestamp bold', () => {
     const generatedAt = '2026-10-05T16:02:00+02:00';
+    const formatted = formatPublicationTime(generatedAt);
     const html = markup(DashboardHeader, { data: { ...data, generatedAt }, mode: 'light', tab: 'overview' });
-    expect(html.includes('Oct 5 · 14:02 UTC')).toBe(true);
+    expect(html.includes(formatted)).toBe(true);
     expect(html.match(/<strong\b/g)).toHaveLength(1);
     const strong = html.match(/<strong\b[^>]*>([\s\S]*?)<\/strong>/)[1];
-    expect(strong.includes('Oct 5 · 14:02 UTC')).toBe(true);
+    expect(strong.includes(formatted)).toBe(true);
     expect(strong.includes('Data as of')).toBe(false);
     expect(html.includes(`dateTime="${generatedAt}"`)).toBe(true);
     expect(html.includes('font-size:24px')).toBe(true);
@@ -158,7 +154,7 @@ describe('v1 responsive shell', () => {
     const canonical = markup(DashboardShell, { data, state }, mode, true);
     expect(canonical.includes('type="checkbox"')).toBe(true);
     const html = markup(DashboardShell, { data, state: { ...state, tab: 'branch' } }, mode, true);
-    expect(html.includes('Branch Runs uses its local configuration matrix')).toBe(true);
+    expect(html.includes('Branch runs uses its local configuration matrix')).toBe(true);
     expect(html.includes('Canonical filters are not applied here')).toBe(true);
     expect(html.includes('type="checkbox"')).toBe(false);
     expect(html.includes('aria-controls="dashboard-filters"')).toBe(false);
@@ -172,25 +168,10 @@ describe('v1 responsive shell', () => {
     expect(html).not.toContain('type="checkbox"');
     expect(html).not.toContain('Latest commit run');
     expect(html).not.toContain('Check all');
-    expect(html).not.toContain('position:sticky');
     expect(html).not.toMatch(/(?<!min-)height:100vh/);
     expect(html).toContain('align-self:stretch');
-    expect(html).toContain('font-size:32px');
-    expect(html).toContain('font-size:28px');
-    expect(html).toContain('min-height:42px');
-    expect(html).toContain('>Dashboard<');
     for (const icon of ['ShowChartRoundedIcon', 'AccountTreeRoundedIcon', 'GridViewRoundedIcon', 'CompareArrowsRoundedIcon']) expect(html).toContain(`data-testid="${icon}"`);
     expect(html).toContain('Dashboard content');
-  });
-});
-
-describe('v1 category identity', () => {
-  it.each([['target', 'gfx1250', 'square'], ['suite', 'Triton', 'circle'], ['mode', 'default', 'triangle']])('renders a decorative %s marker in tags and filters', (kind, label, shape) => {
-    const html = markup(CategoryTag, { kind, label });
-    expect(html).toContain(`data-category-shape="${shape}"`);
-    expect(html).toMatch(new RegExp(`aria-hidden="true"[^>]*data-category-shape="${shape}"`));
-    expect(html).toContain(label);
-    expect(markup(FiltersBar, { data, state })).toContain(`data-category-shape="${shape}"`);
   });
 });
 

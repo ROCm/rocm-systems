@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
@@ -180,7 +182,7 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 
 VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
                                     uint32_t vmid, bool allow_private_batch,
-                                    Mtype instruction_mtype) {
+                                    Mtype instruction_mtype, bool force_l1_bypass) {
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, instruction_mtype);
   for (uint32_t i = 0; i < num_dwords; ++i) {
@@ -205,9 +207,9 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
         const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
-      } else if (mtype == Mtype::CC) {
+      } else if (mtype == Mtype::CC || force_l1_bypass) {
         flush_line(chunk_addr, vmid);
-        const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, mtype, vmid);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
       } else {
@@ -238,7 +240,8 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 }
 
 VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst,
-                                          uint32_t vmid, Mtype instruction_mtype) {
+                                          uint32_t vmid, Mtype instruction_mtype,
+                                          bool force_l1_bypass) {
   synchronize_epoch();
   RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, instruction_mtype);
   uint32_t copied = 0;
@@ -254,9 +257,9 @@ VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uin
       const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
-    } else if (mtype == Mtype::CC) {
+    } else if (mtype == Mtype::CC || force_l1_bypass) {
       flush_line(ea, vmid);
-      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
+      const VmAccessOutcome outcome = l2_->read(ea, dst + copied, chunk, mtype, vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     } else {

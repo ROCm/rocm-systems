@@ -30,8 +30,10 @@
 #include "platform/sampler.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -236,6 +238,10 @@ Device::~Device() {
   // This guards OCL teardown; for HIP the drain already ran via RuntimeTearDown,
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
+  for (ProfilingSignal* signal : gate_signals_) {
+    signal->release();
+  }
+  gate_signals_.clear();
 
   QuiesceHwEvents(graph_hw_events_);
   for (void* hw_event : graph_hw_events_) {
@@ -688,13 +694,23 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
+  // The AQL extensions ROCr reports for the agent; unknown to a runtime without the query
+  int aql_ext_dispatch = -1;
+  uint8_t aql_extensions[8] = {};
+  if (Hsa::agent_get_info(bkendDevice_,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                          aql_extensions) == HSA_STATUS_SUCCESS) {
+    aql_ext_dispatch =
+        hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH) ? 1 : 0;
+  }
+
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_, isAPU_)) {
+                                           isXgmi_, isAPU_, aql_ext_dispatch)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -751,6 +767,8 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d",
+          hsaSettings->ext_dispatch_packet_);
   hsaSettings->limit_blit_wg_ = info().maxComputeUnits_;
   if (!flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
@@ -1002,8 +1020,9 @@ bool Device::createSampler(const amd::Sampler& owner, device::Sampler** sampler)
   return true;
 }
 
-void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                                    const amd::Sampler& sampler) const {
+  samplerDescriptor.max_anisotropy = sampler.maxAnisotropy();
   samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
                                       ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
                                       : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
@@ -1044,7 +1063,7 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
 }
 
 bool Sampler::create(const amd::Sampler& owner) {
-  hsa_ext_sampler_descriptor_v2_t samplerDescriptor;
+  hsa_ext_sampler_descriptor_v3_t samplerDescriptor;
   fillSampleDescriptor(samplerDescriptor, owner);
 
   hsa_status_t status =
@@ -2067,6 +2086,34 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
       success = false;
     }
   }
+
+  // Handle D3D9 adapter binding. The three cl_dx9_media_adapter_type_khr values occupy
+  // separate context slots and carry unrelated object types, so each is bound on its own.
+  constexpr struct {
+    amd::Context::Flags flag;
+    amd::Context::DeviceFlagIdx idx;
+    D3D9Interop::AdapterKind kind;
+  } kD3D9Slots[] = {
+      {amd::Context::Flags::D3D9DeviceKhr, amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx,
+       D3D9Interop::AdapterKind::D3D9},
+      {amd::Context::Flags::D3D9DeviceEXKhr, amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx,
+       D3D9Interop::AdapterKind::D3D9Ex},
+      {amd::Context::Flags::D3D9DeviceVAKhr, amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx,
+       D3D9Interop::AdapterKind::DXVA},
+  };
+
+  for (const auto& slot : kD3D9Slots) {
+    if (!(flags & slot.flag)) {
+      continue;
+    }
+    if (!D3D9Interop::associateD3D9Device(this, gfxDevice[slot.idx], slot.kind, gfxContext,
+                                          validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D9Interop::associateD3D9Device()");
+      }
+      success = false;
+    }
+  }
 #endif  // _WIN32
 
   // Handle GL device binding (existing code)
@@ -2097,6 +2144,13 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
+  }
+
+  // Handle D3D9 cleanup. The cache is keyed by the surfaces' owning devices rather than
+  // by context slot, so one drain covers all three adapter types.
+  if (flags & (amd::Context::Flags::D3D9DeviceKhr | amd::Context::Flags::D3D9DeviceEXKhr |
+               amd::Context::Flags::D3D9DeviceVAKhr)) {
+    D3D9Interop::dissociateD3D9Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
@@ -4291,6 +4345,63 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
     hw_events[event_idx] = profiling_signal;
   }
   return true;
+}
+
+// ================================================================================================
+ProfilingSignal* Device::AcquireGateSignal() {
+  std::scoped_lock lock(gate_lock_);
+  ProfilingSignal* gate = nullptr;
+  // Gates come back about in the order they were taken, so the search starts after the last one
+  const size_t size = gate_signals_.size();
+  for (size_t i = 0; i < size; ++i) {
+    const size_t slot = (gate_next_ + i) % size;
+    // Only the pool holds it: the end marker it completed and every command that waited on it,
+    // which hold that command until their own completion, are gone
+    if (gate_signals_[slot]->referenceCount() == 1) {
+      // Pairs with the last holder's release, so its uses of the gate are complete here
+      std::atomic_thread_fence(std::memory_order_acquire);
+      gate = gate_signals_[slot];
+      gate_next_ = slot + 1;
+      break;
+    }
+  }
+  // A gate comes back once its end marker is destroyed, which the async handler thread drives.
+  // That thread can fall behind, e.g. while it destroys a large graph exec, and device-memory
+  // allocations are slow then. So the pool, shared by the device's queues, grows only while it is
+  // not exhausted: an end marker that finds no free gate goes the usual way, without one, and the
+  // next one that finds a free gate adds a batch for the next time
+  constexpr size_t kGateBatch = 64;
+  constexpr size_t kMaxGates = 4096;
+  const bool grow = gate_signals_.empty() || (gate_short_ && (gate != nullptr));
+  if (grow && (size < kMaxGates)) {
+    std::vector<hsa_signal_t> handles(kGateBatch);
+    bool in_device_memory = false;
+    // Created completed, so an unused one is destroyed without a wait
+    if (CreateSignals(kGateBatch, 0, HSA_AMD_SIGNAL_AMD_GPU_ONLY, /*batched=*/true,
+                      GraphDeviceSignals(), handles.data(), in_device_memory)) {
+      for (hsa_signal_t handle : handles) {
+        ProfilingSignal* signal = new ProfilingSignal(SignalHints());
+        signal->signal_ = handle;
+        signal->in_device_memory_ = in_device_memory;
+        gate_signals_.push_back(signal);
+      }
+      gate_short_ = false;
+      if (gate == nullptr) {
+        gate = gate_signals_[size];
+        gate_next_ = size + 1;
+      }
+    }
+  }
+  if (gate == nullptr) {
+    gate_short_ = true;
+    return nullptr;
+  }
+  // The checkout reference, taken before the lock is dropped: the pool's search skips the gate
+  // from here on, so it is armed and used by this caller only
+  gate->retain();
+  gate->binary_use_ = true;
+  ResetHwEvents({gate});
+  return gate;
 }
 
 // ================================================================================================

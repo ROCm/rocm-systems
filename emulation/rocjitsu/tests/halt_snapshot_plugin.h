@@ -44,10 +44,11 @@ struct WavefrontSnapshot {
   uint64_t exec = 0;
   uint64_t vcc = 0;
   uint32_t status = 0;
-  uint32_t mode_raw = 0;       ///< MODE register at halt.
-  uint8_t vgpr_msb_mode = 0;   ///< Decoded s_set_vgpr_msb layout at halt.
-  uint64_t lds_size_bytes = 0; ///< Size of the LDS region visible to this wave.
-  uint64_t scratch_base = 0;   ///< Per-wave scratch base after dispatch setup.
+  uint32_t mode_raw = 0;         ///< MODE register at halt.
+  uint8_t vgpr_msb_mode = 0;     ///< Decoded s_set_vgpr_msb layout at halt.
+  uint64_t lds_size_bytes = 0;   ///< Capacity of the CU or WGP backing store.
+  uint32_t lds_window_bytes = 0; ///< Accessible range assigned to this workgroup.
+  uint64_t scratch_base = 0;     ///< Per-wave scratch base after dispatch setup.
   uint32_t scratch_scoreboard_id = 0;
   uint32_t shader_engine_id = 0;
   uint32_t scratch_lane_size = 0;   ///< Private bytes per lane.
@@ -129,6 +130,7 @@ public:
     s.mode_raw = wf.mode_raw();
     s.vgpr_msb_mode = wf.vgpr_msb_mode();
     s.lds_size_bytes = wf.lds().size_bytes();
+    s.lds_window_bytes = wf.lds_size();
     s.scratch_base = wf.scratch_base();
     s.scratch_scoreboard_id = wf.scratch_scoreboard_id();
     s.shader_engine_id = wf.shader_engine_id();

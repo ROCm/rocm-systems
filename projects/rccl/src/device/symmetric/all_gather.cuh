@@ -337,6 +337,7 @@ __device__ __forceinline__ void agHierWaitPackage(ncclSymkArgsHandler const& han
   }
 }
 
+template <bool EnableTma>
 static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBarrierSession<ncclCoopCta>& bar,
                                   int block, int nBlocks, ncclTeam scaleIn, ncclTeam scaleUp,
                                   ncclDevResourceHandle flagsBuf, uint64_t& seq, uint64_t launch, size_t nElts,
@@ -363,8 +364,11 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
   ncclCoopWarpSpan half{/*warp0=*/pusher ? 0 : nHalfWarps, /*nWarps=*/nHalfWarps, /*id=*/pusher ? 0 : 1};
 
   // Every block of a group pushes the same number of chunks of up to maxChunkBytes, each a
-  // multiple of ncclSymkBytePerChunk per warp, so bcast()'s 16-byte tier copies it all, split evenly.
-  size_t chunkAlign = size_t(nHalfWarps) * ncclSymkBytePerChunk;
+  // multiple of ncclSymkBytePerChunk per warp, so bcast()'s 16-byte tier copies it all, split evenly. With
+  // tile staging the multiple is one 256-byte-tier tile per warp, for the same split in that tier.
+  size_t chunkAlign = size_t(nHalfWarps) * (ncclSymkAsyncTile && EnableTma ?
+                                              ncclSymkAlign256BDeepBytePerChunk / ncclSymkMinWarpsPerBlock :
+                                              ncclSymkBytePerChunk);
   size_t nBlockChunksMax = max(size_t(1), divUp(divUp(nElts, size_t(nGroupBlocks)), maxChunkBytes));
   size_t chunkBytes = roundUp(divUp(nElts, nBlockChunksMax * nGroupBlocks), chunkAlign);
   size_t nChunks = chunkBytes == 0 ? 0 : divUp(nElts, chunkBytes);
@@ -383,8 +387,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
       if (threadIdx.x == 0) agHierWaitPackage(handler, flagsBuf, scaleIn, arriveWord, launch);
       ncclCoopCta().sync();
       int bt = flattenIx(lane, WARP_SIZE, groupBlock, nG0Blocks, warp, nBlockWarps);
-      bcast<char, /*EnableTma=*/false, /*Deep=*/true>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1,
-                                                      /*waitNeeded=*/false, bar, input, mySlot, nElts, scaleIn);
+      bcast<char, EnableTma, /*Deep=*/true>(handler, nG0Blocks * blockDim.x, bt, /*nBlocks=*/1, /*waitNeeded=*/false,
+                                            bar, input, mySlot, nElts, scaleIn);
       continue;
     }
 
@@ -411,8 +415,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
       half.sync();
       for (int i = 0; i < nBlockChunks; i++) {
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
-        bcast<char, false, /*Deep=*/true>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo,
-                                          min(chunkBytes, nElts - lo), scaleIn, toSlot);
+        bcast<char, EnableTma, /*Deep=*/true>(handler, tn, t, 1, false, bar, input + lo, mySlot + lo,
+                                              min(chunkBytes, nElts - lo), scaleIn, toSlot);
         // half.sync() orders every pusher warp's stores before this system-scope fence
         half.sync();
         if (t == 0) {
@@ -433,8 +437,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
         }
         half.sync();
         size_t lo = (size_t(i) * nGroupBlocks + groupBlock) * chunkBytes;
-        bcast<char, false, /*Deep=*/true>(handler, tn, t, 1, false, bar, fromSlot + lo, fromSlot + lo,
-                                          min(chunkBytes, nElts - lo), scaleIn);
+        bcast<char, EnableTma, /*Deep=*/true>(handler, tn, t, 1, false, bar, fromSlot + lo, fromSlot + lo,
+                                              min(chunkBytes, nElts - lo), scaleIn);
       }
     }
     seq += nBlockChunks;
@@ -444,8 +448,8 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
 // Two-level load/store AllGather for an LSA team over packages of hierScaleInSize consecutive ranks.
 // Each rank pushes its slot to its counterpart on every other package, which forwards it to its
 // package peers, so each remote slot reaches a package once.
-template <bool EnableProfiler>
-__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkArgs const* args) {
+template <bool EnableProfiler, bool EnableTma>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST_impl(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
 
@@ -466,8 +470,8 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkA
       args->kcomm.hierMaxChunkBytes != 0 ? args->kcomm.hierMaxChunkBytes : ncclSymkAgHierMaxChunkBytes;
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
-    agHierPush(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, launch, nElts,
-               nAllElts, input, output, maxChunkBytes);
+    agHierPush<EnableTma>(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, launch,
+                          nElts, nAllElts, input, output, maxChunkBytes);
   });
   if (threadIdx.x == 0) *seqSlot = seq;
 
@@ -481,6 +485,16 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkA
     agHierWaitPackage(handler, args->kcomm.hierPushFlags, scaleIn, closeWord, launch);
   }
   ncclCoopCta().sync();
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_AllGather_HierLsaST_impl<EnableProfiler, /*EnableTma=*/false>(args);
+}
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaTmaST(ncclSymkDevWorkArgs const* args) {
+  ncclSymkRun_AllGather_HierLsaST_impl<EnableProfiler, /*EnableTma=*/true>(args);
 }
 
 template <bool EnableProfiler, bool EnableTma>

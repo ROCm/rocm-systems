@@ -566,22 +566,26 @@ observation-only overload.
 `onAmdgpuMemoryAccessRouted`. It fires once for every tensor DMA instruction, in
 the issuing wavefront's instruction step, after the descriptor is read and,
 unless it is NULL, validated. That includes an instruction that moves no data:
-a store whose tile lies wholly outside the tensor still completes on TENSORcnt,
-and the emulator also counts a NULL descriptor (`count = 0`) on TENSORcnt, an
-assumption since hardware behavior for that encoding is not established. A
-transfer that waits for memory is reported when it issues and not again when it
-resumes. When the hook fires, a store has already sampled its LDS source bytes,
-so changing LDS in the callback does not change what the store writes to global
-memory; no global request has been made and a load has written no LDS. Its
-`lds_ranges` member is a callback-lifetime span of the LDS byte runs the
-transfer will write (loads) or read (stores), with adjacent elements merged and
-padding bytes excluded. A load covers every element of its tile, zero-filling
-those outside the tensor; a store covers only in-bounds elements. The
-observation's `element_size_bytes` describes the transfer only when
-`lds_ranges` is nonempty; when it is empty, consumers must not rely on it,
-since the instruction may be a NULL descriptor, which is not validated, and the
-observation carries no field that distinguishes one. Consumers must opt in
-through `observes_tensor_dma_issue()`.
+a NOP tile (`tile_dim0 = 0`), a gather with no valid indices or a store whose
+tile lies wholly outside the tensor still completes on TENSORcnt, and the
+emulator also counts a NULL descriptor (`count = 0`) on TENSORcnt, an assumption
+since hardware behavior for that encoding is not established. A transfer that
+waits for memory is reported when it issues and not again when it resumes. When
+the hook fires, a store has already sampled its LDS source bytes, so changing
+LDS in the callback does not change what the store writes to global memory; no
+global request has been made and a load has written no LDS. Its `lds_ranges`
+member is a callback-lifetime span of the LDS byte runs the transfer will write
+(loads) or read (stores), with adjacent elements merged and padding bytes
+excluded. Bytes outside the wave's LDS allocation are not transferred and are
+omitted, so a range can end mid-element when an element straddles the end of
+the allocation; consumers must treat ranges as byte ranges, not as whole
+elements. A load covers every element of its tile, zero-filling those outside
+the tensor; a store covers only in-bounds elements. Empty `lds_ranges` mean
+only that the transfer touches no LDS payload bytes, not that it makes no global
+accesses: for a tile wholly past the allocation, a load still reads its
+in-bounds tensor elements from global memory and can fault there, and a store
+still writes zeros to its global destination. Consumers must opt in through
+`observes_tensor_dma_issue()`.
 
 SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither `onAmdgpuReadScalarRegister` nor
@@ -611,15 +615,17 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-An encoding is at most four words (the CU's 16-byte fetch window). The example
-rejects anything else at capture, as the race detector does, so every stored
-copy can be disassembled.
+The CU normally fetches four words starting at the PC. GFX10 MIMG with
+NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
+instruction. The example stores up to five words, as the race detector does,
+and rejects invalid sizes at capture. Perfsim's FFM event format has its own
+four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
 struct LastInstruction : WavefrontState {
   uint64_t pc = 0;
-  std::array<uint32_t, 4> words{};
+  std::array<uint32_t, 5> words{};
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
@@ -702,3 +708,15 @@ Throughput, instruction mix, and kernel logging support this contract. The
 its dependency-event access and diagnostic context support concurrent register
 hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.
+
+Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
+instruction. Samples with a prepared footprint use `image_sample_footprints`
+and leave `addresses` empty. A null resource or unbacked sampler completes as
+an empty request: the callback carries the ordinary per-lane `addresses` span,
+an empty footprint span and a zero `request_lane_mask`. Its counter obligation
+still identifies the sampled request on targets with SAMPLECNT. Each footprint has
+`wavefront_size` entries and its lane mask is a subset of `request_lane_mask`.
+Border-only and zero-weight taps remain present with those lanes cleared.
+`bytes_per_lane()` is the size of one texel per footprint, including gather
+instructions that return four selected components. Consumers must visit every
+footprint without counting another issued instruction or wait-counter event.

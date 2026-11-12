@@ -1152,6 +1152,8 @@ const char *CheckCuMaskIsa =
                 s_and_b32        s6, s6, 0xFFE3FFFF
                 s_or_b32         s6, s6, s7
             .endif
+        .elseif (.amdgcn.gfx_generation_number >= 11)
+            s_getreg_b32     s6, hwreg(HW_REG_HW_ID1)
         .else
             s_getreg_b32     s6, hwreg(HW_REG_HW_ID)
         .endif

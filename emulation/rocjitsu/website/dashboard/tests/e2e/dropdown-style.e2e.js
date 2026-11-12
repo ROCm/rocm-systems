@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { openDashboard } from './helpers/dashboard.js';
 
 async function expectRunStyle(page, picker) {
@@ -16,7 +17,7 @@ test('all run pickers share the comparison option layout and retain exact run se
   const reference = page.getByRole('combobox', { name: 'Reference', exact: true });
   await reference.fill('fictional-develop-20');
   await page.getByRole('option').first().click();
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'reference', 'fictional-develop-20');
   await openDashboard(page, '/?view=compare');
   for (const label of ['Candidate run', 'Baseline run']) await expectRunStyle(page, page.getByRole('combobox', { name: label, exact: true }));
   await openDashboard(page, '/?view=benchmarks');
@@ -42,12 +43,12 @@ test('pull request filter uses the styled anchored menu and keeps filtering beha
   }
 });
 
-test('Add benchmarks popup uses density-matched text, icons and row spacing', async ({ page }) => {
+test('Add benchmarks popup uses the standard text, icon and row sizes', async ({ page }) => {
   await openDashboard(page, '/?view=benchmarks');
   await page.getByRole('button', { name: 'Add benchmarks', exact: true }).click();
   await page.getByRole('combobox', { name: 'Benchmarks to graph' }).click();
   const option = page.getByRole('listbox').getByRole('option').first();
-  const expectedSize = await page.locator('body').evaluate((body) => 20 * Number(getComputedStyle(body).zoom));
+  const expectedSize = 20;
   await expect.poll(() => option.locator('.MuiListItemText-primary').evaluate((node) => parseFloat(getComputedStyle(node).lineHeight)))
     .toBeCloseTo(expectedSize, 3);
   await expect.poll(() => option.locator('svg').evaluate((node) => parseFloat(getComputedStyle(node).fontSize)))

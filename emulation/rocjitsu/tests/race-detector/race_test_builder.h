@@ -9,6 +9,7 @@
 #pragma once
 
 #include "race_test_instruction.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
@@ -18,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -52,9 +54,10 @@ public:
       regs[i] = vgprBase + i;
       waves_[wave]->checkVgprWrite(vgprBase + i, exec, byteMask, memoryOrder);
     }
-    waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR,
-                                std::move(regs), exec, byteMask, amdgpu::WaitCounterType::VMCNT,
-                                memoryOrder, additionalWaitCounterType);
+    waves_[wave]->registerEvent(
+        testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR, std::move(regs), exec, byteMask,
+        CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder, additionalWaitCounterType},
+        memoryOrder);
   }
 
   /// Register a generic FLAT load whose active lanes resolve uniformly to
@@ -92,19 +95,21 @@ public:
                                  memoryOrder);
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
-                                   /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);
+                                   /*byteMask=*/0xF,
+                                   CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder},
+                                   memoryOrder);
   }
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
   /// writes every range; it is validated against outstanding LDS reads.
-  void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
-    tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges, elementBytes);
+  void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges) {
+    tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges);
   }
 
   /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
   /// reads every range; it is validated against outstanding LDS writes.
-  void tensorStoreFromLds(int wave, std::vector<LdsByteRange> ranges, int elementBytes = 4) {
-    tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges, elementBytes);
+  void tensorStoreFromLds(int wave, std::vector<LdsByteRange> ranges) {
+    tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges);
   }
 
   /// Register a global store from VGPRs (tracked by vmcnt).
@@ -117,7 +122,8 @@ public:
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_GLOBAL,
                                 /*registers=*/{}, exec, /*byteMask=*/0xF,
-                                amdgpu::WaitCounterType::VMCNT, memoryOrder);
+                                CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder},
+                                memoryOrder);
   }
 
   /// Register a scalar load into SGPRs with its architecture-specific counter.
@@ -151,7 +157,9 @@ public:
                    amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
     waves_[wave]->prepareForCounterIncrement(waitCounterType);
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::SCALAR_TO_GLOBAL, {},
-                                defaultExec_, 0xF, waitCounterType, MemoryOrderClass::UNORDERED);
+                                defaultExec_, 0xF,
+                                CounterObligations{waitCounterType, MemoryOrderClass::UNORDERED},
+                                MemoryOrderClass::UNORDERED);
   }
 
   /// Apply issue-time backpressure before checking an operation's accesses.
@@ -175,10 +183,11 @@ public:
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
-    waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS,
-                                   /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
-                                   /*byteMask=*/0xF, waitCounterType, memoryOrder,
-                                   additionalWaitCounterType);
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS,
+        /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
+        /*byteMask=*/0xF,
+        CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
   /// Register an LDS read and validate against outstanding writes.
@@ -196,9 +205,10 @@ public:
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
-    waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::LDS_TO_VGPR,
-                                   std::move(regs), laneMask, waveSize_, ldsAddrs, bytes, byteMask,
-                                   waitCounterType, memoryOrder, additionalWaitCounterType);
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask, waveSize_,
+        ldsAddrs, bytes, byteMask,
+        CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
   /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly
@@ -253,7 +263,7 @@ public:
   ///   0xC = hi 2 bytes (D16 hi half)
   /// A race fires only when the pending load's bytes overlap the read's bytes.
   void checkVgprRead(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprRead(reg, lane, byteMask);
+    waves_[wave]->checkVgprReadLanes(reg, uint64_t{1} << lane, byteMask);
   }
 
   void checkVgprReadLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
@@ -261,7 +271,7 @@ public:
   }
 
   void checkVgprWrite(int wave, int reg, int lane, uint8_t byteMask = 0xF) {
-    waves_[wave]->checkVgprWrite(reg, lane, byteMask);
+    waves_[wave]->checkVgprWriteLanes(reg, uint64_t{1} << lane, byteMask);
   }
 
   void checkVgprWriteLanes(int wave, int reg, uint64_t laneMask, uint8_t byteMask = 0xF) {
@@ -341,18 +351,22 @@ public:
   void clearViolations() { violations_.clear(); }
 
   const EventRegistry &events() const { return detector_->events(); }
+  const RaceDetector &detector() const { return *detector_; }
 
 private:
-  /// A transfer has no lanes; its violations report lane -1.
-  void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges,
-                      int elementBytes) {
+  /// A transfer has no lanes; its violations report lane -1. Validates and
+  /// registers the same bytes as the plugin's tensor DMA hook.
+  void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges) {
     // Completion is in issue order (TENSOR); LDS accesses are checked as
     // unordered, a conservative rule, as in the plugin.
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
     constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
     for (const auto &range : ranges) {
+      const auto bytes = static_cast<int>(
+          detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
+      if (bytes == 0)
+        continue;
       const int addr = static_cast<int>(range.address);
-      const int bytes = static_cast<int>(range.bytes);
       if (type == MemoryEventType::GLOBAL_TO_LDS)
         detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
       else
@@ -360,8 +374,8 @@ private:
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, elementBytes,
-                                        obligations, memoryOrder);
+    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations,
+                                        memoryOrder);
   }
 
   std::unique_ptr<RaceDetector> detector_;
