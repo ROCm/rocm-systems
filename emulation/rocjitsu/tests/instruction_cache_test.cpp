@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -1276,7 +1277,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesFullFetchValidatio
   }
 }
 
-TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
+TEST(InstructionCacheCuTest, TranslatedLookaheadKeepsMigratedMfmaOnIssuer) {
   for (const bool refresh_hint : {false, true}) {
     SCOPED_TRACE(refresh_hint);
     GpuVm gpu_vm;
@@ -1298,8 +1299,8 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
     fixture.cu()->step();
     ASSERT_EQ(wf->pc, kCodeBase + 4);
 
-    // Independent MFMAs permit async admission. Both compute a 16x16 matrix
-    // of 32s from packed half-precision ones and an inline zero accumulator.
+    // Migrated MFMAs stay on the issuer even with a fresh admission hint. Both compute a 16x16
+    // matrix of 32s from packed half-precision ones and an inline zero accumulator.
     std::array<uint32_t, 5> program{};
     for (unsigned index = 0; index != 2; ++index) {
       const auto words = cdna4::build_vop3p_mfma(
@@ -1330,10 +1331,7 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
     for (unsigned steps = 0; wf->pc < kCodeBase + 16 && steps != 3; ++steps)
       fixture.cu()->step();
     EXPECT_EQ(wf->pc, kCodeBase + 16);
-    if (refresh_hint)
-      EXPECT_GT(amdgpu::async_execution::stats.mma, submitted);
-    else
-      EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
+    EXPECT_EQ(amdgpu::async_execution::stats.mma, submitted);
     for (const unsigned dst : {64u, 80u})
       for (unsigned reg = 0; reg != 4; ++reg)
         for (unsigned lane = 0; lane != 64; ++lane)

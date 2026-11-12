@@ -1431,6 +1431,13 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return false;
   }
 
+  //! Puts on the queue a wait for a command of another queue, without a command of its own: no
+  //! completion signal, no batch. The anchor holds the waited command until it completes, so
+  //! its anchor's completion must follow the wait. False if the queue can't
+  virtual bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+    return false;
+  }
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 

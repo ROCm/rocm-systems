@@ -8,6 +8,9 @@ mod amdsmi_wrapper;
 mod utils;
 mod amdsmi;
 
+#[cfg(test)]
+mod enumeration_tests;
+
 pub use utils::*;
 pub use amdsmi::*;
 

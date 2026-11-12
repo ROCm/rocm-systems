@@ -81,6 +81,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           CUID_METADATA_STATUS: available
   ```
 
+- **Added `amdsmi_get_gpu_enumeration_info()` to the Rust API**.  
+  - Returns the DRM render node and card, HSA and HIP IDs, HIP UUID, OAM ID and physical accelerator ID; the HIP UUID is read with `hip_uuid()`.
+  - IDs the library cannot determine are `0xFFFFFFFF`, as in the C API.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  

@@ -110,7 +110,7 @@ TEST(MultiplexerFuzzTest, StructuredSeedsReachEveryHarness) {
   EXPECT_EQ(target_did_work, (std::array<bool, 4>{true, true, true, true}));
 }
 
-TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountAsyncInstructionsOnce) {
+TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountMigratedInstructionsOnce) {
   const std::vector<uint8_t> input = seed_corpus()[1];
   ASSERT_EQ(input.front(), static_cast<uint8_t>(FuzzTarget::Execution));
   const std::span<const uint8_t> payload(input.data() + 1, input.size() - 1);
@@ -118,7 +118,8 @@ TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountAsyncInstructionsOnce) {
   const execution_fuzz::RunStats focused =
       execution_fuzz::run_input(payload, std::nullopt, resources);
   ASSERT_EQ(focused.executed, 6u);
-  ASSERT_EQ(focused.async_executed, 1u);
+  // All matrix operations now execute on the issuer.
+  ASSERT_EQ(focused.async_executed, 0u);
   const std::optional<DispatchResult> dispatched = run_input(input);
   ASSERT_TRUE(dispatched);
   EXPECT_EQ(dispatched->work_units, 6u);

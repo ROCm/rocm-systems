@@ -73,14 +73,6 @@
 
 #include "dev_runtime_internal.h"
 
-// Private layout consumed by the real ncclDevrFindWindow implementation in
-// dev_runtime.cc, which is compiled by dev-runtime-test.cc in this binary.
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
-
 namespace {
 
 // Zero-initialized heap ncclComm, mirroring MockComm.hpp's
@@ -3016,6 +3008,20 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_TwoNodesInRangeReturnsTrue) {
         comm->nNodes = 2;
         size_t msgSize = 1048576; // within [128KiB, 2MiB]
         EXPECT_TRUE(rcclUseReduceScatterDirect(comm, msgSize));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// rawTaskAppend posts a useDirect ReduceScatter as a plain collective, so no per-peer transfer fills tempBuff.
+TEST(WrapMicrotestIsolated, UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UseReduceScatterDirect_EnqueueRearchEnabledReturnsFalse",
+      []() {
+        g_loadParam = ForceParam("ENQUEUE_REARCH_ENABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nNodes = 2;
+        size_t msgSize = 1048576; // the TwoNodesInRangeReturnsTrue case
+        EXPECT_FALSE(rcclUseReduceScatterDirect(comm, msgSize));
         DeleteCommWithArch(comm);
       });
 }
@@ -10465,6 +10471,410 @@ TEST(WrapMicrotestIsolated, GetAlgoInfo_FallsBackToPlainGetAlgoInfoForAllReduce)
 }
 
 // ===========================================================================
+// rcclSelectBroadcast: DDA LL -> LL128 on gfx1250, else the ring placeholder.
+// ===========================================================================
+
+namespace {
+// Broadcast's gfx1250 table caps are 0, so the tests opt in and set the tier caps by env.
+// ddaBc < 0 leaves RCCL_DDA_BC unset; vmmMax < 0 leaves RCCL_DDA_THRESHOLD unset.
+auto BroadcastDdaParams(int64_t llMax, int64_t ll128Max, int64_t ddaEnable = 1, int64_t ddaBc = 1,
+                        int64_t vmmMax = -1) {
+  return [=](const char* env, int64_t def) -> int64_t {
+    if (std::strcmp(env, "RCCL_DDA_THRESHOLD") == 0) return vmmMax < 0 ? def : vmmMax;
+    if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0) return llMax;
+    if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return ll128Max;
+    if (std::strcmp(env, "RCCL_DDA_ENABLE") == 0) return ddaEnable;
+    if (std::strcmp(env, "RCCL_DDA_BC") == 0) return ddaBc < 0 ? def : ddaBc;
+    return def;
+  };
+}
+
+ncclComm* MakeBroadcastComm(const char* arch = "gfx1250") {
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->nRanks = 8;
+  return comm;
+}
+
+rcclCollDecision PoisonedDecision() {
+  rcclCollDecision d{};
+  d.algo = -7;
+  d.protocol = -7;
+  d.nMaxChannels = 999;
+  return d;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LLEligible_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LLEligible_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/0, /*query=*/false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    EXPECT_EQ(NCCL_PROTO_LL, d.protocol);
+    EXPECT_EQ(151u, d.nMaxChannels);  // ncclBroadcastDdaFabricLLBlocks
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LLIneligible_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LLIneligible_PicksDdaLL128", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+    EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
+    EXPECT_EQ(152u, d.nMaxChannels);  // ncclBroadcastDdaFabricLL128Blocks
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NoTierEligible_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NoTierEligible_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, d.protocol);
+    EXPECT_EQ(0u, d.nMaxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LiveOutOfRangeRoot_SkipsDdaWithoutCheckingTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LiveOutOfRangeRoot_SkipsDdaWithoutCheckingTiers", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    for (int root : {-1, 8}) {
+      SCOPED_TRACE(root);
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, root, /*query=*/false, &d));
+      EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    }
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_QueryIgnoresRoot) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_QueryIgnoresRoot", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/-1, /*query=*/true, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NonGfx1250_NeverChecksTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NonGfx1250_NeverChecksTiers", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowed_PicksLLAndNeverChecksLL128", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    int ll128Calls = 0;
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++ll128Calls > 0; });
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    comm->ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+
+    ScopedHook llOff(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return false; });
+    d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, ll128Calls);
+    comm->ddaIpcMemHandler = nullptr;
+    DeleteCommWithArch(comm);
+  });
+}
+
+// RCCL_DDA_BC_ALLOW_IPC=1 alone is not enough off gfx1250: the comm must have the IPC DDA state.
+TEST(WrapMicrotestIsolated, SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_IpcAllowedNoIpcHandler_ReturnsRingPlaceholder", []() {
+    auto base = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    g_loadParam = [base](const char* env, int64_t def) -> int64_t {
+      return std::strcmp(env, "RCCL_DDA_BC_ALLOW_IPC") == 0 ? 1 : base(env, def);
+    };
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm("gfx950");
+    ASSERT_EQ(nullptr, comm->ddaIpcMemHandler);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_DdaDisabled_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/0);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// A global DDA threshold alone must not turn Broadcast on: the gfx1250 table has no Broadcast tier.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    ASSERT_EQ(0u, comm->archThresholds->ddaLLMax[ncclFuncBroadcast]);
+    ASSERT_EQ(0u, comm->archThresholds->ddaLL128Max[ncclFuncBroadcast]);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// RCCL_DDA_BC=1 without tier thresholds: the table's Broadcast caps are 0, so the entry gate rejects.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/1);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// With RCCL_DDA_BC unset, a non-zero Broadcast tier in the table turns Broadcast DDA on.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndTableTier_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndTableTier_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 64;
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = &table;
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// A tier written only as a per-rank share counts on a rank-scaled comm.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaLL", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    const rcclArchThresholds* real =
+      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, real);
+    rcclArchThresholds table = *real;
+    table.ddaLLMax[ncclFuncBroadcast] = 0;
+    table.ddaLLMaxPerRank[ncclFuncBroadcast] = 4;  // 8 ranks x 4 B = 32 B cap
+    table.rankScaledMinRanks = 8;
+    table.rankScaledMaxBytes = 256ULL * 1024 * 1024;
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = &table;
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NullComm_ReturnsInvalidArgument) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NullComm_ReturnsInvalidArgument", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclInvalidArgument, rcclSelectBroadcast(nullptr, 8, ncclFloat32, 0, /*query=*/true, &d));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcZero_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcZero_ReturnsRingPlaceholder", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX, /*ddaEnable=*/1, /*ddaBc=*/0);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_NcclAlgoSet_ReturnsRingWithoutCheckingTiers) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NcclAlgoSet_ReturnsRingWithoutCheckingTiers", []() {
+    SetMicroEnv("NCCL_ALGO", "Ring");
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    int calls = 0;
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    EXPECT_EQ(0, calls);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// 8 floats = 32 bytes. Each tier is taken only while bytes <= its cap and the cap is non-zero.
+// RCCL_PARAM caches per process, so one isolated test per pair of caps.
+static void ExpectBroadcastTierForCaps(int64_t llMax, int64_t ll128Max, int algo, int64_t vmmMax = -1) {
+  g_loadParam = BroadcastDdaParams(llMax, ll128Max, /*ddaEnable=*/1, /*ddaBc=*/1, vmmMax);
+  ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+  ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+  ncclComm* comm = MakeBroadcastComm();
+  rcclCollDecision d = PoisonedDecision();
+  EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, 0, false, &d));
+  EXPECT_EQ(algo, d.algo);
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_AtLLCap_PicksDdaLL) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AtLLCap_PicksDdaLL",
+                    []() { ExpectBroadcastTierForCaps(32, 32, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_ZeroLLCap_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_ZeroLLCap_PicksDdaLL128",
+                    []() { ExpectBroadcastTierForCaps(0, 32, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_AboveLLCap_PicksDdaLL128) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AboveLLCap_PicksDdaLL128",
+                    []() { ExpectBroadcastTierForCaps(31, INT64_MAX, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128); });
+}
+
+// The VMM cap keeps the entry gate open, so the LL128 bound is what rejects.
+TEST(WrapMicrotestIsolated, SelectBroadcast_AboveLL128Cap_ReturnsRingPlaceholder) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_AboveLL128Cap_ReturnsRingPlaceholder",
+                    []() { ExpectBroadcastTierForCaps(31, 31, NCCL_ALGO_RING, /*vmmMax=*/INT64_MAX); });
+}
+
+TEST(WrapMicrotestIsolated, SelectBroadcast_LiveLastRoot_PicksDda) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_LiveLastRoot_PicksDda", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    rcclCollDecision d = PoisonedDecision();
+    EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, 8, ncclFloat32, /*root=*/7, /*query=*/false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastReportsDdaWhenSelected) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastReportsDdaWhenSelected", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(151, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastMustEnqueue_FallsBackToGetAlgoInfo) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastMustEnqueue_FallsBackToGetAlgoInfo", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook enqueue(g_collectiveMustUseEnqueuePath, [](ncclComm*) { return true; });
+    ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                          ncclSimInfo_t*) {
+      task->algorithm = NCCL_ALGO_TREE;
+      task->protocol = NCCL_PROTO_LL;
+      task->nMaxChannels = 6;
+      return ncclSuccess;
+    });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ(NCCL_ALGO_TREE, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(6, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+TEST(WrapMicrotestIsolated, GetCollImplInfo_BroadcastFallsBackWhenSelectorReturnsRing) {
+  RUN_ISOLATED_TEST("Wrap_GetCollImplInfo_BroadcastFallsBackWhenSelectorReturnsRing", []() {
+    g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
+    ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                          ncclSimInfo_t*) {
+      task->algorithm = NCCL_ALGO_TREE;
+      task->protocol = NCCL_PROTO_LL;
+      task->nMaxChannels = 6;
+      return ncclSuccess;
+    });
+    ncclComm* comm = MakeBroadcastComm();
+    int algo = -7, protocol = -7, maxChannels = -7;
+    EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr, nullptr,
+                                                /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+    EXPECT_EQ(NCCL_ALGO_TREE, algo);
+    EXPECT_EQ(NCCL_PROTO_LL, protocol);
+    EXPECT_EQ(6, maxChannels);
+    DeleteCommWithArch(comm);
+  });
+}
+
+// ===========================================================================
 // rcclGetCollImplInfo -- rccl_wrap.cc:480-525. Dispatches AllReduce/
 // AllGather/ReduceScatter to their respective rcclSelectXxx(query=true);
 // everything else falls back to rcclGetAlgoInfo. This section proves the
@@ -10624,7 +11034,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_OtherCollFallsBackToGetAlgoInfo) {
         ncclComm* comm = MakeZeroedComm();
         comm->nRanks = 1;
         int algo, protocol, maxChannels;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncBroadcast, 8, ncclFloat32, ncclSum, nullptr,
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncReduce, 8, ncclFloat32, ncclSum, nullptr,
                                                     nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
         EXPECT_EQ(NCCL_ALGO_TREE, algo);
         EXPECT_EQ(NCCL_PROTO_LL, protocol);

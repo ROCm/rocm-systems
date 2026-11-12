@@ -7,6 +7,14 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New AMD-specific device attribute `hipDeviceAttributeL3CacheSize`, queryable with `hipDeviceGetAttribute`. It reports the size of the device L3 (Infinity Cache / MALL) in bytes, capped at `INT_MAX`, and returns `0` when no cache information is available. The attribute is populated by the ROCm (ROCr) backend; the PAL backend reports `0`. On a partitioned AMD Instinct GPU the value is the partition's L3 share, which the kernel scales by the memory-partition (NPS) mode rather than by the compute-partition count. The existing `hipDeviceProp_t::l2CacheSize` and `hipDeviceAttributeL2CacheSize` are unchanged.
+* New HIP APIs
+    - Memory Management: support for API parity with corresponding CUDA API.
+      * `hipMemcpyWithAttributesAsync` performs a single asynchronous 1D copy with the attributes
+        described by a `hipMemcpyAttributes` structure, without requiring the caller to build the
+        arrays that `hipMemcpyBatchAsync` takes.
+      * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
+        `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
+        that `hipMemcpy3DBatchAsync` takes.
 
 ### Resolved issues
 
@@ -14,10 +22,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

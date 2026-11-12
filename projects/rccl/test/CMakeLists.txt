@@ -287,6 +287,7 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
@@ -315,6 +316,7 @@ if(BUILD_TESTS)
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
+    ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
@@ -366,7 +368,8 @@ if(BUILD_TESTS)
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
     "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
-    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6")
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v6"
+    "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
@@ -408,6 +411,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       Gfx1250SendRecvLl128WindowTests.cpp
+      ProfilerOverheadTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestFp8Reduce.cpp
@@ -456,6 +460,10 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
     # Unit tests pass generic hipMalloc pointers into load16global/store16global.
     # The gfx942 b128 global-aperture builtins fault on those pointers; use the
@@ -1086,6 +1094,7 @@ if(BUILD_TESTS)
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
+      transport/NetLl128MPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
@@ -1136,6 +1145,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp

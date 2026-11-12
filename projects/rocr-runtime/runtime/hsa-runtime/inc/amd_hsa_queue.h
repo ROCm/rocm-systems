@@ -78,6 +78,13 @@ enum amd_queue_capabilities_t {
    * amd_signal_hint_t. CP FW sets it once it has processed a packet on the queue.
    */
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_QUEUE_CAPS_CP_SIGNAL_HINTS, 2, 1),
+
+  /*
+   * This version of CP FW executes hsa_amd_ext_kernel_dispatch_packet_t, its
+   * dep_signal included, with clusters of 1 (HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE).
+   * CP FW sets it once it has processed a packet on the queue.
+   */
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH, 3, 1),
 };
 
 /* This is the original amd_queue_t structure. The definition is only kept

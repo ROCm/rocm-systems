@@ -18,7 +18,7 @@
 
 namespace rocjitsu::amdgpu::arith {
 
-// A normal VGPR retains its observed storage view. Uniform, subword or delegated
+// A normal VGPR uses observed storage directly. Uniform, subword or delegated
 // operands use scratch storage; their existing implementation owns routing.
 class VectorInput32 {
 public:
@@ -30,18 +30,18 @@ public:
       data = values_.data();
       return;
     }
-    if (operand.simd_capable() && byte_mask == 0xF)
-      region_ = registers.read_operand_region(operand, exec_mask);
-    if (region_) {
-      auto lanes = region_->lanes(0);
-      if (lanes.succeeded()) {
-        data = lanes.value().data();
-      } else {
-        // Keep input storage valid; result writers observe the retained wave error.
-        values_.fill(0);
-        data = values_.data();
+    if (operand.simd_capable() && byte_mask == 0xF) {
+      if (auto region = registers.read_operand_region(operand, exec_mask)) {
+        auto lanes = region->lanes(0);
+        if (lanes.succeeded()) {
+          // The span refers to CU storage (or a static zero buffer), not the view.
+          data = lanes.value().data();
+        } else {
+          values_.fill(0);
+          data = values_.data();
+        }
+        return;
       }
-      return;
     }
     if (operand.simd_capable()) {
       auto view = registers.read_operand(operand, exec_mask, byte_mask);
@@ -77,7 +77,6 @@ public:
   const uint32_t *data;
 
 private:
-  std::optional<RegisterAccess::VgprReadRegion> region_;
   std::array<uint32_t, 64> values_;
 };
 
@@ -86,6 +85,12 @@ class VectorInput64 {
 public:
   VectorInput64(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
                 uint64_t exec_mask) {
+    if (!exec_mask) {
+      values_[0].fill(0);
+      values_[1].fill(0);
+      data = {values_[0].data(), values_[1].data()};
+      return;
+    }
     region_ = registers.read_operand_region(operand, exec_mask, 2);
     if (region_) {
       auto lo = region_->lanes(0);

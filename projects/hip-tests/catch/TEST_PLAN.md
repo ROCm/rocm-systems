@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 634 | 634 | 0 |
-| **total** | **634** | **634** | **0** |
+| `contract` | 638 | 638 | 0 |
+| **total** | **638** | **638** | **0** |
 
 ## Tier: `contract`
 
@@ -821,6 +821,15 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_MemBatchDiscard_HipMemDiscardBatchAsync_NullPointer_IsRejectedOrUnsupported` | hipMemDiscardBatchAsync | a batch with a null range never returns hipSuccess (rejected, or reported unsupported) |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_NvidiaPrefetchBatchUnsupported_IsSkipped` | hipMemPrefetchBatchAsync | NVIDIA CUDA versions before 13.0 do not expose the batch prefetch API; the contract is skipped until backend parity exists |
 | `Contract_MemBatchDiscard_HipMemPrefetchBatchAsync_PrefetchBatch_IsAcceptedOrUnsupported` | hipMemPrefetchBatchAsync | prefetching a batch of managed ranges to the current device is accepted or reported unsupported |
+
+### `mem_copy_with_attributes` (4 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpy3DWithAttributesAsync | a single stream-ordered pointer copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpy3DWithAttributesAsync_NullOpAndReservedFlags_ReturnInvalidValue` | hipMemcpy3DWithAttributesAsync | a null operation pointer and a reserved nonzero flags value are rejected with hipErrorInvalidValue |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_HostDeviceHostRoundTrip_IsVisibleAfterSync` | hipMemcpyWithAttributesAsync | a stream-ordered host->device->host copy round-trips bytes after stream sync |
+| `Contract_MemCopyWithAttributes_HipMemcpyWithAttributesAsync_NullAttributes_ReturnsInvalidValue` | hipMemcpyWithAttributesAsync | a null attributes pointer is rejected with hipErrorInvalidValue |
 
 ### `mem_location_pool` (4 cases)
 
