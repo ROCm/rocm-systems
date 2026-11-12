@@ -339,7 +339,8 @@ mod tests {
                 .unwrap()
                 .free()
                 .unwrap_err()
-                .native_error_code(),
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);
