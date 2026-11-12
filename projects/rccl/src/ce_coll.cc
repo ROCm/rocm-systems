@@ -191,6 +191,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclWindow_vidmem* ceWinDevHost = nullptr;
   ncclWindow_vidmem* sigWinDev = nullptr;
   ncclWindow_vidmem* sigWinDevHost = nullptr;
+  cudaStream_t sidestream = nullptr;
+  cudaStream_t zeroStream = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks * sizeof(uint32_t), 16) * 2;
   size_t sigBufferSize = NUM_SLOTS * comm->nRanks * sizeof(uint32_t);
   static int64_t paramStaging = rcclParamCeArStagingBytes();
@@ -221,6 +223,14 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
 
   // ceSync window (ready/complete flag arrays).
   NCCLCHECKGOTO(ncclMemAlloc((void**)&ceDevBase, ceDevBaseSize), ret, fail);
+  // ncclMemAlloc does not zero memory, and a stale 1 would pass the first UC sync. hipMemset only queues the fill on
+  // the null stream, which registration does not wait for, so clear on a side stream and wait for that stream.
+  NCCLCHECKGOTO(getSideStream(&sidestream), ret, fail);
+  zeroStream = sidestream;
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), ret, fail);
+  CUDACHECKGOTO(cudaMemsetAsync(ceDevBase, 0, ceDevBaseSize, zeroStream), ret, fail);
+  CUDACHECKGOTO(cudaStreamSynchronize(zeroStream), ret, fail);
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamDestroy(zeroStream), ret, fail);
   NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, ceDevBase, ceDevBaseSize, NCCL_WIN_COLL_SYMMETRIC, &ceWinDev), ret,
                 fail);
   NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, ceWinDev, &ceWinDevHost), ret, fail);
