@@ -152,6 +152,10 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
+    // a tool built against a newer rocprofiler-sdk may pass kinds this library does not know
+    if(kind <= ROCPROFILER_CALLBACK_TRACING_NONE || kind >= ROCPROFILER_CALLBACK_TRACING_LAST)
+        return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);

@@ -16,12 +16,14 @@ use std::sync::atomic::{Ordering, fence};
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
 use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
 use crate::device::gpu::queue::{
+    AqlControlLayout, AqlControlRegion, AqlQueueHeader, MAX_PRIVATE_SEGMENT_BYTES,
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
     QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::session::DriverContextLifetime;
+use crate::topology::{GpuScratchEncoding, GpuTargetProfile};
 
 use crate::{Error, ErrorKind};
 
@@ -32,8 +34,10 @@ const SDMA_READ_OFFSET: usize = 0;
 const SDMA_WRITE_OFFSET: usize = 8;
 const CWSR_ALIGNMENT: usize = 2 * 1024 * 1024;
 const SCRATCH_ALIGNMENT: u64 = 256;
-const MAX_PRIVATE_SEGMENT_BYTES: u32 = 262_128;
-const GFX1201_SCRATCH_RESOURCE_WORD3: u32 =
+const GFX9_SCRATCH_ALIGNMENT: u64 = 1024;
+const GFX9_SCRATCH_RESOURCE_WORD3: u32 =
+    4 | (5 << 3) | (6 << 6) | (7 << 9) | (4 << 12) | (4 << 15) | (1 << 19) | (3 << 21) | (1 << 23);
+const GFX12_SCRATCH_RESOURCE_WORD3: u32 =
     4 | (5 << 3) | (6 << 6) | (7 << 9) | (0x14 << 12) | (1 << 23) | (2 << 28);
 /// A progress query cannot wait indefinitely for a busy producer to pause.
 /// Destruction calls this only after producers stop, so exhaustion is retryable.
@@ -61,51 +65,6 @@ fn sample_wrapping_indices(
     Err(io::Error::from(io::ErrorKind::WouldBlock))
 }
 
-#[allow(dead_code)]
-#[repr(C)]
-struct AqlQueueHeader {
-    queue_type: u32,
-    features: u32,
-    base_address: u64,
-    doorbell_signal: u64,
-    size: u32,
-    reserved: u32,
-    id: u64,
-}
-
-#[allow(dead_code)]
-#[repr(C, align(64))]
-struct AqlControlLayout {
-    queue_header: AqlQueueHeader,
-    caps: u32,
-    reserved1: [u32; 3],
-    write_dispatch_id: u64,
-    group_segment_aperture_base_hi: u32,
-    private_segment_aperture_base_hi: u32,
-    max_cu_id: u32,
-    max_wave_id: u32,
-    max_legacy_doorbell_dispatch_id_plus_1: u64,
-    legacy_doorbell_lock: u32,
-    reserved2: [u32; 9],
-    read_dispatch_id: u64,
-    read_dispatch_id_field_base_byte_offset: u32,
-    compute_tmpring_size: u32,
-    scratch_resource_descriptor: [u32; 4],
-    scratch_backing_memory_location: u64,
-    scratch_backing_memory_byte_size: u64,
-    scratch_wave64_lane_byte_size: u32,
-    queue_properties: u32,
-    scratch_max_use_index: u64,
-    queue_inactive_signal: u64,
-    alt_scratch_max_use_index: u64,
-    alt_scratch_resource_descriptor: [u32; 4],
-    alt_scratch_backing_memory_location: u64,
-    alt_scratch_dispatch_limit: [u32; 3],
-    alt_scratch_wave64_lane_byte_size: u32,
-    alt_compute_tmpring_size: u32,
-    reserved5: u32,
-}
-
 const AQL_CONTROL_SIZE: usize = size_of::<AqlControlLayout>();
 const AQL_WRITE_OFFSET: usize = offset_of!(AqlControlLayout, write_dispatch_id);
 const AQL_READ_OFFSET: usize = offset_of!(AqlControlLayout, read_dispatch_id);
@@ -121,38 +80,57 @@ const _: () = assert!(AQL_READ_OFFSET == 128);
 /// doorbell BO at the same VA and maps it into the owning GPU VM.
 #[derive(Default)]
 pub(super) struct Doorbells {
+    /// Process mapping shared across queue creation and peer access.
     mapping: Mutex<Option<DoorbellMapping>>,
 }
 
+/// Process doorbell mapping and optional GPU-visible backing.
 struct DoorbellMapping {
+    /// Reserved CPU range holding the native doorbell page.
     storage: Option<os_memory::Reservation>,
+    /// Native doorbell slice offset within the device aperture.
     offset: u64,
+    /// KFD GPU ID that supplied this mapping.
     gpu_id: u32,
+    /// Optional BO used when a GPU producer needs doorbell access.
     handle: Option<u64>,
+    /// Progress of mapping that BO into the owning GPU VM.
     gpu_mapping: DoorbellGpuMapping,
+    /// Other GPU VMs that can reach the shared doorbell backing.
     peers: Vec<DoorbellPeer>,
+    /// An operation may have completed despite reporting an error.
     uncertain: bool,
 }
 
 /// Peer VM retaining its device-visible mapping of shared doorbell storage.
 struct DoorbellPeer {
+    /// Peer VM that can reach the shared doorbell allocation.
     vm: Shared<DeviceVm>,
+    /// Mapping phase retained through partial failure.
     gpu_mapping: DoorbellGpuMapping,
+    /// Native mapping result cannot be safely replayed.
     uncertain: bool,
 }
 
+/// Native GPU mapping progress of shared doorbell backing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DoorbellGpuMapping {
+    /// GPU mapping has not begun.
     Unmapped,
+    /// Mapping changed the given number of native entries.
     Mapping(u32),
+    /// GPU mapping and synchronization completed.
     Mapped,
+    /// Unmapping changed the given number of native entries.
     Unmapping(u32),
 }
 
 /// CPU and optional GPU addresses for one allocated doorbell slot.
 #[derive(Clone, Copy)]
 struct DoorbellAddresses {
+    /// CPU MMIO address used by host producers.
     host: usize,
+    /// GPU address used by a qualified device producer.
     device: Option<u64>,
 }
 
@@ -184,7 +162,7 @@ impl DoorbellPeer {
         let result = self
             .vm
             .kfd()
-            .transfer(handle, &[self.vm.gpu_id()], completed, map);
+            .transfer(handle, &[self.vm.gpu_id], completed, map);
         if result.as_ref().err().is_some_and(|source| {
             source.kind() == std::io::ErrorKind::InvalidData
                 || source.raw_os_error() == Some(errno::EFAULT)
@@ -353,7 +331,7 @@ impl DoorbellMapping {
         let mut args = uapi::AllocMemory {
             va: self.address()? as u64,
             size: DOORBELL_SLICE as u64,
-            gpu_id: vm.gpu_id(),
+            gpu_id: vm.gpu_id,
             flags: uapi::DOORBELL | uapi::WRITABLE | uapi::COHERENT | uapi::NO_SUBSTITUTE,
             ..uapi::AllocMemory::default()
         };
@@ -534,7 +512,7 @@ impl Doorbells {
             *mapping = Some(DoorbellMapping {
                 storage: Some(storage),
                 offset: base,
-                gpu_id: vm.gpu_id(),
+                gpu_id: vm.gpu_id,
                 handle: None,
                 gpu_mapping: DoorbellGpuMapping::Unmapped,
                 peers: Vec::new(),
@@ -617,37 +595,58 @@ impl Doorbells {
 
 /// Computed context-save allocation requirements for a compute queue.
 struct ComputeStorage {
+    /// Native context-save extent per XCC.
     context_size: u32,
+    /// Native control-stack extent.
     control_stack_size: u32,
+    /// Additional debug state extent.
     debug_size: u32,
+    /// Number of XCCs requiring context storage.
     xcc_count: u32,
+    /// Total allocation extent after native alignment.
     total_size: u64,
 }
 
 /// Fully validated native queue request used by the acquisition path.
 struct Request {
+    /// Validated ring byte size.
     ring_size: u32,
+    /// Requested host or device ring placement.
     ring_memory: QueueRingMemory,
+    /// KFD queue type passed to creation.
     queue_type: u32,
+    /// Native scheduling priority.
     priority: u32,
+    /// Whether another GPU may produce queue packets.
     device_producer: bool,
+    /// Compute context storage geometry, when required.
     compute: Option<ComputeStorage>,
+    /// AQL control fields, when this is an AQL queue.
     aql: Option<AqlControl>,
+    /// PM4 control fields, when this is a PM4 queue.
     pm4: Option<Pm4Control>,
+    /// Selected SDMA engine policy, when this is an SDMA queue.
     sdma_target: Option<SdmaTarget>,
 }
 
+/// Validated SDMA engine selection and number of available native engines.
 #[derive(Clone, Copy)]
 struct SdmaTarget {
+    /// Default engine or an explicit logical engine index.
     selection: SdmaEngineSelection,
+    /// Number of engines available for this queue family.
     count: u32,
 }
 
 /// A peer VM's mappings of the queue ring and control/index allocation.
 struct QueuePeerMapping {
+    /// Peer VM receiving queue ring and control mappings.
     vm: Shared<DeviceVm>,
+    /// KFD allocation handles for ring and control backing.
     handles: [u64; 2],
+    /// Native mapping phase for each handle.
     mappings: [DoorbellGpuMapping; 2],
+    /// Native update outcome cannot be safely replayed.
     uncertain: bool,
 }
 
@@ -670,10 +669,10 @@ impl QueuePeerMapping {
                 "queue peer mapping has an invalid transfer state",
             ));
         };
-        let result =
-            self.vm
-                .kfd()
-                .transfer(self.handles[index], &[self.vm.gpu_id()], completed, map);
+        let result = self
+            .vm
+            .kfd()
+            .transfer(self.handles[index], &[self.vm.gpu_id], completed, map);
         if result.as_ref().err().is_some_and(|source| {
             source.kind() == std::io::ErrorKind::InvalidData
                 || source.raw_os_error() == Some(errno::EFAULT)
@@ -773,28 +772,41 @@ impl QueuePeerMapping {
 /// Hardware scratch registers derived from one validated scratch allocation.
 #[derive(Clone, Copy)]
 struct ScratchControl {
+    /// Encoded compute temporary-ring size register.
     tmpring_size: u32,
+    /// Hardware scratch resource descriptor words.
     resource: [u32; 4],
+    /// GPU address of scratch backing.
     backing_address: u64,
+    /// Scratch bytes per 64-lane wave.
     wave64_lane_bytes: u32,
 }
 
 /// AQL-specific queue metadata needed for creation and later scratch updates.
 #[derive(Clone, Copy)]
 struct AqlControl {
+    /// Host or device packet producer mode.
     producer_mode: QueueProducerMode,
+    /// Whether the queue supports global work synchronization.
     global_work_sync: bool,
+    /// Shader and queue geometry used for control-page fields.
     properties: sysfs::KfdQueueProperties,
+    /// GPU address of the queue inactive signal, when supplied.
     inactive_signal: Option<u64>,
+    /// Native event used for queue error notification.
     error_event: Option<QueueErrorEvent>,
+    /// Scratch registers installed in the queue control page.
     scratch: Option<ScratchControl>,
 }
 
 /// PM4-specific control-page offsets and wrapped read-index mask.
 #[derive(Clone, Copy)]
 struct Pm4Control {
+    /// Write-index offset in the shared control page.
     write_offset: usize,
+    /// Queue error payload offset in that page.
     error_offset: usize,
+    /// Mask used to expand wrapped native read indices.
     read_mask: u64,
 }
 
@@ -904,13 +916,12 @@ fn validate_sdma(properties: sysfs::KfdQueueProperties, desc: QueueRequest) -> R
 impl Request {
     fn validate(native: &sysfs::KfdNode, desc: QueueRequest) -> Result<Self, Error> {
         let properties = native.queues;
-        // These generations share eight-byte doorbells, the pointer protocol,
-        // and the 32-waves-per-CU debugger tail. Other generations need their
-        // own checked sizing rules before they can use this allocation path.
-        if native.gpu_id == 0 || !(100_100..=120_001).contains(&properties.gfx_target) {
+        // These generations share eight-byte doorbells and the pointer
+        // protocol. Context and debugger backing use reported wave geometry.
+        if native.gpu_id == 0 || !properties.target_profile.supports_aql() {
             return Err(error(
                 ErrorKind::Unsupported,
-                "KFD queue backing is supported on GFX10.1 through GFX12.0",
+                "KFD queue backing is unsupported on this GPU target",
             ));
         }
         let page = os_memory::page_size()
@@ -979,7 +990,7 @@ impl Request {
             QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
         };
         if ring_memory == QueueRingMemory::HostVisibleLocal
-            && (properties.gfx_target != 120_001
+            && (properties.target_profile != GpuTargetProfile::Gfx1201
                 || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
         {
             return Err(error(
@@ -1005,6 +1016,32 @@ impl Request {
     }
 }
 
+fn scratch_wave_bytes(scratch: QueueScratch, alignment: u64) -> Result<u64, Error> {
+    if scratch.maximum_private_segment_byte_length == 0
+        || scratch.maximum_private_segment_byte_length > MAX_PRIVATE_SEGMENT_BYTES
+        || !matches!(scratch.lanes_per_wave, 32 | 64)
+    {
+        return Err(error(
+            ErrorKind::InvalidArgument,
+            "scratch private segment or execution width is invalid",
+        ));
+    }
+    let wave_bytes = u64::from(scratch.lanes_per_wave)
+        .checked_mul(u64::from(scratch.maximum_private_segment_byte_length))
+        .ok_or_else(|| error(ErrorKind::InvalidArgument, "scratch wave size overflows"))?;
+    if wave_bytes % alignment != 0 {
+        return Err(error(
+            ErrorKind::InvalidArgument,
+            "scratch private segment does not meet wave alignment",
+        ));
+    }
+    Ok(wave_bytes)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "target scratch geometry and register encoding share one checked path"
+)]
 fn validate_scratch(
     properties: sysfs::KfdQueueProperties,
     scratch: Option<QueueScratch>,
@@ -1012,27 +1049,41 @@ fn validate_scratch(
     let Some(scratch) = scratch else {
         return Ok(None);
     };
-    if properties.gfx_target != 120_001
-        || properties.wavefront_size != 32
-        || properties.xcc_count != 1
+    let (alignment, wave_size_limit, waves_per_engine) = match properties
+        .target_profile
+        .scratch_encoding(properties.wavefront_size)
     {
+        Some(GpuScratchEncoding::Gfx9) => (GFX9_SCRATCH_ALIGNMENT, 0x1fff, false),
+        Some(GpuScratchEncoding::Gfx12) => (SCRATCH_ALIGNMENT, 0x3_ffff, true),
+        None => {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "fixed AQL scratch requires a qualified GFX9 or GFX12 target",
+            ));
+        }
+    };
+    if !waves_per_engine && scratch.lanes_per_wave != 64 {
         return Err(error(
-            ErrorKind::Unsupported,
-            "fixed AQL scratch is qualified only for GFX1201 wave32",
+            ErrorKind::InvalidArgument,
+            "GFX9 scratch requires wave64 execution",
         ));
     }
-    if scratch.device_address % SCRATCH_ALIGNMENT != 0
-        || scratch.byte_length % SCRATCH_ALIGNMENT != 0
-        || scratch.maximum_private_segment_byte_length == 0
-        || scratch.maximum_private_segment_byte_length > MAX_PRIVATE_SEGMENT_BYTES
-        || scratch.maximum_private_segment_byte_length % 8 != 0
+    if properties.xcc_count == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "fixed AQL scratch requires nonzero XCC geometry",
+        ));
+    }
+    if scratch.device_address % alignment != 0
+        || scratch.byte_length % alignment != 0
         || scratch.maximum_wave_count == 0
     {
         return Err(error(
             ErrorKind::InvalidArgument,
-            "scratch range or limits do not meet GFX1201 alignment",
+            "scratch range or limits do not meet target alignment",
         ));
     }
+    let wave_bytes = scratch_wave_bytes(scratch, alignment)?;
     let shader_engines = properties
         .shader_engine_count_per_xcc
         .checked_mul(properties.xcc_count)
@@ -1050,19 +1101,23 @@ fn validate_scratch(
             "scratch wave count exceeds or does not divide target geometry",
         ));
     }
-    let wave_bytes = u64::from(properties.wavefront_size)
-        .checked_mul(u64::from(scratch.maximum_private_segment_byte_length))
-        .ok_or_else(|| error(ErrorKind::InvalidArgument, "scratch wave size overflows"))?;
-    let wave_units = wave_bytes.div_ceil(SCRATCH_ALIGNMENT);
+    let wave_units = wave_bytes / alignment;
     let required = wave_units
-        .checked_mul(SCRATCH_ALIGNMENT)
+        .checked_mul(alignment)
         .and_then(|size| size.checked_mul(u64::from(scratch.maximum_wave_count)))
         .ok_or_else(|| error(ErrorKind::InvalidArgument, "scratch extent overflows"))?;
-    let waves_per_engine = scratch.maximum_wave_count / shader_engines;
+    let encoded_waves = scratch.maximum_wave_count
+        / if waves_per_engine {
+            shader_engines
+        } else {
+            properties.xcc_count
+        };
     if required > scratch.byte_length
-        || wave_units > 0x3_ffff
-        || waves_per_engine > 0x0fff
-        || scratch.byte_length > u64::from(u32::MAX)
+        || wave_units > wave_size_limit
+        || encoded_waves > 0x0fff
+        || (!waves_per_engine && scratch.maximum_wave_count % properties.xcc_count != 0)
+        || scratch.byte_length / u64::from(properties.xcc_count) > u64::from(u32::MAX)
+        || scratch.byte_length % u64::from(properties.xcc_count) != 0
         || scratch.device_address >> 48 != 0
         || scratch
             .device_address
@@ -1093,18 +1148,28 @@ fn validate_scratch(
             "validated scratch address high word overflowed",
         )
     })?;
-    let backing_size = u32::try_from(scratch.byte_length)
+    let backing_size = u32::try_from(scratch.byte_length / u64::from(properties.xcc_count))
         .map_err(|_| error(ErrorKind::Internal, "validated scratch size overflowed"))?;
+    let wave64_lane_bytes = u32::try_from(wave_bytes / 64).map_err(|_| {
+        error(
+            ErrorKind::Internal,
+            "validated scratch lane size overflowed",
+        )
+    })?;
     Ok(Some(ScratchControl {
-        tmpring_size: waves_per_engine | (wave_units << 12),
+        tmpring_size: encoded_waves | (wave_units << 12),
         resource: [
             address_low,
-            (address_high & 0xffff) | (1 << 30),
+            (address_high & 0xffff) | if waves_per_engine { 1 << 30 } else { 1 << 31 },
             backing_size,
-            GFX1201_SCRATCH_RESOURCE_WORD3,
+            if waves_per_engine {
+                GFX12_SCRATCH_RESOURCE_WORD3
+            } else {
+                GFX9_SCRATCH_RESOURCE_WORD3
+            },
         ],
         backing_address: scratch.device_address,
-        wave64_lane_bytes: scratch.maximum_private_segment_byte_length / 2,
+        wave64_lane_bytes,
     }))
 }
 
@@ -1116,11 +1181,18 @@ fn put_u64(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
 }
 
-fn put_aql_scratch(bytes: &mut [u8], gfx_target: u32, scratch: Option<ScratchControl>) {
-    if gfx_target == 120_001 {
-        let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
-        put_u32(bytes, resource + 4, 1 << 30);
-        put_u32(bytes, resource + 12, GFX1201_SCRATCH_RESOURCE_WORD3);
+fn put_aql_scratch(bytes: &mut [u8], profile: GpuTargetProfile, scratch: Option<ScratchControl>) {
+    let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
+    match profile {
+        GpuTargetProfile::Gfx9 => {
+            put_u32(bytes, resource + 4, 1 << 31);
+            put_u32(bytes, resource + 12, GFX9_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250 => {
+            put_u32(bytes, resource + 4, 1 << 30);
+            put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Other | GpuTargetProfile::Gfx10 | GpuTargetProfile::Gfx11 => {}
     }
     if let Some(scratch) = scratch {
         put_u32(
@@ -1235,7 +1307,7 @@ fn initialize_aql_control(
             signal,
         );
     }
-    put_aql_scratch(&mut bytes, aql.properties.gfx_target, aql.scratch);
+    put_aql_scratch(&mut bytes, aql.properties.target_profile, aql.scratch);
     storage.write_bytes(0, &bytes)
 }
 
@@ -1258,7 +1330,10 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
         ));
     }
     let debug_size = (properties.compute_units / xcc_count)
-        .checked_mul(32 * 32)
+        .checked_mul(properties.maximum_wave_count_per_compute_unit)
+        .and_then(|waves| waves.checked_mul(32))
+        .and_then(|bytes| bytes.checked_add(63))
+        .map(|bytes| bytes / 64 * 64)
         .ok_or_else(|| error(ErrorKind::DriverContract, "KFD debugger storage overflows"))?;
     let total_size = (u64::from(context_size) + u64::from(debug_size))
         .checked_mul(u64::from(xcc_count))
@@ -1289,17 +1364,25 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
 fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     let properties = native.queues;
     if !cfg!(target_arch = "x86_64")
-        || properties.gfx_target != 120_001
+        || !matches!(
+            properties.target_profile,
+            GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250
+        )
         || properties.compute_queues == 0
         || properties.wavefront_size != 32
-        || properties.xcc_count != 1
+        || properties.xcc_count == 0
         || properties.maximum_wave_count_per_compute_unit == 0
         || compute_storage(properties).is_err()
         || os_memory::page_size().ok()? != 4096
     {
         return None;
     }
-    let cache_line = usize::try_from(crate::cpu_cache::cache_line_size().ok()?).ok()?;
+    let cache_line = usize::try_from(
+        crate::host::cache::CacheMaintenance::qualify(crate::host::cache::CachePolicy::WriteBack)
+            .ok()?
+            .line_size_bytes()?,
+    )
+    .ok()?;
     if cache_line < size_of::<u64>() || !cache_line.is_power_of_two() || cache_line > 4096 / 3 {
         return None;
     }
@@ -1311,7 +1394,7 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
 }
 
 pub(super) fn supports_aql(native: &sysfs::KfdNode) -> bool {
-    (100_100..=120_001).contains(&native.queues.gfx_target)
+    native.queues.target_profile.supports_aql()
         && native.queues.compute_queues != 0
         && compute_storage(native.queues).is_ok()
 }
@@ -1335,7 +1418,9 @@ pub(super) fn create(
 
 /// Queue context backing, either registered SVM or an owned native allocation.
 enum QueueContext {
+    /// Host SVM reservation registered with KFD.
     Svm(os_memory::Reservation),
+    /// Native allocation containing the queue control pages.
     Native(Owned<KfdAllocation>),
 }
 
@@ -1376,7 +1461,7 @@ impl QueueContext {
         let mut attributes = [
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
-                value: vm.gpu_id(),
+                value: vm.gpu_id,
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_PREFERRED_LOCATION,
@@ -1392,7 +1477,7 @@ impl QueueContext {
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_ACCESS,
-                value: vm.gpu_id(),
+                value: vm.gpu_id,
             },
             uapi::SvmAttribute {
                 attribute_type: uapi::SVM_ATTR_GRANULARITY,
@@ -1453,26 +1538,50 @@ fn initialize_queue_context(
     Ok(())
 }
 
+/// Whether a callback at the native retirement boundary has run.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RetirementCallbackState {
+    Pending,
+    Delivered,
+}
+
 /// Complete KFD queue owner with resumable teardown state.
 ///
 /// Ring, pointer, optional context, peer mappings, and doorbell state outlive
 /// the native queue ID. Destruction records each completed phase so retry does
 /// not replay an ioctl or release backing still reachable by hardware.
 pub(crate) struct KfdQueue {
+    /// Activated VM whose KFD connection owns the queue ID.
     vm: Shared<DeviceVm>,
+    /// Ring, index/control, and optional EOP allocations.
     backing: [Option<Owned<KfdAllocation>>; 3],
+    /// Compute context backing retained through native destruction.
     context: Option<QueueContext>,
+    /// Additional VMs with mappings of this queue transport.
     peer_mappings: Mutex<Vec<QueuePeerMapping>>,
+    /// Read index location within the control allocation.
     read_offset: usize,
+    /// Write index location within the control allocation.
     write_offset: usize,
+    /// AQL-specific control state when this is a compute queue.
     aql: Option<AqlControl>,
+    /// Native read-index wrap mask for narrow counters.
     read_index_mask: Option<u64>,
+    /// Offset of this queue's doorbell within the device aperture.
     doorbell_offset: u64,
+    /// Native queue ID until destruction succeeds.
     id: Option<u32>,
+    /// Whether the native queue may still execute work.
     active: bool,
+    /// Current native scheduling priority.
     priority: u32,
+    /// Native destruction has begun and cannot accept new updates.
     destroying: bool,
+    /// Tracks delivery of the external retirement callback.
+    retirement_callback: RetirementCallbackState,
+    /// A native result was ambiguous, so backing cannot be reused.
     uncertain: bool,
+    /// Cached transport addresses and queue properties.
     info: QueueTransport,
 }
 
@@ -1518,6 +1627,7 @@ impl KfdQueue {
             BufferKind::Vram {
                 public: true,
                 coherent: false,
+                extended_coherent: false,
                 uncached: true,
                 contiguous: false,
             }
@@ -1558,6 +1668,16 @@ impl KfdQueue {
         let ring_device_address = ring.device_address(&vm)?;
         let pointer_host_address = pointers.host_address()?;
         let pointer_device_address = pointers.device_address(&vm)?;
+        if request.aql.is_some()
+            && (page < AQL_CONTROL_SIZE as u64
+                || pointer_host_address % 256 != 0
+                || pointer_host_address.checked_add(AQL_CONTROL_SIZE).is_none())
+        {
+            return Err(error(
+                ErrorKind::Driver,
+                "AQL control mapping does not contain an aligned control layout",
+            ));
+        }
         let mut eop = None;
         let mut context = None;
         if let Some(compute) = &request.compute {
@@ -1566,6 +1686,7 @@ impl KfdQueue {
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },
@@ -1616,10 +1737,27 @@ impl KfdQueue {
         } else {
             (SDMA_READ_OFFSET, SDMA_WRITE_OFFSET)
         };
+        let aql_control = if request.aql.is_some() {
+            Some(
+                AqlControlRegion::new(
+                    pointer_host_address,
+                    AQL_CONTROL_SIZE,
+                    256,
+                    size_of::<AqlQueueHeader>(),
+                    pointer_host_address + AQL_READ_OFFSET,
+                    pointer_host_address + AQL_WRITE_OFFSET,
+                    pointer_host_address + offset_of!(AqlControlLayout, queue_properties),
+                )
+                .ok_or_else(|| error(ErrorKind::Driver, "invalid AQL control region"))?,
+            )
+        } else {
+            None
+        };
         let info = QueueTransport {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            aql_control,
             sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,
@@ -1642,7 +1780,7 @@ impl KfdQueue {
             write_pointer: pointer_device_address + write_offset as u64,
             read_pointer: pointer_device_address + read_offset as u64,
             ring_size: request.ring_size,
-            gpu_id: vm.gpu_id(),
+            gpu_id: vm.gpu_id,
             queue_type: request.queue_type,
             sdma_engine_id: selected_sdma_engine_id.unwrap_or(0),
             percentage: 100,
@@ -1671,6 +1809,7 @@ impl KfdQueue {
             active: true,
             priority: request.priority,
             destroying: false,
+            retirement_callback: RetirementCallbackState::Pending,
             uncertain: false,
             info,
         })?;
@@ -1975,6 +2114,13 @@ impl KfdQueue {
     }
 
     pub(crate) fn destroy(&mut self) -> Result<(), Error> {
+        self.destroy_with_retained_transport(&mut || {})
+    }
+
+    pub(crate) fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error> {
         self.vm
             .kfd()
             .check_process()
@@ -2010,6 +2156,13 @@ impl KfdQueue {
             // Backing cleanup may fail. Clear the released ID first so that a
             // later cleanup attempt cannot destroy another queue reusing it.
             self.id = None;
+        }
+        // A successful native DESTROY ends GPU access, while the control BO
+        // remains mapped until the backing loop below. Retain this one-shot
+        // boundary across retries after a later cleanup failure.
+        if self.retirement_callback == RetirementCallbackState::Pending {
+            self.retirement_callback = RetirementCallbackState::Delivered;
+            callback();
         }
         let peers = self
             .peer_mappings

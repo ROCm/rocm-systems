@@ -16,6 +16,10 @@ rj_add_object_library(
     race_detector/core/race_detector.cpp
     race_detector/core/wave_race_state.cpp
 )
+target_link_libraries(
+    rocjitsu_plugin_race_detector
+    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+)
 
 rj_add_object_library(
     rocjitsu_plugin_throughput
@@ -81,18 +85,35 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE
                 ${ROCJITSU_INCLUDE_DIR}
                 ${ROCJITSU_SRC_DIR}
-                ${HSA_INCLUDE_DIR}
                 # The plugin's object library links util/simdojo PRIVATE, so
                 # pull in their public header paths for the plugin's compile.
                 $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
                 $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
+        # Plugin logic uses inline simulator accessors whose vptr checks need
+        # simulator RTTI that standalone modules do not link.
+        rj_vptr_free_object_library(plugin_objects ${object_lib})
+        if(name STREQUAL "race" AND NOT plugin_objects STREQUAL object_lib)
+            # The race detector exposes the shared wait decoder through its
+            # interface, and that decoder needs the same vptr exemption.
+            rj_vptr_free_object_library(
+                wait_policy_objects
+                rocjitsu_wait_counter_policy
+            )
+            target_link_libraries(
+                ${plugin_objects}
+                INTERFACE $<TARGET_OBJECTS:${wait_policy_objects}>
+            )
+        endif()
         # Link the plugin's own logic. Any simulator code it references is
         # bundled statically through the object library; the plugin does not
         # link librocjitsu.so (the interposer/simulator image), so loading it
         # never pulls the interposer into the host process and it resolves
         # nothing from the simulator at load time.
-        target_link_libraries(${target} PRIVATE ${object_lib})
+        target_link_libraries(
+            ${target}
+            PRIVATE ${plugin_objects} rocm_runtime::runtime_headers
+        )
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the loader exports (which carry an explicit
         # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps

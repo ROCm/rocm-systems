@@ -37,21 +37,6 @@ struct EvaluationResult {
   ResultProvenance provenance;
 };
 
-inline float flush_input_f32(float value, uint32_t denorm_mode) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  if ((denorm_mode & 1u) == 0 && (bits & 0x7f800000u) == 0 && (bits & 0x007fffffu) != 0)
-    return std::copysign(0.0f, value);
-  return value;
-}
-
-inline float flush_input_f16(float value, uint32_t denorm_mode) {
-  const uint32_t bits = std::bit_cast<uint32_t>(value);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if ((denorm_mode & 1u) == 0 && magnitude != 0 && magnitude < 0x38800000u)
-    return std::bit_cast<float>(bits & 0x80000000u);
-  return value;
-}
-
 inline float quiet_nan(float value) {
   uint32_t bits = std::bit_cast<uint32_t>(value);
   // Test signaling NaNs specifically: a general NaN check can become a host
@@ -249,11 +234,12 @@ inline float apply_source_modifiers(float value, bool absolute, bool negate) {
 
 } // namespace detail
 
-/// @brief Apply F16 result modifiers and perform one direct F64-to-F16 rounding.
-/// @details This is the supported policy surface for fused operations whose exact result is
-/// representable in F64. It avoids exposing pseudo-scalar implementation details to other
-/// execution helpers. CLAMP's NaN conversion is selected separately because older profiles
-/// require MODE.DX10_CLAMP while GFX12 and gfx1250 always convert NaN to positive zero.
+/// @brief Apply optional numeric modifiers to a host value, then narrow it to F16.
+/// @details This helper does not choose an instruction's output ordering. A caller
+/// may pass a wide arithmetic result to apply modifiers before narrowing, pass an
+/// already-rounded F16 value represented in F64, or disable modifiers and apply
+/// the shared raw-bit stage afterward. The caller owns MODE input/output-denormal
+/// policy; clamp_nan_to_zero selects CLAMP's NaN conversion separately.
 inline uint16_t round_f16_result(double value, uint32_t round_mode, uint32_t omod, bool clamp,
                                  bool fp16_ovfl, bool clamp_nan_to_zero) {
   const bool effective_clamp = clamp && (clamp_nan_to_zero || !std::isnan(value));

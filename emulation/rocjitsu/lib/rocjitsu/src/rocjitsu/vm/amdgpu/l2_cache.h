@@ -8,12 +8,14 @@
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/l2_maintenance_mutex.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "simdojo/components/cache.h"
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
+
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
@@ -80,7 +82,7 @@ namespace amdgpu {
 /// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t LINE_SIZE_BITS = 7;
   static constexpr uint32_t NUM_SETS = 2048;
   static constexpr uint32_t ASSOCIATIVITY = 16;
 
@@ -120,7 +122,10 @@ public:
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
 
   /// Diagnostic totals are exact at quiescence. Concurrent queries sample
@@ -222,11 +227,7 @@ public:
   /// @brief Select local VM backing before acquiring the device coherence boundary.
   /// @details Take a fresh snapshot for each attempt, including retries. VMID-zero
   /// physical accesses and transport-backed atomics do not need a local snapshot.
-  [[nodiscard]] std::optional<GpuVmAccess> snapshot_atomic_access(uint32_t vmid) const {
-    if (!backing_memory_ || vmid == 0 || !gpu_vm_)
-      return std::nullopt;
-    return gpu_vm_->snapshot_vmid(vmid);
-  }
+  [[nodiscard]] std::optional<GpuVmAccess> snapshot_atomic_access(uint32_t vmid) const;
 
   /// @brief Perform one backing atomic within an existing device boundary.
   /// @details A vector instruction can prepare the cache hierarchy once for all
@@ -266,6 +267,70 @@ public:
     }
   }
 
+  /// @brief Perform one backing atomic per active lane within an existing device boundary.
+  /// @details Same contract as atomic_rmw() per lane, in lane order from @p next_lane.
+  /// Locally backed VM accesses share one revocation lease and translation span across
+  /// lanes, and the diagnostic counters are bumped once per call. @p next_lane is the first
+  /// unapplied lane on return (the failing lane, or the lane count when complete).
+  /// @param lane_addresses At most 64 per-lane addresses.
+  /// @param fn Callback: fn(lane, data_ptr, offset).
+  template <typename F>
+  [[nodiscard]] VmAccessOutcome
+  atomic_rmw_lanes(const DeviceCacheCoherence::AtomicBoundary &boundary,
+                   std::span<const uint64_t> lane_addresses, uint64_t lane_mask, uint32_t size,
+                   F &&fn, uint32_t vmid, const std::optional<GpuVmAccess> &vm_access,
+                   uint32_t &next_lane) {
+    if (lane_addresses.size() > 64)
+      return VmAccessOutcome::Malformed;
+    const uint32_t lane_count = static_cast<uint32_t>(lane_addresses.size());
+    if (backing_memory_ && vmid != 0 && gpu_vm_ != nullptr && vm_access &&
+        boundary.outcome() == VmAccessOutcome::Complete && boundary.belongs_to(coherence_.get())) {
+      uint32_t first = lane_count, active = 0;
+      for (uint32_t lane = next_lane; lane < lane_count; ++lane) {
+        if (lane_mask & (1ULL << lane)) {
+          first = std::min(first, lane);
+          ++active;
+        }
+      }
+      if (active == 0) {
+        next_lane = lane_count;
+        return VmAccessOutcome::Complete;
+      }
+      next_lane = first;
+      const VmAccessOutcome outcome = vm_access->atomic_modify_lanes(
+          lane_addresses, lane_mask, size,
+          [&](uint32_t lane, std::span<std::byte> target) {
+            fn(lane, reinterpret_cast<uint8_t *>(target.data()), 0);
+          },
+          next_lane);
+      // Count attempted lanes, including the failing one, just as atomic_rmw()
+      // does. Later lanes were never attempted and must not count again on retry.
+      if (outcome != VmAccessOutcome::Complete) {
+        active = 0;
+        for (uint32_t lane = first; lane < lane_count && lane <= next_lane; ++lane)
+          active += (lane_mask & (1ULL << lane)) != 0;
+      }
+      // Only totals are reported; attribute the batch to its first lane's shard.
+      auto &counters = diagnostics(lane_addresses[first]);
+      counters.backing_reads.fetch_add(active, std::memory_order_relaxed);
+      counters.backing_writes.fetch_add(active, std::memory_order_relaxed);
+      return outcome;
+    }
+    for (uint32_t lane = next_lane; lane < lane_count; ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      const VmAccessOutcome outcome = atomic_rmw(
+          boundary, lane_addresses[lane], size,
+          [&](uint8_t *data, uint32_t offset) { fn(lane, data, offset); }, vmid, vm_access);
+      if (outcome != VmAccessOutcome::Complete) {
+        next_lane = lane;
+        return outcome;
+      }
+    }
+    next_lane = lane_count;
+    return VmAccessOutcome::Complete;
+  }
+
   /// @brief Flush a single L2 line (writeback if dirty, then invalidate).
   ///
   /// Used by CC reads to ensure cross-XCD coherence: dirty data is
@@ -293,6 +358,18 @@ public:
   /// vmid (recorded in the line tag), so a caller-supplied vmid cannot be
   /// correct for a global flush. Retained only for call-site signature symmetry.
   VmAccessOutcome flush_all(uint32_t vmid = 0);
+
+  /// Apply CDNA4 BUFFER_INV to this XCD's noncoherent lines. Device scope
+  /// retains a sole L2. System scope applies regardless of the topology.
+  VmAccessOutcome invalidate_buffer_scope(bool system_scope);
+
+  /// @brief Publish and invalidate only the specified address space.
+  /// @details On failure, no line in this VMID is invalidated. Previously published lines
+  /// remain cached clean; unpublished bytes and unvisited dirty lines remain dirty for retry.
+  /// Other VMIDs are untouched.
+  /// Consumers of memory shared across VMIDs rely on the producer publishing its
+  /// own writes before synchronization; this does not publish another VMID's dirty alias.
+  [[nodiscard]] VmAccessOutcome flush_address_space(uint32_t vmid);
 
   /// @brief Create a completer port for a CU connection (one per CU).
   /// @param name Name suffix for the port (used for port naming).
@@ -344,14 +421,9 @@ private:
       }
 
       std::ranges::sort(sets_.begin(), sets_.begin() + count_);
-      try {
-        for (size_t i = 0; i < count_; ++i) {
-          mutexes_[sets_[i]].mutex.lock();
-          ++locked_;
-        }
-      } catch (...) {
-        unlock_all();
-        throw;
+      for (size_t i = 0; i < count_; ++i) {
+        mutexes_[sets_[i]].mutex.lock();
+        ++locked_;
       }
     }
 
@@ -387,7 +459,7 @@ private:
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);
   VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid = 0);
-  VmAccessOutcome flush_dirty_locked();
+  VmAccessOutcome flush_dirty_locked(std::optional<uint32_t> vmid = std::nullopt);
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
   void mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);

@@ -53,7 +53,7 @@
 
 void ConfigurePeerFakes();
 
-const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, int numericHostForm = 1);
+const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, size_t bufLen, int numericHostForm = 1);
 
 namespace {
 
@@ -300,7 +300,7 @@ class RasPeersMicrotest : public ::testing::Test {
 
 uint64_t PeersTestClockNano() { return static_cast<uint64_t>(g_clockNano); }
 
-const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, const int) {
+const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, size_t bufLen, const int) {
   if (buf == nullptr || addr == nullptr || (addr->sa.sa_family != AF_INET && addr->sa.sa_family != AF_INET6)) {
     if (buf) buf[0] = '\0';
     return buf;
@@ -312,7 +312,7 @@ const char* ncclSocketToString(const ncclSocketAddress* addr, char* buf, const i
     buf[0] = '\0';
     return buf;
   }
-  snprintf(buf, SOCKET_NAME_MAXLEN + 1, "%s<%s>", host, service);
+  snprintf(buf, bufLen, "%s<%s>", host, service);
   return buf;
 }
 

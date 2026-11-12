@@ -28,19 +28,27 @@ class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
                                           public PhysicalMemoryAccess {
 public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
-          LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
+          const LegacyAddressSpaceRegistration &registration,
+          std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
         vmid_(vmid), original_request_mutex_(registration.request_mutex),
-        mutation_epoch_(std::move(registration.mutation_epoch)),
-        frontend_lifetime_(std::move(frontend_lifetime)) {
-    address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
-                                     registration.page_table_generation,
-                                     std::move(registration.request_mutex),
-                                     std::move(registration.page_table_cache_state));
+        mutation_epoch_(registration.mutation_epoch), prt_residency_(registration.prt_residency),
+        frontend_lifetime_(std::move(frontend_lifetime)) {}
+
+  util::Result initialize(LegacyAddressSpaceRegistration registration,
+                          util::DiagnosticEmitter emit_error) {
+    if (address_space_
+            ->register_process(vmid_, registration.page_table, registration.page_table_mutex,
+                               registration.page_table_generation,
+                               std::move(registration.request_mutex),
+                               std::move(registration.page_table_cache_state), emit_error)
+            .failed())
+      return util::Result::failure();
     address_space_->set_process_client_pid(vmid_, registration.client_pid);
     address_space_->set_process_mem_fd(vmid_, registration.client_mem_fd);
     address_space_->set_process_passthrough(vmid_, registration.passthrough);
     address_space_->set_process_fault_reporter(vmid_, registration.fault_reporter);
+    return util::Result::success();
   }
 
   [[nodiscard]] bool try_write_private_dwords(PhysicalMemoryAccess &physical,
@@ -56,6 +64,10 @@ public:
                                            std::span<std::byte> bytes) const override {
     return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
            address_space_->try_read_uncached_ram(address, bytes, vmid_, original_request_mutex_);
+  }
+
+  [[nodiscard]] std::shared_ptr<const PrtRanges> nonresident_prt_ranges() const override {
+    return prt_residency_ ? prt_residency_->nonresident.load() : nullptr;
   }
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
@@ -137,7 +149,7 @@ public:
             .begin = address & ~(kLegacyPageSize - 1),
             .size = kLegacyPageSize,
             .mutation_epoch = mutation_epoch_,
-            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
+            .captured_epoch = mutation_epoch_->value.load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
@@ -248,6 +260,21 @@ public:
     return vm_access_outcome(outcome);
   }
 
+  [[nodiscard]] VmAccessOutcome atomic_modify_lanes(VmMemoryDomain domain,
+                                                    std::span<const uint64_t> addresses,
+                                                    uint64_t lane_mask, uint32_t width,
+                                                    const AtomicLaneMutation &mutation,
+                                                    uint32_t &next_lane) override {
+    if (domain != VmMemoryDomain::Compatibility)
+      return VmAccessOutcome::Malformed;
+    return vm_access_outcome(address_space_->atomic_modify_strict_lanes(
+        addresses, lane_mask, width,
+        [&](uint32_t lane, uint8_t *bytes) {
+          mutation(lane, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), width));
+        },
+        vmid_, next_lane));
+  }
+
   [[nodiscard]] std::byte *resolve_host_pointer(VmMemoryDomain domain, uint64_t address,
                                                 std::size_t size) const override {
     if (domain != VmMemoryDomain::Compatibility)
@@ -287,7 +314,8 @@ private:
   // Synchronous word reads and stores must not destroy the final request-mutex owner
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+  util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
+  std::shared_ptr<const PrtResidency> prt_residency_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
@@ -323,18 +351,25 @@ bool LegacyGpuVmAdapter::set_memory(std::shared_ptr<GpuMemory> memory) {
   return true;
 }
 
-AddressSpaceHandle
-LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
-                                           LegacyAddressSpaceRegistration registration,
-                                           std::shared_ptr<void> frontend_lifetime) {
+AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
+    uint32_t vmid, LegacyAddressSpaceRegistration registration,
+    std::shared_ptr<void> frontend_lifetime, util::DiagnosticEmitter emit_error) {
   if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
     return {};
-  std::lock_guard lock(mutex_);
+  std::unique_lock lock(mutex_);
   remove_stale_locked();
   if (memory_ == nullptr || bindings_.contains(vmid))
     return {};
-  auto binding = std::make_shared<Binding>(memory_, vmid, std::move(registration),
-                                           std::move(frontend_lifetime));
+  auto binding =
+      std::make_shared<Binding>(memory_, vmid, registration, std::move(frontend_lifetime));
+  util::StringDiagnostic diagnostic;
+  if (binding->initialize(std::move(registration), diagnostic.emitter()).failed()) {
+    // Diagnostic sinks may query the adapter, so deliver outside its mutex.
+    lock.unlock();
+    // Explicit emit propagates sink exceptions; destructor delivery catches them.
+    (void)(emit_error.emit() << diagnostic.message()).emit();
+    return {};
+  }
   const AddressSpaceHandle handle = gpu_vm_->register_address_space(
       vmid, binding, binding,
       [binding](uint64_t address, VmAccessKind) { binding->report_fault(address); }, true);

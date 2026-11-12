@@ -806,6 +806,14 @@ HIP_TEST_CASE(Unit_bf16_operators_host) {
     REQUIRE((l + -l) == HIPRT_ZERO_BF16);
     REQUIRE((l / -l) == -HIPRT_ONE_BF16);
   }
+
+  SECTION("Min/max signed zero") {
+    // == cannot tell the zeros apart, so compare bits.
+    REQUIRE(__bfloat16_as_ushort(__hmax(-HIPRT_ZERO_BF16, HIPRT_ZERO_BF16)) == 0x0000);
+    REQUIRE(__bfloat16_as_ushort(__hmax(HIPRT_ZERO_BF16, -HIPRT_ZERO_BF16)) == 0x0000);
+    REQUIRE(__bfloat16_as_ushort(__hmin(-HIPRT_ZERO_BF16, HIPRT_ZERO_BF16)) == 0x8000);
+    REQUIRE(__bfloat16_as_ushort(__hmin(HIPRT_ZERO_BF16, -HIPRT_ZERO_BF16)) == 0x8000);
+  }
 }
 
 HIP_TEST_CASE(Unit_bf162_operators_host) {

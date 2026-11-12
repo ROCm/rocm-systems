@@ -253,6 +253,74 @@ pub fn amdsmi_get_processor_handles(
     Ok(processor_handles)
 }
 
+/// Retrieves the NIC processor handles for a specific socket.
+///
+/// NIC processors are kept apart from GPU processors, so [`amdsmi_get_processor_handles`]
+/// never returns them.
+///
+/// # Arguments
+///
+/// * `socket_handle` - A handle to the socket for which the NIC processor handles are being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiProcessorHandle>>` - Returns `Ok(Vec<AmdsmiProcessorHandle>)` containing the NIC [`AmdsmiProcessorHandle`]s of the socket (empty if it has none) if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     let socket_handle = amdsmi_get_socket_handles().unwrap()[0];
+///
+///     // Retrieve the NIC processor handles
+///     match amdsmi_get_nic_processor_handles(socket_handle) {
+///         Ok(handles) => {
+///             for handle in handles {
+///                 // Perform operations with the AMD SMI library
+///                 // ...
+///             }
+///         }
+///         Err(e) => panic!("Failed to get NIC processor handles: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_processor_handles` call fails.
+pub fn amdsmi_get_nic_processor_handles(
+    socket_handle: AmdsmiSocketHandle,
+) -> AmdsmiResult<Vec<AmdsmiProcessorHandle>> {
+    let mut processor_count: u32 = 0;
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_processor_handles(
+        socket_handle,
+        &mut processor_count,
+        std::ptr::null_mut()
+    ));
+
+    let mut processor_handles = Vec::with_capacity(processor_count as usize);
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_processor_handles(
+        socket_handle,
+        &mut processor_count,
+        processor_handles.as_mut_ptr()
+    ));
+
+    // SAFETY: the library wrote `processor_count` handles into the buffer, and the count never
+    // exceeds the capacity reserved from the first call.
+    unsafe {
+        processor_handles.set_len(processor_count as usize);
+    }
+    Ok(processor_handles)
+}
+
 /// Retrieves the type of a specific processor.
 ///
 /// This function returns the processor type of the specified processor handle.
@@ -1422,9 +1490,9 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// is the hwmon pwm1 duty cycle, whose maximum is AMDSMI_MAX_FAN_SPEED (255). On GPUs with the
+/// gpu_od sysfs interface, the range accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od
+/// OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -1482,8 +1550,9 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
+/// This is the hwmon pwm1_max ceiling, AMDSMI_MAX_FAN_SPEED (255), and pairs with
+/// `amdsmi_get_gpu_fan_speed()`. On GPUs with the gpu_od sysfs interface, the range accepted by
+/// `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -3527,7 +3596,7 @@ pub fn amdsmi_get_gpu_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
     block: AmdsmiGpuBlockT,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_ecc_count(
         processor_handle,
         block,
@@ -5076,6 +5145,52 @@ pub fn amdsmi_get_gpu_device_bdf(
     Ok(bdf)
 }
 
+/// Retrieves the DRM, HSA, HIP, and physical enumeration information for a GPU.
+///
+/// The returned [`AmdsmiEnumerationInfoT`] includes the DRM render node, HIP
+/// UUID, and enumeration IDs. The HIP UUID is distinct from the device UUID
+/// returned by [`amdsmi_get_gpu_device_uuid`].
+///
+/// Fields the library cannot determine are set to `0xFFFFFFFF` (`u32::MAX`)
+/// and the call still returns `Ok`. This applies to `hsa_id`, `hip_id`,
+/// `oam_id` and `physical_acc_id`, and to `drm_render` and `drm_card` when the
+/// device identifiers cannot be read. Compare against `u32::MAX` before using
+/// these values.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A processor handle obtained after initializing AMD SMI.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// # fn example(processor_handle: AmdsmiProcessorHandle) -> AmdsmiResult<()> {
+/// let info = amdsmi_get_gpu_enumeration_info(processor_handle)?;
+/// println!("DRM render node: renderD{}", info.drm_render);
+/// println!("HSA ID: {}, HIP ID: {}", info.hsa_id, info.hip_id);
+/// println!("HIP UUID: {}", info.hip_uuid());
+/// if info.oam_id == u32::MAX {
+///     println!("OAM ID is not available");
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns the underlying [`AmdsmiStatusT`] if the query fails.
+pub fn amdsmi_get_gpu_enumeration_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiEnumerationInfoT> {
+    let mut info = MaybeUninit::<AmdsmiEnumerationInfoT>::zeroed();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_enumeration_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    Ok(unsafe { info.assume_init() })
+}
+
 /// Get the UUID of the GPU device with the specified processor handle.
 ///
 /// Given a processor handle `processor_handle`, this function retrieves the UUID of the specified GPU device.
@@ -5222,6 +5337,102 @@ pub fn amdsmi_get_gpu_asic_info(
 ) -> AmdsmiResult<AmdsmiAsicInfoT> {
     let mut info = MaybeUninit::<AmdsmiAsicInfoT>::uninit();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_asic_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Get the firmware versions for the NIC with the specified processor handle.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the NIC for which the firmware information is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiNicFwInfoT>` - Returns `Ok(AmdsmiNicFwInfoT)` containing the [`AmdsmiNicFwInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example NIC processor_handle, assuming at least one NIC is present
+///     let processor_handle = amdsmi_get_nic_processor_handles!()[0];
+///
+///     // Retrieve the NIC firmware versions
+///     match amdsmi_get_nic_fw_info(processor_handle) {
+///         Ok(info) => println!("NIC firmware info: {:?}", info),
+///         Err(e) => panic!("Failed to get NIC firmware info: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_fw_info` call fails.
+pub fn amdsmi_get_nic_fw_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiNicFwInfoT> {
+    let mut info = MaybeUninit::<AmdsmiNicFwInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_fw_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Get live telemetry (health, port-split) for the NIC with the specified processor handle.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the NIC for which the telemetry is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiNicTelemetryT>` - Returns `Ok(AmdsmiNicTelemetryT)` containing the [`AmdsmiNicTelemetryT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     // Example NIC processor_handle, assuming at least one NIC is present
+///     let processor_handle = amdsmi_get_nic_processor_handles!()[0];
+///
+///     // Retrieve live NIC telemetry
+///     match amdsmi_get_nic_telemetry(processor_handle) {
+///         Ok(info) => println!("NIC telemetry: {:?}", info),
+///         Err(e) => panic!("Failed to get NIC telemetry: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_telemetry` call fails.
+pub fn amdsmi_get_nic_telemetry(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiNicTelemetryT> {
+    let mut info = MaybeUninit::<AmdsmiNicTelemetryT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_telemetry(
         processor_handle,
         info.as_mut_ptr()
     ));
@@ -5633,7 +5844,7 @@ pub fn amdsmi_get_gpu_vbios_info(
 pub fn amdsmi_get_gpu_activity(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiEngineUsageT> {
-    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiEngineUsageT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_activity(
         processor_handle,
         info.as_mut_ptr()
@@ -5684,7 +5895,7 @@ pub fn amdsmi_get_gpu_activity(
 pub fn amdsmi_get_power_info(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiPowerInfoT> {
-    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiPowerInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_power_info(
         processor_handle,
         info.as_mut_ptr()
@@ -5790,7 +6001,7 @@ pub fn amdsmi_get_clock_info(
     processor_handle: AmdsmiProcessorHandle,
     clk_type: AmdsmiClkTypeT,
 ) -> AmdsmiResult<AmdsmiClkInfoT> {
-    let mut info = MaybeUninit::<AmdsmiClkInfoT>::uninit();
+    let mut info = MaybeUninit::<AmdsmiClkInfoT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_clock_info(
         processor_handle,
         clk_type,
@@ -5893,7 +6104,7 @@ pub fn amdsmi_get_gpu_vram_usage(
 pub fn amdsmi_get_gpu_total_ecc_count(
     processor_handle: AmdsmiProcessorHandle,
 ) -> AmdsmiResult<AmdsmiErrorCountT> {
-    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::uninit();
+    let mut ec = MaybeUninit::<AmdsmiErrorCountT>::zeroed();
     call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_total_ecc_count(
         processor_handle,
         ec.as_mut_ptr()
@@ -6260,6 +6471,121 @@ pub fn amdsmi_get_link_topology(
     Ok(topology_info)
 }
 
+/// Retrieves the CUID of the GPU or GPU partition with the specified processor handle.
+///
+/// The derived CUID names the component without disclosing its serial and is the value to
+/// record. The primary CUID is empty unless the caller is root. A temporary CUID has
+/// `auxiliary` set; do not record it alongside canonical CUIDs.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the CUID is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiCuidInfoT>` - Returns `Ok(AmdsmiCuidInfoT)` containing the [`AmdsmiCuidInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     match amdsmi_get_gpu_cuid_info(processor_handle) {
+///         Ok(info) => println!(
+///             "CUID: {} source: {:?} temporary: {}",
+///             info.derived(),
+///             info.source,
+///             info.auxiliary != 0
+///         ),
+///         Err(e) => panic!("Failed to get the CUID: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_cuid_info` call fails.
+pub fn amdsmi_get_gpu_cuid_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiCuidInfoT> {
+    let mut info = MaybeUninit::<AmdsmiCuidInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cuid_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Lists every component on the node that has a CUID.
+///
+/// Covers the platform, each CPU package, each AMD GPU or GPU partition, each NPU and each NIC
+/// function, ordered by component type, then BDF, then device path. No processor handle is
+/// needed, so components amd-smi does not manage are included.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiCuidComponentT>>` - Returns `Ok(Vec<AmdsmiCuidComponentT>)` containing the list of [`AmdsmiCuidComponentT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     match amdsmi_get_cuid_components() {
+///         Ok(components) => {
+///             for component in components {
+///                 println!(
+///                     "{:?} {} {}",
+///                     component.info.component_type,
+///                     component.bdf(),
+///                     component.info.derived()
+///                 );
+///             }
+///         }
+///         Err(e) => println!("Failed to list the CUID components: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_cuid_components` call fails.
+pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
+    loop {
+        let mut count: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_cuid_components(
+            &mut count,
+            null_mut()
+        ));
+
+        let mut components = Vec::<AmdsmiCuidComponentT>::with_capacity(count as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_cuid_components(&mut count, components.as_mut_ptr())
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                unsafe { components.set_len(count as usize) };
+                return Ok(components);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize => continue,
+            _ => return Err(status),
+        }
+    }
+}
+
 /// A macro to get all the GPU processor handles directly.
 ///
 /// This macro retrieves all the GPU processor handles by first getting the socket handles
@@ -6297,6 +6623,51 @@ macro_rules! amdsmi_get_processor_handles {
             // Call the amdsmi_get_processor_handles function directly
             let mut processors = amdsmi_get_processor_handles(socket_handle)
                 .expect("Failed to get processor handles for socket");
+
+            // Append the processor handles to the main vector
+            processor_handles.append(&mut processors);
+        }
+
+        processor_handles
+    }};
+}
+
+/// A macro to get all the NIC processor handles directly.
+///
+/// This macro retrieves all the NIC processor handles by first getting the socket handles
+/// and then getting the NIC processor handles for each socket. The result is empty when no NIC is present.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+///
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handles = amdsmi_get_nic_processor_handles!();
+///     for handle in processor_handles {
+///         // Perform operations with each NIC processor handle
+///         // ...
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+#[macro_export]
+macro_rules! amdsmi_get_nic_processor_handles {
+    () => {{
+        // Get the socket handles
+        let socket_handles = amdsmi_get_socket_handles().expect("Failed to get socket handles");
+
+        let mut processor_handles = Vec::new();
+
+        // Iterate over each socket handle to get the NIC processor handles
+        for socket_handle in socket_handles {
+            let mut processors = amdsmi_get_nic_processor_handles(socket_handle)
+                .expect("Failed to get NIC processor handles for socket");
 
             // Append the processor handles to the main vector
             processor_handles.append(&mut processors);

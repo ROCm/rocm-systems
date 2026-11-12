@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 
@@ -9,6 +10,7 @@
 #include "simdojo/sim/topology.h"
 
 #include <algorithm>
+#include <cassert>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -20,10 +22,10 @@ namespace {
 amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return amdgpu::SdmaPacketDialect::Rdna4;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
       arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
@@ -38,8 +40,8 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
   set_weight(0);
-  if (!install_internal_address_space(memory_))
-    throw std::logic_error("failed to install the internal GPU address space");
+  [[maybe_unused]] const bool installed = install_internal_address_space(memory_);
+  assert(installed && "fresh SoC must accept its internal GPU address space");
 }
 
 SoC::~SoC() { release_vm_resources(); }
@@ -58,10 +60,11 @@ void SoC::release_vm_resources() {
   sdma_queue_scheduler_.shutdown();
 }
 
-void SoC::add_xcd(amdgpu::Xcd *xcd) {
+util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {
   if (xcd == nullptr)
-    throw std::invalid_argument("cannot add a null XCD");
-  xcd->set_coherence_domain(cache_coherence_);
+    return emit_error.emit() << "cannot add a null XCD";
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)xcd->set_coherence_domain(cache_coherence_);
   if (xcd->l2_cache()) {
     xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
@@ -69,17 +72,33 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
   }
   if (amdgpu::CommandProcessor *cp = xcd->command_processor())
     cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+  // GWS is device-global: share one store across every XCD so a dispatch that
+  // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
+  // standalone default store. The XCD's CUs are already attached by this point.
+  [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
+  assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
   xcds_.push_back(xcd);
+  return util::Result::success();
 }
 
-void SoC::add_iod(amdgpu::Iod *iod) {
+void SoC::wire_gws_to_xcds() {
+  // Only the full constructor calls this helper, before any CU can execute.
+  for (amdgpu::Xcd *xcd : xcds_) {
+    [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
+    assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
+  }
+}
+
+util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) {
   if (iod == nullptr)
-    throw std::invalid_argument("cannot add a null IOD");
-  iod->set_coherence_domain(cache_coherence_);
+    return emit_error.emit() << "cannot add a null IOD";
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)iod->set_coherence_domain(cache_coherence_);
   iod->set_gpu_vm(&gpu_vm_);
   iod->set_legacy_maintenance_memory(memory_);
   iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
   iods_.push_back(iod);
+  return util::Result::success();
 }
 
 bool SoC::install_internal_address_space(amdgpu::GpuMemory *memory) {
@@ -175,8 +194,8 @@ SoC::SoC(std::string name, const Config &config)
   auto mem = std::make_unique<amdgpu::GpuMemory>("vram");
   memory_ = mem.get();
   add_child(std::move(mem));
-  if (!install_internal_address_space(memory_))
-    throw std::logic_error("failed to install the internal GPU address space");
+  [[maybe_unused]] const bool installed = install_internal_address_space(memory_);
+  assert(installed && "fresh SoC must accept its internal GPU address space");
 
   if (config.num_iods > 0) {
     // Create IODs, each with its own memory-side cache and HBM controller.
@@ -214,16 +233,20 @@ SoC::SoC(std::string name, const Config &config)
       add_child(std::move(xcd_ptr));
     }
   }
+  // GWS is device-global: share one store across every XCD (see GwsDevice). The
+  // XCDs above were pushed directly rather than through add_xcd, so wire here.
+  wire_gws_to_xcds();
   if (config.scratch_slots_per_cu != 0)
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
     });
 }
 
-void SoC::set_arch(rj_code_arch_t arch) {
+util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
   if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch)))
-    throw std::logic_error("SoC architecture cannot change while copy queues are active");
+    return emit_error.emit() << "SoC architecture cannot change while copy queues are active";
   arch_ = arch;
+  return util::Result::success();
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {

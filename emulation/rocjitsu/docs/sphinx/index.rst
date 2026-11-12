@@ -39,18 +39,17 @@ The rocJITsu public repository is located at
       * :doc:`Inspect and disassemble a code object with the C API <tutorials/inspect-code-object>`
       * :doc:`Translate a CDNA4 kernel to RDNA4 using rj_dbt_translate <tutorials/translate-cdna4-to-rdna4>`
       * :doc:`Detect a missing barrier with the race detector <tutorials/race-detection-walkthrough>`
-      * :doc:`Detect an LDS data race with ConSan <tutorials/consan-detect-lds-race>`
       * :doc:`Analyze a code object for wait hazards with waitcheck <tutorials/waitcheck-analyze-code-object>`
 
    .. grid-item-card:: Reference
 
-      * :doc:`ConSan GPU LDS sanitizer reference <reference/consan>`
       * :doc:`waitcheck hazard analyzer reference <reference/waitcheck>`
       * :doc:`Virtual machine API reference <reference/api-vm>`
       * :doc:`Code object and instruction API reference <reference/api-code-object>`
       * :doc:`Status codes and compiler macros reference <reference/api-status>`
       * :doc:`rj_dbt_translate command reference <reference/rj-dbt-translate>`
       * :doc:`rocjitsu CLI reference <reference/rocjitsu-cli>`
+      * :doc:`Python execution API <reference/python-api>`
       * :doc:`Environment variable reference <reference/environment-variables>`
       * :doc:`Supported GPU architectures <reference/supported-architectures>`
 

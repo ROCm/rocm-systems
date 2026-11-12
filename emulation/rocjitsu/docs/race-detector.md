@@ -10,14 +10,10 @@ instructions.
 
 ## Target scope
 
-The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
-and later architectures are not supported. Some GFX12 split-counter behavior
-is already modeled and covered by plugin tests, including partial load waits
-and address-dependent FLAT counter participation. This partial
-coverage does not establish complete counter, scheduling, or writeback support;
-issue-time counter-capacity backpressure remains limited to CDNA1 through CDNA4
-and GFX11.
+The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
+gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
+(CDNA5) is limited and under active development; end-to-end tests currently
+cover its tensor DMA races (see Tensor DMA races below).
 
 ## Quick start
 
@@ -69,7 +65,7 @@ int main() {
 
 Compile it with `hipcc` or `amdclang++`. The `--offload-arch` must match the
 emulated GPU, which depends on the config file you pass to rocjitsu (e.g.
-`gfx950_mi355x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
+`gfx950_mi350x.json` emulates gfx950). If using `amdclang++`, pass `-O1` or
 higher — the emulator does not currently support unoptimized (`-O0`) GPU code
 objects. `hipcc` defaults to `-O3` so this isn't an issue there.
 
@@ -96,9 +92,9 @@ You should see output:
 ```
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+  ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
+       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
+  ==>  0x7f6a1e80101c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -108,6 +104,34 @@ without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
+
+Each trace line shows an instruction's GPU virtual address, which varies
+between runs, and its disassembly. The trace lists instructions that the
+reporting wave (here wave 0) executed, oldest first. `==>` marks entries matching
+the PC and captured encoding of either instruction involved in the race, and
+the `<--` annotation names the wave and lane that performed that access. When the
+conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
+above, the marker is placed where the reporting wave executed the same bytes
+at the same address, if such an entry is present. Repeated executions of identical
+bytes at the same address are not distinguished; the displayed span ends at the
+first matching racing access after its first marker.
+
+The race detector retains the last 256 instructions of each wave. If the
+reporting wave has no entry matching the conflicting PC and encoding, the report
+prints the retained producer instruction first with a `(before trace window)`
+note. This can mean the instruction has left the trace, but it can also mean that
+another wave executed an instruction the reporting wave never executed. The note
+does not establish that the conflict is more than 256 instructions old.
+
+For example, if another wave's producer is at `0x1000` and the reporting wave's
+trace contains only its racing access at `0x3000`, the producer appears with
+`(before trace window)` and `0 instructions not recorded`. That count is the
+number of retained reporting-wave entries skipped before the first displayed
+marker, not the number of instructions since the producer ran.
+
+Traces longer than 32 instructions show only their first and last 16. Each trace
+row is disassembled from its own captured bytes, so it remains accurate if the
+kernel's code is later overwritten or unmapped.
 
 ### Running your own application
 
@@ -168,7 +192,34 @@ races. Some examples:
   wave has an outstanding read of the same byte, without an intervening
   `s_barrier`;
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
-  before the required `s_waitcnt vmcnt`.
+  before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
+  the same wave's pending DS read is also reported, on every target with
+  direct-to-LDS, until a DS wait completes the read. That is a conservative
+  rule: the ISA does not establish that the write waits for the read. Compilers
+  can emit such a pair without a DS wait (on gfx1250, LLVM may place only
+  `s_wait_kmcnt 0` between a `ds_load_b32` and a `global_load_async_to_lds_b32`
+  to the same dword), and the detector reports it.
+- **Tensor DMA races** (gfx1250): `tensor_load_to_lds` writes and
+  `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
+  including the issuing one, that reads a load's destination or overwrites a
+  store's source before `s_wait_tensorcnt` is reported; other waves also need an
+  `s_barrier`. A load covers every element of its tile, including elements
+  outside the tensor, which it zero-fills; padding bytes are excluded. A store
+  covers only the elements inside the tensor. Either way, only bytes inside the
+  wave's LDS allocation are tracked, because bytes past it are not transferred:
+  an i32 at offset 254 of a 256-byte allocation contributes only bytes 254 and
+  255. Transfers from one wave complete
+  on `tensorcnt` in issue order (CDNA5 ISA 10.11.1), so a partial
+  `s_wait_tensorcnt` retires the oldest. The ISA does not specify the relative
+  timing of their LDS reads and writes, so as a conservative rule the detector
+  reports a tensor load and a tensor store from the same wave that touch the
+  same LDS byte, in either order, until `s_wait_tensorcnt` retires the earlier
+  one. Two stores of the same tile only read it, which is safe; two loads over
+  the same bytes are an LDS write/write conflict, which the detector does not
+  check (see Limitations). Each instruction is registered when it issues, as
+  other memory instructions are, so an instruction that moves no data still
+  occupies its `tensorcnt` slot, and a transfer that waits for memory is pending
+  from the moment it issues.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -182,14 +233,24 @@ following lifecycle:
    the same wave remain ordered with respect to each other, so a later
    same-wave DS read or write does not race solely because the earlier DS event
    is still active. Direct-to-LDS VMEM writes still require the owning wave to
-   wait for `vmcnt` before reading the destination bytes.
+   wait for `vmcnt` before reading the destination bytes. Tensor DMA transfers
+   complete in issue order, but as a conservative rule an active tensor load or
+   store still conflicts with a later, overlapping transfer in the other
+   direction from the same wave (see Tensor DMA races above).
 1. **WAVE_COMPLETE** — waits have satisfied every counter obligation for the
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. They then leave the LDS lists that race checks scan, so
+   those checks do not slow down as completed events add up in long
+   single-wave kernels. Retired events stay in the event registry until it
+   trims them, and it trims only from the oldest event: an older event that is
+   still pending, such as a global load waiting on `loadcnt`, keeps every
+   later retired event in the registry.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
@@ -209,9 +270,10 @@ flat_store_dword v[2:3], v8
 ```
 
 LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and independent
-obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
-a nonzero wait cannot prove a result ready.
+split counters. Routing preserves decoded completion ordering and the VMEM/DS
+obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
+carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
+unordered; a nonzero wait cannot prove a result ready.
 
 Functional counter acquisition and both runtime checkers use the selected memory
 domains. FLAT capacity constraints are applied after addresses are resolved.
@@ -224,8 +286,18 @@ observations still attach both obligations to the whole race-plugin event, so a
 consumer restricted to an already-completed lane group can still get a false
 report. `TODO(newling)` regression cases track this remaining #12237 gap. The
 core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
-tracks the groups separately. Mixed LDS/global functional execution remains
-limited by first-request-lane routing, tracked separately in #11456.
+tracks the groups separately. Functional execution splits mixed requests by
+address space, completing retryable global/scratch work before accessing LDS.
+The race plugin retains both counter obligations on its single mixed event.
+LDS validation and interval registration are bounded by the CU backing capacity.
+For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
+retaining only complete memory elements; a lane whose first element does not fit
+records no LDS bytes, and an atomic requires its whole element. This end is the
+modeled `lds_base + lds_size`, including current 256-byte scheduler rounding;
+PM4 sizes may already be 512-byte multiples, and target allocation and encoding
+granules remain unmodeled. Out-of-bounds addresses preserve register and counter
+dependencies without recording LDS bytes. DDS has no emulator backing and faults
+before execution.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
@@ -306,7 +378,15 @@ complete from their in-order completion rule.
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
 events are split by direction so that RAW and WAR hazards are checked
-independently.
+independently. Chunks containing only ordinary LDS accesses from the accessing
+wave can bypass the interval scan because those operations are ordered. A
+mixed chunk uses the scan until its count drains. The history remains available
+for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+memory operations still require their own completion checks.
+For a DS or FLAT instruction, the plugin first merges the active lanes' byte
+ranges into intervals and checks the chunk counts under them. When no chunk can
+hold a conflict, it skips the per-lane checks. The same intervals become the
+instruction's event.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -370,16 +450,18 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 ```
 race_detector/
 ├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    detection algorithm (does not depend on rocjitsu types)
+└── core/                    event tracking and lifetime
     ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
     ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
     ├── event_registry.h      append-only event store with prefix trimming
     ├── interval_set.h        half-open byte range tracking for LDS
     ├── types.h               core enum types and structs
-    ├── common_register.h     SGPR/VGPR classification helpers
-    ├── dim3d.h               3D coordinate helpers
-    └── profiler_interface.h  optional hook profiling
+    ├── common_register.h     memory event types and ordering
+    └── dim3d.h               3D coordinate helpers
 ```
+
+Explicit wait decoding is shared with the core checker in
+`lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
 
 ## Tests
 
@@ -389,17 +471,33 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
-- `hip_race_gfx950_test.hip` and `hip_race_gfx1151_test.hip` — end-to-end HIP
-  kernel tests run under the emulator with the `race` plugin enabled in the
-  config file.
+- `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
+  tensor DMA transfers on gfx1250.
+- `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
+- The `race` suite in
+  [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
+  owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
+  gfx1250 program covers tensor DMA. The `rocjitsu-test-corpus` workflow builds
+  them with the corpus HIP toolchain and runs each case under the emulator with
+  the `race` plugin enabled.
 
 ```bash
 # Core detection tests
 ctest --test-dir build -R "RaceDetector|IntervalSet"
-
-# End-to-end HIP tests (the test config enables the race plugin)
-ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
+
+To run the HIP cases locally, follow the corpus's
+[race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
+and point the wrapper at the RocJITsu build being tested. Set
+`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
+`tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
+gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from
+this source tree. The original
+`RaceTest.<target>_<name>` selectors remain available through the corpus's
+`--case` option. Shared atomic and FLAT-to-LDS cases use
+`RaceTest.vmem_<target>_<name>`, for example
+`--case RaceTest.vmem_gfx942_vmcnt_only`. Positive detection controls use the
+`_race` suffix.
 
 ## Limitations
 
@@ -417,6 +515,50 @@ ctest --test-dir $BUILD_DIR -R "RaceTest"
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
+
+- **Embedded waits**: the plugin handles explicit wait instructions, including
+  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
+  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
+  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
+  plugin leaves them pending and can report false register hazards. With
+  `wait_exp:7` (no wait), both keep those results pending. The shared
+  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
+  requires retirement before the instruction's register accesses.
+
+- **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
+  memory accesses are not checked.
+
+- **Async stores from LDS** (gfx1250): `global_store_async_from_lds_*` is
+  tracked only as a global store; its LDS read is neither checked nor
+  registered. An async store reading a pending tensor load's destination, and
+  a tensor load, DS write or direct-to-LDS write over a pending async store's
+  source, are therefore not reported in either issue order, even with no
+  `s_wait_asynccnt` between them.
+
+- **False positives with LDS barrier synchronization**: a tensor load can
+  request an arrival on an LDS barrier cell when it completes, and a consumer
+  wave can wait for that barrier's phase and then read the tile, without the
+  producer waiting on `s_wait_tensorcnt` or the workgroup passing `s_barrier`.
+  The detector does not observe this synchronization: it retires a transfer
+  only through wait-counter instructions and `s_barrier`. A consumer that is
+  correctly synchronized through the barrier cell is therefore reported as
+  racing with the tensor load. These reports are false positives, not missing
+  coverage.
+
+- **NULL tensor descriptors**: like the emulator, the detector counts a NULL
+  descriptor (`count = 0`) on `tensorcnt`. That is an emulator assumption:
+  hardware behavior for this encoding is not established. If hardware does not
+  count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
+  earlier transfer pending, so a real race would go unreported.
+
+- **No counter-capacity backpressure on gfx1250**: hardware stalls issue when a
+  wait counter is full, which proves the oldest pending entry complete without
+  an explicit wait. The detector models this only on CDNA1 through CDNA4 and
+  GFX11. On gfx1250, code that relies on a full counter instead of a wait
+  gets false positives: a wave that issues 64 tensor transfers has completed
+  its first, because the 6-bit `tensorcnt` holds at most 63, but the detector
+  still reports a read of the first transfer's LDS bytes as a race. Explicit
+  `s_wait_*` waits are handled correctly.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

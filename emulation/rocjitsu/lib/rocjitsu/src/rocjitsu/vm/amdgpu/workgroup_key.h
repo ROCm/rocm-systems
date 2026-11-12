@@ -13,6 +13,10 @@ inline constexpr uint64_t wg_key(uint32_t dispatch_id, uint32_t wg_id) {
   return (uint64_t(dispatch_id) << 32) | wg_id;
 }
 
+inline constexpr uint32_t wg_key_dispatch_id(uint64_t key) {
+  return static_cast<uint32_t>(key >> 32);
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 

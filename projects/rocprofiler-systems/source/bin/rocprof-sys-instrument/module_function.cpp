@@ -4,6 +4,7 @@
 #include "module_function.hpp"
 #include "InstructionCategories.h"
 #include "common/path.hpp"
+#include "common/regex_utility.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
@@ -139,9 +140,9 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 void
 module_function::write_header(std::ostream& os)
 {
-    auto const w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-    auto const w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-    auto const w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+    auto const w0 = std::min<size_t>(get_width()[0], k_absolute_max_width);
+    auto const w1 = std::min<size_t>(get_width()[1], k_absolute_max_width);
+    auto const w2 = std::min<size_t>(get_width()[2], k_absolute_max_width);
 
     std::stringstream ss;
     ss << std::setw(14) << "StartAddress" << " " << std::setw(14) << "AddressRange" << " "
@@ -353,27 +354,12 @@ module_function::is_instrumentable() const
     return true;
 }
 
-namespace
-{
-bool
-check_regex_restrictions(const std::string& _name, const regexvec_t& _regexes)
-{
-    // NOLINTNEXTLINE
-    for(auto& itr : _regexes)
-        if(std::regex_search(_name, itr))
-        {
-            return true;
-        }
-    return false;
-}
-}  // namespace
-
 bool
 module_function::is_user_restricted() const
 {
     if(!file_restrict.empty())
     {
-        if(check_regex_restrictions(module_name, file_restrict))
+        if(rocprofsys::utility::regex_match_any(module_name, file_restrict))
         {
             messages.emplace_back(2, "Forcing", "module", "module-restrict-regex",
                                   module_name);
@@ -387,13 +373,13 @@ module_function::is_user_restricted() const
 
     if(!func_restrict.empty())
     {
-        if(check_regex_restrictions(function_name, func_restrict))
+        if(rocprofsys::utility::regex_match_any(function_name, func_restrict))
         {
             messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
                                   function_name);
             return false;
         }
-        if(check_regex_restrictions(signature.get(), func_restrict))
+        if(rocprofsys::utility::regex_match_any(signature.get(), func_restrict))
         {
             messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
                                   signature.get());
@@ -415,7 +401,7 @@ module_function::is_user_included() const
 {
     if(!file_include.empty())
     {
-        if(check_regex_restrictions(module_name, file_include))
+        if(rocprofsys::utility::regex_match_any(module_name, file_include))
         {
             messages.emplace_back(2, "Forcing", "module", "module-include-regex",
                                   module_name);
@@ -425,13 +411,13 @@ module_function::is_user_included() const
 
     if(!func_include.empty())
     {
-        if(check_regex_restrictions(function_name, func_include))
+        if(rocprofsys::utility::regex_match_any(function_name, func_include))
         {
             messages.emplace_back(2, "Forcing", "function", "function-include-regex",
                                   function_name);
             return true;
         }
-        if(check_regex_restrictions(signature.get(), func_include))
+        if(rocprofsys::utility::regex_match_any(signature.get(), func_include))
         {
             messages.emplace_back(2, "Forcing", "function", "function-include-regex",
                                   signature.get());
@@ -447,7 +433,7 @@ module_function::is_user_excluded() const
 {
     if(!file_exclude.empty())
     {
-        if(check_regex_restrictions(module_name, file_exclude))
+        if(rocprofsys::utility::regex_match_any(module_name, file_exclude))
         {
             messages.emplace_back(2, "Skipping", "module", "module-exclude-regex",
                                   module_name);
@@ -457,13 +443,13 @@ module_function::is_user_excluded() const
 
     if(!func_exclude.empty())
     {
-        if(check_regex_restrictions(function_name, func_exclude))
+        if(rocprofsys::utility::regex_match_any(function_name, func_exclude))
         {
             messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
                                   function_name);
             return true;
         }
-        if(check_regex_restrictions(signature.get(), func_exclude))
+        if(rocprofsys::utility::regex_match_any(signature.get(), func_exclude))
         {
             messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
                                   signature.get());
@@ -828,7 +814,7 @@ module_function::contains_user_callsite() const
     function->getCallPoints(call_points);
     for(const auto& call_point : call_points)
     {
-        if(check_regex_restrictions(
+        if(rocprofsys::utility::regex_match_any(
                std::string(get_name(call_point->getCalledFunction())), caller_include))
         {
             messages.emplace_back(2, "Forcing", "function", "caller-include-regex",
@@ -887,7 +873,7 @@ module_function::is_instruction_constrained() const
             if(!_instr.empty())
             {
                 _instr = _instr.substr(1);
-                if(check_regex_restrictions(_instr, instruction_exclude))
+                if(rocprofsys::utility::regex_match_any(_instr, instruction_exclude))
                 {
                     messages.emplace_back(2, "Skipping", "function",
                                           "instruction-exclude-regex", function_name);

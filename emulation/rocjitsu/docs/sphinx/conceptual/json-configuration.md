@@ -10,7 +10,7 @@ rocJITsu describes GPU topologies declaratively in JSON. A single
 configuration file defines the simulation parameters, the component
 hierarchy (SoC, XCDs, shader engines, compute units, caches, and
 memory), and the link connectivity between components. The VM creation
-functions `rj_vm_create` and `rj_vm_create_from_string` parse the JSON
+functions parse the JSON
 against an embedded FlatBuffers schema, construct the full component
 hierarchy, and load any program binaries before returning a ready-to-run
 virtual machine handle.
@@ -41,15 +41,25 @@ objects for the virtual machine and the topology.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
+| `max_ticks` | int | Finite tick horizon. A finite run also stops if an active primary has no queued work before the limit; `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
 | `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `arithmetic` | object | CPU arithmetic policy; see [CPU arithmetic policy](../../configuration.md#cpu-arithmetic-policy). |
 | `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
+
+An optional `system` describes named nodes, their ordered GPU instances,
+endpoints, and links. `local_node` selects the node instantiated by this VM.
+For a multi-node manifest, pass a node ID to `rj_vm_create_for_node` or
+`rj_vm_create_from_string_for_node`, or put that ID in `local_node` and use
+the original creators. A NULL or empty API selector uses JSON `local_node`;
+without either selector, the manifest must contain exactly one node. Only
+the selected node's GPUs become local devices; links are descriptive until
+the corresponding modeled transport admits an operation.
 
 `num_threads` and `cpu_dispatch_threads` control different layers.
 `num_threads` partitions whole XCD subtrees across Simdojo engine threads. A
@@ -176,14 +186,16 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx90a_mi210_kmd.json` | Single CDNA2 GPU, daemon or KFD mode. |
 | `gfx942_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
-| `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
-| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
-| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
+| `gfx950_mi350x.json` | Single CDNA4 GPU, standalone simulation. |
+| `gfx950_mi350x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
+| `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
 | `gfx1201_r9700.json` | Single RDNA4 GPU, standalone simulation. |
+
+`gfx950_mi355x.json`, `gfx950_mi355x_kmd.json` and `gfx950_mi355x_kmd_2gpu.json` are deprecated copies of the `gfx950_mi350x*` configs. Despite their names, they describe an MI350X (PCI device ID `0x75a0`). They remain only so that existing callers keep working; use the `gfx950_mi350x*` names instead. The `gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`); see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
 
 
 Standalone configs (without `_kmd` in the name) are used with
@@ -204,5 +216,5 @@ Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and
 location ID. Every GPU receives its own command processor, memory
 subsystem, and cache hierarchy. In daemon mode, the simulated driver
 manages all GPUs and routes KFD ioctls to the correct device based on
-`gpu_id`. The `gfx950_mi355x_kmd_2gpu.json` config provides a working
+`gpu_id`. The `gfx950_mi350x_kmd_2gpu.json` config provides a working
 two-GPU configuration used with RCCL collective tests.

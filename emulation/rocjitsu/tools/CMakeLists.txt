@@ -7,6 +7,7 @@ set(RJ_TOOL_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_isa
     rocjitsu_amdgpu_isa_registry
     simdojo
@@ -27,19 +28,76 @@ target_include_directories(
     rocjitsu_translate_cli
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(rocjitsu_translate_cli PUBLIC rocjitsu_tooling)
+target_link_libraries(
+    rocjitsu_translate_cli
+    PUBLIC rocjitsu_tooling rocjitsu_cli
+)
 rj_configure_target(rocjitsu_translate_cli TOOL)
 
 add_executable(rj_dbt_translate rj_dbt_translate_main.cpp)
 target_link_libraries(rj_dbt_translate PRIVATE rocjitsu_translate_cli)
 rj_configure_target(rj_dbt_translate TOOL)
 
-add_executable(rj_decode_benchmark rj_decode_benchmark.cpp)
+add_executable(
+    rj_decode_benchmark
+    rj_decode_benchmark.cpp
+    decode_benchmark_cli.cpp
+)
 target_link_libraries(
     rj_decode_benchmark
-    PRIVATE rocjitsu_analysis_internal rocjitsu_amdgpu_isa_model_registry
+    PRIVATE
+        rocjitsu_cli
+        rocjitsu_analysis_internal
+        rocjitsu_amdgpu_isa_model_registry
 )
 rj_configure_target(rj_decode_benchmark PRIVATE_INCLUDES WARNINGS)
+
+if(BUILD_TESTING)
+    include(GoogleTest)
+    add_executable(
+        rocjitsu_benchmark_cli_test
+        ../tests/tools/benchmark_cli_test.cpp
+        decode_benchmark_cli.cpp
+    )
+    target_include_directories(
+        rocjitsu_benchmark_cli_test
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_benchmark_cli_test
+        PRIVATE rocjitsu_cli GTest::gtest_main
+    )
+    rj_configure_target(rocjitsu_benchmark_cli_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(rocjitsu_benchmark_cli_test TEST_PREFIX "cli." TEST_FILTER "*")
+    if(RJ_INSTALL_TESTS)
+        file(
+            APPEND "${RJ_INSTALL_CTEST_FILE}"
+            "include(\"rocjitsu_benchmark_cli_test.cmake\")\n"
+        )
+    endif()
+
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(RJ_INSTALL_TESTS)
+        install(
+            FILES
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/cli_fixtures.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            DESTINATION ${RJ_INSTALL_TEST_DIR}/tools
+        )
+    endif()
+    rj_add_test(
+        NAME cli.decode_benchmark_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_decode_benchmark_cli.py
+            $<TARGET_FILE:rj_decode_benchmark>
+        INSTALL_COMMAND
+            python3
+            tools/test_decode_benchmark_cli.py
+            bin/rj_decode_benchmark
+    )
+endif()
 
 # Ahead-of-time population of the shared translation tier.
 #
@@ -61,7 +119,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         rj_pretranslate
-        PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
+        PRIVATE
+            rocjitsu_cli
+            rocjitsu_gfx1250_b0_to_a0
+            Threads::Threads
+            ${CMAKE_DL_LIBS}
     )
     rj_configure_target(rj_pretranslate PRIVATE_INCLUDES WARNINGS)
     # Bind to the translator installed beside us. Two copies would carry two
@@ -70,5 +132,81 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_target_properties(
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()
+
+if(RJ_BUILD_CONSAN_COMPILER)
+    add_executable(rj_consan_prepare rj_consan_prepare.cpp)
+    target_link_libraries(
+        rj_consan_prepare
+        PRIVATE rocjitsu_consan_compiler rocjitsu_amdgpu_isa_model_registry
+    )
+    rj_configure_target(rj_consan_prepare PRIVATE_INCLUDES WARNINGS)
+endif()
+
+if(RJ_BUILD_CONSAN_ANALYZER)
+    add_executable(rj_consan_analyze rj_consan_analyze.cpp)
+    target_link_libraries(rj_consan_analyze PRIVATE rocjitsu_consan_analysis)
+    rj_configure_target(rj_consan_analyze WARNINGS)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(
+            rj_consan_analyze
+            PRIVATE
+                "LINKER:-Map,${CMAKE_CURRENT_BINARY_DIR}/rj_consan_analyze.link.map"
+        )
+    endif()
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Private shared-RAM keeper. Exec gives it an independent address space, so it
+    # cannot retain application mappings inherited when an allocation forks it.
+    add_executable(
+        rocjitsu_memory
+        rocjitsu_memory.cpp
+        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/memory_keeper.cpp
+        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/memory_keeper_protocol.cpp
+        ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/libc_passthrough.cpp
+    )
+    target_link_libraries(
+        rocjitsu_memory
+        PRIVATE util Threads::Threads ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(rocjitsu_memory PRIVATE_INCLUDES WARNINGS)
+    set_target_properties(
+        rocjitsu_memory
+        PROPERTIES OUTPUT_NAME rocjitsu-memory
+    )
+    # Exec deliberately omits application loader configuration. Keep the private
+    # helper independent of LD_LIBRARY_PATH for compiler runtime libraries.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_link_options(
+            rocjitsu_memory
+            PRIVATE -static-libstdc++ -static-libgcc
+        )
+    endif()
+    add_dependencies(rocjitsu_kmd rocjitsu_memory)
+    install(
+        TARGETS rocjitsu_memory
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocjitsu
+    )
+endif()
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    rj_add_test(
+        NAME cli.tools_process
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/tools/test_shared_cli_tools.py
+            $<TARGET_FILE:rj_dbt_translate> $<TARGET_FILE:rj_pretranslate>
+            $<TARGET_FILE:rj_ip_discovery> $<TARGET_FILE:rj_decode_fuzz>
+            $<TARGET_FILE:rocjitsu_bin>
+        INSTALL_COMMAND
+            python3
+            tools/test_shared_cli_tools.py
+            bin/rj_dbt_translate
+            \${RJ_INSTALLED_BINDIR}/rj_pretranslate
+            bin/rj-ip-discovery
+            bin/rj_decode_fuzz
+            \${RJ_INSTALLED_BINDIR}/rocjitsu
     )
 endif()

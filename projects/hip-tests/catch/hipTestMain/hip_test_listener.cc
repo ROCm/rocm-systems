@@ -6,48 +6,41 @@
 
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
-#include <catch2/interfaces/catch_interfaces_config.hpp>
+#include <catch2/catch_test_case_info.hpp>
 #include <hip_test_params.hh>
 #include <hip_test_context.hh>
 #include <hip_test_level.hh>
-#include <string>
-#include <vector>
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 /**
  * @brief Loads the active level's test parameters into TestParameterStore.
  *
- * Only the parameters live here. Test *selection* cannot: Catch2 has already
- * parsed the test spec by the time any listener event fires, so the spec is
- * rewritten in main() instead (see HipTestLevel::applyLevelFilter).
- *
- * The level is resolved the same way main() resolves it, from the same two
- * inputs, so the two agree. Where main() rewrote the spec, that rewrite names
- * the levels it applied, so resolving again from the rewritten spec yields the
- * same answer.
+ * The level only picks parameters; it never narrows the run, so the Catch2 test
+ * spec is not consulted. Catch2 never starts a run for --help or the --list-*
+ * options, so those work whatever HIP_TEST_LEVEL holds.
  */
 class HipTestParameterListener : public Catch::EventListenerBase {
  public:
   using Catch::EventListenerBase::EventListenerBase;
 
   /**
-   * @brief Called once when the test run begins.
+   * @brief Called once when the test run begins, before any test.
    * Initializes TestParameterStore and loads the resolved level's parameters.
+   * @throws std::runtime_error when HIP_TEST_LEVEL is rejected. Catch2 prints
+   *         the message and Session::run() returns 1 without running any test,
+   *         rather than silently running with the default parameters.
    */
   void testRunStarting(Catch::TestRunInfo const&) override {
-    const std::vector<std::string> testsOrTags =
-        (m_config != nullptr) ? m_config->getTestsOrTags() : std::vector<std::string>{};
-    const auto resolution = HipTestLevel::resolveLevel(testsOrTags, std::getenv("HIP_TEST_LEVEL"));
-
-    for (const auto& line : resolution.describe()) {
-      LogPrintf("%s\n", line.c_str());
+    const auto resolution = HipTestLevel::resolveLevel(std::getenv("HIP_TEST_LEVEL"));
+    if (resolution.rejected()) {
+      throw std::runtime_error("[Test Level] ERROR: " + resolution.error + ". Aborting.");
     }
+    LogPrintf("%s\n", resolution.describe().c_str());
 
-    // An unsupported level is rejected in main() before the run starts; by the
-    // time we get here the level is known good, so load it and move on.
     auto& params = TestParameterStore::instance();
     params.initialize();
-    LogPrintf("[Level Filter] Applying test parameters level: %s\n", resolution.level.c_str());
     params.loadLevelConfig(resolution.level);
   }
 
@@ -57,3 +50,99 @@ class HipTestParameterListener : public Catch::EventListenerBase {
 
 // Register the listener - it will be automatically activated
 CATCH_REGISTER_LISTENER(HipTestParameterListener)
+
+#if HT_AMD
+extern "C" hipError_t hipExtGetLastError(void);
+#endif
+
+// The reset is gated by HIP runtime initialization only on Linux, to protect
+// fork-based multiprocess parents; HSA (AMD) and the CUDA driver exist there.
+#if HT_LINUX
+#if HT_AMD
+#include <hsa/hsa.h>
+#elif HT_NVIDIA
+#include <cuda.h>
+#else
+#error "Platform not recognized"
+#endif
+
+// Whether this process has initialized the HIP runtime, hence may hold a leaked
+// last error and can be reset without newly initializing a fork parent that
+// never used HIP. The underlying driver uses explicit initialization, so a call
+// made before it returns a "not initialized" status without initializing
+// anything -- a side-effect-free probe. AMD probes HSA, NVIDIA the CUDA driver.
+static bool hipRuntimeInitialized() {
+#if HT_AMD
+  uint16_t version = 0;
+  return hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version) !=
+      HSA_STATUS_ERROR_NOT_INITIALIZED;
+#elif HT_NVIDIA
+  int count = 0;
+  return cuDeviceGetCount(&count) != CUDA_ERROR_NOT_INITIALIZED;
+#else
+#error "Platform not recognized"
+#endif
+}
+#endif  // HT_LINUX
+
+/**
+ * @brief Clears the sticky thread-local HIP last error after each test case so
+ * an error left unconsumed by one test cannot fail the next. Clears both the
+ * standard (hipGetLastError) and, on AMD, the command (hipExtGetLastError)
+ * states. On Linux it resets only once the HIP runtime is initialized, so it
+ * never initializes HIP in a parent that never called it, e.g. a fork-based
+ * multiprocess parent; such parents do not exist on other platforms, which
+ * always reset. A leftover error is always reported on stderr;
+ * HIP_TEST_STRICT_LAST_ERROR additionally fails the run.
+ */
+class HipLastErrorResetListener : public Catch::EventListenerBase {
+ public:
+  using Catch::EventListenerBase::EventListenerBase;
+
+  void testCaseEnded(Catch::TestCaseStats const& stats) override {
+#if HT_LINUX
+    if (!hipRuntimeInitialized()) {
+      return;
+    }
+#endif
+    hipError_t leftover = hipGetLastError();
+#if HT_AMD
+    hipError_t cmdLeftover = hipExtGetLastError();
+#elif HT_NVIDIA
+    hipError_t cmdLeftover = hipSuccess;
+#else
+#error "Platform not recognized"
+#endif
+    bool leaked = false;
+    if (leftover != hipSuccess) {
+      report(stats.testInfo->name, "last error", leftover);
+      leaked = true;
+    }
+    if (cmdLeftover != hipSuccess && cmdLeftover != leftover) {
+      report(stats.testInfo->name, "command error", cmdLeftover);
+      leaked = true;
+    }
+    if (leaked && strict_) {
+      culprits_ += "\n  " + stats.testInfo->name;
+    }
+  }
+
+  void testRunEnded(Catch::TestRunStats const&) override {
+    if (!culprits_.empty()) {
+      fprintf(stderr, "[HIP last-error] strict mode, tests left unconsumed errors:%s\n",
+              culprits_.c_str());
+      g_hipStrictLastErrorFailed.store(true, std::memory_order_relaxed);
+    }
+  }
+
+ private:
+  static void report(std::string const& test, const char* which, hipError_t err) {
+    fprintf(stderr, "[HIP last-error] test '%s' left %s %d (%s)\n", test.c_str(), which,
+            static_cast<int>(err), hipGetErrorString(err));
+  }
+
+  bool strict_ = !TestContext::getEnvVar("HIP_TEST_STRICT_LAST_ERROR").empty();
+  std::string culprits_;
+};
+
+CATCH_REGISTER_LISTENER(HipLastErrorResetListener)

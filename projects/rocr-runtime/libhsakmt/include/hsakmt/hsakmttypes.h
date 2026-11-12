@@ -362,6 +362,9 @@ typedef struct _HsaNodeProperties
     HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
 
     HSAuint32       FabricHandleSupported; // 0 - not supported, 1 - supported
+
+    HSAuint32       NativeSDMASupported;   // 0 - not supported, 1 - device provides the native SDMA user queue
+    HSAuint32       NativeSDMAEpilogueBytes; // Per-doorbell epilogue size in the native SDMA user queue
 } HsaNodeProperties;
 
 

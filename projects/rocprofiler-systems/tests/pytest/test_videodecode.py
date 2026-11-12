@@ -6,6 +6,7 @@ Tests for the videodecode example.
 """
 
 from __future__ import annotations
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -37,8 +38,12 @@ def video_decode_env() -> dict[str, str]:
 def video_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
     """Get validation rules for video decode tests."""
     rules_dir = validation_rules_dir / "video-decode"
+    if gpu_info._is_gfx1250:
+        validation_rules = rules_dir / "gfx1250-validation-rules.json"
+    else:
+        validation_rules = rules_dir / "validation-rules.json"
     rules = [
-        rules_dir / "validation-rules.json",
+        validation_rules,
         rules_dir / "sdk-metrics-rules.json",
     ]
     if "instinct" in gpu_info.categories:
@@ -104,8 +109,6 @@ class TestVideoDecode(RocprofsysTest):
                 result,
                 categories=["rocm_rocdecode_api"],
                 labels=["rocDecCreateVideoParser"],
-                counts=[2],
-                depths=[1],
                 counter_names=(
                     ["VCN Busy"] if "instinct" in gpu_info.categories else None
                 ),

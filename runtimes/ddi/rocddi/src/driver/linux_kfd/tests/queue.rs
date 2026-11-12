@@ -14,7 +14,9 @@ use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
     Shared::new(value).unwrap()
 }
-use crate::device::gpu::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
+use crate::device::gpu::queue::{
+    QueueProducerMode, QueueRingMemory, QueueTransportExpectation, SdmaEngineSelection,
+};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -71,6 +73,7 @@ fn native_node() -> sysfs::KfdNode {
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             compute_units: 4,
             maximum_wave_count_per_compute_unit: 32,
             maximum_scratch_wave_count_per_compute_unit: 32,
@@ -497,7 +500,10 @@ impl Fixture {
                             if let Some(scratch) = expected_scratch {
                                 assert_eq!(
                                     read_u32(offset_of!(AqlControlLayout, compute_tmpring_size)),
-                                    64 | (2 << 12)
+                                    64 | ((scratch.maximum_private_segment_byte_length
+                                        * scratch.lanes_per_wave
+                                        / 256)
+                                        << 12)
                                 );
                                 let resource =
                                     offset_of!(AqlControlLayout, scratch_resource_descriptor);
@@ -534,7 +540,9 @@ impl Fixture {
                                         AqlControlLayout,
                                         scratch_wave64_lane_byte_size
                                     )),
-                                    scratch.maximum_private_segment_byte_length / 2
+                                    scratch.maximum_private_segment_byte_length
+                                        * scratch.lanes_per_wave
+                                        / 64
                                 );
                             } else {
                                 assert_eq!(
@@ -546,7 +554,7 @@ impl Fixture {
                                 assert_eq!(read_u32(resource), 0);
                                 assert_eq!(read_u32(resource + 4), 1 << 30);
                                 assert_eq!(read_u32(resource + 8), 0);
-                                assert_eq!(read_u32(resource + 12), GFX1201_SCRATCH_RESOURCE_WORD3);
+                                assert_eq!(read_u32(resource + 12), GFX12_SCRATCH_RESOURCE_WORD3);
                             }
                             for slot in 0..args.ring_size / 64 {
                                 let mut header = [0; 2];
@@ -581,8 +589,14 @@ impl Fixture {
                             }
                             assert_eq!(header, expected);
                         } else if args.queue_type == 0 {
-                            let cache_line =
-                                u64::from(crate::cpu_cache::cache_line_size().unwrap());
+                            let cache_line = u64::from(
+                                crate::host::cache::CacheMaintenance::qualify(
+                                    crate::host::cache::CachePolicy::WriteBack,
+                                )
+                                .unwrap()
+                                .line_size_bytes()
+                                .unwrap(),
+                            );
                             assert_eq!(args.read_pointer, pointers.va + PM4_READ_OFFSET as u64);
                             assert_eq!(args.write_pointer, pointers.va + cache_line);
                             let mut read = [1; 8];
@@ -953,6 +967,7 @@ fn all_formats_and_priorities_reach_native_queue_creation() {
         desc.priority = priority;
         let mut queue = fixture.create(desc).unwrap();
         let info = queue.info().unwrap();
+        assert!(info.valid_for(QueueTransportExpectation::new(desc)));
         assert_eq!(info.sdma_engine_id, None);
         assert_eq!(info.index_unit_bytes, unit);
         assert_eq!(info.read_index_width, read_width);
@@ -1047,6 +1062,7 @@ fn targeted_sdma_local_ring_is_mapped_and_released() {
         ErrorKind::Unsupported
     );
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     native.public_memory_bytes = 1 << 30;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
@@ -1121,7 +1137,24 @@ fn instance_aql_ring_uses_coherent_gtt_when_kfd_rejects_userptr() {
             DriverContextLifetime::Session,
         )
         .unwrap();
-    assert_eq!(queue.info().unwrap().index_unit_bytes, 64);
+    let info = queue.info().unwrap();
+    assert_eq!(info.index_unit_bytes, 64);
+    let control = info.aql_control.expect("AQL queue has a control view");
+    assert_eq!(control.host_base() % control.alignment(), 0);
+    assert_eq!(control.writable_prefix_bytes(), size_of::<AqlQueueHeader>());
+    assert_eq!(control.byte_length(), size_of::<AqlControlLayout>());
+    assert_eq!(
+        control.read_index_host_address(),
+        info.read_index_host_address
+    );
+    assert_eq!(
+        control.write_index_host_address(),
+        info.write_index_host_address
+    );
+    assert_eq!(
+        control.properties_host_address(),
+        control.host_base() + offset_of!(AqlControlLayout, queue_properties)
+    );
     queue.destroy().unwrap();
     drop(queue);
     fixture.assert_released();
@@ -1170,6 +1203,7 @@ fn host_visible_local_aql_ring_requires_sufficient_public_vram() {
     native.public_memory_bytes = os_memory::page_size().unwrap() as u64;
     assert!(Request::validate(&native, desc).is_ok());
     native.queues.gfx_target = 120_000;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Gfx1200;
     assert_eq!(
         Request::validate(&native, desc).err().unwrap().kind(),
         ErrorKind::Unsupported
@@ -1236,25 +1270,28 @@ fn inactive_queue_destruction_ignores_unmatched_indices() {
 
 #[test]
 fn gfx1201_scratch_populates_the_firmware_queue_control_fields() {
-    let fixture = Fixture::new(true);
-    let scratch = QueueScratch {
-        device_address: 0x1234_0000,
-        byte_length: 64 * 1024,
-        maximum_private_segment_byte_length: 16,
-        maximum_wave_count: 128,
-    };
-    fixture.state.lock().unwrap().expected_scratch = Some(scratch);
-    let desc = descriptor(QueueParameters::Aql {
-        producer_mode: QueueProducerMode::Single,
-        ring_memory: QueueRingMemory::System,
-        global_work_sync: false,
-        inactive_signal: None,
-        error_event: None,
-        scratch: Some(scratch),
-    });
-    let mut queue = fixture.create(desc).unwrap();
-    queue.destroy().unwrap();
-    fixture.assert_released();
+    for lanes_per_wave in [32, 64] {
+        let fixture = Fixture::new(true);
+        let scratch = QueueScratch {
+            device_address: 0x1234_0000,
+            byte_length: u64::from(lanes_per_wave) * 16 * 128,
+            maximum_private_segment_byte_length: 16,
+            lanes_per_wave,
+            maximum_wave_count: 128,
+        };
+        fixture.state.lock().unwrap().expected_scratch = Some(scratch);
+        let desc = descriptor(QueueParameters::Aql {
+            producer_mode: QueueProducerMode::Single,
+            ring_memory: QueueRingMemory::System,
+            global_work_sync: false,
+            inactive_signal: None,
+            error_event: None,
+            scratch: Some(scratch),
+        });
+        let mut queue = fixture.create(desc).unwrap();
+        queue.destroy().unwrap();
+        fixture.assert_released();
+    }
 }
 
 #[test]
@@ -1334,6 +1371,7 @@ fn stopped_gfx1201_queue_accepts_replacement_scratch_without_recreation() {
         device_address: 0x1234_0000,
         byte_length: 64 * 1024,
         maximum_private_segment_byte_length: 16,
+        lanes_per_wave: 32,
         maximum_wave_count: 128,
     };
     queue.set_scratch(scratch).unwrap();
@@ -1372,6 +1410,7 @@ fn invalid_scratch_geometry_fails_before_native_acquisition() {
         device_address: 0x1234_0000,
         byte_length: 64 * 1024,
         maximum_private_segment_byte_length: 16,
+        lanes_per_wave: 32,
         maximum_wave_count: 128,
     };
     for invalid in [
@@ -1480,7 +1519,8 @@ fn unsupported_options_and_missing_context_sizes_fail_before_acquisition() {
         assert!(Request::validate(&native_node(), invalid).is_err());
     }
     let mut native = native_node();
-    native.queues.gfx_target = 120_000;
+    native.queues.gfx_target = 120_002;
+    native.queues.target_profile = crate::topology::GpuTargetProfile::Other;
     assert!(Request::validate(&native, pm4).is_err());
     assert_eq!(fixture.state.lock().unwrap().next_handle, 0);
 }

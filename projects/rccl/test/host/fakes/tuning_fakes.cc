@@ -67,6 +67,9 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
   return g_tuningCompute(input, result);
 }
 
+// A no-op: the overrides only retune system->tuning after a Rome model matches.
+void rcclApplyTuningOverrides(struct ncclTopoSystem*) {}
+
 void ResetTuningFakes() {
   g_topoGetAlgoTime = DefaultTopoGetAlgoTime;
   g_topoGetAlgoTimeCalls = 0;

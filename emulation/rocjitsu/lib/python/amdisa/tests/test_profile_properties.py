@@ -3,6 +3,8 @@
 
 """Unit tests for ISA dimension properties on IsaProfile subclasses."""
 
+import re
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -263,7 +265,7 @@ def test_dpp_suppressed_compare_policy(profile, expected):
         (CdnaProfile(), 32, DppOpcodeRule.ALLOW),
         (CdnaProfile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
         (Cdna1Profile(), 64, DppOpcodeRule.ALLOW),
-        (Cdna2Profile(), 64, DppOpcodeRule.ALLOW),
+        (Cdna2Profile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
     ],
 )
 def test_cdna_64bit_input_dpp_rule(profile, src0_size_bits, expected):
@@ -322,8 +324,9 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
     ],
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
+    encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
     assert (
-        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=64)
+        profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64)
         is DppOpcodeRule.FORBID
     )
 
@@ -367,7 +370,8 @@ def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
     ('profile', 'wave', 'row_bcast', 'row_xmask'),
     [
         (CdnaProfile(), True, True, False),
-        (Rdna1Profile(), True, True, False),
+        (Rdna1Profile(), False, False, True),
+        (Rdna2Profile(), False, False, True),
         (Rdna3Profile(), False, False, True),
         (Rdna4Profile(), False, False, True),
         (Cdna5Profile(), False, False, True),
@@ -394,7 +398,14 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
         (Rdna3Profile(), 'ENC_VOP3P', 'V_WMMA_F32_16X16X16_F16', DppOpcodeRule.FORBID),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
-        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_BF16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_I32_IU8', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT8_U32_U4', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP3', 'V_MUL_LO_U32', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_PIPEFLUSH', DppOpcodeRule.ALLOW),
@@ -542,6 +553,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = true,\n'
         '        .descriptor_sgpr_count_encoded = true,\n'
+        '        .coincident_ds_ignores_data1 = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -563,6 +575,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = true,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::Gfx12,\n'
@@ -584,6 +597,7 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .supports_wgp_mode = false,\n'
         '        .mode_has_gpr_idx_en = false,\n'
         '        .descriptor_sgpr_count_encoded = false,\n'
+        '        .coincident_ds_ignores_data1 = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
         '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
@@ -688,7 +702,10 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert 'current_isa_operand_backend()' in operand_cpp
+    assert 'detail::current_isa_operand_backend_inline()' in operand_cpp
+    assert 'struct UnpackedVgpr {};' in operand_h
+    assert 'UnpackedSource' not in operand_h
+    assert 'OperandType::OPR_SRC;' not in operand_cpp
     assert (
         'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
     )
@@ -885,19 +902,19 @@ class TestCdna4Profile:
 
 
 class TestCdna1Profile:
-    """Cdna1Profile: no AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
+    """Cdna1Profile: separate AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
 
     def setup_method(self):
         self.p = Cdna1Profile()
 
-    def test_has_acc_vgpr_false(self):
-        assert self.p.has_acc_vgpr is False
+    def test_has_acc_vgpr_true(self):
+        assert self.p.has_acc_vgpr is True
 
-    def test_acc_vgpr_encoding_base_zero(self):
-        assert self.p.acc_vgpr_encoding_base == 0
+    def test_acc_vgpr_encoding_base(self):
+        assert self.p.acc_vgpr_encoding_base == 768
 
-    def test_max_acc_vgprs_zero(self):
-        assert self.p.max_acc_vgprs == 0
+    def test_max_acc_vgprs(self):
+        assert self.p.max_acc_vgprs == 256
 
     def test_coherency_model(self):
         assert self.p.coherency_model == MemoryCoherencyModel.GFX9_GLC
@@ -1483,3 +1500,200 @@ def test_vskip_vector_encodings(profile, supported, encoding):
 @pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
 def test_vskip_does_not_suppress_scalar_encodings(encoding):
     assert not CdnaProfile().vskip_affected_encoding(encoding)
+
+
+@pytest.mark.parametrize(
+    ('profile', 'preserves_half', 'bf16_f32_carrier'),
+    [
+        (Cdna1Profile(), False, False),
+        (Cdna2Profile(), False, False),
+        (CdnaProfile(), False, False),
+        (Cdna4Profile(), False, False),
+        (Rdna1Profile(), True, False),
+        (Rdna2Profile(), True, False),
+        (Rdna3Profile(), False, False),
+        (Rdna3_5Profile(), False, False),
+        (Rdna4Profile(), False, False),
+        (Cdna5Profile(), False, True),
+    ],
+)
+def test_valu16_destination_and_bf16_inline_policies(
+    profile, preserves_half, bf16_f32_carrier
+):
+    assert profile.valu16_preserves_unwritten_half is preserves_half
+    assert profile.bf16_inline_uses_f32_carrier is bf16_f32_carrier
+
+
+@pytest.mark.parametrize('split_execution_sources', [False, True])
+def test_execution_operands_override_all_base_value_accessors(
+    tmp_path, split_execution_sources
+):
+    class Profile(Rdna4Profile):
+        @property
+        def split_execution_sources(self):
+            return split_execution_sources
+
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='rdna4',
+            generated_dir_name='rdna4',
+            cpp_namespace='rdna4',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=Profile(),
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    operand_header = (tmp_path / 'rdna4' / 'operand.h').read_text()
+
+    # Guest fields must dispatch to concrete execution hooks; the descriptor
+    # base implementations are programmer-error assertions, not guest failures.
+    for method in (
+        'read_scalar',
+        'read_lane',
+        'write_scalar',
+        'write_lane',
+        'read_scalar64',
+        'read_lane64',
+        'write_scalar64',
+        'write_lane64',
+    ):
+        assert re.search(rf'\b{method}\([^;]+\) const override;', operand_header)
+
+
+@pytest.mark.parametrize(
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_operand_errors_are_retained_and_execution_checks_backends(
+    tmp_path, arch, profile
+):
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name=arch,
+            generated_dir_name=arch,
+            cpp_namespace=arch,
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=profile,
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    model = (tmp_path / arch / 'operand.cpp').read_text()
+    execution = (tmp_path / arch / 'operand_exec.cpp').read_text()
+    assert 'throw ' not in model
+    assert 'throw ' not in execution
+    assert '!delegate() || delegate()->execution_backend_available()' in model
+    assert 'execution_backend_ != nullptr' in model
+    for method in (
+        'read_lane_chunk',
+        'write_lane_chunk',
+        'read_scalar',
+        'read_lane',
+        'write_scalar',
+        'write_lane',
+        'read_lane64',
+        'write_lane64',
+        'read_scalar64',
+        'write_scalar64',
+    ):
+        body = model.split(f'Operand::{method}(', 1)[1].split('\n}', 1)[0]
+        assert re.search(
+            r'if \(!callback\) \{\s*report_missing_execution_backend\(wf\);\s*return(?: 0)?;',
+            body,
+        )
+    for method in ('write_lane_exec', 'write_lane64_exec'):
+        body = execution.split(f'Operand::{method}(', 1)[1].split(
+            '\nuint64_t Operand::', 1
+        )[0]
+        assert 'if (!is_writable())' in body
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+
+    generator._split_execution_classes = ['OneInstruction']
+    generator.gen_execution_backend()
+    backend = (tmp_path / arch / 'execution_backend_exec.cpp').read_text()
+    body = backend.split('void execute_with_backend(', 1)[1].split(
+        'constexpr size_t', 1
+    )[0]
+    assert (
+        body.index('ScopedOperandDelegate::active()')
+        < body.index('execution_backend_available()')
+        < body.index('.execute_impl(')
+    )
+    assert 'instruction.src_operand(i)->execution_backend_available()' in body
+    assert 'instruction.dst_operand(i)->execution_backend_available()' in body
+    assert 'InstructionExecutionError::MissingExecutionBackend' in body
+
+
+@pytest.mark.parametrize('profile_type', [CdnaProfile, Rdna4Profile])
+def test_unsplit_operand_retains_write_errors_and_checks_delegates(
+    tmp_path, profile_type
+):
+    class UnsplitProfile(profile_type):
+        @property
+        def split_execution_sources(self):
+            return False
+
+    generator = CodeGenerator(
+        SimpleNamespace(
+            arch_name='test',
+            generated_dir_name='test',
+            cpp_namespace='test',
+            opnd_selectors=[],
+            operand_types=['OPR_SIMM16', 'OPR_SIMM32', 'OPR_VGPR'],
+            profile=UnsplitProfile(),
+        ),
+        str(tmp_path),
+    )
+    generator.gen_operand()
+    source = (tmp_path / 'test' / 'operand.cpp').read_text()
+    header = (tmp_path / 'test' / 'operand.h').read_text()
+    assert 'bool execution_backend_available() const override;' in header
+    availability = source.split(
+        'bool Operand::execution_backend_available() const {', 1
+    )[1].split('}', 1)[0]
+    assert (
+        'return !delegate() || delegate()->execution_backend_available();'
+        in availability
+    )
+    assert 'execution_backend_ != nullptr' not in availability
+    assert 'util/except.h' not in source
+    for method in ('write_lane', 'write_lane64'):
+        body = source.split(f'Operand::{method}(', 1)[1].split(
+            '\nuint64_t Operand::', 1
+        )[0]
+        assert 'if (!is_writable())' in body
+        assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+        assert 'throw ' not in body
+
+
+@pytest.mark.parametrize(
+    ('profile', 'clamp'),
+    [
+        (Cdna1Profile(), False),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), False),
+        (Cdna5Profile(), False),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), True),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+    ],
+)
+def test_packed_u16_multiply_clamp(profile, clamp):
+    assert profile.packed_mul_lo_u16_clamp is clamp

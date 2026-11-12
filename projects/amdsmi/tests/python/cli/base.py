@@ -147,6 +147,28 @@ class TestCliBase(unittest.TestCase):
         "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
     }
 
+    # The only flags ``metric --nic`` accepts. The parser rejects any GPU or CPU
+    # metric flag given with --nic, so a command carrying one expects a failure.
+    NIC_METRIC_FLAGS = frozenset(
+        {
+            "--nic",
+            "--port",
+            "--extended",
+            "--rdma",
+            "--sensors",
+            "--show-unsupported",
+            "--json",
+            "--csv",
+            "--file",
+            "--append",
+            "--overwrite",
+            "--loglevel",
+            "--watch",
+            "--watch_time",
+            "--iterations",
+        }
+    )
+
     # Order for the amd-smi reset commands, putting --clocks last since
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
@@ -234,15 +256,17 @@ class TestCliBase(unittest.TestCase):
                 gpus.append(entry["bdf"])
                 gpus.append(entry["uuid"])
         baseline["gpus"] = gpus
+        baseline["nics"] = cls._nic_sweep_values()
 
         # When parsing, expand each arg with its value(s).
-        # CPU/Core are given default values because their sub-arguments require a value.
+        # CPU/Core/NIC are given default values because their sub-arguments require a value.
         # Otherwise, tests will populate the args incorrectly on CPU/APU-capable systems.
         baseline["sub_args"] = {
             "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
+            "NIC": baseline["nics"],
             "CPU": ["all", "0"],
             "CORE": ["all", "0"],
             "FILE": [
@@ -257,6 +281,22 @@ class TestCliBase(unittest.TestCase):
         }
         baseline["clk_freq"] = cls._read_clk_freq()
         return baseline
+
+    @classmethod
+    def _nic_sweep_values(cls) -> list:
+        """Values for the --nic selector: none on a host without a NIC.
+
+        A host without a NIC answers ``--nic 0`` with DEVICE_NOT_FOUND and
+        ``--nic all`` with no output, so sweeping them could never pass.
+        """
+        (rc, data, _) = cls.util.RunCmdSync("amd-smi list --nic all --json")
+        if rc or not data:
+            return []
+        try:
+            nics = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+        return ["all", "0"] if nics else []
 
     @classmethod
     def _read_clk_freq(cls):
@@ -798,6 +838,14 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+            words = cmd.split()
+            if "--nic" in words and ("--watch" in words):
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
+            if (words[1:2] == ["metric"]) and ("--nic" in words):
+                given_flags = {word for word in words if word.startswith("--")}
+                if given_flags - self.NIC_METRIC_FLAGS:
+                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands

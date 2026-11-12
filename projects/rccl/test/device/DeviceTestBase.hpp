@@ -10,6 +10,7 @@
 #include <hip/hip_runtime.h>
 #include <vector>
 #include <cstring>
+#include <string>
 
 #include "../common/TestChecks.hpp"
 
@@ -131,6 +132,13 @@ protected:
   void syncAndCheck() {
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  }
+
+  // Prefix match, so gfx1250 strict counts too.
+  static bool isGfx1250(int device = 0) {
+    hipDeviceProp_t prop{};
+    if (hipGetDeviceProperties(&prop, device) != hipSuccess) return false;
+    return std::string(prop.gcnArchName).rfind("gfx1250", 0) == 0;
   }
 };
 

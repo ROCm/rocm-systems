@@ -8,6 +8,8 @@
 #define ROCJITSU_KMD_LINUX_SYSFS_H_
 
 #include "rocjitsu/config/kfd_device_config.h"
+#include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include <cstdint>
 #include <string>
@@ -30,6 +32,7 @@ public:
     // Identification
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    [[nodiscard]] uint32_t clock_frequency_mhz() const;
     uint32_t vendor_id = 0x1002; // AMD
     uint32_t device_id = 0;
     uint32_t family_id = 0;
@@ -58,6 +61,9 @@ public:
 
     // Memory
     uint64_t local_mem_size = 0;
+    uint64_t visible_vram_size = 0;  ///< CPU-visible VRAM; an explicit PCI aperture can limit it.
+    uint32_t control_stack_size = 0; ///< Control stack bytes per XCC.
+    uint32_t context_save_size = 0;  ///< Context save area bytes per XCC.
     uint32_t vram_type = 6;
     uint32_t lds_size_kb = 64;
     uint32_t mem_width = 4096;   // HBM interface width in bits
@@ -133,7 +139,9 @@ public:
 
   /// @brief Generate the sysfs topology directory for multiple GPUs.
   /// @param gpus Per-GPU configurations. Each gets its own topology node.
-  std::string generate(const std::vector<GpuInfo> &gpus);
+  /// @param publish_peer_links Whether the GPU peers have qualified executable routes.
+  /// An explicit false writes zero P2P counts so libhsakmt cannot infer peers.
+  std::string generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links = true);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).
   const std::string &path() const { return topology_dir_; }
@@ -154,19 +162,21 @@ private:
   std::string topology_dir_;
   std::string drm_dir_;
   GpuInfo gpu_info_{};
+  std::vector<BackingFile> pending_files_;
 
-  void write_file(const std::string &path, const std::string &content);
+  void queue_file(const std::string &path, const std::string &content);
   void make_dir(const std::string &path);
   void write_generation_id();
   void write_system_properties(uint32_t num_devices);
   void write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links);
   void write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
-                      uint32_t total_gpus);
+                      uint32_t total_gpus, bool publish_peer_links);
   void write_drm_tree(const std::vector<GpuInfo> &gpus);
 };
 
 /// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
-Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
+Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+                                    const config::PciDeviceConfig &pci = {});
 
 } // namespace rocjitsu
 

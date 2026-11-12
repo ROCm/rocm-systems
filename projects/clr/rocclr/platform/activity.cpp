@@ -14,6 +14,7 @@
 namespace amd::activity_prof {
 
 decltype(report_activity) report_activity{nullptr};
+std::atomic<bool> tool_attached{false};
 
 // Reserved sentinel pointer value (0x1) used to signal roctracer that CLR commits
 // to delivering an activity record for this operation. roctracer's TracerCallback
@@ -52,10 +53,10 @@ void ReportActivity(const amd::Command& command) {
   if (operation_id >= OP_ID_NUMBER) {
     // hipEventRecord enqueues an EventMarker with command type 0 (internal marker) rather than
     // CL_COMMAND_MARKER, so OperationId() can't classify it. It still dispatches a real barrier
-    // packet carrying a GPU timestamp (marker_ts_), so report it as a barrier to surface
+    // packet with a signal of its own (signal_required_), so report it as a barrier to surface
     // event-record sync points on the GPU timeline. Generic internal markers (batch-flush) have
-    // marker_ts_ == false and stay unreported.
-    if (command.type() == 0 && command.profilingInfo().marker_ts_) {
+    // signal_required_ == false and stay unreported.
+    if (command.type() == 0 && command.profilingInfo().signal_required_) {
       operation_id = OP_ID_BARRIER;
     } else {
       // This command does not translate into a profiler activity (dispatch, memcopy, etc...),
@@ -107,6 +108,16 @@ void ReportActivity(const amd::Command& command) {
       const auto& ops = static_cast<const amd::BatchCopyMemoryCommand&>(command).copyOps();
       size_t total = 0;
       for (const auto& op : ops) total += op.size;
+      record.bytes = total;
+      break;
+    }
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT: {
+      const std::vector<amd::BatchCopyRectOp>& ops =
+          static_cast<const amd::BatchCopyMemoryRectCommand&>(command).CopyOps();
+      size_t total = 0;
+      for (const amd::BatchCopyRectOp& op : ops) {
+        total += linearSize(op.size);
+      }
       record.bytes = total;
       break;
     }
@@ -205,6 +216,7 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
     CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
     CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT, BatchCopyBufferRect);
     CASE_STRING(ROCCLR_COMMAND_BATCH_WRITE_BUFFER, BatchWriteBuffer);
     CASE_STRING(ROCCLR_COMMAND_BATCH_READ_BUFFER, BatchReadBuffer);
     default:

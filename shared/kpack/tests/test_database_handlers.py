@@ -193,6 +193,19 @@ class TestRocBLASHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack+"
 
+    def test_detect_arch_subdir_stepping_not_applicable(self, handler, prefix_root):
+        """The gfx1250v0 stepping alias is scoped to hipBLASLt/hipSPARSELt and
+        must not apply to rocBLAS, even though rocBLAS shares the same
+        _TensileHandler base class. rocBLAS does not produce this directory
+        today, but if it ever did, a directory-only file should stay
+        unclassified rather than being silently merged into gfx1250."""
+        file_path = prefix_root / "lib/rocblas/library/gfx1250v0/TensileManifest.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in rocblas/library are rejected."""
         file_path = prefix_root / "lib/other/library/TensileLibrary_gfx1100.dat"
@@ -335,6 +348,50 @@ class TestHipBLASLtHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx1100"
 
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "TensileLibrary_lazy_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.co",
+            "Kernels.so-000-gfx1250.hsaco",
+        ],
+    )
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root, filename):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = prefix_root / "lib/hipblaslt/library/gfx1250v0" / filename
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
+
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            # Wrong revision: only v0 is a known, verified stepping.
+            "gfx1250v1",
+            # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+            "gfx90av0",
+            "gfx942v0",
+        ],
+    )
+    def test_detect_arch_subdir_unknown_stepping_not_merged(
+        self, handler, prefix_root, directory
+    ):
+        """Only gfx1250v0 is a known, verified stepping alias. Neither a
+        different revision nor a different base arch should be silently folded
+        into a base arch -- a directory-only file (no arch in its own filename)
+        under such a directory should stay unclassified rather than guessed."""
+        file_path = (
+            prefix_root / "lib/hipblaslt/library" / directory / "TensileManifest.txt"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
@@ -423,6 +480,18 @@ class TestHipSparseLtHandler:
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx950"
+
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = (
+            prefix_root
+            / "lib/hipsparselt/library/gfx1250v0/TensileLibrary_lazy_gfx1250.dat.zlib"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         file_path = prefix_root / "lib/rocblas/library/something_gfx942.co"

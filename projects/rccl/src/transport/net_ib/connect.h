@@ -67,6 +67,10 @@ struct ncclIbConnectionMetadata {
   int tc;
   int sl;
   int isP2p;
+  // Receiver to sender: the GDR flush flags to write after each flagged
+  // payload, or 0 when this connection keeps the RDMA read flush.
+  uint32_t flagFlushRkey;
+  uint64_t flagFlushAddr;
 };
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);

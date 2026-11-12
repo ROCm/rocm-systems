@@ -25,7 +25,6 @@
 #include <cstring>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -106,11 +105,15 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words, std::optional<size_t> text_function_words,
     size_t text_function_offset_words, std::optional<size_t> function_pointer_table_target_words,
     bool name_function_pointer_table_with_symbol, bool export_text_function) {
-  if (text_function_words && text_function_offset_words + *text_function_words > text_words.size())
-    throw std::invalid_argument("text function extent exceeds .text fixture");
+  if (text_function_words &&
+      (text_function_offset_words > text_words.size() ||
+       *text_function_words > text_words.size() - text_function_offset_words)) {
+    ADD_FAILURE() << "text function extent exceeds .text fixture";
+  }
   if (function_pointer_table_target_words &&
-      *function_pointer_table_target_words >= text_words.size())
-    throw std::invalid_argument("function pointer target exceeds .text fixture");
+      *function_pointer_table_target_words >= text_words.size()) {
+    ADD_FAILURE() << "function pointer target exceeds .text fixture";
+  }
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
@@ -209,7 +212,8 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   }
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
-  std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  if (!text_words.empty())
+    std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
   const auto descriptor = make_kernel_descriptor_bytes(static_cast<int64_t>(text_vaddr) -
                                                        static_cast<int64_t>(rodata_vaddr));
@@ -328,17 +332,18 @@ std::vector<uint8_t> make_minimal_amdgpu_kernel_elf(const std::vector<uint32_t> 
 
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
-  if (ehdr.e_shnum <= 2 || ehdr.e_shentsize != sizeof(Elf64_Shdr) ||
-      ehdr.e_shoff + static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) > image.size())
-    throw std::runtime_error("single-kernel fixture has an invalid section table");
+  assert(ehdr.e_shnum > 2 && ehdr.e_shentsize == sizeof(Elf64_Shdr) &&
+         ehdr.e_shoff <= image.size() &&
+         static_cast<uint64_t>(ehdr.e_shnum) * sizeof(Elf64_Shdr) <= image.size() - ehdr.e_shoff &&
+         "single-kernel fixture has an invalid section table");
   ehdr.e_flags = elf_machine;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   Elf64_Shdr rodata{};
   std::memcpy(&rodata, image.data() + ehdr.e_shoff + 2 * sizeof(Elf64_Shdr), sizeof(rodata));
-  if (rodata.sh_size < sizeof(TestKernelDescriptor) ||
-      rodata.sh_offset + sizeof(TestKernelDescriptor) > image.size())
-    throw std::runtime_error("single-kernel fixture has an invalid kernel descriptor");
+  assert(rodata.sh_size >= sizeof(TestKernelDescriptor) && rodata.sh_offset <= image.size() &&
+         sizeof(TestKernelDescriptor) <= image.size() - rodata.sh_offset &&
+         "single-kernel fixture has an invalid kernel descriptor");
 
   TestKernelDescriptor descriptor = kernel_descriptor;
   const int64_t entry_offset = read_kernel_descriptor_entry_offset(image.data() + rodata.sh_offset);
@@ -757,6 +762,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernel_descriptors(
   return image;
 }
 std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
+  constexpr util::FailureOr<uint32_t> kNopCdna4Result = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(kNopCdna4Result.succeeded());
+
   constexpr uint64_t rodata_offset = 0x100;
   constexpr uint64_t rodata_vaddr = 0x100;
   constexpr uint64_t text_offset = 0x1000;
@@ -826,8 +834,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
                                                        static_cast<int64_t>(rodata_vaddr));
   std::memcpy(image.data() + rodata_offset, descriptor.data(), descriptor.size());
 
-  std::vector<uint32_t> text_words(text_size / sizeof(uint32_t),
-                                   build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA4));
+  std::vector<uint32_t> text_words(text_size / sizeof(uint32_t), kNopCdna4Result.value());
   text_words[0] = cdna4::build_sopp(cdna4::kSWaitcntSopp)[0]; // Expands on RDNA4.
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -868,7 +875,7 @@ std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry() {
   return image;
 }
 void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
-  using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+  using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
   AmdGpuCodeObject layout(image.data(), image.size());
   ASSERT_TRUE(layout.is_valid());
@@ -878,7 +885,7 @@ void enable_workgroup_id_x_sgpr(std::vector<uint8_t> &image) {
 
   KD kd{};
   std::memcpy(&kd, image.data() + rodata->sectionOffset(), sizeof(kd));
-  kd.compute_pgm_rsrc2 |= rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
+  kd.compute_pgm_rsrc2 |= rocjitsu::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X;
   std::memcpy(image.data() + rodata->sectionOffset(), &kd, sizeof(kd));
 }
 

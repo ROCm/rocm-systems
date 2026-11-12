@@ -121,6 +121,8 @@ class StaticCommands:
         profile=None,
         mem_carveout=None,
         ampp=None,
+        cuid=None,
+        cuid_primary=None,
     ):
         """Get Static information for target gpu
 
@@ -147,6 +149,9 @@ class StaticCommands:
             soc_pstate (bool, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -155,6 +160,15 @@ class StaticCommands:
             args.gpu = gpu
         if asic:
             args.asic = asic
+        if cuid:
+            args.cuid = cuid
+        if cuid_primary:
+            args.cuid_primary = cuid_primary
+        if getattr(args, "cuid_primary", False):
+            # --cuid-primary selects a field of the CUID block, so asking for it
+            # asks for the block. Without this it is a no-op alongside any other
+            # flag.
+            args.cuid = True
         if bus:
             args.bus = bus
         if vbios:
@@ -227,6 +241,16 @@ class StaticCommands:
         if args.partition:
             current_platform_args += ["partition"]
             current_platform_values += [args.partition]
+
+        # Note: CUID is a special case for the same reason, and is not an
+        # amd-smi static default argument either.
+        # Reason: it changes the shape of the default output for every existing
+        #         consumer of `amd-smi static --json`, and on a build without
+        #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
+        #         --cuid or --cuid-primary.
+        if getattr(args, "cuid", False):
+            current_platform_args += ["cuid"]
+            current_platform_values += [args.cuid]
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -316,6 +340,10 @@ class StaticCommands:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict["asic"] = asic_dict
+        if getattr(args, "cuid", False):
+            static_dict["cuid"] = self.helpers.get_gpu_cuid_info(
+                args.gpu, include_primary=getattr(args, "cuid_primary", False)
+            )
         if args.bus:
             bus_info = {
                 "bdf": "N/A",
@@ -685,7 +713,7 @@ class StaticCommands:
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
                 driver_info_dict["name"] = driver_info["driver_name"]
-                driver_info_dict["version"] = driver_info["driver_full_version"]
+                driver_info_dict["version"] = driver_info["driver_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
                     "Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info()
@@ -1495,91 +1523,13 @@ class StaticCommands:
         if not self.logger.is_json_format():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
-    def _filter_nics_from_args(subcommand):
-        @functools.wraps(subcommand)
-        def wrapper(self, *args, **kwargs):
-            original_nic = None
-            if len(args) > 0:
-                original_nic = args[0].nic
-                nics, ainics = self._get_nics_from_args(args[0])
-                if len(nics) == 0:
-                    args[0].nic = None
-                else:
-                    args[0].nic = nics
-            result = subcommand(self, *args, **kwargs)
-            if len(args) > 0:
-                args[0].nic = original_nic
-            return result
-
-        return wrapper
-
-    @_filter_nics_from_args
-    def _static_brcm_nic(self, args, multiple_devices=False, nic=None):
-        """Get Static information for target nic
-
-        Args:
-            args (Namespace): Namespace containing the parsed CLI args
-            multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
-            nic (device_handle, optional): device_handle for target device. Defaults to None.
-
-        Returns:
-            None: Print output via AMDSMILogger to destination
-        """
-
-        if nic:
-            args.nic = nic
-
-        # Handle multiple NICs
-        handled_multiple_nics, device_handle = self.helpers.handle_brcm_nics(
-            args, self.logger, self._static_brcm_nic
-        )
-        if handled_multiple_nics:
-            return  # This function is recursive
-        args.nic = device_handle
-        if not args.nic:
-            return
-
-        # Get nic id for logging
-        nic_id = self.helpers.get_nic_id_from_device_handle(args.nic)
-        logging.debug(f"Static Arg information for NIC {nic_id} on {self.helpers.os_info()}")
-
-        static_dict = {}
-        if self.logger.is_json_format():
-            static_dict["ai_nic"] = int(nic_id)
-
-        if args.nic:
-            try:
-                nic_info = amdsmi_interface.amdsmi_get_nic_info(args.nic)
-                if nic_info:
-                    static_dict["nic"] = {
-                        "bdf": f"{nic_info['bdf']}",
-                        "UUID": f"{nic_info['UUID']}",
-                        "Device Name": f"{nic_info['Device Name']}",
-                        "Part Number": f"{nic_info['Part Number']}",
-                        "Firmware_Version": f"{nic_info['Firmware_Version']}",
-                    }
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["nic"] = "N/A"
-                logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
-
-        multiple_devices_csv_override = False
-        if not self.logger.is_json_format():
-            self.logger.store_nic_output(args.nic, "values", static_dict)
-        else:
-            self.logger.store_nic_json_output.append(static_dict)
-        if multiple_devices:
-            self.logger.store_multiple_device_output()
-            return  # Skip printing when there are multiple devices
-        if not self.logger.is_json_format():
-            self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
-
     def _filter_ainics_from_args(subcommand):
         @functools.wraps(subcommand)
         def wrapper(self, *args, **kwargs):
             original_nic = None
             if len(args) > 0:
                 original_nic = args[0].nic
-                nics, ainics = self._get_nics_from_args(args[0])
+                ainics = self._get_ainics_from_args(args[0])
                 if len(ainics) == 0:
                     args[0].nic = None
                 else:
@@ -1623,7 +1573,7 @@ class StaticCommands:
 
         static_dict = {}
         if self.logger.is_json_format():
-            static_dict["ai_nic"] = int(nic_id)
+            static_dict["nic"] = int(nic_id)
 
         if args.nic:
             try:
@@ -1638,16 +1588,15 @@ class StaticCommands:
                 if hasattr(args, "numa") and getattr(args, "numa"):
                     info_filter.append("numa")
                 if len(info_filter) == 0 or len(info_filter) == 4:
-                    static_dict["nic"] = nic_info
+                    static_dict.update(nic_info)
                 else:
                     nic_info_filtered = {}
                     for attr in info_filter:  # remove all attributes except the one in info_filter:
-                        nic_info_filtered = nic_info_filtered | {
-                            key: value for key, value in nic_info.items() if key.lower() == attr
-                        }
-                    static_dict["nic"] = nic_info_filtered
+                        nic_info_filtered.update(
+                            {key: value for key, value in nic_info.items() if key.lower() == attr}
+                        )
+                    static_dict.update(nic_info_filtered)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["nic"] = "N/A"
                 logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())
 
         multiple_devices_csv_override = False
@@ -1666,22 +1615,20 @@ class StaticCommands:
             nic = None
             if self.helpers.is_ainic_initialized():
                 nic = self.device_handles_ainics
-            if self.helpers.is_brcm_nic_initialized():
-                nic = self.device_handles_brcm_nics
             args.nic = nic
             return False
         else:
-            if (
-                not self.helpers.is_ainic_initialized()
-                and not self.helpers.is_brcm_nic_initialized()
-            ):
+            if not self.helpers.is_ainic_initialized():
                 return False
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
-            if self.helpers.is_ainic_initialized():
-                self._static_ainic(args, multiple_devices, nic)
-            if self.helpers.is_brcm_nic_initialized():
-                self._static_brcm_nic(args, multiple_devices, nic)
+            if isinstance(args.nic, list) and not args.nic:
+                self.logger.print_no_ainics_found()
+                return True
+            self._static_ainic(args, multiple_devices, nic)
+            # static() returns right after this, so it never reaches its own flush.
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             return True
 
     def static(
@@ -1887,7 +1834,6 @@ class StaticCommands:
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
             self._static_ainic(args, multiple_devices, nic)
-            self._static_brcm_nic(args, multiple_devices, nic)
 
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()

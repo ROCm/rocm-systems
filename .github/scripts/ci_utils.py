@@ -42,10 +42,14 @@ def retry(
 
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(subprocess.TimeoutExpired,))
-def get_modified_paths(base_ref: str) -> set[str]:
-    """Returns paths of files changed relative to the base reference."""
+def get_modified_paths(base_ref: str, no_renames: bool = False) -> set[str]:
+    """Returns paths of files changed relative to the base reference.
+
+    With ``no_renames``, a rename reports both its old and new path.
+    """
+    rename_args = ["--no-renames"] if no_renames else []
     result = subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
+        ["git", "diff", *rename_args, "--name-only", base_ref],
         capture_output=True,
         text=True,
         check=True,

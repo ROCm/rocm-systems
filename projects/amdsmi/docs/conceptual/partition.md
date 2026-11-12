@@ -166,7 +166,7 @@ logical GPU.
 A mode is valid only when the XCC count divides evenly by its partition count, so supported modes
 differ by model:
 
-| Mode | Partitions | MI300X / MI325X (8 XCCs) | MI300A (6 XCCs) |
+| Mode | Partitions | MI300X / MI325X / MI350X / MI355X (8 XCCs) | MI300A (6 XCCs) |
 | :--- | :---: | :---: | :---: |
 | SPX | 1 | ✅ 8 XCCs | ✅ 6 XCCs |
 | DPX | 2 | ✅ 4 XCCs each | ✅ 3 XCCs each |
@@ -181,7 +181,7 @@ configurations AMD validates are listed per GPU model and environment in {ref}`G
 ```
 
 Firmware also controls which modes are offered. Check the modes and partition counts on your system
-(including other models, such as MI350X/MI355X) with `sudo amd-smi partition --accelerator`.
+with `sudo amd-smi partition --accelerator`.
 
 MI300X XCC grouping by mode (each box is one logical GPU):
 
