@@ -22,6 +22,7 @@
 #include "ScopedHook.h"
 #include "StickyHipLastError.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/search_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "../../common/ProcessIsolatedTestRunner.hpp"
 
@@ -288,6 +289,7 @@ static void ResetP2pFakes()
     g_fakeCudaMemcpyAsync = DefaultFakeCudaMemcpyAsync;
     g_fakeCuMemAlloc      = DefaultFakeCuMemAlloc;
     ResetNcclFakes();  // restore the nccl* hooks owned by nccl_fakes.cc
+    ResetSearchFakes();
     ResetHipFakes();   // restore the HIP hooks owned by hip_fakes.cc
     SetP2pCallocFailSize(0);  // disarm any ncclCalloc failure arming
     for (void* p : g_fakeAllocations) std::free(p);
