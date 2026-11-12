@@ -30,113 +30,65 @@ namespace {
 constexpr uint8_t kGfx1250WaveSize =
     static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
 
-/// @brief Exact instruction names handled by the B0-to-A0 expansion profile.
-///
-/// @details Keep this list aligned with the implemented B0-to-A0 semantic
-/// rules. Prefix-classified WMMA/SWMMAC and cluster-load instructions are
-/// handled separately by family-level translation rules.
-///
-/// A rule keyed on an exact (encoding id, opcode) that only inserts spacing and
-/// leaves the opcode alone needs no entry here at all: with no classification
-/// the instruction reaches the semantic rule table on its own and, when the rule
-/// declines, takes the verbatim copy path. The MODE-write separation rule is
-/// registered that way, and the diff report is what shows it, as "expand
-/// semantic" with no legalization action.
-///
-/// An entry here does more than label the report when it is a mnemonic prefix
-/// that covers more instructions than the semantic table implements: the
-/// unimplemented siblings then fail closed instead of passing through silently.
-/// That is why the integer WMMA prefixes below keep their entry.
-///
-/// Separately, non-opcode-keyed rewrites are classified by SemanticTranslator's
-/// profile registry, and the barrier-state and sleep/monitor families are
-/// DEFERRED with a pass-through report rather than fail-closed (see
-/// gfx1250_b0_to_a0_is_deferred_family).
-inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemonics = {
-    "ds_load_2addr_b32",
-    "ds_load_2addr_b64",
-    "ds_load_2addr_stride64_b32",
-    "ds_load_2addr_stride64_b64",
-    "ds_store_2addr_b32",
-    "ds_store_2addr_b64",
-    "ds_store_2addr_stride64_b32",
-    "ds_store_2addr_stride64_b64",
-    "ds_storexchg_2addr_rtn_b32",
-    "ds_storexchg_2addr_rtn_b64",
-    "ds_storexchg_2addr_stride64_rtn_b32",
-    "ds_storexchg_2addr_stride64_rtn_b64",
-    "ds_load_addtid_b32",
-    "ds_store_addtid_b32",
-    "v_cvt_pk_fp8_f32",
-    "v_cvt_sr_fp8_f32",
-    "tensor_load_to_lds",
-};
-
-[[nodiscard]] bool requires_b0_to_a0_expansion(std::string_view mnemonic) {
-  // This is deliberately more conservative than the reference patch
-  // patterns. Rocjitsu relocates and expands instructions, so it cannot retain
-  // a source clause without revalidating the translated membership and
-  // placement constraints.
-  if (mnemonic == "s_clause")
+/// @brief Instructions that require a B0-to-A0 expansion or rejection.
+/// @details These operation groups are intentionally broader than the implemented
+/// rewrite table. Unimplemented siblings must fail closed. Opcode-keyed spacing
+/// rewrites need no entry here because they retain the ordinary copy fallback.
+[[nodiscard]] bool requires_b0_to_a0_expansion(const Instruction &inst) {
+  if (inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Cluster)
     return true;
-
-  for (std::string_view exact : kExactB0ToA0TranslationMnemonics) {
-    if (mnemonic == exact)
-      return true;
+  switch (inst.amdgpu_operation()) {
+  // Relocation changes clause membership and placement constraints.
+  case amdgpu::Operation::S_CLAUSE:
+  // Exact operations implemented by this expansion profile.
+  case amdgpu::Operation::DS_LOAD_2ADDR_B32:
+  case amdgpu::Operation::DS_LOAD_2ADDR_B64:
+  case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B32:
+  case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B64:
+  case amdgpu::Operation::DS_STORE_2ADDR_B32:
+  case amdgpu::Operation::DS_STORE_2ADDR_B64:
+  case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B32:
+  case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B64:
+  case amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B32:
+  case amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B64:
+  case amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32:
+  case amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64:
+  case amdgpu::Operation::DS_LOAD_ADDTID_B32:
+  case amdgpu::Operation::DS_STORE_ADDTID_B32:
+  case amdgpu::Operation::V_CVT_PK_FP8_F32:
+  case amdgpu::Operation::V_CVT_SR_FP8_F32:
+  case amdgpu::Operation::TENSOR_LOAD_TO_LDS:
+  // CLAMP selects the B0-only conversion mode; checked by the caller.
+  case amdgpu::Operation::V_CVT_F32_FP8:
+  // B0-only dense K=128 forms and low-precision scale-prefix rules.
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_32X16X128_F4:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4:
+  case amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4:
+  // Integer co-execution spacing is longer on A0. Unimplemented shapes
+  // remain rejected until their CFG-aware spacing rule is available.
+  case amdgpu::Operation::V_SWMMAC_I32_16X16X128_IU8:
+  case amdgpu::Operation::V_SWMMAC_I32_16X16X32_IU4:
+  case amdgpu::Operation::V_SWMMAC_I32_16X16X32_IU8:
+  case amdgpu::Operation::V_SWMMAC_I32_16X16X64_IU4:
+  case amdgpu::Operation::V_WMMA_I32_16X16X16_IU4:
+  case amdgpu::Operation::V_WMMA_I32_16X16X16_IU8:
+  case amdgpu::Operation::V_WMMA_I32_16X16X32_IU4:
+  case amdgpu::Operation::V_WMMA_I32_16X16X64_IU8:
+    return true;
+  default:
+    return false;
   }
-
-  // Every cluster-load form is kept as a cluster load and wrapped to run with
-  // M0 forced to zero (save M0, set M0 = 0, load, restore M0). The semantic rule
-  // performs the rewrite.
-  if (mnemonic.starts_with("cluster_load_"))
-    return true;
-
-  // The reference patch accepts every encoding suffix in this conversion
-  // family. The semantic rule further restricts the expansion to the
-  // operand/modifier combinations selected by the B0-to-A0 profile.
-  if (mnemonic.starts_with("v_cvt_f32_fp8"))
-    return true;
-
-  // The eight K=128 FP8/BF8 forms and the standalone 32x16 FP4 WMMA exist on B0
-  // but not A0, so they require semantic expansion. The common f32 K=128 forms
-  // use one neutral regular-Scale mixed-format operation. Source fields with no
-  // meaning for these opcodes are discarded while constructing the target.
-  // The standalone 32x16 FP4 form splits into two scaled M=16 halves. Packed-f16
-  // K=128 forms lower through an f32 accumulator and pack the final result.
-  const bool is_k128_fp8_bf8 = (mnemonic.starts_with("v_wmma_f16_16x16x128_") ||
-                                mnemonic.starts_with("v_wmma_f32_16x16x128_")) &&
-                               (mnemonic.ends_with("_fp8_fp8") || mnemonic.ends_with("_fp8_bf8") ||
-                                mnemonic.ends_with("_bf8_fp8") || mnemonic.ends_with("_bf8_bf8"));
-  if (is_k128_fp8_bf8 || mnemonic == "v_wmma_f32_32x16x128_f4")
-    return true;
-
-  // A0 trap/CWSR recovery requires every low-precision F8F6F4 WMMA to carry its
-  // load-scale prefix, even when the requested scale is 1.0. Standalone input
-  // is therefore wrapped with inline-zero neutral E8M0 scales. Native M=16
-  // Scale16 is retained with its unused prefix field normalized. B0-only M=32
-  // scaled forms split into two native M=16 operations.
-  if (mnemonic == "v_wmma_f32_16x16x128_f8f6f4" || mnemonic.starts_with("v_wmma_scale"))
-    return true;
-
-  // K=64 FP8/BF8 WMMA is present on A0 and retains its architectural encoding.
-  // It stays on the ordinary copy path. It is distinct from the scale-capable
-  // K=128 F8F6F4 matrix body: only that body consumes an immediately preceding
-  // LD_SCALE. The A0 profile therefore wraps bare F8F6F4 input in the scaled
-  // four-DWORD form, while native K=64 FP8/BF8 remains unscaled.
-  //
-  // FP8/BF8 SWMMAC is present on both A0 and B0. Unlike dense K=128 WMMA,
-  // the gfx1250 A0-to-B0 change table does not classify these sparse forms as
-  // B0 additions, and their opcodes remain inside the A0 seven-bit VOP3P
-  // opcode field. They therefore stay on the same-stepping byte-copy path.
-
-  // The A0 co-execution distance exceeds B0 only for integer IU8/IU4 WMMA or
-  // SWMMAC. FP16/BF16 need four spacing slots on both revisions, while floating
-  // FP8 forms need no additional A0 padding. The implemented long-K IU8 forms
-  // use conservative fixed padding; other integer forms fail closed pending a
-  // CFG-aware spacing pass that can inspect following instructions.
-  const bool is_wmma_like = mnemonic.starts_with("v_wmma_") || mnemonic.starts_with("v_swmmac_");
-  return is_wmma_like && (mnemonic.find("_iu8") != std::string_view::npos ||
-                          mnemonic.find("_iu4") != std::string_view::npos);
 }
 
 /// @brief True when a B0 FP8 conversion selects the B0-only E5M3 mode.
@@ -147,9 +99,10 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
 /// VOP3 base encoding; a trailing literal increases the decoded size without
 /// moving that field.
 [[nodiscard]] bool requires_fp8_clamp_emulation(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-  const bool affected = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
-                        mnemonic.starts_with("v_cvt_f32_fp8");
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  const bool affected = operation == amdgpu::Operation::V_CVT_PK_FP8_F32 ||
+                        operation == amdgpu::Operation::V_CVT_SR_FP8_F32 ||
+                        operation == amdgpu::Operation::V_CVT_F32_FP8;
   const bool is_vop3 = inst.encoding_id() >= cdna5::encoding::kVop3 &&
                        inst.encoding_id() <= cdna5::encoding::kVop3OpHi6;
   if (!affected || !is_vop3 || inst.size() < static_cast<int>(sizeof(cdna5::Vop3MachineInst)) ||
@@ -163,7 +116,7 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
 
 [[nodiscard]] bool is_wmma_completion_wait(const Instruction &inst) {
   if (inst.size() != static_cast<int>(sizeof(uint32_t)) || inst.raw_encoding() == nullptr ||
-      inst.mnemonic() != "s_wait_alu")
+      inst.amdgpu_operation() != amdgpu::Operation::S_WAIT_ALU)
     return false;
 
   // S_WAIT_ALU SIMM16[15:12] is VA_VDST. Zero waits for all outstanding
@@ -198,9 +151,9 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     // generated split forms may place before their trailing completion wait.
     // The def/use check below independently verifies VGPR transparency for
     // both generated and hand-written source streams.
-    const std::string_view mnemonic = next.mnemonic();
-    const bool canonical_split_scaffolding =
-        mnemonic == "s_wait_xcnt" || mnemonic == "s_set_vgpr_msb";
+    const amdgpu::Operation operation = next.amdgpu_operation();
+    const bool canonical_split_scaffolding = operation == amdgpu::Operation::S_WAIT_XCNT ||
+                                             operation == amdgpu::Operation::S_SET_VGPR_MSB;
     if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
       return false;
 
@@ -218,13 +171,37 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
 } // namespace
 
 bool gfx1250_b0_to_a0_requires_wmma_completion_wait(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (!mnemonic.starts_with("v_wmma_"))
+  switch (inst.amdgpu_operation()) {
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X128_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X64_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X64_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X64_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F16_16X16X64_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X128_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X16_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X16_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X16_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X16_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X64_BF8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X64_BF8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X64_FP8_BF8:
+  case amdgpu::Operation::V_WMMA_F32_16X16X64_FP8_FP8:
+  case amdgpu::Operation::V_WMMA_F32_32X16X128_F4:
+  case amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4:
+  case amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4:
+  case amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4:
+    return true;
+  default:
     return false;
-
-  return mnemonic.find("_fp8") != std::string_view::npos ||
-         mnemonic.find("_bf8") != std::string_view::npos ||
-         mnemonic.find("_f8f6f4") != std::string_view::npos || mnemonic.ends_with("_f4");
+  }
 }
 
 void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
@@ -248,32 +225,34 @@ void gfx1250_b0_to_a0_append_wmma_completion_wait_if_needed(
   words.push_back(cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kWaitVaVdstZero})[0]);
 }
 
-bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic) {
+bool gfx1250_b0_to_a0_is_deferred_family(const Instruction &inst) {
   // s_sleep and s_sleep_var are deliberately absent. They behave identically on
   // A0 and B0. Only s_monitor_sleep('forever') with MWAIT=0 requires an A0
   // translation. Copying a plain sleep through is the correct translation, not
   // an unimplemented one, so reporting
   // it said nothing and buried the reports that do name a real gap -- one RCCL
   // all_reduce run emitted 104,831 of them.
-  return mnemonic == "s_get_barrier_state" || mnemonic == "s_monitor_sleep";
+  return inst.amdgpu_operation() == amdgpu::Operation::S_GET_BARRIER_STATE ||
+         inst.amdgpu_operation() == amdgpu::Operation::S_MONITOR_SLEEP;
 }
 
 const InstructionLegalization *gfx1250_b0_to_a0_legalization(const Instruction &inst) {
   // CLAMP=0 is the common E4M3 operation on both steppings. CLAMP=1 selects
   // the B0-only E5M3 behavior and therefore requires a semantic expansion.
-  const std::string_view mnemonic = inst.mnemonic();
-  const bool fp8_clamp_family = mnemonic == "v_cvt_pk_fp8_f32" || mnemonic == "v_cvt_sr_fp8_f32" ||
-                                mnemonic.starts_with("v_cvt_f32_fp8");
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  const bool fp8_clamp_family = operation == amdgpu::Operation::V_CVT_PK_FP8_F32 ||
+                                operation == amdgpu::Operation::V_CVT_SR_FP8_F32 ||
+                                operation == amdgpu::Operation::V_CVT_F32_FP8;
   if (fp8_clamp_family && !requires_fp8_clamp_emulation(inst))
     return nullptr;
 
-  if (!requires_b0_to_a0_expansion(inst.mnemonic())) {
+  if (!requires_b0_to_a0_expansion(inst)) {
     return nullptr;
   }
 
   // The runtime uses only the action and target opcode for this revision-specific
   // classification. Source keys remain zero because matching is performed on
-  // the fully decoded mnemonic, which is necessary for contextual gfx1250
+  // the fully decoded operation, which is necessary for contextual gfx1250
   // variants that share structural opcode fields.
   static constexpr InstructionLegalization kExpand{
       .src_opcode = 0,

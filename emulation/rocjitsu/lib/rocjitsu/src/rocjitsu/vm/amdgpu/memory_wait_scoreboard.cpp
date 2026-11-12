@@ -145,9 +145,10 @@ std::optional<RegisterRef> RegisterAccess::block_data_register(const Operand &op
 }
 
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
-  if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
+  const Operation operation = inst.amdgpu_operation();
+  if (operation == Operation::LDS_DIRECT_LOAD || operation == Operation::DS_DIRECT_LOAD)
     return valid_lds_direct_operand(wf.m0());
-  if (inst.mnemonic() == "s_barrier_signal_isfirst") {
+  if (operation == Operation::S_BARRIER_SIGNAL_ISFIRST) {
     const auto &source = *inst.src_operand(0);
     const auto constant = source.const_value();
     const auto value =
@@ -319,7 +320,7 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
     if (!hit)
       return;
   }
-  if (!pending_scalar_ && inst.mnemonic().starts_with("s_"))
+  if (!pending_scalar_ && (inst.flags() & (SALU | SMEM)))
     return;
   check_instruction_pending(inst, wf);
 }
@@ -331,17 +332,18 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   if (wf.discards_valu_result(inst) ||
       (inst.is_memory_op() && wf.memory_destination_out_of_range(inst)))
     return;
-  const auto name = inst.mnemonic();
   // VOPD only executes its two operations in a wave32.
-  if (wf.wf_size() != 32 && name.starts_with("v_dual_"))
+  if (wf.wf_size() != 32 && inst.amdgpu_secondary_operation() != Operation::Unknown)
     return;
   const bool gfx10_valu = (inst.flags() & VALU) && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
                                                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
-  const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
-                      name.starts_with("lds_") || (inst.is_memory_op() && !name.starts_with("s_"));
-  const bool scalar_lane_read = name.starts_with("v_readlane_b32");
-  const bool scalar_lane_write = name.starts_with("v_writelane_b32");
-  const bool first_lane = name.starts_with("v_readfirstlane_b32");
+  const Operation operation = inst.amdgpu_operation();
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  const bool vector =
+      (inst.flags() & (VALU | LDS)) || (inst.is_memory_op() && !(inst.flags() & (SALU | SMEM)));
+  const bool scalar_lane_read = operation == Operation::V_READLANE_B32;
+  const bool scalar_lane_write = operation == Operation::V_WRITELANE_B32;
+  const bool first_lane = operation == Operation::V_READFIRSTLANE_B32;
   const bool selected_lane = scalar_lane_read || scalar_lane_write || first_lane;
   const bool matrix = inst.flags() & MATRIX_REGISTER_ACCESSES;
   const auto *memory_issue = inst.amdgpu_memory_issue_info();
@@ -401,7 +403,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       if (addr_calc::buffer_resource_range_is_backed(wf, selector))
         control = registers.scalar_control_value(selector + 3);
       const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
-      const bool typed = name.starts_with("tbuffer_");
+      const auto name = inst.mnemonic();
+      const bool typed = addressing == MemoryAddressing::TypedBuffer;
       const bool formatted = typed || name.find("_format_") != std::string_view::npos;
       if (!control) {
         first_resource_word = 4;
@@ -440,19 +443,21 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   // FLAT's result ordering depends on its planned memory domains. The issuer
   // checks those results after checking address sources, still before execution.
-  if (inst.is_memory_wait_producer() && !name.starts_with("flat_"))
+  if (inst.is_memory_wait_producer() && addressing != MemoryAddressing::Flat)
     check_memory_result(inst, wf,
                         (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf) : lanes,
                         modifiers);
   // SUBREV permutes VSRC1, unlike other integer DPP instructions.
   const bool reverse_dpp =
-      name.starts_with("v_subrev_") &&
-      (name.ends_with("u32") || name.ends_with("u32_e32") || name.ends_with("u32_e64")) &&
+      (operation == Operation::V_SUBREV_U32 || operation == Operation::V_SUBREV_CO_U32 ||
+       operation == Operation::V_SUBREV_NC_U32 || operation == Operation::V_SUBREV_CO_CI_U32) &&
       (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4);
   const Operand *routed_source = reverse_dpp ? inst.src_operand(1) : modifiers.src0;
   // Floating DOT4 filters its non-routed source observations with its destinations.
   const bool filtered_dot4 =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 && name.starts_with("v_dot4_f32_");
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
+      (operation == Operation::V_DOT4_F32_BF8_BF8 || operation == Operation::V_DOT4_F32_BF8_FP8 ||
+       operation == Operation::V_DOT4_F32_FP8_BF8 || operation == Operation::V_DOT4_F32_FP8_FP8);
   uint64_t source_lanes = lanes;
   uint64_t src0_lanes = lanes;
   uint64_t destination_lanes = lanes;
@@ -502,7 +507,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     access(*data, source_lanes, 0xf, false);
     return;
   }
-  if (!pending_scalar_ && inst.is_memory_op() && name.starts_with("ds_")) {
+  if (!pending_scalar_ && inst.is_memory_op() &&
+      (addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds ||
+       addressing == MemoryAddressing::DirectLds)) {
     for (int i = 0; i < inst.num_src_operands(); ++i) {
       if (!inst.tracks_explicit_source(i))
         continue;
@@ -513,15 +520,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     return;
   }
-  const bool hwreg_read = name == "s_getreg_b32";
-  const bool hwreg_write = name == "s_setreg_b32" || name == "s_setreg_imm32_b32";
+  const bool hwreg_read = operation == Operation::S_GETREG_B32;
+  const bool hwreg_write =
+      operation == Operation::S_SETREG_B32 || operation == Operation::S_SETREG_IMM32_B32;
   const Operand *hwreg = hwreg_read    ? inst.src_operand(0)
                          : hwreg_write ? inst.dst_operand(0)
                                        : nullptr;
   if (hwreg && hwreg_accesses_scc(wf, hwreg->encoding_value(), hwreg_write))
     access({RegClass::SCC, 0, 1}, ~uint64_t{0}, 0xf, hwreg_write);
-  if (name.starts_with("v_dual_") && name.find("cndmask") != std::string_view::npos && lanes)
-    access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
   auto scalar_register = [&](uint32_t selector, uint8_t width,
                              bool write) -> std::optional<RegisterRef> {
     if (width == 2 && scalar_pair_crosses_register_region(wf, selector))
@@ -583,7 +589,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return scalar_register(kTtmpSelectorFirst + reg->index, reg->width, write);
     if (wave_mask)
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
-    if (op.is_fieldless() && (vector || name.starts_with("s_cbranch")) &&
+    if (op.is_fieldless() && (vector || (inst.flags() & (COND_BRANCH | BRANCH_STACK))) &&
         (reg->cls == RegClass::EXEC || reg->cls == RegClass::VCC))
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
     return reg;
@@ -641,11 +647,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       access(*reg, write_lanes, 0xf, true);
     return;
   }
-  if (name.starts_with("s_movrel")) {
+  if (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) {
     access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
-    const bool split = name.starts_with("s_movrelsd_2");
-    const bool source_relative = name.starts_with("s_movrels");
-    const bool destination_relative = split || name.starts_with("s_movreld");
+    const bool split = operation == Operation::S_MOVRELSD_2_B32;
+    const bool source_relative = inst.flags() & RELATIVE_SGPR_SOURCE;
+    const bool destination_relative = inst.flags() & RELATIVE_SGPR_DESTINATION;
     const auto &destination = *inst.dst_operand(0);
     if (destination_relative &&
         !relative_scalar_selector(wf, destination.encoding_value(), wf.m0(),
@@ -668,13 +674,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     check_relative(*inst.dst_operand(0), destination_relative, true);
     return;
   }
-  if (name.starts_with("v_movrel") || name.starts_with("v_swaprel")) {
+  if (inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) {
     access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
-    const bool swap = name.starts_with("v_swaprel");
-    const bool source_relative = swap || name.starts_with("v_movrels");
-    const bool destination_relative =
-        swap || name.starts_with("v_movreld") || name.starts_with("v_movrelsd");
-    const bool split = swap || name.starts_with("v_movrelsd_2");
+    const bool swap = operation == Operation::V_SWAPREL_B32;
+    const bool source_relative = inst.flags() & RELATIVE_VGPR_SOURCE;
+    const bool destination_relative = inst.flags() & RELATIVE_VGPR_DESTINATION;
+    const bool split = swap || operation == Operation::V_MOVRELSD_2_B32;
     const auto *source = swap ? inst.dst_operand(1) : inst.src_operand(0);
     const auto *destination = inst.dst_operand(0);
     auto relative = [&](const Operand &operand, uint32_t offset) -> std::optional<RegisterRef> {
@@ -748,7 +753,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return;
   }
   std::optional<uint64_t> selection;
-  if (name.starts_with("v_cndmask_") && lanes &&
+  if ((operation == Operation::V_CNDMASK_B16 || operation == Operation::V_CNDMASK_B32) && lanes &&
       (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
     // Check the condition dependency before using its current value to select sources.
     const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
@@ -787,9 +792,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool reads_buffer_payload =
       wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? !cdna5_type_mismatch : read_buffer_address;
   auto check_operand = [&](const Operand *op, bool write) {
-    const bool mix_preservation = !write && op == inst.dst_operand(0) &&
-                                  (name.find("mixlo_") != std::string_view::npos ||
-                                   name.find("mixhi_") != std::string_view::npos);
+    const bool mix_preservation =
+        !write && op == inst.dst_operand(0) &&
+        (operation == Operation::V_MAD_MIXLO_F16 || operation == Operation::V_MAD_MIXHI_F16 ||
+         operation == Operation::V_FMA_MIXLO_F16 || operation == Operation::V_FMA_MIXHI_F16 ||
+         operation == Operation::V_FMA_MIXLO_BF16 || operation == Operation::V_FMA_MIXHI_BF16);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
         (!write && op == modifiers.buffer_address && !read_buffer_address) ||
         (!write && op == buffer_payload && !reads_buffer_payload) ||
@@ -819,7 +826,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       accessed_lanes = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? data.exec_mask : data.lane_mask;
     }
     if (!write && !destination_lanes && modifiers.dpp && reg->cls != RegClass::VGPR &&
-        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && name == "v_add_f32" &&
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && operation == Operation::V_ADD_F32 &&
         op == inst.src_operand(1))
       return;
     if (!write && op == modifiers.dpp_masked_compare_rhs) {
@@ -831,12 +838,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT))
       accessed_lanes &= UINT32_MAX;
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
-    if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
+    if (!write && reg->cls == RegClass::VGPR && inst.is_interpolation() &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
          wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
       const uint64_t quads =
           (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
-      const bool p2 = name.starts_with("v_interp_p2");
+      const bool p2 = operation == Operation::V_INTERP_P2_F32 ||
+                      operation == Operation::V_INTERP_P2_F16_F32 ||
+                      operation == Operation::V_INTERP_P2_RTZ_F16_F32;
       if (op == inst.src_operand(0))
         accessed_lanes = quads << (p2 ? 2 : 1);
       else if (op == inst.src_operand(2) && !p2)
@@ -910,7 +919,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // Compute that predicate once and check the backing register outside the loop.
   const RegisterRef scratch{RegClass::FLAT_SCRATCH, 0, 2};
   if (lanes && pending_.pending(scratch) && inst.raw_encoding() &&
-      (name.starts_with("flat_") || name.starts_with("scratch_"))) {
+      (addressing == MemoryAddressing::Flat ||
+       (addressing == MemoryAddressing::Scratch && (inst.flags() & VMEM)))) {
     const auto arch = wf.cu().arch();
     if (arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) {
@@ -941,8 +951,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   std::optional<BranchStackAccess> stack_access;
   if (branch_stack && inst.src_operand(0)) {
     const Operand &src0 = *inst.src_operand(0);
-    stack_access = name == "s_cbranch_join" ? join_stack_access(wf, registers.read_scalar(src0))
-                                            : fork_stack_access(wf, registers.read_scalar64(src0));
+    stack_access = operation == Operation::S_CBRANCH_JOIN
+                       ? join_stack_access(wf, registers.read_scalar(src0))
+                       : fork_stack_access(wf, registers.read_scalar64(src0));
   }
   const auto stack_entry = [&]() {
     return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
@@ -1248,7 +1259,9 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
         return obligation.counter_increment();
   // Inline message returns are outside the memory-pipeline metadata: one
   // completion acknowledges the send, the other the returned register value.
-  if (event.kind == WaitEventKind::SqMessage && inst.mnemonic().starts_with("s_sendmsg_rtn_"))
+  if (event.kind == WaitEventKind::SqMessage &&
+      (inst.amdgpu_operation() == Operation::S_SENDMSG_RTN_B32 ||
+       inst.amdgpu_operation() == Operation::S_SENDMSG_RTN_B64))
     return 2;
   return 1;
 }
@@ -1473,7 +1486,7 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
       for (const auto &event : events.value()) {
         // FLAT may not use either memory domain. Its resolved requests apply
         // the corresponding capacity constraint after address calculation.
-        if (inst.mnemonic().starts_with("flat_") &&
+        if (inst.amdgpu_memory_addressing() == MemoryAddressing::Flat &&
             (event.counter == WaitCounterKind::Load || event.counter == WaitCounterKind::Store ||
              event.counter == WaitCounterKind::Ds))
           continue;

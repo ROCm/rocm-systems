@@ -23,6 +23,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -62,10 +63,12 @@ using namespace rocjitsu::test;
 class TestInstruction : public Instruction {
 public:
   TestInstruction(std::string_view mnemonic, int size, uint64_t flags,
-                  std::optional<int64_t> branch_delta, const uint32_t *raw_enc)
+                  std::optional<int64_t> branch_delta, const uint32_t *raw_enc,
+                  amdgpu::Operation operation = amdgpu::Operation::Unknown)
       : Instruction(mnemonic, nullptr), branch_delta_(branch_delta) {
     size_ = size;
     flags_ = flags;
+    set_amdgpu_operation(operation);
     raw_encoding_ = raw_enc;
   }
   std::optional<int64_t> branch_offset_bytes() const override { return branch_delta_; }
@@ -275,28 +278,64 @@ TEST(Validator, RejectsForceFullExecWithoutAProbe) {
   EXPECT_NE(err.find("force_full_exec"), std::string::npos) << err;
 }
 
-TEST(Validator, RejectsDenylistedMnemonic) {
+TEST(Validator, RejectsPcRelativeOperationsIndependentlyOfDisplayName) {
   static constexpr uint32_t kRaw = 0xCAFEBABEu;
   auto text = dummy_text();
   InstrumentationPoint pt;
 
-  // PC-relative semantics that may not surface in flags / branch_offset_bytes.
-  // Includes gfx1250's renamed _i64 family (s_getpc_b64 -> s_get_pc_i64, etc.);
-  // s_rfe_b64 / s_rfe_i64 exercise the s_rfe_ prefix match.
-  for (const char *m :
-       {"s_getpc_b64", "s_call_b64", "s_setpc_b64", "s_swappc_b64", "s_rfe_b64", "s_get_pc_i64",
-        "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64", "s_rfe_i64"}) {
-    TestInstruction anchor(m, 4, /*flags=*/0, std::nullopt, &kRaw);
+  struct Case {
+    amdgpu::Operation operation;
+    uint64_t flags;
+  };
+  constexpr Case kCases[] = {
+      {amdgpu::Operation::S_GETPC_B64, READS_PC},  {amdgpu::Operation::S_CALL_B64, READS_PC},
+      {amdgpu::Operation::S_SETPC_B64, 0},         {amdgpu::Operation::S_SWAPPC_B64, READS_PC},
+      {amdgpu::Operation::S_GET_PC_I64, READS_PC}, {amdgpu::Operation::S_CALL_I64, READS_PC},
+      {amdgpu::Operation::S_SET_PC_I64, 0},        {amdgpu::Operation::S_SWAP_PC_I64, READS_PC},
+      {amdgpu::Operation::S_ADD_PC_I64, READS_PC}, {amdgpu::Operation::S_RFE_B64, 0},
+      {amdgpu::Operation::S_RFE_I64, 0},           {amdgpu::Operation::S_RFE_RESTORE_B64, 0},
+      {amdgpu::Operation::Unknown, READS_PC},
+  };
+  for (const Case &test_case : kCases) {
+    TestInstruction anchor("arbitrary_display_name", 4, test_case.flags, std::nullopt, &kRaw,
+                           test_case.operation);
     std::string err;
     EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
-        << "mnemonic " << m << " should be rejected";
+        << "operation " << static_cast<unsigned>(test_case.operation) << " should be rejected";
     EXPECT_FALSE(err.empty());
+  }
+}
+
+TEST(Validator, RejectsDecodedPcRelativePrefetches) {
+  struct Case {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 2> words;
+  };
+  const Case cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::build_smem(cdna5::kSPrefetchInstPcRelSmem, {})},
+      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::build_smem(cdna5::kSPrefetchDataPcRelSmem, {})},
+      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::build_smem(rdna4::kSPrefetchInstPcRelSmem, {})},
+      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::build_smem(rdna4::kSPrefetchDataPcRelSmem, {})},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.arch));
+    auto decoder = Decoder::create(test_case.arch);
+    ASSERT_NE(decoder, nullptr);
+    auto decoded = decoder->decode(test_case.words.data());
+    ASSERT_TRUE(decoded.succeeded());
+    SCOPED_TRACE(decoded.value()->mnemonic());
+    auto text = std::span(reinterpret_cast<const uint8_t *>(test_case.words.data()),
+                          sizeof(test_case.words));
+    std::string error;
+    EXPECT_FALSE(is_relocatable_anchor(*decoded.value(), 0, text, test_case.arch, &error));
+    EXPECT_FALSE(error.empty());
   }
 }
 
 TEST(Validator, RejectsSClauseAnchor) {
   static constexpr uint32_t kRaw = 0xBF850001u;
-  TestInstruction anchor("s_clause", 4, /*flags=*/0, std::nullopt, &kRaw);
+  TestInstruction anchor("s_clause", 4, /*flags=*/0, std::nullopt, &kRaw,
+                         amdgpu::Operation::S_CLAUSE);
   auto text = dummy_text();
   InstrumentationPoint pt;
 

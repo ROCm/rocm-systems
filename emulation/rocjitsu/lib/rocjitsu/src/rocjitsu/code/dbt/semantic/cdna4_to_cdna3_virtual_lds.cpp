@@ -939,16 +939,16 @@ make_virtual_lds_flat_global_operands(uint16_t signed_offset13, uint8_t addr, ui
 /// @brief Return true when @p inst needs a virtual-LDS body variant.
 ///
 /// @details The scan is intentionally broader than the lowering table: any
-/// mnemonic with an LDS suffix or MUBUF LDS bit means the kernel cannot be made
+/// decoded LDS transfer or MUBUF LDS bit means the kernel cannot be made
 /// a zero-hardware-LDS sidecar until the access is either lowered or rejected
 /// with a clear diagnostic.
 [[nodiscard]] bool source_instruction_uses_virtualizable_lds_impl(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic.find("_lds") != std::string_view::npos)
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (inst.transfers_to_lds() || inst.transfers_from_lds())
     return true;
   if (is_cdna4_mubuf_lds_instruction(inst))
     return true;
-  if (mnemonic == "ds_read_b64_tr_b16")
+  if (operation == amdgpu::Operation::DS_READ_B64_TR_B16)
     return true;
   return is_cdna4_ds_encoding(inst) && virtual_lds_ds_op(inst.opcode()).has_value();
 }

@@ -47,7 +47,8 @@ AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::Instructio
 }
 
 TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
@@ -84,7 +85,8 @@ TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
 }
 
 TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
@@ -110,7 +112,8 @@ TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
 }
 
 TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialFetch) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   decoder->enable_pool();
@@ -197,7 +200,8 @@ private:
 };
 
 TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesThreadMigration) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   for (bool pooled : {false, true}) {
     AdmissionCache cache;

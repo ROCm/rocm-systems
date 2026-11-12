@@ -12,7 +12,6 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocjitsu {
@@ -104,7 +103,6 @@ enum class TrackedRegisterSource {
   Defs,
   Uses,
   VectorUses,
-  StoreDataUses,
 };
 
 struct ClassifiedEvent {
@@ -161,7 +159,7 @@ struct WaitcheckTarget : WaitCounterPolicy {
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst);
 
-  [[nodiscard]] static bool is_dsdir(std::string_view mnemonic);
+  [[nodiscard]] static bool is_dsdir(const Instruction &inst);
 
   // GFX11 WAITVDST and GFX12 WAIT_VA_VDST share bits 16-19.
   [[nodiscard]] static std::optional<uint32_t> dsdir_wait_va_vdst(const Instruction &inst);
@@ -169,23 +167,23 @@ struct WaitcheckTarget : WaitCounterPolicy {
   // WAIT_VM_VSRC exists only on GFX12; bit 23 is reserved on GFX11.
   [[nodiscard]] static std::optional<uint32_t> dsdir_wait_vm_vsrc(const Instruction &inst);
 
-  [[nodiscard]] static bool is_scalar_memory_op(std::string_view mnemonic);
+  [[nodiscard]] static bool is_scalar_memory_op(const Instruction &inst);
 
-  [[nodiscard]] static bool is_vmem_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_vmem_store(const Instruction &inst);
 
-  [[nodiscard]] static bool is_vmem_atomic(std::string_view mnemonic);
+  [[nodiscard]] static bool is_vmem_atomic(const Instruction &inst);
 
-  [[nodiscard]] static bool is_image_atomic(std::string_view mnemonic);
+  [[nodiscard]] static bool is_image_atomic(const Instruction &inst);
 
-  [[nodiscard]] static bool uses_ds_wait_counter(std::string_view mnemonic);
+  [[nodiscard]] static bool uses_ds_wait_counter(const Instruction &inst);
 
-  [[nodiscard]] static bool is_async_lds_load(std::string_view mnemonic);
+  [[nodiscard]] static bool is_async_lds_load(const Instruction &inst);
 
-  [[nodiscard]] static bool is_async_lds_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_async_lds_store(const Instruction &inst);
 
-  [[nodiscard]] static bool is_tensor_lds_load(std::string_view mnemonic);
+  [[nodiscard]] static bool is_tensor_lds_load(const Instruction &inst);
 
-  [[nodiscard]] static bool is_tensor_lds_store(std::string_view mnemonic);
+  [[nodiscard]] static bool is_tensor_lds_store(const Instruction &inst);
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
   classify_events(const Instruction &inst, rj_code_arch_t arch);

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_mma_test_util.h"
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
@@ -34,6 +35,7 @@
 #include <memory>
 #include <semaphore>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -56,7 +58,7 @@ TEST(AsyncMmaPolicyTest, EncodingHintDoesNotExcludeEnabledDecodedCandidates) {
       continue;
     const auto &inst = *decoded.value();
     SCOPED_TRACE(inst.mnemonic());
-    if (policy::candidate(inst.mnemonic())) {
+    if (policy::candidate(inst)) {
       EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0]));
     }
   }
@@ -73,14 +75,14 @@ TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
     // An opcode may decode as an extension prefix; provide the maximum size.
     const std::array<uint32_t, 4> words = {encoding[0], encoding[1], 0, 0};
     auto result = decoder->decode(words.data());
-    if (result.succeeded() && policy::candidate(result.value()->mnemonic())) {
+    if (result.succeeded() && policy::candidate(*result.value())) {
       EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0]));
     }
   }
   for (unsigned opcode : {45, 46}) {
     const auto words = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    EXPECT_FALSE(policy::candidate(inst->mnemonic()));
+    EXPECT_FALSE(policy::candidate(*inst));
     EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA4, words[0]));
   }
   const auto add = cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
@@ -100,28 +102,62 @@ TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
     const auto words = rdna4::build_vop3p(
         opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    EXPECT_FALSE(policy::candidate(inst->mnemonic()));
+    EXPECT_FALSE(policy::candidate(*inst));
   }
 }
 
 TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
-  for (auto name :
-       {"v_mfma_f32_16x16x32_f16", "v_mfma_f32_32x32x16_f16", "v_mfma_f32_16x16x32_fp8_fp8",
-        "v_mfma_f32_32x32x16_bf8_fp8", "v_mfma_f32_16x16x128_f8f6f4", "v_mfma_f32_32x32x64_f8f6f4",
-        "v_mfma_scale_f32_16x16x128_f8f6f4"}) {
-    EXPECT_EQ(policy::candidate(name), false);
-  }
-  EXPECT_FALSE(policy::candidate("v_mfma_f32_32x32x4_2b_f16"));
-  EXPECT_FALSE(policy::candidate("v_mfma_i32_16x16x64_i8"));
+  using amdgpu::Operation;
+  for (Operation operation : {
+           Operation::V_MFMA_F32_16X16X32_F16,
+           Operation::V_MFMA_F32_32X32X16_F16,
+           Operation::V_MFMA_F32_16X16X32_FP8_FP8,
+           Operation::V_MFMA_F32_32X32X16_BF8_FP8,
+           Operation::V_MFMA_F32_16X16X128_F8F6F4,
+           Operation::V_MFMA_F32_32X32X64_F8F6F4,
+           Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4,
+           Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4,
+           Operation::V_MFMA_F32_32X32X4_2B_F16,
+           Operation::V_MFMA_I32_16X16X64_I8,
+       })
+    EXPECT_FALSE(policy::candidate(mma_test::PolicyInstruction(operation)));
 }
 
 TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
-  for (auto name :
-       {"v_wmma_f32_16x16x32_f16", "v_wmma_f32_16x16x32_bf16", "v_wmma_f32_16x16x64_fp8_fp8",
-        "v_wmma_f32_16x16x128_fp8_fp8", "v_wmma_scale_f32_16x16x128_f8f6f4"}) {
-    EXPECT_EQ(policy::candidate(name), false);
-  }
-  EXPECT_FALSE(policy::candidate("v_wmma_f32_16x16x16_f16"));
+  using amdgpu::Operation;
+  for (Operation operation : {
+           Operation::V_WMMA_F32_16X16X32_F16,
+           Operation::V_WMMA_F32_16X16X32_BF16,
+           Operation::V_WMMA_F32_16X16X64_FP8_FP8,
+           Operation::V_WMMA_F32_16X16X128_FP8_FP8,
+           Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4,
+           Operation::V_WMMA_F32_16X16X16_F16,
+       })
+    EXPECT_FALSE(policy::candidate(mma_test::PolicyInstruction(operation)));
+}
+
+TEST(AsyncMmaPolicyTest, AdmissionRequiresMetadataAndKeepsDualInstructionsInline) {
+  Instruction named_candidate("v_wmma_f32_32x16x128_f4", nullptr);
+  EXPECT_FALSE(policy::candidate(named_candidate));
+  EXPECT_FALSE(policy::safe_inline(named_candidate));
+  const mma_test::PolicyInstruction unknown_wait(amdgpu::Operation::Unknown,
+                                                 amdgpu::Operation::Unknown, WAITCNT);
+  EXPECT_FALSE(policy::safe_inline(unknown_wait));
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto scalar = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 1, .sdst = 2});
+  std::unique_ptr<Instruction> scalar_inst(decode_valid(*decoder, scalar.data()));
+  EXPECT_TRUE(policy::safe_inline(*scalar_inst));
+  // The same copy into EXEC changes state that an outstanding MMA may use.
+  const auto exec = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 1, .sdst = 126});
+  std::unique_ptr<Instruction> exec_inst(decode_valid(*decoder, exec.data()));
+  EXPECT_FALSE(policy::safe_inline(*exec_inst));
+
+  const std::array<uint32_t, 2> dual = {(0x32u << 26) | (8u << 22) | (8u << 17) | (4u << 9) | 256u,
+                                        (16u << 24) | (8u << 17) | (12u << 9) | 264u};
+  std::unique_ptr<Instruction> dual_inst(decode_valid(*decoder, dual.data()));
+  ASSERT_NE(dual_inst->amdgpu_secondary_operation(), amdgpu::Operation::Unknown);
+  EXPECT_FALSE(policy::safe_inline(*dual_inst));
 }
 
 // These are the production decoder restrictions that keep the defensive
@@ -135,7 +171,7 @@ TEST(AsyncMmaPolicyTest, Cdna5AsyncCandidatesRejectNonVgprMatrixInputsAtDecode) 
     const std::array<uint32_t, cdna5::Decoder::kMaxInstructionWords> words = {encoding[0],
                                                                               encoding[1]};
     auto decoded = decoder->decode(words.data());
-    if (decoded.failed() || !policy::candidate(decoded.value()->mnemonic()))
+    if (decoded.failed() || !policy::candidate(*decoded.value()))
       continue;
     ++candidates;
     SCOPED_TRACE(decoded.value()->mnemonic());
@@ -167,7 +203,7 @@ TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
           opcode, {.vdst = 64, .cbsz = 4, .src0 = 256, .src1 = 288, .src2 = 320, .blgp = 4});
       std::unique_ptr<Instruction> decoded(
           decode_valid(*cdna4_decoder, scaled ? good.data() : dense.data()));
-      EXPECT_FALSE(policy::candidate(decoded->mnemonic()));
+      EXPECT_FALSE(policy::candidate(*decoded));
       for (unsigned format : {5u, 6u, 7u}) {
         for (bool first : {false, true}) {
           const auto bad_scaled = mma_test::make_cdna4_mfma_scale_words(
@@ -187,7 +223,7 @@ TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
   }
   const auto good = mma_test::make_cdna5_wmma_scale_words(4, 4, 448, 449);
   std::unique_ptr<Instruction> decoded(decode_valid(*cdna5_decoder, good.data()));
-  EXPECT_FALSE(policy::candidate(decoded->mnemonic()));
+  EXPECT_FALSE(policy::candidate(*decoded));
   for (unsigned format : {5u, 6u, 7u}) {
     for (bool first : {false, true}) {
       const auto words =
@@ -209,7 +245,7 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaHintAndFootprintIncludeBothScaleRegisters) {
       const auto words = mma_test::make_cdna5_wmma_scale_words(format_a, format_b, 448, 449);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_EQ(inst->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
-      EXPECT_FALSE(policy::candidate(inst->mnemonic()));
+      EXPECT_FALSE(policy::candidate(*inst));
       EXPECT_TRUE(policy::encoding_may_be_candidate(ROCJITSU_CODE_ARCH_CDNA5, words[0]));
       auto access = policy::footprint(*inst, 256);
       ASSERT_TRUE(access);
@@ -271,7 +307,7 @@ TEST(AsyncMmaPolicyTest, ScaledWmmaOffloadsVectorAndInlineScalesButKeepsScalarSc
 }
 
 TEST(AsyncMmaPolicyTest, UnsupportedAsyncWmmaHaltsWithoutHostException) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   constexpr uint64_t kPc = 0x200000;
   amdgpu::GpuMemory memory("unsupported_async_wmma_memory");
@@ -335,7 +371,7 @@ struct FaultDrainState {
 FaultDrainState *fault_drain_state = nullptr;
 
 TEST(AsyncMmaPolicyTest, TerminalMemoryFaultDrainsPendingMmaBeforePublishingFailure) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   constexpr uint64_t kPc = 0x200000;
   FaultDrainState state;
@@ -445,6 +481,8 @@ public:
                       state.done.store(true, std::memory_order_release);
                     }),
         state_(state) {
+    set_amdgpu_operation(decoded.amdgpu_operation(), decoded.amdgpu_secondary_operation());
+    flags_ = decoded.flags();
     num_src_ = decoded.num_src_operands();
     num_dst_ = decoded.num_dst_operands();
     size_ = decoded.size();
@@ -459,7 +497,7 @@ private:
 };
 
 TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto mma_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   const auto mma_words =
@@ -575,7 +613,7 @@ TEST(AsyncMmaPolicyTest, Dpp16InstructionsDrainAndStopAnAsyncWindow) {
 }
 
 TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOpen) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   const auto mma_words =
@@ -646,7 +684,7 @@ TEST(AsyncMmaPolicyTest, IndependentPlainAndDpp8InstructionsKeepTheAsyncWindowOp
 }
 
 TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   const auto words =
@@ -697,7 +735,7 @@ TEST(AsyncMmaPolicyTest, WaitIdleDrainsBlockedMmaBeforeReturningToIssue) {
   }
 }
 TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
-  if (!policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!policy::candidate(mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4)))
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
   const auto good_words =
@@ -711,7 +749,7 @@ TEST(AsyncMmaPolicyTest, SynchronousFormatFailureDrainsEarlierMatrixWork) {
                          {.vdst = 64, .opsel = 5, .src0 = 256, .src1 = 288, .src2 = 128});
   std::unique_ptr<Instruction> failing(decode_valid(*decoder, bad_words.data()));
   ASSERT_NE(failing, nullptr);
-  EXPECT_FALSE(policy::candidate(failing->mnemonic()));
+  EXPECT_FALSE(policy::candidate(*failing));
   amdgpu::GpuMemory memory("matrix_failure_memory");
   amdgpu::L2Cache l2("matrix_failure_l2");
   amdgpu::ComputeUnitCore::Config config{};

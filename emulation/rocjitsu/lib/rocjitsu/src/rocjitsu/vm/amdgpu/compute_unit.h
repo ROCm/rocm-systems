@@ -1544,7 +1544,7 @@ public:
     assert(inst->execute && "instruction execution backend is not linked");
     wf.begin_instruction_execution();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
-    if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
+    if (drop_set_vgpr_msb && inst->amdgpu_operation() == Operation::S_SET_VGPR_MSB)
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     if (wf.discards_valu_result(*inst))

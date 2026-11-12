@@ -27,6 +27,8 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P1_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -55,6 +57,8 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_P2_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {
@@ -83,6 +87,8 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
+  set_amdgpu_operation(amdgpu::Operation::V_INTERP_MOV_F32);
+  flags_ |= INTERPOLATION;
 }
 
 namespace detail {

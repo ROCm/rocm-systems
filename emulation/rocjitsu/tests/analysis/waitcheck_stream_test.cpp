@@ -501,6 +501,18 @@ TEST(WaitcheckStream, LdsOverwritesKeepIssueOrder) {
   }
 }
 
+TEST(WaitcheckStream, OrdinaryDsAtomicResultsRetainDependencyChecks) {
+  Program program;
+  append(program, cdna4::build_ds(cdna4::kDsAddRtnU32Ds, {.addr = 8, .data0 = 4, .vdst = 6}));
+  program.push_back(v_mov(1, 6));
+  const auto report = analyze(program, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(report.incomplete);
+  ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 6, 1}));
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+}
+
 TEST(WaitcheckStream, GdsAndLdsOverwritesRequireAWait) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5})
     for (bool gds_first : {false, true}) {

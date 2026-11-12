@@ -285,9 +285,9 @@ def test_workflow_preparation_order_pins_and_timeout_authority(tmp_path):
         for step in steps
         if 'timeout-minutes' in step
     } == {
-        'Run performance suite': 60,
+        'Run performance suite': 180,
     }
-    assert workflow['jobs']['benchmark']['timeout-minutes'] == 120
+    assert workflow['jobs']['benchmark']['timeout-minutes'] == 240
     assert workflow['jobs']['publish']['timeout-minutes'] == 30
     for name, key, revision in [
         (

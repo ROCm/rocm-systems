@@ -9,6 +9,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/execution_block.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
@@ -143,7 +144,26 @@ enum InstFlags : uint64_t {
   /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
   COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
   /// Global load-transpose instructions acquire no register operands when EXEC is zero.
-  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43)
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43),
+  /// @brief Matrix arithmetic, including MFMA, WMMA and their sparse forms.
+  MATRIX_OP = (1ULL << 45),
+  /// @brief Reads the current PC as an input, including PC-relative calculations.
+  READS_PC = (1ULL << 46),
+  /// @brief Interpolation operation with interpolation-specific register rules.
+  INTERPOLATION = (1ULL << 47),
+  /// @brief M0-relative scalar source or destination register addressing.
+  RELATIVE_SGPR_SOURCE = (1ULL << 48),
+  RELATIVE_SGPR_DESTINATION = (1ULL << 49),
+  /// @brief M0-relative vector source or destination register addressing.
+  RELATIVE_VGPR_SOURCE = (1ULL << 50),
+  RELATIVE_VGPR_DESTINATION = (1ULL << 51),
+  /// @brief A transfer into or out of LDS using another memory address space.
+  MEMORY_TO_LDS = (1ULL << 52),
+  MEMORY_FROM_LDS = (1ULL << 53),
+  /// @brief Memory data uses D16 register packing, including whole packed tuples.
+  /// @details This describes register data layout, not whether a particular
+  /// destination preserves bytes. A packed pair can write a complete DWORD.
+  D16_MEMORY_DATA = (1ULL << 54)
 };
 
 class BasicBlock;
@@ -311,9 +331,29 @@ public:
   /// @param[in] d Dynamic state (ownership transferred).
   void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
 
-  /// @brief The instruction's canonical semantic mnemonic.
-  /// @returns Reference to the mnemonic used by analysis and execution consumers.
+  /// @brief Human-readable instruction identity for textual interfaces and diagnostics.
+  /// @details Behavior is described by decoded metadata. The spelling can include
+  /// encoding decorations and is not a semantic classification interface.
   std::string_view mnemonic() const { return mnemonic_; }
+
+  /// @brief Canonical AMDGPU operation, independent of display encoding suffixes.
+  /// @details VOPD exposes the X operation here and the Y operation separately.
+  /// Unknown represents a synthetic or custom operation outside the generated
+  /// canonical catalog; it never implies that the instruction has no effects.
+  [[nodiscard]] amdgpu::Operation amdgpu_operation() const { return operation_; }
+  [[nodiscard]] amdgpu::Operation amdgpu_secondary_operation() const {
+    return secondary_operation_;
+  }
+  [[nodiscard]] amdgpu::MemoryAddressing amdgpu_memory_addressing() const {
+    return memory_addressing_;
+  }
+  [[nodiscard]] amdgpu::MemoryKind amdgpu_memory_kind() const { return memory_kind_; }
+  [[nodiscard]] bool is_matrix() const { return flags_ & MATRIX_OP; }
+  [[nodiscard]] bool reads_pc() const { return flags_ & READS_PC; }
+  [[nodiscard]] bool is_interpolation() const { return flags_ & INTERPOLATION; }
+  [[nodiscard]] bool transfers_to_lds() const { return flags_ & MEMORY_TO_LDS; }
+  [[nodiscard]] bool transfers_from_lds() const { return flags_ & MEMORY_FROM_LDS; }
+  [[nodiscard]] bool has_d16_memory_data() const { return flags_ & D16_MEMORY_DATA; }
 
   /// @brief The instruction's total number of operands.
   /// @returns Sum of source and destination operand counts.
@@ -558,6 +598,19 @@ public:
 protected:
   friend class Decoder;
 
+  /// @brief Set immutable operation identity during instruction construction.
+  void set_amdgpu_operation(amdgpu::Operation operation,
+                            amdgpu::Operation secondary = amdgpu::Operation::Unknown) {
+    operation_ = operation;
+    secondary_operation_ = secondary;
+  }
+
+  /// @brief Set decoded memory facts without advertising an execution pipeline.
+  void set_amdgpu_memory(amdgpu::MemoryAddressing addressing, amdgpu::MemoryKind kind) {
+    memory_addressing_ = addressing;
+    memory_kind_ = kind;
+  }
+
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
                         bool exec_masked = true) {
@@ -585,6 +638,16 @@ protected:
   /// mirrors this size); resize both together.
   std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
+  // These fixed-width facts occupy the existing padding before dst_operands_
+  // on supported 64-bit hosts. Keep their payload within this byte budget.
+  static_assert(2 * sizeof(amdgpu::Operation) + sizeof(amdgpu::MemoryAddressing) +
+                        sizeof(amdgpu::MemoryKind) <=
+                    6,
+                "decoded identity and memory facts must remain compact");
+  amdgpu::MemoryAddressing memory_addressing_ = amdgpu::MemoryAddressing::None;
+  amdgpu::MemoryKind memory_kind_ = amdgpu::MemoryKind::None;
+  amdgpu::Operation operation_ = amdgpu::Operation::Unknown;
+  amdgpu::Operation secondary_operation_ = amdgpu::Operation::Unknown;
   /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};

@@ -1723,7 +1723,13 @@ TEST(MemoryWaitExecutionTest, Vopd3CndmaskSelectorWaitsOnlyForItsOwnSgpr) {
 // decoded instructions in the core issuer.
 class TestMemoryLoad final : public Instruction {
 public:
-  TestMemoryLoad(std::string_view mnemonic) : Instruction(mnemonic, nullptr) {}
+  TestMemoryLoad(Operation operation, MemoryAddressing addressing,
+                 MemoryKind kind = MemoryKind::Load)
+      : Instruction("test_memory_load", nullptr) {
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
+    flags_ = VMEM | MEMORY_WAIT_PRODUCER;
+  }
 
   void initialize(uint16_t reg) {
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
@@ -1781,7 +1787,7 @@ TEST(MemoryWaitExecutionTest, FlatLanesHaveSeparateDependenciesAndCounterPartici
         ASSERT_NE(wf, nullptr);
         wf->set_exec(0b1111);
         set_test_flat_domains(*cu, *wf, shared_lanes);
-        TestMemoryLoad inst("flat_load_b32");
+        TestMemoryLoad inst(Operation::FLAT_LOAD_B32, MemoryAddressing::Flat);
         ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
         cu->track_memory_wait(inst, *wf);
         auto &state = *wf->memory_wait_scoreboard();
@@ -2326,7 +2332,7 @@ TEST_F(MemoryWaitOrderingTest, PartialWaitRetiresFlatResultFromGfx10) {
       if (lds_route) {
         lds_load(younger_dst);
       } else {
-        TestMemoryLoad global("global_load_dword");
+        TestMemoryLoad global(Operation::GLOBAL_LOAD_DWORD, MemoryAddressing::Global);
         ASSERT_NO_FATAL_FAILURE(global.initialize(younger_dst));
         track(global);
       }
@@ -2533,7 +2539,8 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
         wf->set_exec(0b1111);
         set_test_flat_domains(*cu, *wf, shared_lanes);
         for (bool flat : {false, true}) {
-          TestMemoryLoad inst(flat ? "flat_load_dword" : "global_load_dword");
+          TestMemoryLoad inst(flat ? Operation::FLAT_LOAD_DWORD : Operation::GLOBAL_LOAD_DWORD,
+                              flat ? MemoryAddressing::Flat : MemoryAddressing::Global);
           ASSERT_NO_FATAL_FAILURE(inst.initialize(2));
           if (flat && wait)
             wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
@@ -2614,16 +2621,18 @@ TEST(MemoryWaitExecutionTest, Gfx12LoadDestinationsUseTheirActualWidth) {
 TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionClass) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA3_5})
-    for (const auto &[first, second] : {std::pair{"global_load_dword", "image_sample"},
-                                        {"global_load_dword", "image_bvh_intersect_ray"},
-                                        {"image_sample", "global_load_dword"},
-                                        {"image_sample", "image_bvh_intersect_ray"},
-                                        {"image_sample", "image_sample"},
-                                        {"global_load_dword", "global_load_dword"}})
+    for (const auto &[first, second] : {
+             std::pair{Operation::GLOBAL_LOAD_DWORD, Operation::IMAGE_SAMPLE},
+             {Operation::GLOBAL_LOAD_DWORD, Operation::IMAGE_BVH_INTERSECT_RAY},
+             {Operation::IMAGE_SAMPLE, Operation::GLOBAL_LOAD_DWORD},
+             {Operation::IMAGE_SAMPLE, Operation::IMAGE_BVH_INTERSECT_RAY},
+             {Operation::IMAGE_SAMPLE, Operation::IMAGE_SAMPLE},
+             {Operation::GLOBAL_LOAD_DWORD, Operation::GLOBAL_LOAD_DWORD},
+         })
       for (bool wait : {false, true}) {
         SCOPED_TRACE(static_cast<unsigned>(arch));
-        SCOPED_TRACE(first);
-        SCOPED_TRACE(second);
+        SCOPED_TRACE(static_cast<unsigned>(first));
+        SCOPED_TRACE(static_cast<unsigned>(second));
         SCOPED_TRACE(wait);
         GpuMemory memory("image_overwrite_memory");
         L2Cache l2("image_overwrite_l2");
@@ -2642,20 +2651,25 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
         wf->set_exec(1);
         // Exercise the runtime tracking path with decoded destinations; this
         // does not depend on functional support for image sampling or BVH.
-        auto track = [&](std::string_view mnemonic, unsigned reg) {
-          TestMemoryLoad inst(mnemonic);
+        auto track = [&](Operation operation, unsigned reg) {
+          const bool global = operation == Operation::GLOBAL_LOAD_DWORD;
+          const MemoryKind kind = global                                 ? MemoryKind::Load
+                                  : operation == Operation::IMAGE_SAMPLE ? MemoryKind::Sample
+                                                                         : MemoryKind::Bvh;
+          TestMemoryLoad inst(operation,
+                              global ? MemoryAddressing::Global : MemoryAddressing::Image, kind);
           ASSERT_NO_FATAL_FAILURE(inst.initialize(reg));
           wf->ensure_memory_wait_scoreboard().check_instruction(inst, *wf);
           cu->track_memory_wait(inst, *wf);
           wf->pc += 8;
         };
         // An unrelated load makes the image/image control a mixed counter.
-        ASSERT_NO_FATAL_FAILURE(track("global_load_dword", 3));
+        ASSERT_NO_FATAL_FAILURE(track(Operation::GLOBAL_LOAD_DWORD, 3));
         ASSERT_NO_FATAL_FAILURE(track(first, 2));
         if (wait)
           wf->memory_wait_scoreboard()->wait(WaitCounterKind::Load, 0);
         ASSERT_NO_FATAL_FAILURE(track(second, 2));
-        const bool same_class = std::string_view(first) == second;
+        const bool same_class = first == second;
         EXPECT_EQ(cu->memory_wait_diagnostic_count(), wait || same_class ? 0u : 1u);
       }
 }
@@ -2755,7 +2769,7 @@ TEST(MemoryWaitExecutionTest, LdsLoadsOverwriteInIssueOrder) {
         if (wait)
           state.wait(WaitCounterKind::Ds, 0);
         if (sequence == Sequence::LdsThenGlobal) {
-          TestMemoryLoad global("global_load_dword");
+          TestMemoryLoad global(Operation::GLOBAL_LOAD_DWORD, MemoryAddressing::Global);
           ASSERT_NO_FATAL_FAILURE(global.initialize(2));
           track(global);
         } else {

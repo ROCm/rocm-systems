@@ -226,36 +226,43 @@ bool is_cdna5_smem(const Instruction &inst) {
 
 FfmInstructionCounters instruction_counters(const Instruction &inst) {
   FfmInstructionCounters counters{};
-  const std::string_view mnemonic = inst.mnemonic();
+  const amdgpu::MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  const amdgpu::Operation operation = inst.amdgpu_operation();
 
-  if (inst.is_mfma() || mnemonic.starts_with("v_wmma_") || mnemonic.starts_with("v_smfmac_") ||
-      mnemonic.starts_with("v_swmmac_")) {
+  if (inst.is_mfma() || inst.is_matrix()) {
     counters.valu_count = 1;
     counters.xdl_valu_count = 1;
-  } else if (mnemonic.starts_with("ds_")) {
+  } else if (addressing == amdgpu::MemoryAddressing::Lds ||
+             addressing == amdgpu::MemoryAddressing::Gds ||
+             operation == amdgpu::Operation::DS_DIRECT_LOAD ||
+             operation == amdgpu::Operation::DS_PARAM_LOAD) {
     counters.lds_count = 1;
-  } else if (mnemonic.starts_with("flat_")) {
+  } else if (addressing == amdgpu::MemoryAddressing::Flat) {
     // FFM deliberately leaves flat_count at zero. FLAT issues through TEX and
     // is also charged to LDS because its resource is unresolved at issue time.
     counters.lds_count = 1;
     counters.tex_count = 1;
-  } else if (mnemonic.starts_with("global_") || mnemonic.starts_with("buffer_") ||
-             mnemonic.starts_with("tbuffer_") || mnemonic.starts_with("image_") ||
-             mnemonic.starts_with("scratch_") || mnemonic.starts_with("tensor_") ||
-             mnemonic.starts_with("cluster_")) {
+  } else if ((inst.flags() & SMEM) == 0 && (addressing == amdgpu::MemoryAddressing::Global ||
+                                            addressing == amdgpu::MemoryAddressing::Buffer ||
+                                            addressing == amdgpu::MemoryAddressing::TypedBuffer ||
+                                            addressing == amdgpu::MemoryAddressing::Image ||
+                                            addressing == amdgpu::MemoryAddressing::Scratch ||
+                                            addressing == amdgpu::MemoryAddressing::Tensor ||
+                                            addressing == amdgpu::MemoryAddressing::Cluster)) {
     counters.tex_count = 1;
-    if (mnemonic.starts_with("global_") || mnemonic.starts_with("scratch_") ||
-        mnemonic.starts_with("cluster_")) {
-      if (mnemonic.find("store") != std::string_view::npos)
+    if (addressing == amdgpu::MemoryAddressing::Global ||
+        addressing == amdgpu::MemoryAddressing::Scratch ||
+        addressing == amdgpu::MemoryAddressing::Cluster) {
+      if (inst.amdgpu_memory_kind() == amdgpu::MemoryKind::Store)
         counters.global_scratch_store = 1;
       else
         counters.global_scratch_load = 1;
     }
   } else if (is_cdna5_smem(inst)) {
     counters.smem_count = 1;
-  } else if (mnemonic.starts_with("s_")) {
+  } else if ((inst.flags() & (SALU | SMEM)) != 0) {
     counters.salu_count = 1;
-  } else if (mnemonic.starts_with("v_")) {
+  } else if ((inst.flags() & VALU) != 0) {
     counters.valu_count = 1;
   }
 
@@ -263,46 +270,50 @@ FfmInstructionCounters instruction_counters(const Instruction &inst) {
 }
 
 FfmWaitInfo wait_info(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic == "s_wait_loadcnt")
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (operation == amdgpu::Operation::S_WAIT_LOADCNT)
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_LOADCNT};
-  if (mnemonic == "s_wait_xcnt")
+  if (operation == amdgpu::Operation::S_WAIT_XCNT)
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_XCNT};
-  if (mnemonic == "s_wait_loadcnt_dscnt")
+  if (operation == amdgpu::Operation::S_WAIT_LOADCNT_DSCNT)
     return {FFM_WAIT_TYPE_LOAD, FFM_WAIT_NAME_S_WAIT_LOADCNT_DSCNT};
-  if (mnemonic == "s_wait_samplecnt")
+  if (operation == amdgpu::Operation::S_WAIT_SAMPLECNT)
     return {FFM_WAIT_TYPE_SAMPLE, FFM_WAIT_NAME_S_WAIT_SAMPLECNT};
-  if (mnemonic == "s_wait_dscnt")
+  if (operation == amdgpu::Operation::S_WAIT_DSCNT)
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_DSCNT};
-  if (mnemonic == "s_wait_storecnt_dscnt")
+  if (operation == amdgpu::Operation::S_WAIT_STORECNT_DSCNT)
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_STORECNT_DSCNT};
-  if (mnemonic == "s_wait_kmcnt")
+  if (operation == amdgpu::Operation::S_WAIT_KMCNT)
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_KMCNT};
-  if (mnemonic == "s_wait_tensorcnt")
+  if (operation == amdgpu::Operation::S_WAIT_TENSORCNT)
     return {FFM_WAIT_TYPE_LDS, FFM_WAIT_NAME_S_WAIT_TENSORCNT};
-  if (mnemonic == "s_wait_idle")
+  if (operation == amdgpu::Operation::S_WAIT_IDLE)
     return {FFM_WAIT_TYPE_VM, FFM_WAIT_NAME_S_WAIT_IDLE};
-  if (mnemonic == "s_waitcnt")
+  if (operation == amdgpu::Operation::S_WAITCNT)
     return {FFM_WAIT_TYPE_VM, FFM_WAIT_NAME_S_WAITCNT};
-  if (mnemonic == "s_barrier_wait")
+  if (operation == amdgpu::Operation::S_BARRIER_WAIT)
     return {FFM_WAIT_TYPE_BARRIER, FFM_WAIT_NAME_S_BARRIER_WAIT};
   return {FFM_WAIT_TYPE_NONE, FFM_WAIT_NAME_NONE};
 }
 
-bool ffm_omits_memory_access(std::string_view mnemonic) {
-  return mnemonic == "ds_append" || mnemonic == "ds_consume" || mnemonic == "ds_load_tr4_b64" ||
-         mnemonic == "ds_load_tr6_b96" || mnemonic == "ds_load_tr8_b64" ||
-         mnemonic == "ds_atomic_async_barrier_arrive_b64" ||
-         mnemonic == "ds_atomic_barrier_arrive_rtn_b64" || mnemonic == "global_load_block" ||
-         mnemonic == "global_store_block";
+bool ffm_omits_memory_access(amdgpu::Operation operation) {
+  return operation == amdgpu::Operation::DS_APPEND || operation == amdgpu::Operation::DS_CONSUME ||
+         operation == amdgpu::Operation::DS_LOAD_TR4_B64 ||
+         operation == amdgpu::Operation::DS_LOAD_TR6_B96 ||
+         operation == amdgpu::Operation::DS_LOAD_TR8_B64 ||
+         operation == amdgpu::Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64 ||
+         operation == amdgpu::Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64 ||
+         operation == amdgpu::Operation::GLOBAL_LOAD_BLOCK ||
+         operation == amdgpu::Operation::GLOBAL_STORE_BLOCK;
 }
 
 uint32_t ffm_memory_data_size(const amdgpu::MemoryAccessObservation &access) {
   const uint64_t bytes = access.bytes_per_lane();
   if (access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL ||
-      access.mnemonic.starts_with("global_"))
+      access.addressing == amdgpu::MemoryAddressing::Global)
     return static_cast<uint32_t>(std::max<uint64_t>(4, bytes));
-  if (access.mnemonic.starts_with("buffer_") || access.mnemonic.starts_with("tbuffer_"))
+  if (access.addressing == amdgpu::MemoryAddressing::Buffer ||
+      access.addressing == amdgpu::MemoryAddressing::TypedBuffer)
     return static_cast<uint32_t>(std::max<uint64_t>(1, bytes / 4) * 4);
   return static_cast<uint32_t>(bytes);
 }
@@ -410,7 +421,7 @@ struct PerfsimWavefrontState final : WavefrontState {
 
 /// Cache immutable instruction classification per callback thread.
 ///
-/// A wave-local cache repeats the same mnemonic work once for every resident
+/// A wave-local cache repeats the same decoded metadata work once for every resident
 /// wave even though all waves execute the same code object. GPUCompilerSim v13
 /// invokes a wave from one callback thread at a time, so a thread-local cache
 /// shares those immutable results across waves without adding a lock to this
@@ -432,7 +443,9 @@ public:
     cached.counters = instruction_counters(inst);
     cached.wait = wait_info(inst);
     cached.encoding_dwords = static_cast<uint8_t>(encoding_dwords);
-    cached.scratch_incompatible = inst.mnemonic().starts_with("scratch_");
+    cached.scratch_incompatible =
+        inst.amdgpu_memory_addressing() == amdgpu::MemoryAddressing::Scratch &&
+        (inst.flags() & SMEM) == 0;
     cached.terminates = (inst.flags() & PROGRAM_TERMINATOR) != 0;
     cached.valid = true;
     return cached;
@@ -991,7 +1004,7 @@ struct PerfsimPlugin::Impl {
     // FFM executes these LDS operations without recording a regular-memory
     // event. Preserve the instruction callback but suppress RocJITsu's routing
     // observation.
-    if (ffm_omits_memory_access(access.mnemonic))
+    if (ffm_omits_memory_access(access.operation))
       return;
 
     PerfsimWavefrontState *wave =
@@ -1101,7 +1114,7 @@ struct PerfsimPlugin::Impl {
       }
       {
         uint64_t callback_requests = requests;
-        if (access.mnemonic == "ds_load_tr16_b128") {
+        if (access.operation == amdgpu::Operation::DS_LOAD_TR16_B128) {
           callback_requests = access.architectural_exec_lane_mask;
           if ((callback_requests & ~requests) != 0) {
             reject_wave(wave, access.dispatch_id,
@@ -1239,8 +1252,8 @@ struct PerfsimPlugin::Impl {
                   "tensor-DMA callback could not be matched to its issuing wave");
       return;
     }
-    const bool is_load = access.mnemonic == "tensor_load_to_lds";
-    const bool is_store = access.mnemonic == "tensor_store_from_lds";
+    const bool is_load = access.operation == amdgpu::Operation::TENSOR_LOAD_TO_LDS;
+    const bool is_store = access.operation == amdgpu::Operation::TENSOR_STORE_FROM_LDS;
     if ((!is_load && !is_store) || access.is_load != is_load || access.addresses.empty() ||
         !access.addresses.valid() || !std::has_single_bit(access.element_size_bytes) ||
         access.element_size_bytes > 8 || access.data_size > 3 ||

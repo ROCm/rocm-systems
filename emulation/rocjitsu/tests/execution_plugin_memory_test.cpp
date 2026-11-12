@@ -959,7 +959,11 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   state->per_lane_addr[2] = kSharedBase + 0x28;
   state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "flat_store_b32"), *wave);
+      *cu,
+      std::make_unique<TestMemoryInstruction>(std::move(state), "flat_store_b32",
+                                              Operation::FLAT_STORE_B32, MemoryAddressing::Flat,
+                                              MemoryKind::Store),
+      *wave);
 
   // What the pre-routing hook was shown.
   ASSERT_EQ(plugin->before_tag.size(), 1u);
@@ -1293,7 +1297,11 @@ TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture
   state->lane_mask = 1;
   state->per_lane_addr[0] = kSharedBase + 0x20;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "global_load_b32"), *wave);
+      *cu,
+      std::make_unique<TestMemoryInstruction>(std::move(state), "global_load_b32",
+                                              Operation::GLOBAL_LOAD_B32, MemoryAddressing::Global,
+                                              MemoryKind::Load),
+      *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1424,7 +1432,11 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
   uint32_t increment = 3;
   std::memcpy(state->store_data.data(), &increment, sizeof(increment));
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "flat_atomic_add"), *wave);
+      *cu,
+      std::make_unique<TestMemoryInstruction>(std::move(state), "flat_atomic_add",
+                                              Operation::FLAT_ATOMIC_ADD, MemoryAddressing::Flat,
+                                              MemoryKind::Atomic),
+      *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1470,7 +1482,11 @@ TEST(RoutedMemoryObservationTest, DedicatedScratchIsDistinctFromFlatScratch) {
   state->per_lane_addr[0] = 0x9800;
   state->store_data.resize(static_cast<size_t>(state->wf_size) * state->elem_size);
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "scratch_store_dword"), *wave);
+      *cu,
+      std::make_unique<TestMemoryInstruction>(std::move(state), "scratch_store_dword",
+                                              Operation::SCRATCH_STORE_DWORD,
+                                              MemoryAddressing::Scratch, MemoryKind::Store),
+      *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
@@ -1503,7 +1519,11 @@ TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
   state->scratch_addr_stride = 256;
   state->per_lane_addr[0] = 0xA000;
   test::ComputeUnitTestAccess::route_memory_inst(
-      *cu, std::make_unique<TestMemoryInstruction>(std::move(state), "buffer_load_dword"), *wave);
+      *cu,
+      std::make_unique<TestMemoryInstruction>(std::move(state), "buffer_load_dword",
+                                              Operation::BUFFER_LOAD_DWORD,
+                                              MemoryAddressing::Buffer, MemoryKind::Load),
+      *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   EXPECT_EQ(plugin->accesses.front().decoded_space, DecodedMemorySpace::GLOBAL);

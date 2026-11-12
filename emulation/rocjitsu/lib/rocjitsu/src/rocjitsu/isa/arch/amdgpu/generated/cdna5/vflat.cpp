@@ -43,6 +43,8 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -79,6 +81,8 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -115,6 +119,8 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -151,6 +157,8 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -187,6 +195,8 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -223,6 +233,8 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -259,6 +271,8 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -295,6 +309,8 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -332,6 +348,8 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -369,6 +387,8 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -405,6 +425,8 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -441,6 +463,8 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -477,6 +501,8 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -513,6 +539,8 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -549,6 +577,9 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -585,6 +616,9 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -621,6 +655,9 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -657,6 +694,9 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -693,6 +733,9 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -729,6 +772,9 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -766,6 +812,9 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -803,6 +852,9 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -847,6 +899,8 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -891,6 +945,8 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -935,6 +991,8 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -979,6 +1037,8 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1023,6 +1083,8 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1067,6 +1129,8 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1111,6 +1175,8 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1155,6 +1221,8 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1199,6 +1267,8 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1243,6 +1313,8 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1287,6 +1359,8 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1331,6 +1405,8 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1375,6 +1451,8 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1419,6 +1497,8 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1463,6 +1543,8 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1507,6 +1589,8 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1551,6 +1635,8 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1595,6 +1681,8 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1639,6 +1727,8 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1683,6 +1773,8 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1727,6 +1819,8 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1771,6 +1865,8 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1815,6 +1911,8 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1859,6 +1957,8 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1903,6 +2003,8 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1947,6 +2049,8 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1991,6 +2095,8 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2035,6 +2141,8 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2079,6 +2187,8 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2123,6 +2233,8 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2167,6 +2279,8 @@ FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2211,6 +2325,8 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2255,6 +2371,8 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2299,6 +2417,8 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2343,6 +2463,8 @@ FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2387,6 +2509,8 @@ FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2416,6 +2540,8 @@ FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_PREFETCH_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -2452,6 +2578,8 @@ FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2488,6 +2616,8 @@ FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2524,6 +2654,8 @@ FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
