@@ -432,6 +432,20 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     if (err != hipSuccess) {
       return err;
     }
+
+    // Cap to physical wavefront-slot limit: all cooperative blocks must be
+    // resident simultaneously, so the grid cannot exceed CUs × blocks/CU.
+    {
+      const uint32_t wf = device->isa().simdWidth();
+      const uint32_t waves = (block_size + wf - 1) / wf;
+      if (waves > 0 && device->info().maxComputeUnits_ > 0) {
+        const uint32_t slots_per_cu = device->isa().simdPerCU() *
+            ((device->isa().versionMajor() >= 10) ? 16 : 8);
+        const int hw_max = device->info().maxComputeUnits_ * (slots_per_cu / waves);
+        max_blocks_per_grid = std::min(max_blocks_per_grid, hw_max);
+      }
+    }
+
     if (((launch_params.global_.product()) / block_size) > unsigned(max_blocks_per_grid)) {
       return hipErrorCooperativeLaunchTooLarge;
     }
