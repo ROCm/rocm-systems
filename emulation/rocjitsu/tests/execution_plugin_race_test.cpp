@@ -996,11 +996,13 @@ TEST_F(TensorDmaRaceTest, AsyncPartialWaitRetiresTheOlderLoadButNotTheStore) {
   EXPECT_TRUE(ds_read(0, 128));
 }
 
-// Each store is one ASYNCcnt entry: of three stores, waiting for all but two
-// completes only the first.
+// Each store is one ASYNCcnt entry, whatever its number of lanes: of three
+// stores, the middle one with two lanes, waiting for all but two completes only
+// the first, and leaves both lanes of the middle store pending.
 TEST_F(TensorDmaRaceTest, AsyncStoreTakesOneAsynccntSlot) {
   async_store(0, 0);
-  async_store(0, 64);
+  const std::array<uint32_t, 2> lanes{64, 80};
+  async_store_lanes(0, lanes);
   async_store(0, 128);
   wait_asynccnt(0, 2);
   EXPECT_FALSE(ds_write(0, 0));

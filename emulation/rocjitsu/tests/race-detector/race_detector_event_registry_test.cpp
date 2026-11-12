@@ -61,9 +61,12 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
   // a tensor transfer that moves no data. It still holds a counter slot, but no
   // other wave can race with it, so once its wait completes it is trimmable
   // like a wave-local event, and must not be queued for barrier retirement.
+  // The workgroup has two waves, so completed LDS events are not retired
+  // immediately as in a single-wave workgroup: only the trim rule for events
+  // without LDS bytes lets these go.
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
-                        1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        2, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
@@ -79,7 +82,9 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
     wave.dispatch(wait);
   }
 
-  EXPECT_GT(detector.events().trimmedCount(), 0);
+  // The trim attempt runs after event N - 1 is added, when every earlier event
+  // is complete and empty.
+  EXPECT_EQ(detector.events().trimmedCount(), N - 1);
   EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
   EXPECT_TRUE(detector.getLdsReadEvents().empty());
 }
