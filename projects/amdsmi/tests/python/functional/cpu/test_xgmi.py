@@ -4,6 +4,7 @@
 
 """CPU XGMI: link width get/set."""
 
+import os
 import unittest
 
 import common.common as common
@@ -115,9 +116,9 @@ class TestCpuXgmi(unittest.TestCase):
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,  # firmware/protocol lacks the message (ENOMSG)
-            amdsmi.AmdSmiStatus.INVAL,  # e_smi.h: multi-socket, protocol >= 7; may be rejected
-            amdsmi.AmdSmiStatus.NO_PERM,  # no read access to /dev/hsmp (mode/LSM/container)
         ]
+        if not os.access("/dev/hsmp", os.R_OK):
+            correct_processor.append(amdsmi.AmdSmiStatus.NO_PERM)
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
@@ -151,6 +152,8 @@ class TestCpuXgmi(unittest.TestCase):
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
         if not cpu_handles:
             self.common.print("\tNo CPU sockets on machine, unable to test with valid cpu handles.")
+        elif len(cpu_handles) == 1:
+            correct_processor.append(amdsmi.AmdSmiStatus.INVAL)
 
         # status_sweep() collects every expect_status failure in the block and
         # raises once at the end.
@@ -159,6 +162,17 @@ class TestCpuXgmi(unittest.TestCase):
             with self.common.status_sweep():
                 for i, cpu in enumerate(cpu_handles):
                     msg = f"\t### amdsmi_get_cpu_xgmi_width(cpu={i}):"
+                    try:
+                        proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+                    except amdsmi.AmdSmiLibraryException:
+                        proto_ver = None
+                    if proto_ver is not None and proto_ver < 7:
+                        with self.assertRaises(amdsmi.AmdSmiLibraryException) as context:
+                            amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
+                        self.assertEqual(
+                            context.exception.err_code, amdsmi.AmdSmiStatus.NOT_SUPPORTED
+                        )
+                        continue
                     val = "N/A"
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)

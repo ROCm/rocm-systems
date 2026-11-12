@@ -2651,6 +2651,9 @@ class MetricCommands:
         if not any(curr_platform_cpu_values):
             for arg in curr_platform_cpu_args:
                 if arg not in (
+                    "cpu_xgmi_link_width",
+                    "cpu_apb_status",
+                    "cpu_df_pstate_range",
                     "cpu_lclk_dpm_level",
                     "cpu_io_bandwidth",
                     "cpu_xgmi_bandwidth",

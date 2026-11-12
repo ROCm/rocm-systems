@@ -9498,6 +9498,9 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
  * count of lanes: 0 => 4 lanes on family 19h model 10h and 2 lanes on other
  * models, 1 => 8 lanes, 2 => 16 lanes.
  *
+ * @note HSMP protocol version 7 or later is required. Returns
+ * ::AMDSMI_STATUS_NOT_SUPPORTED for older protocol versions.
+ *
  * @param[in] processor_handle Cpu socket which to query
  *
  * @param[out] min - Output buffer to receive minimum XGMI link width level

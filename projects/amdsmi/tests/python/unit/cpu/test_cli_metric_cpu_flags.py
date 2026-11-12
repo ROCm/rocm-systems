@@ -189,13 +189,13 @@ class TestCliMetricCpuFlags(unittest.TestCase):
         self.assertIsNotNone(captured, "metric_cpu did not store a values payload")
         return captured
 
-    def test_no_cpu_flags_emits_all_three_sections(self):
-        # With no cpu_* flag set, metric_cpu defaults to "show everything", so the
-        # three new sections must all render (getters unstubbed here -> N/A).
+    def test_no_cpu_flags_omits_explicit_cpu_sections(self):
+        # These sections are opt-in, so an otherwise unqualified CPU metric does
+        # not invoke their getters.
         captured = self._run_metric_cpu()
-        self.assertIn("apb_status", captured)
-        self.assertIn("xgmi_link_width", captured)
-        self.assertIn("df_pstate_range", captured)
+        self.assertNotIn("apb_status", captured)
+        self.assertNotIn("xgmi_link_width", captured)
+        self.assertNotIn("df_pstate_range", captured)
 
     def test_apb_status_disabled_reports_pstate(self):
         # pstate == 0 is a real value: assert it survives and is not coerced to "N/A".
