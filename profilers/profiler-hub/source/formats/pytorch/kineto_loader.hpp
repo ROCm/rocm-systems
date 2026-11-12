@@ -45,6 +45,7 @@ struct load_diag_t
     std::uint64_t x_events{};
     std::uint64_t flow_s{};
     std::uint64_t flow_f{};
+    std::uint64_t flow_unbound{};  // set by the store
     std::uint64_t meta_events{};
     std::uint64_t memory_events{};
     std::uint64_t other_events{};
@@ -52,6 +53,20 @@ struct load_diag_t
     std::uint64_t clamped_events{};
     std::uint64_t gunzip_ms{};
     std::uint64_t parse_ms{};
+};
+
+// One end of a flow arrow ("ph" "s" or "f") of a kind that links events beyond what
+// "correlation" does: fwdbwd, forward_backward, async_* and critical_path.
+struct flow_t
+{
+    char          phase{};  // 's' or 'f'
+    std::int64_t  id{};
+    std::int64_t  ts_ns{};
+    std::int64_t  pid{};
+    std::int64_t  tid{};
+    std::string   category;
+    std::uint64_t args_off{};  // as event_t
+    std::uint32_t args_len{};
 };
 
 // An instant event that is not a memory event, such as an iteration start.
@@ -87,6 +102,7 @@ struct loaded_trace_t
     std::vector<event_t>          events;
     std::vector<memory_sample_t>  memory;  // by event index
     std::vector<marker_t>         markers;
+    std::vector<flow_t>           flows;
     std::string trace_info;  // the other top-level members as the inside of a JSON object
     std::string args;
     bool        link_by_correlation{ true };
