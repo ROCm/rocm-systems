@@ -42,10 +42,7 @@ The analyze options for Dynamic process attachment are completely compatible wit
 .. note::
 
   * To enable Dynamic process attachment, you need to have the correct supported version of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` and ``rocprofiler-register``.
-  * ROCm Compute Profiler needs ROCprofiler-SDK from the same ROCm release, or a newer one. With an older version, it can stop at startup.
-  * Run ROCm Compute Profiler as the user that owns the workload process, or as root.
-  * To attach to a process in a container without root, start that process as your own user. For example, use ``docker exec -u $(id -u):$(id -g)``.
-  * On distributions with the Yama security module, such as recent Ubuntu releases, users other than root must also run ``sudo sysctl kernel.yama.ptrace_scope=0``.
-  * ``kernel.yama.ptrace_scope`` applies to the whole system. With ``0``, any process can trace other processes of the same user.
+  * The process to attach to must run as the same user as ROCm Compute Profiler. For a process in a container, run the container as that user.
+  * On many Linux systems, a process can only trace its own child processes. To attach, first run ``sudo sysctl kernel.yama.ptrace_scope=0``. This setting lets processes trace any process of the same user on the whole system.
   * To make the Dynamic process attachment feature work, you must use ``--block`` or ``--set`` to limit the number of counter input files to ensure single application run. You can also use "--iteration-multiplexing" to ensure single application run.
   * Due to the limitation of ROCprofiler-SDK, the attach can now only happen before Heterogeneous System Architecture (HSA) initialization. HSA initialization happens before the execution of the first HIP kernel call. It only happens once to save all the kernels' function signature, such as the function name and other launch parameters. Attaching after this stage misses all crucial information of the HIP kernel and makes it impossible to store the output. This limitation will be solved in later releases of ROCprofiler-SDK.
