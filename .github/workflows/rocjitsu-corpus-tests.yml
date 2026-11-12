@@ -633,7 +633,7 @@ jobs:
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          uv pip install -e lib/python
+          uv pip install -e "lib/python[test]"
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests

@@ -17317,6 +17317,9 @@ public:
   explicit KfdCuAtomicInstruction(std::unique_ptr<rocjitsu::DynamicInstState> state)
       : Instruction("global_atomic_add", nullptr) {
     flags_ |= rocjitsu::MEMORY_OP;
+    set_amdgpu_operation(rocjitsu::amdgpu::Operation::GLOBAL_ATOMIC_ADD);
+    set_amdgpu_memory(rocjitsu::amdgpu::MemoryAddressing::Global,
+                      rocjitsu::amdgpu::MemoryKind::Atomic);
     set_data(std::move(state));
   }
 };
