@@ -471,6 +471,19 @@ public:
     // thread may have held locked. One-way: nothing un-abandons a child.
     void abandon_in_child() { m_abandoned.store(true, std::memory_order_release); }
 
+    uint64_t get_num_of_pending_dispatches()
+    {
+        auto lk                  = std::lock_guard<std::mutex>{m_mu};
+        auto num_pending_entries = uint64_t{0};
+        for(auto it = m_entries.begin(); it != m_entries.end();
+            it      = m_entries.equal_range(it->first).second)
+        {
+            ++num_pending_entries;
+        }
+
+        return num_pending_entries;
+    }
+
 private:
     struct entry
     {

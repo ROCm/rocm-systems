@@ -181,7 +181,9 @@ public:
     // does not wake spuriously, so false is a real per-slice timeout rather than an early return.
     // Teardown callers treat false as warn-and-proceed. Callers needing a guaranteed drain loop
     // until true (e.g., see @replay_drain_or_fatal).
-    bool sync() const;
+    // Passing in a timeout value set the timeout time to that ns value. Passing in the default, 0,
+    // will use the existing 5 second timeout
+    uint64_t sync(const uint64_t timeout_ns = 0) const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
     void remove_callback(ClientID id);

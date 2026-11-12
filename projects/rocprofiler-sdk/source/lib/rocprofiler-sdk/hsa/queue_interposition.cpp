@@ -1125,44 +1125,55 @@ completion_monitor_loop(completion_monitor& mon)
 //
 // A drain entered from a tool callback running on the record emitter waits on that callback's own
 // still-counted batch and never returns; the warning names that case.
-void
-wait_for_inflight_drain(completion_monitor& mon)
+uint64_t
+wait_for_inflight_drain(completion_monitor& mon, const uint64_t timeout_ns)
 {
     const auto start        = std::chrono::steady_clock::now();
     auto       next_warning = start + drain_warn_interval;
+    const auto timeout = std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
+    const auto timeout_enabled = timeout_ns > 0;
 
     while(mon.inflight.load(std::memory_order_acquire) > 0)
     {
         const auto now = std::chrono::steady_clock::now();
+        if(timeout_enabled && std::chrono::steady_clock::now() > timeout)
+        {
+            const auto outstanding_batches = mon.inflight.load(std::memory_order_acquire);
+            ROCP_WARNING << fmt::format(
+                "Completion monitor drain timed out while waiting on {} batch(es) after {} s.",
+                outstanding_batches,
+                std::chrono::duration_cast<std::chrono::seconds>(now - start).count());
+            return outstanding_batches;
+        }
         if(now >= next_warning)
         {
             ROCP_WARNING << fmt::format(
-                "Completion monitor drain still waiting on {} batch(es) after {} s. A drain "
-                "entered from a tool callback running on the record emitter waits on that "
-                "callback's own batch and cannot complete.",
+                "Completion monitor drain still waiting on {} batch(es) after {} s.",
                 mon.inflight.load(std::memory_order_acquire),
                 std::chrono::duration_cast<std::chrono::seconds>(now - start).count());
             next_warning = now + drain_warn_interval;
         }
         std::this_thread::sleep_for(poll_interval);
     }
+    return 0;
 }
 
 // Wait for all in-flight completions to retire without stopping the monitor.
 // Safe to call while interception is still active (e.g. on context stop).
-void
-drain_completion_monitor()
+// Returns outstanding records if timeout is hit
+uint64_t
+drain_completion_monitor(const uint64_t timeout_ns)
 {
     // Skips the drain both during and after finalization. stop_completion_monitor covers that path,
     // and past destroy_static_objects the monitor's static_object is null, so it must not be
     // constructed or dereferenced here.
-    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return;
+    if(registration::get_fini_status() != 0 || internal_threading::fork_stale()) return 0;
 
     // Polls `inflight`, not `state`: work outlives the monitor thread, since submit_to_task_group
     // admits on fini-status and emitter existence alone. Must not bump wake_signal -- this runs on
     // arbitrary tool threads with nothing serializing it against stop_completion_monitor, which
     // destroys that signal.
-    wait_for_inflight_drain(get_completion_monitor());
+    return wait_for_inflight_drain(get_completion_monitor(), timeout_ns);
 }
 
 // Local kernel-dispatch tracing path: swaps in pooled completion signals,
@@ -2279,10 +2290,10 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
     }
 }
 
-void
-interposition_sync()
+uint64_t
+interposition_sync(const uint64_t timeout_ns)
 {
-    drain_completion_monitor();
+    return drain_completion_monitor(timeout_ns);
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already
@@ -2501,10 +2512,10 @@ drain_signal_less_queues_hw(uint64_t deadline_ns)
 // Waits on the completion monitor's in-flight counter, which counts signal-less completions
 // alongside interposed ones. The wait has no deadline and no return value, so a monitor that
 // never reaches zero is not reported.
-void
-join_signal_less_tasks()
+uint64_t
+join_signal_less_tasks(const uint64_t timeout_ns)
 {
-    hsa::queue_interposition::interposition_sync();
+    return hsa::queue_interposition::interposition_sync(timeout_ns);
 }
 }  // namespace kfd
 }  // namespace rocprofiler

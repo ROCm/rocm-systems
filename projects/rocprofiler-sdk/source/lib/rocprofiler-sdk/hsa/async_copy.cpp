@@ -246,9 +246,10 @@ struct active_signals
     void destroy();  // destroy hsa signal
     // Wait for outstanding signal completion callbacks. False if the wait expired with
     // callbacks still undelivered.
-    bool sync();
-    void fetch_add(int v);  // increment hsa signal value
-    void fetch_sub(int v);  // decrement hsa signal value
+    uint64_t sync(const uint64_t timeout_ns);
+    void     fetch_add(int v);    // increment hsa signal value
+    void     fetch_sub(int v);    // decrement hsa signal value
+    uint64_t peek_count() const;  // Peek hsa signal value
 
 private:
     hsa_signal_t         m_signal = {.handle = 0};
@@ -287,10 +288,10 @@ active_signals::destroy()
     }
 }
 
-bool
-active_signals::sync()
+uint64_t
+active_signals::sync(const uint64_t timeout_ns)
 {
-    if(m_signal.handle == 0) return true;
+    if(m_signal.handle == 0) return 0;
 
 #if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
     constexpr auto timeout_sec = std::chrono::seconds{5};
@@ -298,9 +299,9 @@ active_signals::sync()
     // wait a maximum of thirty seconds
     constexpr auto timeout_sec = std::chrono::seconds{30};
 #endif
-
-    constexpr auto timeout =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
+    const auto timeout =
+        timeout_ns == 0 ? std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count()
+                        : std::chrono::nanoseconds{timeout_ns}.count();
 
     if(m_count.load() > 0)
     {
@@ -316,10 +317,10 @@ active_signals::sync()
                 << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
                 << " completion callbacks were not delivered";
         }
-        return _cnt_end == 0;
+        return static_cast<uint64_t>(_cnt_end);
     }
 
-    return true;
+    return 0;
 }
 
 void
@@ -343,6 +344,13 @@ active_signals::fetch_sub(int v)
 
     if(_cnt > 0) m_count.fetch_sub(1);
     get_core_table()->hsa_signal_subtract_screlease_fn(m_signal, v);
+}
+
+uint64_t
+active_signals::peek_count() const
+{
+    const auto _cnt = m_count.load(std::memory_order_relaxed);
+    return _cnt >= 0 ? static_cast<uint64_t>(_cnt) : 0;
 }
 
 active_signals*
@@ -1416,12 +1424,12 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
     }
 }
 
-bool
-async_copy_sync()
+uint64_t
+async_copy_sync(const uint64_t timeout_ns)
 {
-    if(!async_copy::get_active_signals()) return true;
+    if(!async_copy::get_active_signals()) return 0;
 
-    return async_copy::get_active_signals()->sync();
+    return async_copy::get_active_signals()->sync(timeout_ns);
 }
 
 void
@@ -1431,6 +1439,14 @@ async_copy_fini()
 
     async_copy_sync();
     async_copy::get_active_signals()->destroy();
+}
+
+uint64_t
+async_copy_peek_count()
+{
+    if(!async_copy::get_active_signals()) return 0;
+
+    return async_copy::get_active_signals()->peek_count();
 }
 }  // namespace hsa
 }  // namespace rocprofiler

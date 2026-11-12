@@ -1601,21 +1601,18 @@ Queue::destroy_signal(pooled_signal_t* signal)
     }
 }
 
-bool
-Queue::sync() const
+uint64_t
+Queue::sync(const uint64_t timeout_ns) const
 {
-    if(_active_kernels == null_hsa_signal) return true;
-
-    const auto _value =
-        _core_api.hsa_signal_wait_relaxed_fn(_active_kernels,
-                                             HSA_SIGNAL_CONDITION_EQ,
-                                             0,
-                                             std::chrono::nanoseconds{drain_slice}.count(),
-                                             HSA_WAIT_STATE_BLOCKED);
+    if(_active_kernels == null_hsa_signal) return 0;
+    auto       timeout = timeout_ns == 0 ? std::chrono::nanoseconds{drain_slice}.count()
+                                         : std::chrono::nanoseconds{timeout_ns}.count();
+    const auto _value  = _core_api.hsa_signal_wait_relaxed_fn(
+        _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_BLOCKED);
 
     ROCP_WARNING_IF(_value != 0) << fmt::format(
         "Timeout while waiting for queue sync: {} kernels still active", _value);
-    return _value == 0;
+    return _value >= 0 ? static_cast<uint64_t>(_value) : 0;
 }
 
 void

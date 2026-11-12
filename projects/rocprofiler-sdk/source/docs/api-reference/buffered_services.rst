@@ -21,11 +21,17 @@ completed operation must be accounted for.
 
 .. warning::
 
+   ``rocprofiler_synchronize_contexts`` is experimental. It is declared in
+   ``rocprofiler-sdk/experimental/synchronize_contexts.h`` and its interface may change in a
+   future release.
+
+.. warning::
+
    ``rocprofiler_synchronize_contexts`` is expensive and slows tracing while it runs. It blocks
    until record production has caught up and stalls queue creation and destruction for its
    duration. Use it only where a window of records must be complete, typically once before
    reading a buffer. Calling it per dispatch, or anywhere on a hot path, will dominate the cost
-   of tracing. If it returns ``ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING``, records remain
+   of tracing. If it returns ``ROCPROFILER_STATUS_ERROR_TIMEOUT``, records remain
    outstanding but nothing was discarded and the call may be retried.
 
 Subscribing to buffer tracing services

@@ -244,7 +244,7 @@ stop_context(const context::context* ctx)
         // serialized->unserialized transition stays coordinated until disable_serialization() runs
         // below. That ordering is why no separate "draining" flag is needed -- but it only works
         // because the drain happens here, before the slot is cleared.
-        if(!hsa::queue_controller_sync())
+        if(hsa::queue_controller_sync() != 0)
         {
             ROCP_WARNING << fmt::format(
                 "counter collection: queue drain timed out while stopping context {}; in-flight "

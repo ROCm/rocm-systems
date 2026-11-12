@@ -519,21 +519,30 @@ signal_less_state_present()
 }
 }  // namespace
 
-bool
-drain_signal_less_completions()
+uint64_t
+drain_signal_less_completions(const uint64_t timeout_ns)
 {
-    // Nothing outstanding is success, not failure: no state means no completion to wait for.
-    if(!signal_less_state_present()) return true;
+    if(!signal_less_state_present()) return 0;
 
-    // The registration set is deliberately not closed first: registrations landing during the
-    // wait are post-call work, and the reader wait below already tolerates a pass in flight.
-    bool _drained = wait_for_reader_quiesce(quiesce_budget_ns());
-    if(!_drained && !reader_unavailable()) _drained = wait_for_reader_quiesce(quiesce_budget_ns());
+    // Mimics signal_less_fence_completions with no permanent teardown/shutdown. Two attempt
+    // wait_for_reader_quiesce to attempt to drain all completed dispatches.
+    drain_signal_less_interceptor();
+    const auto timeout = (timeout_ns > 0) ? timeout_ns : quiesce_budget_ns();
 
-    // Reports the failure through the return value; never abandons, stops or disables, so the
-    // signal-less path is left in the state it was found in.
-    join_signal_less_tasks();
-    return _drained;
+    bool _drained = wait_for_reader_quiesce(timeout);
+    if(!_drained && !reader_unavailable()) _drained = wait_for_reader_quiesce(timeout);
+    // If drain was unsucessful, get estimate of pending dispatches
+    auto pending_dispatches = uint64_t{0};
+    if(!_drained)
+    {
+        pending_dispatches = signal_less_hub().get_num_of_pending_dispatches();
+    }
+    const auto in_flight = join_signal_less_tasks(timeout_ns);
+
+    // Advisory by construction. On a live session the hub is a moving target, and an entry
+    // whose kernel is still executing has no EOP yet -- so a successful wait does not imply
+    // an empty hub. Nothing is discarded and the caller may retry.
+    return pending_dispatches + in_flight;
 }
 
 void
@@ -606,6 +615,12 @@ signal_less_fence_completions()
     // is the only one that can still touch a deferred completion.
     flush_deferred_completions();
     join_signal_less_tasks();
+}
+
+uint64_t
+peek_active_signal_less_packets()
+{
+    return signal_less_hub().get_num_of_pending_dispatches();
 }
 }  // namespace kfd
 }  // namespace rocprofiler

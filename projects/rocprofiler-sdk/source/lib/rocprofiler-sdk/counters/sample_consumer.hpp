@@ -84,26 +84,47 @@ public:
                 selfconsume                                       = false;
             }
         }
-        // A self-consumed sample never enters the ring, so it is not counted: consume_fn has
-        // already run by the time this returns, and counting it would push consumed_ptr past
-        // write_ptr and make drain() return without waiting.
         if(selfconsume)
             consume_fn(std::move(params));
         else
             cv.notify_all();
     }
 
-    // Blocks until samples enqueued before this call have been consumed. Stops nothing: no exit,
-    // no join, no pause on submission -- samples arriving during the wait are post-call work and
-    // are deliberately not waited for, which is what makes this terminate.
-    void drain()
+    // Blocks until samples enqueued before this call have been consumed or timeout is hit. Stops
+    // nothing: no exit, no join, no pause on submission -- samples arriving during the wait are
+    // post-call work and are deliberately not waited for.
+    uint64_t drain(const uint64_t timeout_ns)
     {
-        auto         lk     = std::unique_lock{mut};
-        const size_t target = write_ptr.load(std::memory_order_acquire);
-        drain_cv.wait(lk, [&] {
-            return consumed_ptr.load(std::memory_order_acquire) >= target ||
-                   !valid.load(std::memory_order_acquire);
-        });
+        auto         lk              = std::unique_lock{mut};
+        const size_t target          = write_ptr.load(std::memory_order_acquire);
+        const auto   timeout_enabled = timeout_ns > 0;
+        const auto   timeout =
+            std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
+        auto outstanding_records = uint64_t{0};
+        if(!timeout_enabled)
+        {
+            drain_cv.wait(lk, [&] {
+                return consumed_ptr.load(std::memory_order_acquire) >= target ||
+                       !valid.load(std::memory_order_acquire);
+            });
+        }
+        else
+        {
+            drain_cv.wait_until(lk, timeout, [&] {
+                return consumed_ptr.load(std::memory_order_acquire) >= target ||
+                       !valid.load(std::memory_order_acquire);
+            });
+            const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
+            outstanding_records = consumed >= target ? consumed - target : 0;
+        }
+        return outstanding_records;
+    }
+
+    uint64_t peek_pending_records()
+    {
+        const auto target   = write_ptr.load(std::memory_order_relaxed);
+        const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
+        return consumed >= target ? consumed - target : 0;
     }
 
 protected:
