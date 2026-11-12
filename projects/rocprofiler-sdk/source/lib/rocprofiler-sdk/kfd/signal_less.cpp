@@ -535,7 +535,7 @@ drain_signal_less_completions(const uint64_t timeout_ns)
     auto pending_dispatches = uint64_t{0};
     if(!_drained)
     {
-        pending_dispatches = signal_less_hub().get_num_of_pending_dispatches();
+        pending_dispatches = signal_less_hub().pending_count();
     }
     const auto in_flight = join_signal_less_tasks(timeout_ns);
 
@@ -620,7 +620,12 @@ signal_less_fence_completions()
 uint64_t
 peek_active_signal_less_packets()
 {
-    return signal_less_hub().get_num_of_pending_dispatches();
+    // Same guard, and for the same reasons, as drain_signal_less_completions: signal_less_hub()
+    // constructs the hub on first touch, so an unguarded peek would stand one up in a process
+    // that never enabled the feature and in a forked child that owns none of this state.
+    if(!signal_less_state_present()) return 0;
+
+    return signal_less_hub().pending_count();
 }
 }  // namespace kfd
 }  // namespace rocprofiler

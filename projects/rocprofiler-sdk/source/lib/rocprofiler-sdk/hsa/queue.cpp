@@ -158,11 +158,13 @@ replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
 // teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
 // running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
 // handler that is still emitting records, releasing signals, and dropping correlation-id refs.
-// Each sync() call blocks up to one slice and reports whether the queue drained.
+// Each sync() call blocks up to one slice and returns the number of kernels still active, so the
+// drained test is `== 0`. Do not hand sync() to a predicate directly: a non-zero count converts to
+// `true` and reads as "drained", which is the inverse of what it means.
 void
 replay_drain_or_fatal(const Queue& queue)
 {
-    replay_wait_or_fatal([&]() { return queue.sync(); },
+    replay_wait_or_fatal([&]() { return queue.sync() == 0; },
                          "this queue's async completion handler(s)");
 }
 

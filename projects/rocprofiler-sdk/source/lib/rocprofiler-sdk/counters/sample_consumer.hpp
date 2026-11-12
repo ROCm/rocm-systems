@@ -100,31 +100,29 @@ public:
         const auto   timeout_enabled = timeout_ns > 0;
         const auto   timeout =
             std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
-        auto outstanding_records = uint64_t{0};
+        const auto predicate = [&] {
+            return consumed_ptr.load(std::memory_order_acquire) >= target ||
+                   !valid.load(std::memory_order_acquire);
+        };
+
         if(!timeout_enabled)
-        {
-            drain_cv.wait(lk, [&] {
-                return consumed_ptr.load(std::memory_order_acquire) >= target ||
-                       !valid.load(std::memory_order_acquire);
-            });
-        }
+            drain_cv.wait(lk, predicate);
         else
-        {
-            drain_cv.wait_until(lk, timeout, [&] {
-                return consumed_ptr.load(std::memory_order_acquire) >= target ||
-                       !valid.load(std::memory_order_acquire);
-            });
-            const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
-            outstanding_records = consumed >= target ? consumed - target : 0;
-        }
-        return outstanding_records;
+            drain_cv.wait_until(lk, timeout, predicate);
+
+        // Outstanding is what the consumer has NOT reached yet, so target minus consumed -- the
+        // other order returns zero on exactly the timeout this call exists to report. Computed on
+        // both arms: the untimed wait also returns early when the consumer is shutting down, and
+        // samples it will never consume are still outstanding.
+        const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
+        return target > consumed ? target - consumed : 0;
     }
 
     uint64_t peek_pending_records()
     {
         const auto target   = write_ptr.load(std::memory_order_relaxed);
         const auto consumed = consumed_ptr.load(std::memory_order_relaxed);
-        return consumed >= target ? consumed - target : 0;
+        return target > consumed ? target - consumed : 0;
     }
 
 protected:

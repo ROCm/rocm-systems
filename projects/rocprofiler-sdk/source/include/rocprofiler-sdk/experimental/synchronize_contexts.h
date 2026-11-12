@@ -49,9 +49,11 @@ typedef enum rocprofiler_synchronize_context_flags_t
  */
 typedef struct rocprofiler_synchronize_context_options_t
 {
-    uint64_t size;        ///< must be set by user
-    uint64_t flags;       ///< bitset of rocprofiler_synchronize_context_flags_t
-    uint64_t timeout_ns;  ///< maximum amount of time to wait before returning
+    uint64_t size;   ///< must be set by user
+    uint64_t flags;  ///< bitset of rocprofiler_synchronize_context_flags_t
+    /// Bounds each wait the call makes, not the call as a whole, so the total may exceed it.
+    /// Zero means wait indefinitely.
+    uint64_t timeout_ns;
 } rocprofiler_synchronize_context_options_t;
 
 /**
@@ -79,19 +81,28 @@ typedef struct rocprofiler_synchronize_context_result_t
  *
  * Covers kernel dispatch, memory copy, HIP event tracing, dispatch and device counter collection,
  * signal-less dispatch, and services extracted inline at dispatch completion; PC sampling agent
- * buffers are flushed for the clients owning @p contexts. Records written by the calling thread,
+ * buffers are flushed for the clients owning @p context. Records written by the calling thread,
  * such as API tracing, never need it. Free-running sources are not covered.
  *
+ * The wait spans record production process-wide, since the threads producing records are not
+ * partitioned by context; only the flush is scoped to @p context, which is flushed buffer by
+ * buffer. The flush runs even when the wait timed out, so the records that did land are still
+ * delivered and the status reports the shortfall.
+ *
  * @param [in] context Context whose records the caller needs written; must be owned by the caller
- * @param [in] options Options controlling the behavior of synchronization
- * @param [in] result Result structure to be filled with the outcome of the synchronization attempt
+ * @param [in] options Options controlling the behavior of synchronization. May be NULL, which
+ * selects no flags and an unbounded wait.
+ * @param [out] result Filled with the outcome of the synchronization attempt. May be NULL unless
+ * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set. Its counts are zeroed before anything else
+ * runs, so they are readable on every status this returns.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Record writing is caught up for the covered kinds
- * @retval ::ROCPROFILER_STATUS_ERROR_RECORDS_OUTSTANDING Records remain outstanding; nothing was
- * discarded and the call may be retried
- * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND A context in @p contexts does not exist
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND @p context does not exist
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p result is NULL while
+ * ::ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG is set, which would leave nothing to return
  * @retval ::ROCPROFILER_STATUS_ERROR_TIMEOUT The operation timed out before all records were
- * written
+ * written. Nothing was discarded, @p result reports the estimated shortfall, and the call may be
+ * retried.
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_synchronize_context(rocprofiler_context_id_t                         context,

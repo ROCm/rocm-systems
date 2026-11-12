@@ -176,13 +176,14 @@ public:
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
 
-    // Block up to one ~5s slice for in-flight async completion handlers to finish. Returns true if
-    // the queue drained (zero active kernels), false if the slice elapsed first. HSA's signal wait
-    // does not wake spuriously, so false is a real per-slice timeout rather than an early return.
-    // Teardown callers treat false as warn-and-proceed. Callers needing a guaranteed drain loop
-    // until true (e.g., see @replay_drain_or_fatal).
-    // Passing in a timeout value set the timeout time to that ns value. Passing in the default, 0,
-    // will use the existing 5 second timeout
+    // Block up to one ~5s slice for in-flight async completion handlers to finish. Returns the
+    // number of kernels still
+    // active on expiry, so ZERO means drained -- never use the result as a truth value, since a
+    // non-zero count converts to `true` and reads as the opposite of what it means. HSA's signal
+    // wait does not wake spuriously, so a non-zero return is a real timeout rather than an early
+    // return. Teardown callers warn and proceed; callers needing a guaranteed drain loop until it
+    // returns zero (e.g., see @replay_drain_or_fatal).
+    // @p timeout_ns bounds the wait; the default of 0 uses the built-in per-slice budget.
     uint64_t sync(const uint64_t timeout_ns = 0) const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);
