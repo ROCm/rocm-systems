@@ -183,6 +183,26 @@ GIN_SDMA_AG_HD inline int lsaCtasFromLadder(size_t chunkBytes_, const LsaCtaStep
   return above;
 }
 
+// Measured LSA-tier CTA ladder for one GPU architecture, keyed like ArchSdmaThreshold.
+struct ArchLsaCtaLadder {
+  const char* arch;
+  const LsaCtaStep* steps;
+  size_t nSteps;
+  int above;
+};
+
+// The first table entry whose arch matches gcnArchName (see gcnArchMatches), or
+// nullptr when the name is null or not in the table.
+inline const ArchLsaCtaLadder* archLsaCtaLadder(const char* gcnArchName,
+                                                const ArchLsaCtaLadder* table,
+                                                size_t tableSize) {
+  if (!gcnArchName || !table) return nullptr;
+  for (size_t i = 0; i < tableSize; i++) {
+    if (gcnArchMatches(gcnArchName, table[i].arch)) return &table[i];
+  }
+  return nullptr;
+}
+
 // Element offset of rank r's contribution within EVERY peer's AllGather recv
 // buffer: rank r's send chunk lands at [r*count, r*count + count). Shared by the
 // production LSA-direct kernel (AllGatherLsaDirect) and the addressing tests so a

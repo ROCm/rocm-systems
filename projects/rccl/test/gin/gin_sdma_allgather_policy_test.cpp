@@ -279,6 +279,24 @@ TEST(GatherPolicyArch, GcnArchMatchesBaseNameOnly) {
   EXPECT_FALSE(gcnArchMatches("gfx1250", nullptr));
 }
 
+TEST(GatherPolicyArch, LsaCtaLadderLookupByArch) {
+  static constexpr LsaCtaStep kOther[] = {{2u << 10, 1}};
+  static constexpr ArchLsaCtaLadder kTable[] = {
+    {"gfx942", kOther, 1, 8},
+    {"gfx1250", kLadder, kLadderSize, 4},
+  };
+  EXPECT_EQ(archLsaCtaLadder("gfx942:sramecc+:xnack-", kTable, 2), &kTable[0]);
+  EXPECT_EQ(archLsaCtaLadder("gfx1250-strict", kTable, 2), &kTable[1]);
+  EXPECT_EQ(archLsaCtaLadder("gfx950", kTable, 2), nullptr);
+  EXPECT_EQ(archLsaCtaLadder("gfx94", kTable, 2), nullptr);
+  EXPECT_EQ(archLsaCtaLadder(nullptr, kTable, 2), nullptr);
+  EXPECT_EQ(archLsaCtaLadder("gfx942", nullptr, 0), nullptr);
+  const ArchLsaCtaLadder* l = archLsaCtaLadder("gfx1250", kTable, 2);
+  ASSERT_NE(l, nullptr);
+  EXPECT_EQ(lsaCtasFromLadder(16u << 10, l->steps, l->nSteps, l->above), 2);
+  EXPECT_EQ(lsaCtasFromLadder(1u << 20, l->steps, l->nSteps, l->above), 4);
+}
+
 // ---- Gather -D 3 in-place: root skips its self-put and waits for one fewer ----
 
 TEST(GatherPolicyInPlace, RootSkipsSelfPutOnlyInPlace) {
