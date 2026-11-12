@@ -26,7 +26,7 @@
 namespace dda::common {
 
 constexpr size_t ddaLL128BcTwoShotChunkSlices(size_t totalSlices, int nRanks) {
-  // O8: chunk into nPeers = nRanks-1 so root has no separate chunk.
+  // chunk into nPeers = nRanks-1 so root has no separate chunk.
   const int nPeers = nRanks - 1;
   size_t cs = (totalSlices + (size_t)nPeers - 1) / (size_t)nPeers;
   return cs < 1 ? 1 : cs;
@@ -174,7 +174,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
     const uint64_t* myGather = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) +
       gatherOff + (uint64_t)peer * slotWireWords;
     for (size_t s = gwarp; s < chunkSlices; s += wstride) {
-      const int peerCol = peer < root ? peer : peer - 1; // O8: rank to chunk index
+      const int peerCol = peer < root ? peer : peer - 1;
       const size_t dOff = chunkOff(peerCol) + s * (size_t)kDdaLL128DataBytesPerSlice;
       const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
       const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
@@ -187,7 +187,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
       ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
         s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
     }
-    } // if (peer != root) -- O8 guard
+    } // if (peer != root)
   }
 
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
