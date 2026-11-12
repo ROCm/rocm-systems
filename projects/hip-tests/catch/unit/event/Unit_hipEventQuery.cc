@@ -98,9 +98,9 @@ HIP_TEST_CASE(Unit_hipEventQuery_RecordingStreamDestroyed) {
 }
 
 HIP_TEST_CASE(Unit_hipEventQuery_RecordingStreamDestroyed_GlobalCapture) {
-  hipEvent_t event = RecordOnDestroyedStream();
   hipStream_t capture_stream{};
   HIP_CHECK(hipStreamCreate(&capture_stream));
+  hipEvent_t event = RecordOnDestroyedStream();
   HIP_CHECK(hipStreamBeginCapture(capture_stream, hipStreamCaptureModeGlobal));
   HIP_CHECK_ERROR(hipEventQuery(event), hipErrorStreamCaptureUnsupported);
   HIP_CHECK_ERROR(hipEventSynchronize(event), hipErrorStreamCaptureUnsupported);
@@ -109,6 +109,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_RecordingStreamDestroyed_GlobalCapture) {
   REQUIRE(graph == nullptr);
   HIP_CHECK(hipStreamDestroy(capture_stream));
   HIP_CHECK(hipEventDestroy(event));
+  (void)hipGetLastError();
 }
 
 /**
