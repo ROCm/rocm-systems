@@ -7,15 +7,16 @@ Unit tests for rocprof-compute general CLI options.
 
 import argparse
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
-from common import SUPPORTED_ARCHS
+from common import SUPPORTED_ARCHS, patch_console
 
-from argparser import CliHelpFormatter, build_parser
+from argparser import CliHelpFormatter, DeprecatedAction, build_parser
 
 HOME = Path.cwd()
 VERSION = {"ver_pretty": "rocprof-compute (unit test)"}
+REMOVAL = "is deprecated and will be removed in a future release."
 
 
 def build_args(argv, experimental=False):
@@ -39,6 +40,35 @@ def write_skills_readme(skills_dir):
     readme = skills_dir / "README.md"
     readme.write_text("skills")
     return readme
+
+
+def deprecated_option_parser():
+    """Return a parser with a renamed option and two wholly deprecated options."""
+    parser = argparse.ArgumentParser(formatter_class=CliHelpFormatter)
+    parser.add_argument(
+        "--new",
+        "--old",
+        dest="value",
+        metavar="<value>",
+        action=DeprecatedAction,
+        base_action="store",
+        deprecated_names=["--old"],
+        help="Set the value.",
+    )
+    parser.add_argument(
+        "--gone",
+        action=DeprecatedAction,
+        base_action="store_true",
+        advice="Use --new instead.",
+        help="Turn it on.",
+    )
+    parser.add_argument(
+        "--retired",
+        action=DeprecatedAction,
+        base_action="store_true",
+        help="Turn it off.",
+    )
+    return parser
 
 
 # =============================================================================
@@ -248,6 +278,40 @@ def test_ml_api_options_reject_unknown_values(argv, capsys):
         build_args(argv, experimental=True)
     assert exc.value.code == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+# =============================================================================
+# Deprecated option names
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("argv", "warnings"),
+    [
+        (["--old", "1"], [call(f"--old {REMOVAL} Use --new instead.")]),
+        (["--new", "1"], []),
+        (["--gone"], [call(f"--gone {REMOVAL} Use --new instead.")]),
+        (["--retired"], [call(f"--retired {REMOVAL}")]),
+    ],
+    ids=["old_name", "new_name", "whole_option", "whole_option_without_advice"],
+)
+def test_deprecated_action_warns_only_for_deprecated_names(monkeypatch, argv, warnings):
+    mocks = patch_console(monkeypatch, "argparser", "warning")
+    deprecated_option_parser().parse_args(argv)
+    assert mocks["warning"].call_args_list == warnings
+
+
+def test_deprecated_alias_fills_the_same_dest(monkeypatch):
+    patch_console(monkeypatch, "argparser", "warning")
+    assert deprecated_option_parser().parse_args(["--old", "1"]).value == "1"
+
+
+def test_deprecated_action_adds_the_deprecation_to_the_help():
+    help_text = deprecated_option_parser().format_help()
+    assert "Set the value.\n" in help_text
+    assert "Deprecated alias: --old." in help_text
+    assert "DEPRECATED: Use --new instead." in help_text
+    assert "DEPRECATED: Will be removed in a future release." in help_text
 
 
 # =============================================================================

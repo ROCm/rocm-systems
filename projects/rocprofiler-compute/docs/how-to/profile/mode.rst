@@ -394,7 +394,6 @@ Raw performance counter data produced by the underlying
 
    Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
    ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
 
 
 .. _filtering:
@@ -412,7 +411,7 @@ Filtering options
 ``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   Note that this option cannot be used with ``--roof-only`` or ``--set``.
+   Note that this option cannot be used with ``--roofline`` or ``--set``.
 
 ``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
@@ -422,7 +421,7 @@ Filtering options
 
 ``--set``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
-   Cannot be used with ``--roof-only`` or ``--block``.
+   Cannot be used with ``--roofline`` or ``--block``.
    See :ref:`profiling-metric-sets`.
 
 .. tip::
@@ -613,7 +612,7 @@ Metric sets filtering
 
 A metrics set contains a subset of metrics that can be collected in a single pass. This filtering option minimizes profiling overhead by only collecting counters of interest.
 The `--set` filter option provides a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
-This option cannot be used with ``--roof-only`` and ``--block``.
+This option cannot be used with ``--roofline`` and ``--block``.
 
 .. code-block:: shell-session
 
@@ -686,7 +685,7 @@ Standalone roofline
 
 Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
 You don't need to include any additional roofline-specific options for roofline analysis.
-If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
+If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roofline`` option.
 This option checks if there is existing roofline benchmark data in the workload directory (``roofline.csv``):
 
 a) If found, skips microbenchmark execution;
@@ -695,7 +694,7 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 
 .. note::
 
-  ``--roof-only`` cannot be used with ``--block``, ``--set``, or ``--bench-only`` options.
+  ``--roofline`` cannot be used with ``--block``, ``--set``, or ``--roofline-bench-only``.
 
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
@@ -715,7 +714,7 @@ that contains both ``roofline.csv`` and application performance counters
 Roofline options (profile)
 --------------------------
 
-``--device``
+``--roofline-device``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
@@ -734,7 +733,7 @@ The following example demonstrates profiling roofline data only:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name occupancy --roof-only -- ./tests/occupancy -n 1048576 -b 256
+   $ rocprof-compute profile --name occupancy --roofline -- ./tests/occupancy -n 1048576 -b 256
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
    | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
@@ -789,7 +788,7 @@ Benchmark only
 --------------
 
 If you only want to run the roofline microbenchmark without profiling an application
-or collecting any performance counters, use the ``--bench-only`` option. No
+or collecting any performance counters, use the ``--roofline-bench-only`` option. No
 application run is required.
 
 This is useful for:
@@ -799,40 +798,41 @@ This is useful for:
 
 .. note::
 
-  ``--bench-only`` cannot be used with ``--block``, ``--set``, ``--roof-only``, or ``--no-roof`` options.
+  ``--roofline-bench-only`` cannot be used with ``--block``, ``--set``, ``--roofline``,
+  or ``--no-roof``.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name my_bench --bench-only
+   $ rocprof-compute profile --name my_bench --roofline-bench-only
 
-To target a specific GPU device, use ``--device``:
+To target a specific GPU device, use ``--roofline-device``:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name my_bench --bench-only --device 2
+   $ rocprof-compute profile --name my_bench --roofline-bench-only --roofline-device 2
 
 To regenerate benchmark data in an existing workload directory, point
 ``--output-directory`` at the workload path. This replaces the existing
 ``roofline.csv``, so it requires ``--overwrite``. Unlike a full profile,
-``--bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
+``--roofline-bench-only`` replaces only ``roofline.csv`` and leaves the rest of the
 workload (counter data, traces) untouched:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
+   $ rocprof-compute profile --roofline-bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
 
 .. note::
 
-   ``--bench-only`` writes ``roofline.csv`` only; rendering a roofline
+   ``--roofline-bench-only`` writes ``roofline.csv`` only; rendering a roofline
    chart additionally requires application performance counters from a
-   ``--roof-only`` (or regular profile) run. The intended workflow is to
-   profile first, then re-run ``--bench-only --overwrite`` against that workload
+   ``--roofline`` (or regular profile) run. The intended workflow is to
+   profile first, then re-run ``--roofline-bench-only --overwrite`` against that workload
    later to refresh stale peak values before analyzing:
 
    .. code-block:: shell-session
 
-      $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy
-      $ rocprof-compute profile --bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
+      $ rocprof-compute profile --name vcopy --roofline -- ./vcopy
+      $ rocprof-compute profile --roofline-bench-only --overwrite --output-directory workloads/vcopy/MI300X_A1
       $ rocprof-compute analyze --path workloads/vcopy/MI300X_A1
 
 .. _torch-operator-mapping:
