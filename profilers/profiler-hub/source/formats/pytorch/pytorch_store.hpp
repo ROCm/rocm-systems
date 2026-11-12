@@ -54,10 +54,11 @@ struct store_track_t
 // at.
 struct pytorch_store_t
 {
-    std::vector<store_track_t>   tracks;
-    std::vector<event_t>         events;  // file order
-    std::vector<memory_sample_t> memory;  // by event index
-    std::vector<bound_flow_t>    flows;   // by event index
+    std::vector<store_track_t>    tracks;
+    std::vector<event_t>          events;       // file order
+    std::vector<memory_sample_t>  memory;       // by event index
+    std::vector<bound_flow_t>     flows;        // by event index
+    std::vector<category_class_t> cat_classes;  // by category index
     std::uint64_t
         cpu_agent_id{};  // set by fill_catalog; 0 when no memory event is on the CPU
     std::string                                                   args;
