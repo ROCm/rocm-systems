@@ -75,6 +75,9 @@ public:
     void sqtt_simd_analysis(CppReturnInfo& info, class TokenGenerator& generator, class Stitcher& stitch) override;
 
 protected:
+    // Assigns an exec popcount to the oldest pending exec write (VALU if va, SALU otherwise) of the
+    // wave in slot wid. Ignored if count is 127 (invalid)
+    void send_exec_popcount(int wid, uint64_t count, bool va);
 
     static constexpr uint64_t SQTT_CFG_WAVES = 32;
     std::array<std::vector<gfx10::wave_t>, SQTT_CFG_WAVES> SIMD{};
@@ -89,9 +92,16 @@ protected:
     int tt_version = 0;
     bool exclude_barrier_wait = false;
 
+    struct wavepipe_t
+    {
+        pcinfo_t pc;
+        uint64_t dispatch_id;
+        uint32_t me;
+        uint32_t pipe;
+    };
     // data from all waves
-    std::unordered_map<uint64_t, pcinfo_t> running_waves{};
-    std::unordered_map<uint64_t, pcinfo_t> saved_waves{};
+    std::unordered_map<uint64_t, wavepipe_t> running_waves{};
+    std::unordered_map<uint64_t, wavepipe_t> saved_waves{};
 
     int dprate = 1;
     int derate = 1;

@@ -31,6 +31,16 @@ from BDF import BDF
 
 import amdsmi_cli_exceptions
 
+# Drivers whose absence the CLI explains: driver -> (device label, PCI vendor ID, PCI base
+# classes). The CPU's HSMP interface is an ACPI device, not a PCI function.
+DRIVER_DEVICES = {
+    "amdgpu": ("GPU", 0x1002, (0x03, 0x12)),  # display, processing accelerator
+    "hsmp_acpi": ("CPU", None, ()),
+    "ionic": ("AI NIC", 0x1DD8, (0x02,)),  # network controller
+    "bnxt_en": ("NIC", 0x14E4, (0x02,)),
+}
+HSMP_ACPI_DEVICES = Path("/sys/bus/acpi/devices")
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -204,39 +214,69 @@ class AMDSMIHelpers:
     def is_ainic_initialized(self):
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS
 
-    def is_brcm_nic_initialized(self):
-        """Returns True if a Broadcom NIC handle is enumerated.
+    def is_driver_loaded(self, driver):
+        """Returns True if *driver* (a DRIVER_DEVICES key) is loaded, even if the CLI did
+        not initialize it (e.g. CPU init turned off with AMDSMI_DISABLE_CPU_INIT)."""
+        if driver == "amdgpu":
+            return bool(self.is_amdgpu_initialized()) or self._is_module_live("amdgpu")
+        if driver == "hsmp_acpi":
+            # Either CPU driver (hsmp_acpi or amd_hsmp) creates /dev/hsmp
+            return bool(self.is_amd_hsmp_initialized()) or os.path.exists("/dev/hsmp")
+        return self._is_module_live(driver)
 
-        The result is cached on first call. The init flag is checked first to
-        short-circuit on systems where no NIC stack was initialized; otherwise
-        a single C-library probe is issued and memoized.
+    @staticmethod
+    def _is_module_live(module):
+        try:
+            return (Path("/sys/module") / module / "initstate").read_text().strip() == "live"
+        except OSError:
+            return False
+
+    def get_devices_without_driver(self, driver):
+        """Returns the devices present for *driver* while it is not loaded.
+
+        PCI addresses for GPUs and NICs, ACPI device names for the CPU; empty when the
+        driver is loaded or none of its hardware is present.
         """
-        if hasattr(self, "_brcm_nic_initialized_cached"):
-            return self._brcm_nic_initialized_cached
-        result = False
-        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
-            try:
-                result = len(self.get_nic_handles()) > 0
-            except amdsmi_interface.AmdSmiLibraryException:
-                result = False
-        self._brcm_nic_initialized_cached = result
-        return result
+        cache = self.__dict__.setdefault("_devices_without_driver", {})
+        if driver not in cache:
+            if self.is_driver_loaded(driver):
+                devices = []
+            elif driver == "hsmp_acpi":
+                devices = sorted(path.name for path in HSMP_ACPI_DEVICES.glob("AMDI0097:*"))
+            else:
+                _, vendor_id, base_classes = DRIVER_DEVICES[driver]
+                devices = self.get_pci_devices_without_driver(vendor_id, base_classes, driver)
+            cache[driver] = devices
+        return cache[driver]
 
-    def is_brcm_switch_initialized(self):
-        """Returns True if a Broadcom switch handle is enumerated.
+    def get_missing_drivers(self):
+        """Returns the drivers that are not loaded although their hardware is present."""
+        return [driver for driver in DRIVER_DEVICES if self.get_devices_without_driver(driver)]
 
-        The result is cached on first call.  See ``is_brcm_nic_initialized``.
+    def get_driver_notes(self, args):
+        """Returns a note for each missing driver of the command in *args*.
+
+        Only drivers for the device types the user selected (-g, -U/-O, -N) count, if any.
         """
-        if hasattr(self, "_brcm_switch_initialized_cached"):
-            return self._brcm_switch_initialized_cached
-        result = False
-        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
-            try:
-                result = len(self.get_switch_handles()) > 0
-            except amdsmi_interface.AmdSmiLibraryException:
-                result = False
-        self._brcm_switch_initialized_cached = result
-        return result
+        selected = set()
+        for option, drivers in (
+            ("gpu", ("amdgpu",)),
+            ("cpu", ("hsmp_acpi",)),
+            ("core", ("hsmp_acpi",)),
+            ("nic", ("ionic", "bnxt_en")),
+        ):
+            if getattr(args, option, None) is not None:
+                selected.update(drivers)
+        notes = []
+        for driver in getattr(args, "note_drivers", ()):
+            devices = self.get_devices_without_driver(driver)
+            if devices and (not selected or driver in selected):
+                label = DRIVER_DEVICES[driver][0]
+                notes.append(
+                    f"Note: {label} {' '.join(devices)}: {driver} driver not loaded"
+                    f" (sudo modprobe {driver})"
+                )
+        return notes
 
     def get_handles_by_processor_type(self, processor_type):
         """Get all processor handles of a given type across all sockets."""
@@ -248,14 +288,6 @@ class AMDSMIHelpers:
 
     def get_gpu_handles(self):
         return self.get_handles_by_processor_type(amdsmi_interface.AmdSmiProcessorType.AMD_GPU)
-
-    def get_nic_handles(self):
-        return self.get_handles_by_processor_type(amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_NIC)
-
-    def get_switch_handles(self):
-        return self.get_handles_by_processor_type(
-            amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_SWITCH
-        )
 
     def get_ainic_handles(self):
         return self.get_handles_by_processor_type(amdsmi_interface.AmdSmiProcessorType.AMD_AINIC)
@@ -389,14 +421,64 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_or_uuid(self, device_handle):
-        """Return the device CUID when available, falling back to the UUID."""
-        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
-        if identifier == "N/A":
-            identifier = self._query_or_na(
-                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        result = {
+            "derived_cuid": "N/A",
+            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "component_type": "UNKNOWN",
+            "auxiliary": "unknown",
+            "source": "UNKNOWN",
+            "identifier_kind": "unknown",
+            "cuid_metadata_status": "unknown",
+        }
+        try:
+            info = amdsmi_interface.amdsmi_get_gpu_cuid_info(device_handle)
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as error:
+            if not isinstance(error, amdsmi_exception.AmdSmiLibraryException):
+                result["cuid_metadata_status"] = "unsupported"
+            elif (
+                error.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            ):
+                result.update(
+                    component_type="N/A",
+                    auxiliary="N/A",
+                    source="N/A",
+                    cuid_metadata_status="not_supported",
+                )
+            else:
+                result["cuid_metadata_status"] = f"amdsmi_error_{error.get_error_code()}"
+            # Older libraries may provide the CUID-only API but not its metadata.
+            try:
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
+                return result
+            if cuid and cuid != "N/A":
+                result.update(derived_cuid=cuid, identifier_kind="cuid")
+            return result
+
+        cuid = info.get("derived")
+        if not cuid or cuid == "N/A":
+            result["cuid_metadata_status"] = "invalid_value"
+            return result
+        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result["component_type"] = info.get("component_type", "UNKNOWN")
+        source = info.get("source")
+        if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
+            result["source"] = source
+        else:
+            result["cuid_metadata_status"] = "partial"
+        auxiliary = info.get("auxiliary")
+        if isinstance(auxiliary, bool):
+            result["auxiliary"] = auxiliary
+        else:
+            result["cuid_metadata_status"] = "partial"
+        if include_primary:
+            result["primary_cuid"] = info.get("primary") or (
+                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
             )
-        return identifier
+        return result
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
@@ -477,12 +559,9 @@ class AMDSMIHelpers:
     def get_nic_choices(self):
         nic_choices = {}
         nic_choices_str = ""
-        nic_device_handles = []
         ainic_device_handles = []
 
         try:
-            # get_nic_handles returns the device_handles sorted for nic_id
-            nic_device_handles = self.get_nic_handles()
             ainic_device_handles = self.get_ainic_handles()
 
         except amdsmi_interface.AmdSmiLibraryException as e:
@@ -491,29 +570,26 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                    "Unable to get device choices, driver not initialized (IONIC_NIC, RDMA_NIC not found in modules)"
                 )
             else:
                 raise e
 
-        if len(nic_device_handles) == 0 and len(ainic_device_handles) == 0:
+        if len(ainic_device_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                "Unable to find any devices, check if driver is initialized (IONIC_NIC, RDMA_NIC not found in modules)"
             )
         else:
             # Handle spacing for the gpu_choices_str
-            max_padding = int(math.log10(len(nic_device_handles) + len(ainic_device_handles))) + 1
-
-            for nic_id, device_handle in enumerate(nic_device_handles):
-                nic_info = amdsmi_interface.amdsmi_get_nic_info(device_handle)
-                if nic_info:
-                    nic_choices, nic_choices_str = self.nic_choices_from_nic_info(
-                        nic_info, nic_id, device_handle, max_padding, nic_choices, nic_choices_str
-                    )
+            max_padding = int(math.log10(len(ainic_device_handles))) + 1
 
             for nic_id, device_handle in enumerate(ainic_device_handles):
-                nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle)
-                nic_id = nic_id + len(nic_device_handles)
+                try:
+                    nic_info = amdsmi_interface.amdsmi_get_ainic_info(device_handle)
+                except amdsmi_interface.AmdSmiLibraryException as e:
+                    # One failing NIC must not stop the parser, and every subcommand builds it.
+                    logging.debug(f"Unable to read NIC {nic_id} identity: {e}")
+                    nic_info = {"bdf": "N/A", "UUID": "N/A"}
                 nic_choices, nic_choices_str = self.nic_choices_from_nic_info(
                     nic_info, nic_id, device_handle, max_padding, nic_choices, nic_choices_str
                 )
@@ -524,59 +600,41 @@ class AMDSMIHelpers:
 
         return (nic_choices, nic_choices_str)
 
-    # BRCM POC to get switch choices
-    def get_switch_choices(self):
-        switch_choices = {}
-        switch_choices_str = ""
-        device_handles = []
+    @staticmethod
+    def is_valid_ampp_field_name(name) -> bool:
+        """Check a candidate AMPP field name against the same constraints
+        amdsmi_configure_ampp_profile()/the driver enforce: a non-empty str
+        whose UTF-8 encoding fits in AMDSMI_MAX_STRING_LENGTH bytes.
 
+        Shared between the CLI's --ampp-configure argv parsing
+        (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+        """
+        if not isinstance(name, str) or not name:
+            return False
         try:
-            # get_switch_handles returns the device_handles sorted for switch_id
-            device_handles = self.get_switch_handles()
+            # A str may contain a lone UTF-16 surrogate (e.g. via
+            # surrogateescape on argv, or from JSON), which is a valid
+            # Unicode code point but not valid UTF-8.
+            return len(name.encode("utf-8")) < amdsmi_interface.AMDSMI_MAX_STRING_LENGTH
+        except UnicodeEncodeError:
+            return False
 
-        except amdsmi_interface.AmdSmiLibraryException as e:
-            if e.err_code in (
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
-                amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
-            ):
-                logging.info(
-                    "Unable to get device choices, driver not initialized (BRCM_switch not found in modules)"
-                )
-
-            else:
-                raise e
-
-        if len(device_handles) == 0:
-            logging.info(
-                "Unable to find any devices, check if driver is initialized (BRCM_switch not found in modules)"
-            )
-        else:
-            # Handle spacing for the gpu_choices_str
-            max_padding = int(math.log10(len(device_handles))) + 1
-
-            for switch_id, device_handle in enumerate(device_handles):
-                bdf = amdsmi_interface.amdsmi_get_switch_device_bdf(device_handle)
-                uuid = amdsmi_interface.amdsmi_get_switch_device_uuid(device_handle)
-
-                switch_choices[str(switch_id)] = {
-                    "bdf": bdf,
-                    "UUID": uuid,
-                    "Device Handle": device_handle,
-                }
-
-                if switch_id == 0:
-                    id_padding = max_padding
-                else:
-                    id_padding = max_padding - int(math.log10(switch_id))
-                switch_choices_str += (
-                    f"ID: {switch_id}{' ' * id_padding}| BDF: {bdf} | UUID: {uuid}\n"
-                )
-
-            # Add the all option to the gpu_choices
-            switch_choices["all"] = "all"
-            switch_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
-
-        return (switch_choices, switch_choices_str)
+    @staticmethod
+    def parse_ampp_field_value(value) -> Optional[int]:
+        """Parse and range-check a candidate AMPP field value the same way
+        amdsmi_configure_ampp_profile() will (it assigns straight into an
+        int64 ctypes struct field). Returns the parsed int, or None if
+        `value` isn't representable as an int64 -- int(value) itself raises
+        TypeError/ValueError/OverflowError for a non-numeric or
+        out-of-range value (e.g. bare JSON Infinity/NaN)."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not -(2**63) <= parsed < 2**63:
+            return None
+        return parsed
 
     @staticmethod
     def is_UUID(uuid_question: str) -> bool:
@@ -670,7 +728,7 @@ class AMDSMIHelpers:
             (False, str): Return False, and the first input that failed to be converted
         """
         if "all" in nic_selections:
-            return (True, self.get_nic_handles() + self.get_ainic_handles())
+            return (True, self.get_ainic_handles())
 
         if isinstance(nic_selections, str):
             nic_selections = [nic_selections]
@@ -682,21 +740,27 @@ class AMDSMIHelpers:
         for nic_selection in nic_selections:
             valid_nic_choice = False
 
+            # ID and UUID are matched against every choice before the selection is read as a
+            # BDF: BDF() raises for anything that is not one, which hid every ID but the first.
             for nic_id, nic_info in nic_choices.items():
-                bdf = nic_info["bdf"]
-                uuid = nic_info["UUID"]
-                device_handle = nic_info["Device Handle"]
-
-                # Check if passed nic is a nic ID or UUID
-                if nic_selection == nic_id or nic_selection.lower() == uuid:
-                    selected_device_handles.append(device_handle)
+                if nic_selection == nic_id or nic_selection.lower() == nic_info["UUID"]:
+                    selected_device_handles.append(nic_info["Device Handle"])
                     valid_nic_choice = True
                     break
-                else:  # Check if nic passed is a BDF object
-                    if BDF(nic_selection) == BDF(bdf):
-                        selected_device_handles.append(device_handle)
-                        valid_nic_choice = True
-                        break
+
+            if not valid_nic_choice:
+                try:
+                    selected_bdf = BDF(nic_selection)
+                except BDF.BDFError:
+                    logging.debug(
+                        f"AMDSMIHelpers.get_device_handles_from_nic_selections - {nic_selection} is not a BDF"
+                    )
+                else:
+                    for nic_info in nic_choices.values():
+                        if nic_info["bdf"] != "N/A" and selected_bdf == BDF(nic_info["bdf"]):
+                            selected_device_handles.append(nic_info["Device Handle"])
+                            valid_nic_choice = True
+                            break
 
             if not valid_nic_choice:
                 logging.debug(
@@ -704,63 +768,6 @@ class AMDSMIHelpers:
                 )
 
                 return False, nic_selection
-
-        return True, selected_device_handles
-
-    # BRCM POC to get device handles from switch selections
-    def get_device_handles_from_switch_selections(
-        self, switch_selections: List[str], switch_choices=None
-    ):
-        """Convert provided switch_selections to device_handles
-
-        Args:
-            switch_selections (list[str]): Selected switch ID(s), BDF(s), or UUID(s):
-                    ex: ID:0  | BDF:0000:23:00.0 | UUID:ffffffff-0000-1000-0000-000000000000
-            switch_choices (dict{switch_choices}): This is a dictionary of the possible switch_choices
-        Returns:
-            (True, list[device_handles]): Returns a list of all the switch_selections converted to
-                amdsmi device_handles
-            (False, str): Return False, and the first input that failed to be converted
-        """
-        if "all" in switch_selections:
-            return (True, self.get_switch_handles())
-
-        if isinstance(switch_selections, str):
-            switch_selections = [switch_selections]
-
-        if switch_choices is None:
-            switch_choices = self.get_switch_choices()[0]
-
-        selected_device_handles = []
-        for switch_selection in switch_selections:
-            valid_switch_choice = False
-
-            for switch_id, switch_info in switch_choices.items():
-                bdf = switch_info["bdf"]
-                uuid = switch_info["UUID"]
-                device_handle = switch_info["Device Handle"]
-
-                # Check if passed switch is a switch ID or UUID
-                if switch_selection == switch_id or switch_selection.lower() == uuid:
-                    selected_device_handles.append(device_handle)
-                    valid_switch_choice = True
-                    break
-                else:  # Check if switch passed is a BDF object
-                    try:
-                        if BDF(switch_selection) == BDF(bdf):
-                            selected_device_handles.append(device_handle)
-                            valid_switch_choice = True
-                            break
-                    except Exception:
-                        # Ignore exception when checking if the gpu_choice is a BDF
-                        pass
-
-            if not valid_switch_choice:
-                logging.debug(
-                    f"AMDSMIHelpers.get_device_handles_from_switch_selections - Unable to convert {switch_selection}"
-                )
-
-                return False, switch_selection
 
         return True, selected_device_handles
 
@@ -1028,88 +1035,6 @@ class AMDSMIHelpers:
         else:
             return False, args.gpu
 
-    def handle_switchs(self, args, logger, subcommand):
-        """This function will run execute the subcommands based on the number
-            of gpus passed in via args.
-        params:
-            args - argparser args to pass to subcommand
-            current_platform_args (list) - GPU supported platform arguments
-            current_platform_values (list) - GPU supported values for the arguments
-            logger (AMDSMILogger) - Logger to print out output
-            subcommand (AMDSMICommands) - Function that can handle multiple gpus
-
-        return:
-            tuple(bool, device_handle) :
-                bool - True if executed subcommand for multiple devices
-                device_handle - Return the device_handle if the list of devices is a length of 1
-            (handled_multiple_gpus, device_handle)
-
-        """
-
-        if isinstance(args.switch, list):
-            if len(args.switch) > 1:
-                for device_handle in args.switch:
-                    device_type = amdsmi_interface.amdsmi_get_processor_type(device_handle)
-                    if (
-                        device_type["processor_type"]
-                        == amdsmi_interface.AmdSmiProcessorType(
-                            amdsmi_interface.amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH
-                        ).name
-                    ):
-                        self.run_device_subcommand(subcommand, args, switch=device_handle)
-
-                logger.print_output(multiple_device_enabled=True)
-                return True, args.switch
-            elif len(args.switch) == 1:
-                args.switch = args.switch[0]
-                return False, args.switch
-            else:
-                logging.debug("args.switch has an empty list")
-                return True, args.switch
-        else:
-            return False, args.switch
-
-    def handle_brcm_nics(self, args, logger, subcommand):
-        """This function will run execute the subcommands based on the number
-            of nics passed in via args.
-        params:
-            args - argparser args to pass to subcommand
-            current_platform_args (list) - nic supported platform arguments
-            current_platform_values (list) - nic supported values for the arguments
-            logger (AMDSMILogger) - Logger to print out output
-            subcommand (AMDSMICommands) - Function that can handle multiple nics
-
-        return:
-            tuple(bool, device_handle) :
-                bool - True if executed subcommand for multiple devices
-                device_handle - Return the device_handle if the list of devices is a length of 1
-            (handled_multiple_gpus, device_handle)
-
-        """
-
-        if isinstance(args.nic, list):
-            if len(args.nic) > 1:
-                for device_handle in args.nic:
-                    device_type = amdsmi_interface.amdsmi_get_processor_type(device_handle)
-                    if (
-                        device_type["processor_type"]
-                        == amdsmi_interface.AmdSmiProcessorType(
-                            amdsmi_interface.amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC
-                        ).name
-                    ):
-                        self.run_device_subcommand(subcommand, args, nic=device_handle)
-
-                logger.print_output(multiple_device_enabled=True)
-                return True, args.nic
-            elif len(args.nic) == 1:
-                args.nic = args.nic[0]
-                return False, args.nic
-            else:
-                logging.debug("args.nic has an empty list")
-                return True, args.nic
-        else:
-            return False, args.nic
-
     def handle_ainics(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of nics passed in via args.
@@ -1310,22 +1235,6 @@ class AMDSMIHelpers:
             "Unable to find gpu ID from device_handle",
         )
 
-    def get_nic_id_from_device_handle(self, input_device_handle):
-        """Get the nic index from the device_handle.
-        get_nic_handles() returns the list of device_handles in order of nic_index
-        """
-        device_handles = self.get_nic_handles()
-        if len(device_handles) == 0:
-            return -1
-        for nic_index, device_handle in enumerate(device_handles):
-            if input_device_handle.value == device_handle.value:
-                return nic_index
-        raise amdsmi_exception.AmdSmiParameterException(
-            input_device_handle,
-            amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find nic ID from device_handle",
-        )
-
     def get_ainic_id_from_device_handle(self, input_device_handle):
         """Get the ainic index from the device_handle.
         get_ainic_handles() returns the list of device_handles in order of ainic_index
@@ -1340,20 +1249,6 @@ class AMDSMIHelpers:
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
             "Unable to find nic ID from device_handle",
-        )
-
-    def get_switch_id_from_device_handle(self, input_device_handle):
-        """Get the nic index from the device_handle.
-        get_switch_handles() returns the list of device_handles in order of nic_index
-        """
-        device_handles = self.get_switch_handles()
-        for switch_index, device_handle in enumerate(device_handles):
-            if input_device_handle.value == device_handle.value:
-                return switch_index
-        raise amdsmi_exception.AmdSmiParameterException(
-            input_device_handle,
-            amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find switch ID from device_handle",
         )
 
     def get_cpu_id_from_device_handle(self, input_device_handle):
@@ -1638,14 +1533,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -1757,8 +1652,8 @@ class AMDSMIHelpers:
     def get_fan_support(self):
         """Check if fan control is supported and return dynamic range info for all devices.
 
-        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
-        legacy hwmon GPUs. Results are cached to improve CLI performance.
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and falls
+        back to the legacy hwmon range. Results are cached to improve CLI performance.
 
         Returns:
             str: Range description for all GPUs, "N/A" if not supported.
@@ -1779,29 +1674,19 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
 
-                # Determine the range based on interface type
-                if max_speed <= 100:
-                    # This is likely a gpu_od GPU - try to get actual min from sysfs
-                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
-                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+                # Advertise the range the set path validates against: the gpu_od
+                # OD_RANGE where present, otherwise the legacy hwmon 0-255
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
 
-                    if has_gpu_od:
-                        # Use shared helper function to parse OD_RANGE
-                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
-                        if min_speed is not None:
-                            # Successfully parsed - use the actual range from sysfs
-                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
-                        else:
-                            # Parsing failed - fallback to 0-max_speed
-                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
-                    else:
-                        # gpu_od directory doesn't exist but max_speed <= 100
-                        # Could be an edge case - use 0-max_speed
-                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                min_speed = None
+                if has_gpu_od:
+                    min_speed, max_speed = self.parse_gpu_od_fan_range(gpu_od_path)
+
+                if min_speed is not None:
+                    gpu_ranges.append((idx, f"{min_speed}-{max_speed} or 0-100%%"))
                 else:
-                    # Legacy hwmon GPU (0-255)
                     gpu_ranges.append((idx, "0-255 or 0-100%%"))
 
             except amdsmi_interface.AmdSmiLibraryException as e:
@@ -2180,8 +2065,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -2201,6 +2088,30 @@ class AMDSMIHelpers:
             except Exception as _:
                 continue
         return pci_devices
+
+    @staticmethod
+    def get_pci_devices_without_driver(
+        vendor_id, base_classes, driver, pci_devices_path=Path("/sys/bus/pci/devices")
+    ):
+        """Returns PCI addresses of *vendor_id* functions in *base_classes* that are not
+        bound to a driver other than *driver*. Reads sysfs, so it works without the driver.
+        """
+        devices = []
+        for device in sorted(pci_devices_path.glob("*")):
+            try:
+                if int((device / "vendor").read_text(encoding="ascii"), 16) != vendor_id:
+                    continue
+                pci_class = int((device / "class").read_text(encoding="ascii"), 16)
+            except (OSError, ValueError):
+                continue
+            # sysfs "class" is 0xBBSSPP; Instinct GPUs (e.g. MI300, MI450) use base class 0x12
+            if (pci_class >> 16) not in base_classes:
+                continue
+            bound = device / "driver"
+            if bound.exists() and bound.resolve().name != driver:
+                continue  # owned by another driver, e.g. vfio-pci
+            devices.append(device.name)
+        return devices
 
     def progressbar(self, it, prefix="", size=60, out=sys.stdout, add_newline=False):
         count = len(it)
@@ -2437,7 +2348,26 @@ class AMDSMIHelpers:
 
         return True
 
-    def _severity_as_string(self, error_severity, notify_type, for_filename):
+    def _severity_as_string(self, error_severity, notify_type, for_filename, source=None):
+        if source == "fabric":
+            # IFoE reports a link going down as non-fatal uncorrected and a link
+            # coming back up as non-fatal corrected; there is no other carrier.
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "fabric-linkdown"
+                return "FABRIC-LINKDOWN"
+            if error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "fabric-linkup"
+                return "FABRIC-LINKUP"
+            if error_severity == "fatal":
+                if for_filename:
+                    return "fabric-fatal"
+                return "FABRIC-FATAL"
+            if for_filename:
+                return "fabric-unknown"
+            return "FABRIC-UNKNOWN"
+
         if error_severity == "non_fatal_uncorrected":
             if for_filename:
                 return "uncorrected"
@@ -2484,6 +2414,7 @@ class AMDSMIHelpers:
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
+                    entry.get("source"),
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
@@ -2545,7 +2476,8 @@ class AMDSMIHelpers:
             # Determine prefix/severity
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            prefix = self._severity_as_string(error_severity, notify_type, True)
+            source = entry.get("source")
+            prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
             count = cper_counter[0] + 1
@@ -2584,7 +2516,7 @@ class AMDSMIHelpers:
             gpu_id = "-"
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            severity = self._severity_as_string(error_severity, notify_type, False)
+            severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
                 gpu_id,
@@ -2733,6 +2665,7 @@ class AMDSMIHelpers:
                             entry.get("error_severity", "Unknown"),
                             entry.get("notify_type", "Unknown"),
                             False,
+                            entry.get("source"),
                         )
                         json_rows.append(
                             {
@@ -2916,6 +2849,9 @@ class AMDSMIHelpers:
         collected_json_rows = []
         entries = {}
         cper_data = []
+        gpu_cper_unavailable = False
+        gpu_cper_error_code = None
+
         while True:
             try:
                 entries, new_cursor, cper_data, _status_code = (
@@ -2936,11 +2872,11 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-                        logger.format,
-                        e.get_error_code(),
-                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
-                    ) from e
+                    # GPU CPER unavailable; try fabric before raising
+                    gpu_cper_unavailable = True
+                    gpu_cper_error_code = e.get_error_code()
+                    logging.debug(f"GPU CPER unavailable: {e}")
+                    break
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
@@ -2964,6 +2900,88 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
+            )
+
+        # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
+        # separate list so --follow does not interleave them with the GPU cursors.
+        fabric_cursors = getattr(args, "fabric_cursor", None)
+        if fabric_cursors is None:
+            fabric_cursors = []
+            args.fabric_cursor = fabric_cursors
+        while len(fabric_cursors) <= gpu_idx:
+            fabric_cursors.append(0)
+
+        fabric_has_more = False
+        while True:
+            prev_fabric_cursor = fabric_cursors[gpu_idx]
+            try:
+                fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
+                    amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                        device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
+                    )
+                )
+                logging.debug(
+                    f"fabric_cper_entries | entries: {fabric_entries}, status: {fabric_status_code}"
+                )
+                num_entries = num_entries + len(fabric_entries)
+
+                # Check if the status indicates more data is available or if we're done
+                fabric_has_more = (
+                    fabric_status_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing fabric CPER. This command requires elevation"
+                    ) from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug("Fabric CPER not supported on this device")
+                    break
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_OUT_OF_RESOURCES
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Fabric CPER entries exceed internal buffer capacity",
+                    ) from e
+                logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
+                break
+
+            # Only update cursor if we got entries or if the library advanced it (non-zero).
+            # When cursor returns 0 with no entries, it means "end of current data" —
+            # preserve the last valid cursor so --follow doesn't restart from 0.
+            if len(fabric_entries) > 0 or new_fabric_cursor != 0:
+                fabric_cursors[gpu_idx] = new_fabric_cursor
+
+            # Emit output if we have entries
+            if len(fabric_entries) > 0:
+                self._emit_cper_output(
+                    fabric_entries,
+                    fabric_cper_data,
+                    device_handle,
+                    args,
+                    logger,
+                    collected_json_rows,
+                    emit_inline,
+                    cper_counter,
+                )
+
+            if not fabric_has_more:
+                break
+
+            if len(fabric_entries) == 0 and fabric_cursors[gpu_idx] == prev_fabric_cursor:
+                break
+
+        if gpu_cper_unavailable and num_entries == 0 and not args.follow:
+            raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                logger.format,
+                gpu_cper_error_code,
+                detail="Error accessing CPER files. This command requires CPER to be enabled.",
             )
 
         if num_entries == 0 and not args.follow:
@@ -3362,6 +3380,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 
@@ -3436,6 +3458,90 @@ class AMDSMIHelpers:
                     "message": error_msg,
                 }
             return error_msg
+
+    # CLI-facing full names for the library's internal "PB"/"FB" strings
+    # (amdsmi_interface.py's own string contract stays unchanged).
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+    NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
+        """Validate and set the NPM balancing mode for a node.
+
+        Args:
+            node_handle: Node handle (system-wide, not per-GPU)
+            requested_mode (str): "POWER_BALANCING" or "FREQUENCY_BALANCING"
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        if node_handle is None:
+            message = "No node handle available; cannot set balancing mode"
+            self.error_collector.record(int(amdsmi_cli_exceptions.AmdSmiExitCode.DEVICE_NOT_FOUND))
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "error", "message": message}
+            return message
+
+        # Pre-check NPM enablement, mirroring validate_and_set_node_power_limit():
+        # amdsmi_set_npm_balancing_mode() reports both "NPM disabled" and
+        # "board/mode sysfs file missing/unreadable while NPM is enabled" as
+        # the same AMDSMI_STATUS_NOT_SUPPORTED. Checking status up front lets
+        # the former be reported unambiguously.
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                message = "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode"
+                self.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "requested_mode": requested_mode,
+                        "error": "AMDSMI_STATUS_NOT_SUPPORTED",
+                        "message": message,
+                    }
+                return message
+        except amdsmi_exception.AmdSmiLibraryException:
+            # NPM enablement couldn't be determined (e.g. npm_status sysfs file
+            # unreadable); fall through and let the set call below report its
+            # own error rather than masking it with a pre-check failure.
+            pass
+
+        try:
+            amdsmi_interface.amdsmi_set_npm_balancing_mode(
+                node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
+            )
+            message = f"Successfully set NPM balancing mode to {requested_mode}"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "success", "balancing_mode": requested_mode, "message": message}
+            return message
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
+            ):
+                message = (
+                    f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
+                    f"{requested_mode} is not supported on this platform"
+                )
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                message = (
+                    "NPM balancing mode is not supported on this node; cannot set balancing mode"
+                )
+            else:
+                message = f"[{e.get_error_info(detailed=False)}] Unable to set NPM balancing mode to {requested_mode}"
+            self.error_collector.record_library_error(e.get_error_code())
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_mode": requested_mode,
+                    "error": e.get_error_info(detailed=False),
+                    "message": message,
+                }
+            return message
 
     def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
         """Validate and set the NPM (Node Power Management) power limit for a node.

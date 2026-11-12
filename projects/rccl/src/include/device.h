@@ -247,7 +247,15 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
+#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
+static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
+              "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
+
+// RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
+__host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
+  return (connFlags & NCCL_GPU_PRODUCER) == 0;
+}
 
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
@@ -288,7 +296,26 @@ struct ncclConnInfo {
   uint32_t* next_hdp_reg; // Next GPU in ring (for p2p transport use only)
   uint32_t* curr_hdp_reg; // Current GPU's HDP register
   ncclNetDeviceHandle_t netDeviceHandle;
+  // Net recv only: RO=0 GPU flags, one per QP, each written by the remote NIC
+  // after the payload it carried on that QP. When set, the GPU waits until the
+  // flags selected by gdrFlushSeq[step % NCCL_STEPS] reach its sequence instead
+  // of the proxy issuing a GDR flush. Both live in local VRAM.
+  uint64_t* gdrFlushFlag;
+  uint64_t* gdrFlushSeq;
 };
+
+// A gdrFlushSeq entry packs the flag value in its low bits with the per-QP
+// flags that must reach it: `count` consecutive flags starting at flag `first`.
+// Zero means nothing to wait for.
+#define NCCL_GDR_FLUSH_SEQ_BITS 48
+#define NCCL_GDR_FLUSH_SEQ_MASK ((1ULL << NCCL_GDR_FLUSH_SEQ_BITS) - 1)
+#define NCCL_GDR_FLUSH_FIRST_SHIFT 48
+#define NCCL_GDR_FLUSH_COUNT_SHIFT 56
+// Byte distance between per-QP flags: each flag sits alone in a GPU L2
+// cacheline so NIC writes and GPU polls of different QPs never share one.
+#define NCCL_GDR_FLUSH_FLAG_STRIDE 128
+// Most per-QP flags one step can wait on; the GPU polls them all at once.
+#define NCCL_GDR_FLUSH_MAX_WAIT_QPS 8
 
 struct ncclProxyConnector {
   bool initialized;
@@ -693,6 +720,7 @@ struct ncclKernelComm {
   int node;
   int nNodes;
   int buffSizes[NCCL_NUM_PROTOCOLS];
+  int p2pLl128BuffSize;
   int p2pChunkSize;
   bool p2pCrossClique;
   int isAllNvlink;
@@ -700,6 +728,10 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+  int tdmSimpleReduceEnable; // RCCL: route reduction-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
@@ -755,6 +787,31 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   return n;
 }
 
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
+  int total = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
+    const uint64_t word = mask.masks[i];
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
+    }
+    if (WARP_SIZE < 64) {
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
+      }
+    }
+    total += __popcll(word);
+  }
+  return -1;
+}
+
+#define RCCL_DEV_FLAG_PROFILER 0x1 // profiler plugin loaded
+#define RCCL_DEV_FLAG_PROGRESS 0x2 // comm->deviceCountersBlock is allocated iff device progress counters are enabled
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED
@@ -762,6 +819,7 @@ struct alignas(16) ncclDevKernelArgs {
 #endif
   struct channelMasks channelMask;
   enum ncclDevWorkStorageType workStorageType;
+  uint8_t devFlags; // RCCL_DEV_FLAG_* bits; uses the padding before workMask, so sizeof is unchanged
   uint32_t workMask;
   void* workBuf;
   // A channel's first batch is at `blockIdx.x`. Use `nextJump` to follow rest of list.
@@ -940,7 +998,7 @@ extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 // Arch each unroll factor's device functions were compiled for, or nullptr when
 // the unroll carries no arch restriction. Neither table implies the other, so both
 // have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// out. BUILD_ALL_UNROLLS does not clear the pin.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py

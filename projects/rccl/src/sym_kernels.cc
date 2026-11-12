@@ -35,7 +35,10 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_HierLsaST |
+                                   1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -58,13 +61,19 @@ constexpr uint32_t kernelMask_LSA =
 
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
+                                    1 << ncclSymkKernelId_AllGather_HierLsaTmaST |
                                     1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
                                     1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
+
+// Needs the LSA team to factor into equal-size packages
+constexpr uint32_t kernelMask_Hier =
+  1 << ncclSymkKernelId_AllGather_HierLsaST | 1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;
@@ -78,6 +87,10 @@ int ncclSymkTmaKernelMask() {
 
 int ncclSymkGinKernelMask() {
   return kernelMask_Gin;
+}
+
+int ncclSymkLsaKernelMask() {
+  return kernelMask_LSA;
 }
 
 int ncclSymkAGKernelMask() {
@@ -111,6 +124,12 @@ bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t n
     bytePerChunk = ncclSymkMultimemDeepBytePerChunk;
     chunkMod = 1;
     break;
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    // Each chunk goes through its own single-block bcast<Deep=true>(), so the first one reaches the 16 B deep
+    // tier whatever the block count; the 256 B tier may still be skipped. Deep unrolls that tier 4x.
+    bytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, 4 * ncclSymkUnrollPacks);
+    chunkMod = 1;
+    break;
   default:
     WARN("Unexpected kernel id %d in ncclSymkTmaDeepEligible", (int)k);
     return false;
@@ -134,11 +153,19 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
+
+// [RCCL] Anvil SDMA reaches a GIN peer only through its slot in this rank's LSA window, and every
+// rail peer of the GIN kernels is outside the LSA team.
+static bool ncclSymkGinBackendUnsupported(struct ncclComm* comm) {
+  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+  return ncclGetRailedGinType(comm, &ginType) == ncclSuccess && ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+}
 // [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
-// Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
+// Data Mover on gfx1250. On by default as in NCCL 2.31; ncclSymkTmaAvailable() still
+// confines them to gfx1250 builds whose SDK ships the TDM descriptor header.
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
-NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
+NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 1)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
   if (!ncclParamSymTmaEnable()) return false;
@@ -200,6 +227,68 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 
 extern int64_t ncclParamSymCTAs();
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
+// shared LL slots and blockDim, which peers must agree on, so every rank has to share this arch.
+bool ncclSymkIsGfx950(struct ncclComm* comm) {
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
+         IsArchMatch(comm->archName, "gfx950");
+}
+
+// The partition-mode AllGather tuning is fitted to gfx1250 and must not reach other architectures.
+// Peers must pick the same kernel, so every rank has to share this arch.
+bool ncclSymkIsGfx1250(struct ncclComm* comm) {
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
+         IsArchMatch(comm->archName, "gfx1250");
+}
+#endif
+
+// The hierarchical AllGather is tuned and validated only on gfx1250 in partition mode.
+static bool ncclSymkAgHierAvailable(struct ncclComm* comm) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  return ncclSymkIsGfx1250(comm) && comm->hasMloPart;
+#else
+  (void)comm;
+  return false;
+#endif
+}
+
+static bool sameCard(struct ncclPeerInfo const& a, struct ncclPeerInfo const& b) {
+  return a.hostHash == b.hostHash && (a.busId & ~0xfLL) == (b.busId & ~0xfLL);
+}
+
+// How many consecutive ranks share a physical device.
+static int computeHierScaleInSize(struct ncclComm* comm) {
+  struct ncclPeerInfo* peerInfo = comm->peerInfo;
+  if (peerInfo == nullptr || comm->nRanks < 2) return 0;
+
+  int size = 1;
+  while (size < comm->nRanks && sameCard(peerInfo[size], peerInfo[0])) size++;
+  if (size < 2 || size == comm->nRanks || comm->nRanks % size != 0) return 0;
+
+  for (int r = 1; r < comm->nRanks; r++) {
+    if (sameCard(peerInfo[r], peerInfo[r - 1]) != (r % size != 0)) return 0;
+  }
+  INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", size, comm->nRanks);
+  return size;
+}
+
+// Packages the hierarchical AllGather spans, or 0 where it can't run: it needs gfx1250 in partition
+// mode and an LSA team of at least two equal packages, so there is a cross-package hop to save.
+static int ncclSymkAgHierGroups(struct ncclComm* comm) {
+  int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  int lsaRanks = ncclTeamLsa(comm).nRanks;
+  if (!ncclSymkAgHierAvailable(comm) || scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) return 0;
+  return lsaRanks / scaleIn;
+}
+
+int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks) {
+  int nGroups = ncclSymkAgHierGroups(comm);
+  if (nGroups == 0) return nBlocks;
+  int nUsed = ncclSymkAgHierG0Blocks(nBlocks, nGroups) + (nGroups - 1) * ncclSymkAgHierGroupBlocks(nBlocks, nGroups);
+  return std::min(nBlocks, nUsed);
+}
+
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   // ncclTeamLsa() below calls this internally but drops the error code so we do it here.
   NCCLCHECK(ncclDevrInitOnce(comm));
@@ -207,27 +296,57 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   struct ncclSymkState* symk = &comm->symkState;
   if (!symk->initialized) {
     symk->initialized = true;
+    symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    int agHierGroups = ncclSymkAgHierGroups(comm);
+    if (ncclSymkAgHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
+      INFO(NCCL_INIT,
+           "Symmetric hierarchical AllGather off: ranks do not form two or more consecutive, equal-size groups "
+           "per physical device (nRanks %d)", comm->nRanks);
+    }
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =
       ncclNvlsSymmetricMultimemEnabled(comm) && ncclTeamLsa(comm).nRanks > 2 && !comm->p2pCrossClique;
     reqs.lsaMultimem = symk->hasLsaMultimem;
-    reqs.lsaBarrierCount = ncclSymkMaxBlocks;
+    reqs.lsaBarrierCount = agHierGroups > 0 ? std::max(ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks) : ncclSymkMaxBlocks;
     reqs.ginStrongSignalsRequired = false;
     reqs.ginVaSignalsRequired = false;
 
+    // Sized for the widest LL launch any collective will use, since one shared buffer is allocated
+    // here before the first collective is known. Doubling the width costs 4 MiB on an 8-rank comm.
+    int llThreads = ncclSymkMaxThreads;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    if (ncclSymkIsGfx950(comm)) llThreads = ncclSymkGfx950LLThreads;
+#endif
+
     struct ncclDevResourceRequirements lla2aReq;
     ncclLLA2ACreateRequirement(ncclSymkMaxBlocks,
-                               ncclLLA2ACalcSlots(ncclTeamLsa(comm).nRanks * ncclSymkMaxThreads, ncclSymkLLMaxEltSize),
+                               ncclLLA2ACalcSlots(ncclTeamLsa(comm).nRanks * llThreads, ncclSymkLLMaxEltSize),
                                &symk->kcomm.lsaLLA2A, &lla2aReq);
     lla2aReq.next = reqs.resourceRequirementsList;
     reqs.resourceRequirementsList = &lla2aReq;
+
+    struct ncclDevResourceRequirements hierPushFlagsReq = {};
+    if (agHierGroups > 0) {
+      hierPushFlagsReq.bufferSize = size_t(ncclSymkAgHierMaxBlocks) * agHierGroups * sizeof(uint64_t);
+      hierPushFlagsReq.bufferAlign = 128;
+      hierPushFlagsReq.outBufferHandle = &symk->kcomm.hierPushFlags;
+      hierPushFlagsReq.next = reqs.resourceRequirementsList;
+      reqs.resourceRequirementsList = &hierPushFlagsReq;
+    }
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
     struct ncclDevResourceRequirements ginOutboxReq = {};
     struct ncclDevResourceRequirements rsGinAccumReq = {};
     struct ncclDevResourceRequirements railSignalReq = {};
-    if (ncclParamSymGinKernelsEnable() && ncclTeamLsa(comm).nRanks < comm->nRanks) {
+    const bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
+    symk->ginBackendUnsupported = needGin && ncclSymkGinBackendUnsupported(comm);
+    if (symk->ginBackendUnsupported && ncclParamSymGinKernelsEnable()) {
+      INFO(NCCL_INIT, "Symmetric GIN kernels disabled: the Anvil SDMA GIN backend cannot reach rail peers outside "
+                      "the LSA team (lsaSize=%d, nRanks=%d)",
+           ncclTeamLsa(comm).nRanks, comm->nRanks);
+    }
+    if (ncclParamSymGinKernelsEnable() && needGin && !symk->ginBackendUnsupported) {
       int maxBlocks;
       size_t bufSize;
       getRequirements_gin(comm, &maxBlocks, &bufSize);
@@ -371,10 +490,12 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   // Tma kernel degrades to normal selection instead of ending up with an empty mask.
   if (ncclSymkTmaForced(comm) && (kmask & kernelMask_Tma) != 0) kmask &= kernelMask_Tma;
 
-  bool hasGin = ncclParamSymGinKernelsEnable() != 0;
+  bool hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported;
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
+
+  if (ncclSymkAgHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
   return kmask;
 }
 
@@ -386,6 +507,77 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
 
   return (ncclSymkMask(comm, coll, red, ty, nElts) != 0);
 }
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Thresholds bounding the block width of the gfx950 symmetric kernels, fitted on 8 ranks only.
+// ReduceScatter's and AllGather's are bus bytes since their counts are per rank. AllReduce's are message bytes.
+static constexpr size_t ncclSymkRsWideBlockMinBusBytes = 1 << 20;
+static constexpr size_t ncclSymkRsNarrowBlockBusBytes = 16 << 20;
+static constexpr size_t ncclSymkArTailSaturatedBytes = 512 << 10;
+static constexpr size_t ncclSymkArDeepTierBytes = 2 << 20;
+static constexpr size_t ncclSymkArOccupancyBoundBytes = 1 << 30;
+// Below this message size AllReduce's LL packs fit few enough epochs that a wider block only adds
+// threads to the epoch barrier without removing an epoch.
+static constexpr size_t ncclSymkArLLWideBytes = 64 << 10;
+static constexpr size_t ncclSymkAgLLWideBusBytes = 512 << 10;
+static constexpr size_t ncclSymkAgWideBlockBusBytes = 64 << 20;
+// Where AllGather's store kernel overtakes LL, which the shared cost model places past 8 MB.
+static constexpr size_t ncclSymkAgStoreMinBusBytes = 1 << 20;
+// Block widths those thresholds select between. 1024 is the widest workgroup gfx950 will launch.
+static constexpr int ncclSymkGfx950NarrowThreads = 256;
+static constexpr int ncclSymkGfx950WideThreads = 512;
+static constexpr int ncclSymkGfx950WidestThreads = 1024;
+
+bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes) {
+  return size_t(nRanks) * nBytes >= ncclSymkAgStoreMinBusBytes;
+}
+
+// Where AllGather's store kernel overtakes LL on gfx1250 in partition mode, and where the hierarchical
+// kernel overtakes the store kernel.
+static constexpr size_t ncclSymkGfx1250AgLLMaxBusBytes = 1 << 20;
+static constexpr size_t ncclSymkGfx1250AgSTMaxBusBytes = 16 << 20;
+
+bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes) {
+  return size_t(nRanks) * nBytes >= ncclSymkGfx1250AgLLMaxBusBytes;
+}
+
+bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes) {
+  return size_t(nRanks) * nBytes >= ncclSymkGfx1250AgSTMaxBusBytes;
+}
+
+int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes) {
+  if (coll == ncclFuncAllGather) {
+    // A wider LL block halves the epoch count, which pays from 512 KB. The store kernel stays narrow
+    // below 64 MB, where a wider block leaves each warp too few iterations.
+    size_t busBytes = size_t(nRanks) * nBytes;
+    if (isLL) return busBytes >= ncclSymkAgLLWideBusBytes ? ncclSymkGfx950LLThreads : ncclSymkGfx950NarrowThreads;
+    return busBytes >= ncclSymkAgWideBlockBusBytes ? ncclSymkGfx950WideThreads : ncclSymkGfx950NarrowThreads;
+  }
+  if (coll != ncclFuncReduceScatter && coll != ncclFuncAllReduce) return ncclSymkMaxThreads;
+
+  if (isLL) {
+    // AllReduce narrows below the threshold, where a wider block only adds threads to the epoch
+    // barrier. ReduceScatter always stays at the full width.
+    bool narrowLL = coll == ncclFuncAllReduce && nBytes < ncclSymkArLLWideBytes;
+    return narrowLL ? ncclSymkGfx950NarrowThreads : ncclSymkGfx950LLThreads;
+  }
+
+  if (coll == ncclFuncReduceScatter) {
+    // Small sizes are latency bound on per-peer loads and want every thread. Large ones are
+    // bandwidth bound, where a narrower block keeps iterations per globally strided warp high.
+    size_t busBytes = size_t(nRanks) * nBytes;
+    if (busBytes >= ncclSymkRsNarrowBlockBusBytes) return ncclSymkGfx950NarrowThreads;
+    if (busBytes >= ncclSymkRsWideBlockMinBusBytes) return ncclSymkGfx950WidestThreads;
+    return ncclSymkGfx950WideThreads;
+  }
+
+  // AllReduce folds rank into its thread index, so across the deep tiers a wider block halves
+  // iterations per warp rather than covering more GPU. Outside them the wider block wins.
+  bool narrowBlock = nBytes < ncclSymkArTailSaturatedBytes ||
+                     (ncclSymkArDeepTierBytes <= nBytes && nBytes < ncclSymkArOccupancyBoundBytes);
+  return narrowBlock ? ncclSymkGfx950NarrowThreads : ncclSymkGfx950WideThreads;
+}
+#endif
 
 const char* ncclSymkKernelIdToString(int kernelId) {
   if (kernelId < 0 || kernelId >= ncclSymkKernelId_Count) {
@@ -441,6 +633,11 @@ ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWi
 bool rcclSymkKernelIdIsLL(int kernelId) {
   if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
   return (kernelMask_LL >> kernelId) & 1;
+}
+
+bool rcclSymkKernelIdIsTma(int kernelId) {
+  if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
+  return (kernelMask_Tma >> kernelId) & 1;
 }
 
 #ifndef GENERATE_SYM_KERNELS

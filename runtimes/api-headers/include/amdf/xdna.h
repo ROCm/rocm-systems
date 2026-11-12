@@ -7,6 +7,8 @@
 #include <stdint.h>
 
 #include "amdf/amdf.h"
+#include "amdf/xdna_result.h"
+#include "amdf/xdna_trace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,8 +17,14 @@ extern "C" {
 /// The first supported XDNA extension version.
 #define AMDF_XDNA_EXTENSION_VERSION_1 1u
 
+/// Device-wide firmware tracing and context firmware-result services.
+#define AMDF_XDNA_EXTENSION_VERSION_2 2u
+
+/// Explicit context-to-firmware trace identity snapshots.
+#define AMDF_XDNA_EXTENSION_VERSION_3 3u
+
 /// The most recent XDNA extension version described by this header.
-#define AMDF_XDNA_EXTENSION_VERSION_LATEST AMDF_XDNA_EXTENSION_VERSION_1
+#define AMDF_XDNA_EXTENSION_VERSION_LATEST AMDF_XDNA_EXTENSION_VERSION_3
 
 /// One program-independent schedulable XDNA context.
 typedef struct amdf_xdna_context_t amdf_xdna_context_t;
@@ -79,7 +87,13 @@ enum amdf_xdna_scheduling_mode_bits_e {
   AMDF_XDNA_SCHEDULING_MODE_EXCLUSIVE = 1u << 0,
   /// Contexts can execute concurrently on disjoint spatial placements.
   AMDF_XDNA_SCHEDULING_MODE_SPATIAL = 1u << 1,
-  /// Contexts can time-share one physical placement.
+  /// Contexts can time-share one physical placement. The native provider owns
+  /// isolation between contexts using that placement; admission is not an
+  /// execution or residency guarantee. Context lifetime does not reserve tile
+  /// state between submissions: another context may use the array and native
+  /// scheduling may reset its registers, locks, or local memories.
+  /// Each independent submission establishes the application state it needs.
+  /// Host instruction backing remains valid for its explicit memory lifetime.
   AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED = 1u << 2,
 };
 
@@ -282,6 +296,11 @@ typedef struct amdf_xdna_context_placement_info_t {
   uint32_t column_count;
 } amdf_xdna_context_placement_info_t;
 
+/// Default pending capacity for kernel-mediated XDNA queues.
+/// Native transport storage is prepared for the entire window. Work scheduled
+/// within persistent programs does not consume additional submission slots.
+#define AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT 128u
+
 /// Parameters used to acquire one kernel-mediated XDNA queue.
 typedef struct amdf_xdna_kernel_queue_create_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO`.
@@ -292,8 +311,13 @@ typedef struct amdf_xdna_kernel_queue_create_info_t {
   const void* next;
   /// Endpoint-local XDNA family supporting kernel publication.
   uint32_t queue_family_ordinal;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Maximum accepted submissions that may remain unretired, or zero for
+  /// AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT. Native
+  /// packet/result storage for this capacity is allocated before creation
+  /// returns. Arrays share that bounded storage: a submission with multiple
+  /// commands can consume multiple packet credits and return BUSY below this
+  /// submission bound. Query the created queue's maximum_command_count.
+  uint32_t maximum_pending_submission_count;
 } amdf_xdna_kernel_queue_create_info_t;
 
 /// One caller-owned target-native instruction range.
@@ -312,7 +336,8 @@ typedef struct amdf_xdna_kernel_command_t {
   uint64_t byte_length;
 } amdf_xdna_kernel_command_t;
 
-/// One bounded kernel-mediated XDNA submission.
+/// One bounded, ordered kernel-mediated XDNA submission. Commands execute in
+/// descriptor order; the returned submission point covers the entire array.
 typedef struct amdf_xdna_kernel_queue_submission_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO`.
   amdf_structure_type_t type;
@@ -324,8 +349,9 @@ typedef struct amdf_xdna_kernel_queue_submission_info_t {
   uint32_t command_count;
   /// Reserved for compatible growth and must be zero.
   uint32_t reserved;
-  /// Borrowed descriptors consumed before return. Accepted instruction ranges
-  /// remain borrowed through checked native retirement.
+  /// Borrowed descriptors consumed before return. All accepted instruction
+  /// ranges remain borrowed through checked native retirement of the array,
+  /// including when execution fails after completing only a prefix.
   const amdf_xdna_kernel_command_t* commands;
 } amdf_xdna_kernel_queue_submission_info_t;
 
@@ -387,7 +413,13 @@ typedef struct amdf_xdna_api_t {
   /// provider-owned firmware bootstrap work. Failure leaves `out_queue`
   /// unchanged; any unfinished bootstrap ownership remains with the context.
   /// Native packet storage, completion resources and required bootstrap are
-  /// ready before success. Their costs never move to first submission or wait.
+  /// ready before success; libamdf does not defer preparation to submission or
+  /// wait. A live queue does not prevent native idle suspension.
+  /// A missing required execution interface returns
+  /// `AMDF_STATUS_CODE_UNSUPPORTED`. On Linux, the first queue submits and
+  /// retires a provider-owned no-effect transaction to qualify the direct
+  /// instruction transport. This check is independent of optional profiling
+  /// services and is not repeated when a queue is reacquired on that context.
   amdf_status_t(AMDF_CALL* kernel_queue_create)(
       amdf_xdna_context_t* context,
       const amdf_xdna_kernel_queue_create_info_t* create_info,
@@ -399,21 +431,53 @@ typedef struct amdf_xdna_api_t {
   /// grant EXECUTE access. Caller writes must be published before submission;
   /// libamdf neither reads, copies nor modifies instruction bytes. The native
   /// provider fills its preallocated transport packet with address and length.
-  /// Submission performs no allocation, format parsing, lowering, relocation,
-  /// binding resolution, native submission retry, sleep or host wait. Native
-  /// retirement consumes the command result. The caller keeps instruction
-  /// memory live until retirement; libamdf neither retains nor tracks it.
-  /// Native rejection leaves `out_submission` unchanged.
-  /// The caller also keeps memory reachable through opaque device addresses
-  /// live; native command retirement does not prove that user-mode work
-  /// scheduled by those commands has stopped accessing that memory.
+  /// The library performs no allocation, format parsing, lowering, relocation,
+  /// binding resolution, work replay, resource-exhaustion retry, sleep or host
+  /// wait. An interrupted native publication may restart only when the native
+  /// contract guarantees that no command was accepted. Native retirement
+  /// consumes the command result. The caller keeps instruction memory live
+  /// until retirement; libamdf neither retains nor tracks it. Native rejection
+  /// accepts no prefix and leaves `out_submission` unchanged. The whole array
+  /// is validated before native publication. After acceptance, execution may
+  /// fail partway through the array; its one retirement point still covers all
+  /// borrowed ranges. The caller also keeps memory reachable
+  /// through opaque device addresses live; native command retirement does not
+  /// prove that user-mode work scheduled elsewhere, such as a GPU consumer, has
+  /// stopped accessing it.
+  ///
+  /// A complete command covers the lifetime of the work using its XDNA
+  /// placement. Before its controller instructions finish, the program must
+  /// quiesce its tile workers and drain transfers that could interfere with
+  /// subsequent reconfiguration. Native completion does not insert that drain.
+  /// An autonomous worker cannot continue using the placement after the command
+  /// ends merely because its context and memory remain live. Resident role
+  /// changes can preserve services inside the same outstanding command.
+  /// Each independent command establishes the application state it needs;
+  /// neither zeroed entry state nor retention from an earlier command is
+  /// implied. Cross-context handoff belongs to the native provider, not a
+  /// caller-managed exclusion protocol. libamdf does not replay setup or work
+  /// when an admitted command is rescheduled or fails.
   ///
   /// This hot path takes no library lock and performs no lazy initialization,
   /// mapping, pinning or indirect-buffer scan. It is thread-safe with other
-  /// submissions and progress operations. Queue-slot contention returns BUSY
-  /// rather than waiting. This is not a wait-free guarantee. Native publication
-  /// may enter the driver and publish the queue-owned packet's cache lines, not
-  /// the caller's instruction or data bytes.
+  /// submissions and progress operations. Concurrent publication returns BUSY
+  /// rather than waiting; its claim ends at native acceptance, not execution
+  /// completion. At either the configured pending bound or the shared native
+  /// packet capacity, a nonblocking native refresh
+  /// and checked result consumption reclaim completed packet slots before
+  /// returning BUSY if capacity remains unavailable. No intermediate host wait
+  /// is required. Native resource exhaustion can reject work earlier.
+  /// Returned points increase within this queue, without a caller-visible
+  /// starting value or dense-numbering guarantee. Waiting for one point covers
+  /// earlier accepted commands, not independently scheduled descendants.
+  /// This is not a wait-free guarantee. Native publication can block acquiring
+  /// driver admission credits or synchronously resuming an idle device, even
+  /// when library packet capacity remains. Native resume may restore firmware
+  /// and contexts without restoring application tile state. The native call
+  /// may publish queue-owned packet cache lines, not caller instruction/data
+  /// bytes. Preserving the first native completion identity can require a
+  /// one-time fence transfer after acceptance and before later publication;
+  /// its native storage is already prepared at queue creation.
   amdf_status_t(AMDF_CALL* kernel_queue_submit)(
       amdf_kernel_queue_t* queue,
       const amdf_xdna_kernel_queue_submission_info_t* submission_info,
@@ -483,6 +547,146 @@ typedef struct amdf_xdna_api_t {
   /// teardown failure leaves the context live so destruction can be retried.
   /// The caller must otherwise have exclusive access.
   amdf_status_t(AMDF_CALL* context_destroy)(amdf_xdna_context_t* context);
+
+  /// Queries live firmware recorder state without changing its configuration.
+  /// Performs one native query, with no allocation or workload synchronization.
+  /// Unavailable native services return UNSUPPORTED. Other failures preserve
+  /// native permission/device errors. Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* device_query_firmware_trace_info)(
+      amdf_device_t* device, amdf_xdna_firmware_trace_info_t* out_info);
+
+  /// Configures the device-wide firmware recorder. enabled is zero or one;
+  /// enabling requires a nonzero native category mask. Disabling ignores the
+  /// category argument. This changes global native state without acquiring an
+  /// exclusive session: the caller arranges configuration ownership across
+  /// processes and serializes reconfiguration against reads. Device destruction
+  /// does not disable tracing. An external recorder may own configuration while
+  /// a workload only reads, subject to its independent native permissions.
+  /// A configuration failure can have native effects; query the live state
+  /// before deciding cleanup. No array trace resources or workload code change.
+  amdf_status_t(AMDF_CALL* device_configure_firmware_trace)(
+      amdf_device_t* device, uint32_t enabled,
+      amdf_xdna_firmware_trace_categories_t categories);
+
+  /// Nonblocking read into caller-owned host storage. position begins at zero
+  /// for each newly enabled capture. format_version is that capture's queried
+  /// schema. The caller excludes external reconfiguration and owns its capture
+  /// generation: native byte positions cannot detect every external restart.
+  /// Reads allocate nothing, retain nothing and wait for no application queue.
+  ///
+  /// Success publishes decoded amdf_xdna_firmware_trace_event_t records at the
+  /// returned byte offset/length. Discontinuity flags precede those records;
+  /// a discarded copy returns zero records and advances beyond unsafe bytes.
+  /// This is a lossy observation transport, never a completion/credit channel.
+  /// Empty reads do not establish retirement or a final drain. The consumer's
+  /// work/completion protocol supplies that boundary. Simultaneous readers use
+  /// independent storage and positions. Storage is borrowed only for the call.
+  /// It obeys the queried size/alignment and is disjoint from out_result.
+  ///
+  /// BUFFER_TOO_SMALL means storage is below the minimum or capacity made the
+  /// native copy's position ambiguous. Retrying with larger storage leaves the
+  /// caller's prior progress valid.
+  /// The format-2 schema is supported; other schemas return UNSUPPORTED.
+  /// Native failures and unsupported schemas publish no result. Storage may
+  /// change on any native read, including failure; out_result changes only on
+  /// success. Source clock continuity never follows from cursor continuity.
+  amdf_status_t(AMDF_CALL* device_read_firmware_trace)(
+      amdf_device_t* device, uint32_t format_version, uint64_t position,
+      void* buffer, uint32_t buffer_byte_length,
+      amdf_observation_read_result_t* out_result);
+
+  /// Queries the cached backing/geometry requirements for finite firmware
+  /// results before the caller selects its memory layout. Performs no native
+  /// call, allocation or reservation. Success describes layout requirements,
+  /// not native service availability; attachment can still return UNSUPPORTED.
+  /// Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* context_query_result_buffer_info)(
+      amdf_xdna_context_t* context, amdf_xdna_result_buffer_info_t* out_info);
+
+  /// Attaches one caller-owned finite result destination to this context.
+  /// The caller clears and publishes its destination beforehand, budgets every
+  /// possible result byte, and maintains only one active attachment per
+  /// context. The compiler/caller supplies RECORD_TIMER/READ_REGS instructions
+  /// and the record protocol; submission neither patches commands nor tracks
+  /// results.
+  ///
+  /// The caller serializes result controls with each other and queue
+  /// publication. The caller retires every result writer before collection,
+  /// rearm or detach. Controls can block on native commands; they allocate no
+  /// library objects and retain no memory/descriptor references. Native failure
+  /// may leave the association active: backing remains live until native
+  /// removal/retirement is established. Failure is not transactional rollback
+  /// or release proof.
+  ///
+  /// AMDF_STATUS_CODE_UNSUPPORTED rejects this attachment without establishing
+  /// a binding. A previously unbound destination can be released immediately.
+  /// This does not discharge any prior binding or ambiguous-failure obligation.
+  amdf_status_t(AMDF_CALL* context_attach_result_buffer)(
+      amdf_xdna_context_t* context,
+      const amdf_xdna_result_buffer_binding_t* binding);
+
+  /// Completes the native result transfer for the same active binding. This
+  /// does not reset the append position, clear storage, decode records or
+  /// report a written extent. CPU access then performs the existing
+  /// host-mapping cache acquire. The caller's known finite record protocol
+  /// determines valid bytes; a successful transfer alone does not prove that
+  /// expected records exist. Failure invalidates this attempted snapshot and
+  /// preserves the backing obligation. Concurrent collection or live rearm is
+  /// not part of this mode.
+  amdf_status_t(AMDF_CALL* context_collect_result_buffer)(
+      amdf_xdna_context_t* context,
+      const amdf_xdna_result_buffer_binding_t* binding);
+
+  /// Removes the same active binding after writer retirement, leaving memory
+  /// allocated. Healthy native completion permits reuse or a fresh explicit
+  /// clear/publish/attach cycle. After an ambiguous native failure, a
+  /// subsequent successful control alone is not independent proof of writer
+  /// retirement. No implicit detach occurs during memory or context
+  /// destruction.
+  amdf_status_t(AMDF_CALL* context_detach_result_buffer)(
+      amdf_xdna_context_t* context,
+      const amdf_xdna_result_buffer_binding_t* binding);
+
+  /// Queries the native-reported array rate associated with the partition-shim
+  /// RECORD_TIMER counter. This explicit query may wake the device; it
+  /// allocates no library objects, retains no state and changes no power
+  /// policy. Failure leaves out_info unchanged; absent rate metadata returns
+  /// UNSUPPORTED.
+  ///
+  /// Native metadata can retain a configured or previously sampled rate when
+  /// live telemetry is unavailable; the reply supplies no freshness indicator.
+  /// Query after workload/context admission: idle and active rates can differ.
+  /// A same-epoch delta at constant rate converts as ticks * 1e9 /
+  /// frequency_hz. This snapshot neither pins that rate nor records changes
+  /// between samples. The caller owns a controlled profiling interval or
+  /// accounts for rate changes and clock gating before interpreting this as
+  /// elapsed wall time. Equal before/after rates alone do not prove stability.
+  /// Reconfiguration can reset the timer; markers bracketing work belong after
+  /// that configuration and around the program's ordinary completion waits. The
+  /// rate supplies no shared epoch with another command, automatic firmware
+  /// events or the CPU.
+  amdf_status_t(AMDF_CALL* device_query_timer_clock_info)(
+      amdf_device_t* device, amdf_observation_clock_info_t* out_info);
+
+  /// Samples the current physical firmware slot assigned to a live context.
+  /// Performs an explicit native query, which may wake the device or wait for
+  /// native telemetry. It allocates no library objects, retains no state,
+  /// changes no recorder configuration, and synchronizes no application work.
+  /// The caller keeps context live through the call; concurrent queries and
+  /// ordinary submissions are permitted. Failure leaves out_info unchanged.
+  /// An unavailable native query returns UNSUPPORTED; permission and device
+  /// failures preserve their native status. An unassigned firmware slot is a
+  /// successful snapshot, represented by the UNASSIGNED sentinel.
+  ///
+  /// The snapshot is not a placement binding or a stable identity. Native
+  /// scheduling, suspension, or recovery can replace it without destroying
+  /// the public context. The caller may bracket the query with the portable
+  /// host clock, but this supplies neither an event-clock correlation nor a
+  /// historical mapping. Event attribution requires an independently known
+  /// lifetime interval; loss or restart invalidates joins that depend on it.
+  amdf_status_t(AMDF_CALL* context_query_firmware_trace_info)(
+      amdf_xdna_context_t* context,
+      amdf_xdna_context_firmware_trace_info_t* out_info);
 } amdf_xdna_api_t;
 
 #ifdef __cplusplus

@@ -65,3 +65,6 @@ RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedAsync(RocJpegHandle handle, RocJpeg
 RocJpegStatus ROCJPEGAPI rocJpegDecodeBatchedSync(RocJpegHandle handle, RocJpegImage *destinations, int batch_size) {
     return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_decode_batched_sync(handle, destinations, batch_size);
 }
+RocJpegStatus ROCJPEGAPI rocJpegGetDecoderCaps(RocJpegHandle handle, RocJpegDecodeCaps *decode_caps) {
+    return rocjpeg::GetRocJpegDispatchTable()->pfn_rocjpeg_get_decoder_caps(handle, decode_caps);
+}

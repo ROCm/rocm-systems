@@ -8,6 +8,18 @@ project(hrr LANGUAGES CXX)
 option(HRR_BUILD_PLAYBACK "Build HRR playback tools" ON)
 option(HRR_BUILD_TESTS "Build HRR unit tests" OFF)
 
+# Public HIP headers from this tree, searched ahead of the SDK's. A HIP API added
+# to the tree is declared here before any SDK that CI installs has it, so
+# playback can name it. Headers only: the runtime library still comes from
+# whatever hip package is found, so an API the SDK's library lacks must be
+# resolved at replay time (_PLAYBACK_RUNTIME_RESOLVED_APIS in
+# tools/gen_hrr_api_args.py). C++ only; HIP-language sources keep the SDK's.
+set(HRR_HIP_INCLUDE_DIRS "" CACHE STRING
+    "Directories of in-tree public HIP headers to search before the SDK's (host C++ only)")
+foreach(_hrr_hip_dir IN LISTS HRR_HIP_INCLUDE_DIRS)
+  include_directories(BEFORE "$<$<COMPILE_LANGUAGE:CXX>:${_hrr_hip_dir}>")
+endforeach()
+
 # Shared HRR archive wire format (header-only public interface).
 add_library(hrr_api_args INTERFACE)
 add_library(hrr::api_args ALIAS hrr_api_args)

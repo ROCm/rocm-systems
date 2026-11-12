@@ -62,6 +62,9 @@ concept externals =
         typename Externals::rocm_rocshmem_api_category;
         typename Externals::rocm_hipfile_api_category;
         typename Externals::rocm_rccl_api_category;
+        typename Externals::rocm_ompt_api_category;
+        typename Externals::rocm_marker_api_category;
+        typename Externals::string_id_t;
         typename Externals::state_thread;
         typename Externals::pmc_event_with_sample;
         requires agent_manager_policy<typename Externals::agent_manager_t,
@@ -155,6 +158,13 @@ concept externals =
         {
             Externals::rocm_rccl_api_category_name
         } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_ompt_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        {
+            Externals::rocm_marker_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        { Externals::roctx_trigger_name } -> std::convertible_to<std::string_view>;
         { Externals::comm_data_name } -> std::convertible_to<std::string_view>;
         { Externals::comm_data_description } -> std::convertible_to<std::string_view>;
         { Externals::comm_data_enum_value } -> std::convertible_to<std::size_t>;
@@ -216,13 +226,14 @@ concept externals =
             }
         };
     } &&
-    requires(std::string_view text, Externals::thread_info_t thread_info,
-             Externals::track_t track, Externals::pmc_info_t pmc_info,
-             Externals::kfd_sample_t sample) {
+    requires(std::string_view      text, Externals::thread_info_t (&make_thread)(),
+             Externals::pmc_info_t pmc_info, Externals::kfd_sample_t sample) {
         { Externals::get_metadata_registry() };
         { Externals::get_metadata_registry().add_string(text) };
-        { Externals::get_metadata_registry().add_thread_info(thread_info) };
-        { Externals::get_metadata_registry().add_track(track) };
+        {
+            Externals::get_metadata_registry().ensure_thread(std::uint64_t{}, make_thread)
+        };
+        { Externals::get_metadata_registry().ensure_track(text, std::nullopt) };
         { Externals::get_metadata_registry().add_pmc_info(pmc_info) };
         { Externals::get_buffer_storage() };
         { Externals::get_buffer_storage().store(std::move(sample)) };
@@ -245,16 +256,65 @@ concept externals =
     requires(std::string_view text, Externals::region_sample sample,
              Externals::rocm_hip_api_category hip_category) {
         { Externals::is_active() } -> std::convertible_to<bool>;
+        { Externals::is_finalized() } -> std::convertible_to<bool>;
         { Externals::get_use_timemory() } -> std::convertible_to<bool>;
         { Externals::tracing_push_timemory(hip_category, text) };
         { Externals::tracing_pop_timemory(hip_category, text) };
         { Externals::get_buffer_storage().store(std::move(sample)) };
     }
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
-    && requires(const char* symbol_name, Externals::pmc_event_with_sample rccl_sample) {
+    &&
+    requires(const char* symbol_name, Externals::pmc_event_with_sample rccl_sample) {
+        {
+            Externals::get_metadata_registry()
+        } -> std::convertible_to<typename Externals::metadata_registry_t&>;
+        {
+            Externals::get_buffer_storage()
+        } -> std::convertible_to<typename Externals::buffer_storage_t&>;
+        { Externals::dlsym(symbol_name) } -> std::convertible_to<void*>;
+        { Externals::dlerror() } -> std::convertible_to<const char*>;
+        { Externals::state_thread::scoped(Externals::state_thread::Internal) };
+    }
+    // ─── Members required by domains::callback::on_tracing_api_enter/exit when
+    // forwarding metadata-registry inserts ──────────────────────────────────────────
+    &&
+    requires(std::string_view text, Externals::thread_info_t thread_info,
+             Externals::thread_info_t (&make_thread)(), Externals::region_sample sample,
+             Externals::rocm_hip_api_category hip_category) {
+        { Externals::is_active() } -> std::convertible_to<bool>;
+        { Externals::get_use_timemory() } -> std::convertible_to<bool>;
+        { Externals::tracing_push_timemory(hip_category, text) };
+        { Externals::tracing_pop_timemory(hip_category, text) };
+        { Externals::get_metadata_registry().add_string(text) };
+        {
+            Externals::get_metadata_registry().ensure_thread(std::uint64_t{}, make_thread)
+        };
+        { Externals::get_buffer_storage().store(std::move(sample)) };
+    }
+    // ─── Members required by domains::callback::roctx::k_{core,control}_api ─────────
+    //
+    // get_session()/get_roctx_trigger() are non-owning observers (nullptr when the
+    // roctx trigger was not created); the concept only checks the calls the marker
+    // callbacks make through them.
+    && requires(const char* text, std::string_view name, std::uint64_t value,
+                Externals::rocm_marker_api_category marker_category,
+                Externals::string_id_t string_id, const char* symbol_name) {
+           { Externals::is_roctx_enabled() } -> std::convertible_to<bool>;
+           { Externals::get_roctx_pause_resume_enabled() } -> std::convertible_to<bool>;
            {
-               Externals::get_metadata_registry()
-           } -> std::convertible_to<typename Externals::metadata_registry_t&>;
+               Externals::get_session()->is_active_without(name)
+           } -> std::convertible_to<bool>;
+           {
+               Externals::get_roctx_trigger()->should_write_markers()
+           } -> std::convertible_to<bool>;
+           { Externals::get_roctx_trigger()->on_range_start(value, text) };
+           { Externals::get_roctx_trigger()->on_range_stop(value) };
+           { Externals::get_roctx_trigger()->on_pause() };
+           { Externals::get_roctx_trigger()->on_resume() };
+           { Externals::intern_string(text) } -> std::convertible_to<decltype(string_id)>;
+           { Externals::lookup_string(string_id) } -> std::convertible_to<const char*>;
+           { Externals::tracing_push_timemory(marker_category, name) };
+           { Externals::tracing_pop_timemory(marker_category, name) };
            {
                Externals::get_buffer_storage()
            } -> std::convertible_to<typename Externals::buffer_storage_t&>;

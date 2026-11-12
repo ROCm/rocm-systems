@@ -21,27 +21,8 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
-option(BRCM_NIC "Build brcm-nic" OFF)
-if(BRCM_NIC)
-    add_compile_definitions(BRCM_NIC)
-    set(NIC_SOURCES
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_lspci_commands.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_nic_device.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_nic.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_switch.cc"
-        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_switch_device.cc"
-    )
-    set(NIC_INCLUDES
-        ${INC_DIR}/impl/nic/amd_smi_lspci_commands.h
-        ${INC_DIR}/impl/nic/amd_smi_nic_device.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_nic.h
-        ${INC_DIR}/impl/nic/amd_smi_no_drm_switch.h
-        ${INC_DIR}/impl/nic/amd_smi_switch_device.h
-    )
-endif()
-
-set(NIC_SOURCES ${NIC_SOURCES} "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
-set(NIC_INCLUDES ${NIC_INCLUDES} ${INC_DIR}/impl/nic/amd_smi_ainic_device.h)
+set(NIC_SOURCES "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc")
+set(NIC_INCLUDES ${INC_DIR}/impl/nic/amd_smi_ainic_device.h ${INC_DIR}/impl/nic/amd_smi_nic_interface.h)
 set(NIC_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/")
 
 set(SRC_LIST
@@ -55,6 +36,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_lib_loader.cc"
     "${SRC_DIR}/amd_smi_socket.cc"
     "${SRC_DIR}/amd_smi_system.cc"
+    "${SRC_DIR}/amd_smi_test_overrides.cc"
     "${SRC_DIR}/amd_smi_ualoe.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
@@ -130,24 +112,149 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_subdirectory(nic/ai-nic/amdsmi_unified)
 
-option(BUILD_CUID "Build CUID library" OFF)
+# CUID support. BUILD_CUID is a STRING, not option(): option() freezes the
+# first configure's answer, so a later-installed libamdcuid would stay unused
+# until CMakeCache.txt is deleted. ON fails configure when CUID is unavailable;
+# packaging should pass ON or OFF rather than rely on AUTO.
+set(BUILD_CUID "AUTO" CACHE STRING "Link libamdcuid and enable the CUID API: AUTO, ON or OFF")
+set_property(CACHE BUILD_CUID PROPERTY STRINGS AUTO ON OFF)
+
+# libamdcuid installs under ${ROCM_DIR}/core, which config-mode search does not
+# reach from ${ROCM_DIR}.
+if(ROCM_DIR)
+    set(_amdsmi_rocm_dir "${ROCM_DIR}")
+else()
+    set(_amdsmi_rocm_dir "/opt/rocm")
+endif()
+set(AMDCUID_HINT_DIR "${_amdsmi_rocm_dir}/core" CACHE PATH "Additional prefix searched for the amdcuid CMake package")
+unset(_amdsmi_rocm_dir)
+set(AMDSMI_AMDCUID_MIN_VERSION 2.1 CACHE INTERNAL "Oldest installed libamdcuid amd-smi builds against")
+
+# Build the monorepo sibling when no installed package is found, so every
+# packaging channel ships CUID without a separate libamdcuid install.
+set(AMDCUID_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/cuid"
+    CACHE PATH
+    "In-tree libamdcuid sources, built when no installed amdcuid package is found"
+)
+
+string(TOUPPER "${BUILD_CUID}" _amdsmi_cuid_request)
+if(NOT _amdsmi_cuid_request STREQUAL "AUTO")
+    if(_amdsmi_cuid_request)
+        set(_amdsmi_cuid_request ON)
+    else()
+        set(_amdsmi_cuid_request OFF)
+    endif()
+endif()
+set(_amdsmi_cuid_in_tree OFF)
+set(AMDSMI_CUID_IN_TREE OFF CACHE INTERNAL "libamdcuid is built here, not found")
+
+if(_amdsmi_cuid_request STREQUAL "OFF")
+    set(BUILD_CUID OFF)
+else()
+    # An installed package wins, so a distribution that ships libamdcuid
+    # separately gets the one it shipped rather than a second copy built here.
+    # 2.1 gives every component and partition a temporary CUID; an older
+    # install is passed over in favour of the in-tree sources.
+    find_package(amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CONFIG QUIET HINTS "${AMDCUID_HINT_DIR}")
+
+    if(NOT amdcuid_FOUND AND EXISTS "${AMDCUID_SOURCE_DIR}/CMakeLists.txt")
+        # The objects are absorbed into libamd_smi, so build only the library
+        # and install none of it.
+        set(AMDCUID_INSTALL OFF CACHE BOOL "" FORCE)
+        set(AMDCUID_BUILD_TESTS OFF)
+        set(AMDCUID_BUILD_EXAMPLES OFF)
+        add_subdirectory("${AMDCUID_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/amdcuid" EXCLUDE_FROM_ALL)
+        if(TARGET amdcuid_objs)
+            set(_amdsmi_cuid_in_tree ON)
+            set(AMDSMI_CUID_IN_TREE ON CACHE INTERNAL "libamdcuid is built here, not found")
+            get_target_property(_amdcuid_incs amdcuid_objs INTERFACE_INCLUDE_DIRECTORIES)
+            set(AMDCUID_INCLUDE_DIRS "${_amdcuid_incs}" CACHE INTERNAL "")
+            set(amdcuid_FOUND TRUE)
+            set(amdcuid_VERSION "in-tree")
+            set(amdcuid_DIR "${AMDCUID_SOURCE_DIR}")
+        endif()
+    endif()
+
+    set(BUILD_CUID "${amdcuid_FOUND}")
+
+    # ON requires the package.
+    if(NOT _amdsmi_cuid_request STREQUAL "AUTO" AND NOT amdcuid_FOUND)
+        message(
+            FATAL_ERROR
+            "BUILD_CUID=${_amdsmi_cuid_request} but libamdcuid was neither found nor "
+            "buildable here.\n"
+            "No installed amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CMake package on CMAKE_PREFIX_PATH, amdcuid_ROOT, "
+            "CMAKE_INSTALL_PREFIX (${CMAKE_INSTALL_PREFIX}) or AMDCUID_HINT_DIR "
+            "(${AMDCUID_HINT_DIR}), and no sources at AMDCUID_SOURCE_DIR "
+            "(${AMDCUID_SOURCE_DIR}).\n"
+            "A sparse checkout of projects/amdsmi alone has no sibling to build from: "
+            "add shared/cuid to it, point AMDCUID_HINT_DIR at an install prefix, or "
+            "set -DBUILD_CUID=OFF."
+        )
+    endif()
+endif()
+
+# Cached so the top-level CMakeLists sees the outcome, not the request.
+if(BUILD_CUID)
+    set(AMDSMI_WITH_CUID 1 CACHE INTERNAL "AMD SMI links libamdcuid (computed each configure)")
+else()
+    set(AMDSMI_WITH_CUID 0 CACHE INTERNAL "AMD SMI links libamdcuid (computed each configure)")
+endif()
+
+# Only an exported static library names amdcuid::amdcuid, as
+# $<LINK_ONLY:amdcuid::amdcuid>; a shared one carries no reference a consumer
+# must resolve, and the in-tree build absorbs the objects.
+if(BUILD_CUID AND NOT _amdsmi_cuid_in_tree AND (BUILD_BOTH_LIBS OR NOT BUILD_SHARED_LIBS))
+    set(AMDSMI_CUID_NEEDS_FIND_DEPENDENCY 1 CACHE INTERNAL "amd_smi-config.cmake resolves amdcuid")
+else()
+    set(AMDSMI_CUID_NEEDS_FIND_DEPENDENCY 0 CACHE INTERNAL "amd_smi-config.cmake resolves amdcuid")
+endif()
+
+# The libraries the package installs, for amd_smi-config.cmake's components.
+# Not read back from the imported targets: before project() CMake imports a
+# shared library as static.
+if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
+    set(AMDSMI_PACKAGE_HAS_SHARED TRUE CACHE INTERNAL "amd_smi package installs the shared library")
+else()
+    set(AMDSMI_PACKAGE_HAS_SHARED FALSE CACHE INTERNAL "amd_smi package installs the shared library")
+endif()
+if(BUILD_BOTH_LIBS OR NOT BUILD_SHARED_LIBS)
+    set(AMDSMI_PACKAGE_HAS_STATIC TRUE CACHE INTERNAL "amd_smi package installs the static library")
+else()
+    set(AMDSMI_PACKAGE_HAS_STATIC FALSE CACHE INTERNAL "amd_smi package installs the static library")
+endif()
+
+# Relocating the sysfs root lets any unprivileged user report a forged
+# AMDSMI_CUID_SOURCE_DRIVER, so the override is compiled out unless a build asks
+# for it. The partition-node CUID test needs it and skips itself when it is off.
+option(
+    AMDSMI_CUID_TEST_SYSFS_OVERRIDE
+    "Honour AMDSMI_CUID_SYSFS_ROOT so the partition-node CUID path is testable without partitioned hardware. Never in a release build."
+    OFF
+)
 
 if(BUILD_CUID)
-    set(ROCM_DIR_CORE "/opt/rocm/core")
-    # include CUID library
-    find_library(
-        AMDCUID_LIB
-        NAMES libamdcuid_static.a amdcuid_static
-        HINTS ${ROCM_DIR_CORE}/lib ${CMAKE_PREFIX_PATH}
-        REQUIRED
+    if(_amdsmi_cuid_in_tree)
+        message(STATUS "CUID support: enabled (built from ${AMDCUID_SOURCE_DIR}, absorbed into the library)")
+    else()
+        message(STATUS "CUID support: enabled (amdcuid ${amdcuid_VERSION} at ${amdcuid_DIR})")
+    endif()
+elseif(_amdsmi_cuid_request STREQUAL "OFF")
+    message(STATUS "CUID support: disabled (BUILD_CUID=OFF)")
+else()
+    # AUTO and not found: the feature set now depends on the build host.
+    message(
+        WARNING
+        "CUID support: disabled -- BUILD_CUID=AUTO and no amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CMake package was found "
+        "(AMDCUID_HINT_DIR=${AMDCUID_HINT_DIR}), and no sources at AMDCUID_SOURCE_DIR "
+        "(${AMDCUID_SOURCE_DIR}). amdsmi_get_gpu_cuid_info() will return "
+        "AMDSMI_STATUS_NOT_SUPPORTED in this build. "
+        "Pass -DBUILD_CUID=ON to make this a hard error, or -DBUILD_CUID=OFF to make it "
+        "deliberate."
     )
-    find_path(
-        AMDCUID_INCLUDE_DIR
-        NAMES amd_cuid.h
-        HINTS ${ROCM_DIR_CORE}/include/amdcuid ${CMAKE_PREFIX_PATH}/include/amdcuid
-        REQUIRED
-    )
-endif(BUILD_CUID)
+endif()
+
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
 #   Otherwise: build one library (BUILD_SHARED_LIBS).
@@ -201,6 +308,7 @@ function(amdsmi_configure_common_target _TARGET)
             ${DRM_INCLUDE_DIRS}
             ${DRM_AMDGPU_INCLUDE_DIRS}
             ${NIC_INCLUDE_DIRS}
+            ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
             ${UALOE_INCLUDE_DIR}
     )
     target_include_directories(
@@ -212,8 +320,23 @@ function(amdsmi_configure_common_target _TARGET)
 
     if(BUILD_CUID)
         target_compile_definitions(${_TARGET} PRIVATE BUILD_CUID)
-        target_link_libraries(${_TARGET} PRIVATE ${AMDCUID_LIB})
-        target_include_directories(${_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
+        if(AMDSMI_CUID_IN_TREE)
+            # Objects, not a link: linking would export
+            # $<LINK_ONLY:amdcuid::amdcuid> from amd_smi_static, a target this
+            # build never installs.
+            target_sources(${_TARGET} PRIVATE ${AMDCUID_IN_TREE_OBJECTS})
+            target_include_directories(${_TARGET} SYSTEM PRIVATE ${AMDCUID_INCLUDE_DIRS})
+        else()
+            target_link_libraries(${_TARGET} PRIVATE amdcuid::amdcuid)
+        endif()
+
+        if(AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+            message(
+                WARNING
+                "AMDSMI_CUID_TEST_SYSFS_OVERRIDE=ON: AMDSMI_CUID_SYSFS_ROOT can forge the CUID source field. Do not ship this build."
+            )
+            target_compile_definitions(${_TARGET} PRIVATE AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+        endif()
     endif()
 
     # Compiles in test-only escape hatches (e.g. amdsmi_test_register_node_handle())
@@ -365,11 +488,15 @@ install(
     COMPONENT dev
 )
 set(UNIFIED_NIC_INCLUDES
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_hwmon.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_stats.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_transport.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_vpd.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_pci_topology.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
 )
 install(

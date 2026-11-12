@@ -325,9 +325,9 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                           const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                           const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+  hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                           const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
+                           uint16_t num_rects, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
   // @brief Override from core::Agent.
@@ -403,6 +403,9 @@ class GpuAgent : public GpuAgentInt {
     return properties_;
   }
 
+  // @brief True when this node supports the native SDMA user queue AND it is enabled.
+  __forceinline bool sdma_native() const { return sdma_native_; }
+
   // @brief set rec_sdma_eng_override_
   __forceinline void SetRecSdmaEngOverride(bool flag) override { rec_sdma_eng_override_ = flag; }
 
@@ -462,6 +465,16 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief This GPU's memory is reached over PCIe, so stores to it pass through HDP and need
+  /// a flush.
+  __forceinline bool PcieStoresNeedFlush() const { return !xgmi_cpu_gpu_; }
+  /// @brief Host atomics on this GPU's memory are atomic with respect to the GPU.
+  __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
+  /// @brief The CP firmware consumes completion signal handle hints.
+  bool SignalHintsSupported() const;
+  /// @brief The agent executes hsa_amd_ext_kernel_dispatch_packet_t: natively (gfx12.5), or
+  /// with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
+  bool ExtendedAqlDispatchSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -480,9 +493,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
-      _mm_sfence();
+      store_fence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
-      _mm_mfence();
+      memory_fence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }
@@ -702,6 +715,12 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
+  // @brief The CP firmware's capabilities, read from the utility queue's caps once, on first
+  // query.
+  uint32_t CpFirmwareCaps() const;
+  mutable std::once_flag cp_caps_once_;
+  mutable uint32_t cp_caps_ = 0;
+
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;
 
@@ -874,7 +893,9 @@ class GpuAgent : public GpuAgentInt {
       const hsa_agent_t* dst_agent_list,
       const size_t* size_list,
       uint32_t coord_engine = 0,
-      uint32_t max_engines = 0);
+      uint32_t max_engines = 0,
+      // Optional per-entry dst-side swap sizes (null = symmetric).
+      const size_t* dst_size_list = nullptr);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -1086,6 +1107,9 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
+  //!< True when SDMA copies go through the native WDDM SDMA user queue.
+  bool sdma_native_;
+
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
@@ -1109,6 +1133,8 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
 
+  // Native support (gfx12.5), set at construction and never written later. CP firmware support
+  // comes from CpFirmwareCaps(); ExtendedAqlDispatchSupported() combines the two.
   bool extended_aql_dispatch_supported_;
 
   /* Workgroup Cluster Parameters */

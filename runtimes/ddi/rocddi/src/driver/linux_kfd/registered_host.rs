@@ -1,0 +1,401 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+//! Borrowed host pages registered through DRM in a secondary KFD context.
+//!
+//! A KFD USERPTR allocation is unavailable in that context, but its acquired
+//! render VM can map a DRM GEM USERPTR object. This owner retains the caller's
+//! GPU VA, each render VM, GEM handle, and timeline until native cleanup ends.
+//! Borrowed callers keep the complete source page cover live. Registrations of
+//! rocddi-owned backing retain a lease on those pages until cleanup completes.
+
+use super::drm;
+use super::memory::DeviceVm;
+use super::os_memory;
+use super::{errno, error, native_error};
+use crate::memory::device::registered_host_page_cover;
+use crate::memory::host::HostBackingLease;
+use crate::memory::storage::TryPush;
+use crate::memory::storage::{Owned, Shared};
+use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
+use crate::{Error, ErrorKind};
+
+/// Native mapping phase retained across partial failure and retry.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum MappingPhase {
+    /// No mapping request has been sent.
+    NotMapped,
+    /// A map request may have changed some page-table entries.
+    Mapping,
+    /// Mapping and synchronization completed.
+    Mapped,
+    /// An unmap request may have changed some page-table entries.
+    Unmapping,
+    /// Unmapping and synchronization completed.
+    Unmapped,
+}
+
+/// Per-render-VM GEM registration and mapping progress for borrowed pages.
+struct VmMapping {
+    /// Render VM that owns the GEM handle and timeline.
+    vm: Shared<DeviceVm>,
+    /// GEM USERPTR handle, or zero before registration.
+    handle: u32,
+    /// Timeline used to prove VM update completion.
+    timeline: u32,
+    /// Last known mapping phase.
+    phase: MappingPhase,
+    /// Native operation may have completed despite reporting an error.
+    uncertain: bool,
+}
+
+impl VmMapping {
+    fn new(vm: Shared<DeviceVm>) -> Self {
+        Self {
+            vm,
+            handle: 0,
+            timeline: 0,
+            phase: MappingPhase::NotMapped,
+            uncertain: false,
+        }
+    }
+
+    /// # Safety
+    /// `host_base..host_base + size` must remain mapped until this native
+    /// registration is fully released or its render file closes.
+    #[allow(unsafe_code)]
+    unsafe fn map(
+        &mut self,
+        host_base: u64,
+        address: u64,
+        size: u64,
+        permissions: DeviceAccess,
+        uncached: bool,
+    ) -> Result<(), Error> {
+        let render = self.vm.render()?;
+        // SAFETY: The caller retains the complete host page cover.
+        let result = unsafe { drm::register_userptr(render, host_base, size, &mut self.handle) };
+        if let Err(source) = result {
+            if self.handle != 0
+                || source.raw_os_error() == Some(errno::EFAULT)
+                || source.kind() == std::io::ErrorKind::InvalidData
+            {
+                self.uncertain = true;
+            }
+            return Err(native_error("DRM GEM USERPTR registration", source));
+        }
+        self.timeline = drm::create_syncobj(render)
+            .map_err(|source| native_error("DRM host registration timeline", source))?;
+        self.phase = MappingPhase::Mapping;
+        if let Err(source) = drm::map_with_cache(
+            render,
+            self.handle,
+            address,
+            0,
+            size,
+            permissions.bits(),
+            uncached,
+            self.timeline,
+            1,
+        ) {
+            // An ioctl error may follow submission. Reusing the VA or host
+            // pages would then be unsafe, even if no timeline point arrives.
+            self.uncertain = true;
+            return Err(native_error("DRM host registration map", source));
+        }
+        drm::wait(render, self.timeline, 1)
+            .map_err(|source| native_error("DRM host registration map wait", source))?;
+        self.phase = MappingPhase::Mapped;
+        Ok(())
+    }
+
+    fn free(&mut self, address: u64, size: u64) -> Result<(), Error> {
+        if self.uncertain {
+            return Err(error(
+                ErrorKind::DriverContract,
+                "DRM host registration outcome is uncertain",
+            ));
+        }
+        let render = self.vm.render()?;
+        if self.phase == MappingPhase::Mapping {
+            drm::wait(render, self.timeline, 1)
+                .map_err(|source| native_error("DRM host registration map wait", source))?;
+            self.phase = MappingPhase::Mapped;
+        }
+        if self.phase == MappingPhase::Mapped {
+            if let Err(source) = drm::unmap(render, self.handle, address, 0, size, self.timeline, 2)
+            {
+                self.uncertain = true;
+                return Err(native_error("DRM host registration unmap", source));
+            }
+            self.phase = MappingPhase::Unmapping;
+        }
+        if self.phase == MappingPhase::Unmapping {
+            drm::wait(render, self.timeline, 2)
+                .map_err(|source| native_error("DRM host registration unmap wait", source))?;
+            self.phase = MappingPhase::Unmapped;
+        }
+        if self.timeline != 0 {
+            if let Err(source) = drm::destroy_syncobj(render, self.timeline) {
+                // EFAULT can follow successful handle removal at copyout.
+                // Quarantine the mapping rather than retrying a recycled ID.
+                self.uncertain = source.raw_os_error() == Some(errno::EFAULT);
+                return Err(native_error("DRM host registration timeline close", source));
+            }
+            self.timeline = 0;
+        }
+        if self.handle != 0 {
+            drm::close_gem(render, self.handle)
+                .map_err(|source| native_error("DRM GEM USERPTR close", source))?;
+            self.handle = 0;
+        }
+        Ok(())
+    }
+}
+
+/// One common GPU VA for a caller-owned page cover across requested render VMs.
+pub(crate) struct DrmRegisteredHost {
+    /// Creating VM retained through every peer registration.
+    owner: Shared<DeviceVm>,
+    /// Native USERPTR handles and mapping progress in each render VM.
+    mappings: Vec<VmMapping>,
+    /// Common GPU virtual address reserved for the page cover.
+    reservation: Option<os_memory::Reservation>,
+    /// First caller-visible host byte.
+    host_address: usize,
+    /// Owner of runtime-allocated pages, when present.
+    backing: Option<HostBackingLease>,
+    /// Offset from the registered page cover to `host_address`.
+    byte_offset: usize,
+    /// Exact public byte extent.
+    size: u64,
+    /// Page cover measured from the aligned host base.
+    native_size: u64,
+    /// Prevents new access changes after cleanup begins.
+    freeing: bool,
+}
+
+impl DrmRegisteredHost {
+    /// # Safety
+    /// Borrowed callers keep the complete host page cover mapped and
+    /// synchronized; an owned request transfers that obligation in `backing`.
+    #[allow(unsafe_code)]
+    pub(super) unsafe fn create(
+        owner: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
+        desc: AllocationDesc,
+        host_address: usize,
+        permissions: DeviceAccess,
+        uncached: bool,
+        backing: Option<HostBackingLease>,
+    ) -> Result<Owned<Self>, Error> {
+        if !permissions.contains(DeviceAccess::READ) {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "registered GPU pages require READ permission",
+            ));
+        }
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("registered host page size", source))?;
+        let size = usize::try_from(desc.size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "registered host extent exceeds host address width",
+            )
+        })?;
+        let (host_base, native_size) = registered_host_page_cover(host_address, size, page)
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::InvalidArgument,
+                    "registered host page cover is invalid",
+                )
+            })?;
+        let byte_offset = host_address - host_base;
+        owner.check()?;
+
+        let mut mappings = crate::memory::storage::try_vec_with_capacity(
+            peers.len().checked_add(1).ok_or_else(|| {
+                error(
+                    ErrorKind::ResourceExhausted,
+                    "registered device count overflow",
+                )
+            })?,
+        )?;
+        mappings.try_push(VmMapping::new(owner.clone()))?;
+        let mut bounds = owner.address_range();
+        for peer in peers {
+            if !owner.shares_kfd(&peer) {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "registered devices must share one KFD session",
+                ));
+            }
+            if Shared::ptr_eq(&owner, &peer)
+                || mappings
+                    .iter()
+                    .any(|mapping| Shared::ptr_eq(&mapping.vm, &peer))
+            {
+                continue;
+            }
+            if mappings
+                .iter()
+                .any(|mapping| mapping.vm.gpu_id == peer.gpu_id)
+            {
+                return Err(error(
+                    ErrorKind::InvalidArgument,
+                    "distinct registered VMs must have distinct GPU IDs",
+                ));
+            }
+            peer.check()?;
+            let range = peer.address_range();
+            bounds.0 = bounds.0.max(range.0);
+            bounds.1 = bounds.1.min(range.1);
+            if bounds.0 > bounds.1 {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "registered devices have no common GPU address range",
+                ));
+            }
+            mappings.try_push(VmMapping::new(peer))?;
+        }
+        let owner_slot = Owned::try_new_uninit()?;
+        let alignment = usize::try_from(desc.alignment)
+            .map_err(|_| error(ErrorKind::InvalidArgument, "alignment exceeds host width"))?;
+        let reservation = os_memory::Reservation::new(native_size, alignment, bounds, false)
+            .map_err(|source| native_error("registered GPU address reservation", source))?;
+        let mut allocation = owner_slot.write(Self {
+            owner,
+            mappings,
+            reservation: Some(reservation),
+            host_address,
+            backing,
+            byte_offset,
+            size: desc.size,
+            native_size: native_size as u64,
+            freeing: false,
+        });
+        let address = allocation.address()?;
+        for mapping in &mut allocation.mappings {
+            // SAFETY: This constructor retains the caller-owned page cover.
+            unsafe {
+                mapping.map(
+                    host_base as u64,
+                    address,
+                    native_size as u64,
+                    permissions,
+                    uncached,
+                )?;
+            };
+        }
+        allocation.owner.check()?;
+        Ok(allocation)
+    }
+
+    fn address(&self) -> Result<u64, Error> {
+        self.reservation
+            .as_ref()
+            .map(|reservation| reservation.address() as u64)
+            .ok_or_else(|| error(ErrorKind::InvalidArgument, "registered GPU VA was released"))
+    }
+
+    pub(crate) fn cached_info(&self) -> AllocationInfo {
+        AllocationInfo {
+            device_address: self.reservation.as_ref().map_or(0, |reservation| {
+                reservation.address() as u64 + self.byte_offset as u64
+            }),
+            host_address: Some(self.host_address),
+            size: self.size,
+            native_size: self.native_size,
+            physical_backing_id: [0; 2],
+        }
+    }
+
+    pub(crate) fn check(&self) -> Result<(), Error> {
+        self.owner.check()?;
+        if self.freeing
+            || self
+                .mappings
+                .iter()
+                .any(|mapping| mapping.phase != MappingPhase::Mapped)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "registered host mapping is unavailable",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn device_address(&self, device: &Shared<DeviceVm>) -> Result<u64, Error> {
+        self.check()?;
+        if !self
+            .mappings
+            .iter()
+            .any(|mapping| Shared::ptr_eq(&mapping.vm, device))
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "registered host mapping is unavailable on this device",
+            ));
+        }
+        device.check()?;
+        self.address()
+            .map(|address| address + self.byte_offset as u64)
+    }
+
+    pub(crate) fn is_owned_by(&self, device: &Shared<DeviceVm>) -> bool {
+        self.owner.shares_kfd(device) && self.owner.gpu_id == device.gpu_id
+    }
+
+    pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.owner
+            .kfd()
+            .check_process()
+            .map_err(|source| native_error("DRM host registration process check", source))?;
+        self.freeing = true;
+        if self.reservation.is_none() {
+            self.backing = None;
+            return Ok(());
+        }
+        let address = self.address()?;
+        for mapping in self.mappings.iter_mut().rev() {
+            mapping.free(address, self.native_size)?;
+        }
+        if let Some(reservation) = self.reservation.as_mut() {
+            reservation
+                .release()
+                .map_err(|source| native_error("registered GPU address munmap", source))?;
+            self.reservation = None;
+        }
+        self.backing = None;
+        Ok(())
+    }
+}
+
+impl Drop for DrmRegisteredHost {
+    fn drop(&mut self) {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
+            if self.mappings.iter().any(|mapping| {
+                mapping.handle != 0
+                    || mapping.uncertain
+                    || matches!(
+                        mapping.phase,
+                        MappingPhase::Mapping | MappingPhase::Mapped | MappingPhase::Unmapping
+                    )
+            }) {
+                if let Some(backing) = self.backing.take() {
+                    // A failed native cleanup may leave these pages reachable.
+                    std::mem::forget(backing);
+                }
+            }
+            if let Some(reservation) = self.reservation.take() {
+                std::mem::forget(reservation);
+            }
+            std::mem::forget(self.owner.clone());
+            for mapping in &self.mappings {
+                std::mem::forget(mapping.vm.clone());
+            }
+        }
+    }
+}

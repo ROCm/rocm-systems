@@ -40,6 +40,8 @@ class SdmaPutNbiTester : public Tester {
 
   char *s_buf;
   char *r_buf;
+  // True if SDMA failed to connect on this topology.
+  bool sdma_unavailable;
 };
 
 #endif

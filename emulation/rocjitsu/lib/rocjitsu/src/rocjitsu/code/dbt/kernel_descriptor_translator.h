@@ -24,6 +24,7 @@ namespace rocjitsu {
 /// @details RSRC3 is not one register. The families disagree on bits the others
 /// reserve, so a source word may only be carried to a target in the same family:
 ///
+/// - Reserved: CDNA1 requires the entire word to be zero.
 /// - Gfx9Accum: ACCUM_OFFSET in bits 5:0.
 /// - Gfx10: SHARED_VGPR_COUNT in bits 3:0; bits 11:4 and bit 31 reserved. There
 ///   is no INST_PREF_SIZE here at all -- it is a GFX11+ field.
@@ -33,7 +34,15 @@ namespace rocjitsu {
 ///   (absorbing both trap bits), GLG_EN at 13; bits 21:14 reserved.
 /// - Gfx125: as Gfx120, but bits 21:14 carry NAMED_BAR_CNT,
 ///   ENABLE_DYNAMIC_VGPR, TCP_SPLIT and ENABLE_DIDT_THROTTLE.
-enum class Rsrc3Layout : uint8_t { Incompatible, Gfx9Accum, Gfx10, Gfx11, Gfx120, Gfx125 };
+enum class Rsrc3Layout : uint8_t {
+  Incompatible,
+  Reserved,
+  Gfx9Accum,
+  Gfx10,
+  Gfx11,
+  Gfx120,
+  Gfx125
+};
 
 /// @brief RSRC3 layout family for an architecture.
 [[nodiscard]] Rsrc3Layout rsrc3_layout(rj_code_arch_t arch);

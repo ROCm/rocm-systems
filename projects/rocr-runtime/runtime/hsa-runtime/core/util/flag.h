@@ -45,6 +45,7 @@
 
 #include <stdint.h>
 
+#include <atomic>
 #include <vector>
 #include <map>
 #include <string>
@@ -129,6 +130,12 @@ class Flag {
 
     var = os::GetEnvVar("HSA_ENABLE_SDMA");
     enable_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
+
+    // Opt-in multi-sample GPU/CPU clock correlation. Profiling tools enable this
+    // at runtime through hsa_amd_enable_high_precision_timestamps. Unset or any
+    // value other than "1" leaves the single-query path in place.
+    var = os::GetEnvVar("HSA_ENABLE_HIGH_PRECISION_TIMESTAMPS");
+    enable_high_precision_timestamps_.store(var == "1", std::memory_order_relaxed);
 
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
@@ -247,11 +254,12 @@ class Flag {
     var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
     disable_pc_sampling_ = (var == "1") ? true : false;
 
-    // Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by
-    // default, so the agent keeps the base target. Set the variable to 0 to opt
-    // in and have the agent re-point to the strict variant.
+    // Controls reporting of the "strict" ISA variant on A0 silicon. Enabled by
+    // default, so an A0 agent re-points to the strict variant and accepts native
+    // strict code objects. Set the variable to 1 as an emergency kill switch to
+    // fall back to the base target.
     var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
-    disable_gfx12_strict_ = (var == "0") ? false : true;
+    disable_gfx12_strict_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
@@ -293,6 +301,9 @@ class Flag {
 
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
     enable_mwaitx_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_YIELDING_POLL");
+    enable_yielding_poll_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
@@ -448,6 +459,14 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  bool enable_high_precision_timestamps() const {
+    return enable_high_precision_timestamps_.load(std::memory_order_relaxed);
+  }
+
+  void set_enable_high_precision_timestamps(bool enable) {
+    enable_high_precision_timestamps_.store(enable, std::memory_order_relaxed);
+  }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -487,6 +506,8 @@ class Flag {
   bool override_cpu_affinity() const { return override_cpu_affinity_; }
 
   bool image_print_srd() const { return image_print_srd_; }
+
+  bool enable_yielding_poll() const { return enable_yielding_poll_; }
 
   bool check_mwaitx(bool mwaitx_supported) {
     if (enable_mwaitx_ && !mwaitx_supported) enable_mwaitx_ = false;
@@ -612,7 +633,7 @@ class Flag {
   bool no_scratch_thread_limit_;
   bool disable_image_;
   bool disable_pc_sampling_;
-  bool disable_gfx12_strict_ = true;
+  bool disable_gfx12_strict_ = false;
   bool loader_enable_mmap_uri_;
   bool check_sramecc_validity_;
   bool debug_;
@@ -622,6 +643,7 @@ class Flag {
   bool override_cpu_affinity_;
   bool image_print_srd_;
   bool enable_mwaitx_;
+  bool enable_yielding_poll_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
   bool dev_mem_queue_buf_;
@@ -641,6 +663,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  std::atomic<bool> enable_high_precision_timestamps_{false};
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;

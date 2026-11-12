@@ -833,6 +833,50 @@ check_hsa_timing_functions()
 }
 }  // namespace
 
+bool
+needs_high_precision_timestamps(const context::context* ctx)
+{
+    return ctx != nullptr &&
+           (ctx->dispatch_counter_collection || ctx->dispatch_spm || ctx->dispatch_thread_trace ||
+            ctx->device_thread_trace || ctx->pc_sampler ||
+            ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                   ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
+                                   ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY));
+}
+
+bool
+enable_high_precision_timestamps(hsa_amd_ext_table_t* table)
+{
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02 && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    constexpr auto required_size =
+        offsetof(hsa_amd_ext_table_t, hsa_amd_enable_high_precision_timestamps_fn) +
+        sizeof(table->hsa_amd_enable_high_precision_timestamps_fn);
+    if(!table || table->version.major_id != HSA_AMD_EXT_API_TABLE_MAJOR_VERSION ||
+       table->version.minor_id < required_size)
+        return false;
+
+    auto enable = table->hsa_amd_enable_high_precision_timestamps_fn;
+    if(!enable) return false;
+
+    auto status = enable();
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "hsa_amd_enable_high_precision_timestamps failed with status " << status;
+        return false;
+    }
+    ROCP_INFO << "Enabled high-precision GPU timestamps in ROCr";
+    return true;
+#else
+    (void) table;
+    return false;
+#endif
+}
+
 std::string_view
 get_hsa_status_string(hsa_status_t _status)
 {

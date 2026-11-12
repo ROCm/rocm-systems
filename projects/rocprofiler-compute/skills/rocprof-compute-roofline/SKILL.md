@@ -10,20 +10,20 @@ ceilings, peak compute and peak bandwidth, and answers one question: which of
 the two is the limit.
 
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
-before choosing flags. Never use the GUI or TUI, and do not open the generated
-HTML chart. The analyze table carries the same numbers in readable form.
+before choosing flags. Do not open the generated HTML chart. The analyze table
+carries the same numbers in readable form.
 
 ## 1. Collect
 
-Roofline is collected by default, so an ordinary profile already has it:
+Collect only the roofline block:
 
 ```bash
-rocprof-compute profile --name <workload_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> -b roof -- <application> <args>
 ```
 
 Collecting it runs microbenchmarks in addition to profiling the application,
-which takes extra time. `--no-roof` skips them when the user only wants
-counters.
+which takes extra time. An existing profile already has roofline unless it was
+collected with `--no-roof`, or with a `-b` list that left out `roof`.
 
 MI100 (gfx908) does not support the roofline microbenchmarks. Every other
 supported architecture does. On MI100 the benchmark is skipped and the profile
@@ -39,6 +39,26 @@ choose which GPU the application runs on; use `HIP_VISIBLE_DEVICES` for that.
 See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Read the table
 
@@ -78,29 +98,23 @@ at 45% of peak bandwidth" tells the user there is headroom; "memory-bound at
 
 ## 3. Pick the right precision and memory level
 
-Section 2 gives the verdict against the default ceilings. Refine it here when
-the kernel does not use FP32, or when the question is about a specific level of
-the hierarchy.
+The table lists a peak for every precision and an arithmetic intensity for
+every memory level. Compare against the peak row for the precision the kernel
+actually issues, and the intensity row for the memory level in question.
 
-```bash
-# Ceilings for the precision the kernel actually uses
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -R FP16 BF16
-
-# Ceilings for a specific level
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b roof \
-    -m HBM L2
-```
-
-`-R` defaults to FP32. A mixed-precision or matrix kernel compared against the
-FP32 ceiling will look far worse than it is, so set `-R` to the precision the
-kernel actually issues. Read that from the instruction mix with `-b cu_ins`
+A mixed-precision or matrix kernel compared against the FP32 peak will look far
+worse than it is. Read the precision from the instruction mix with `-b cu_ins`
 rather than assuming it. Ask the user which precision the kernel is meant to
 use only when the mix is genuinely mixed and no single type dominates; they
 know the intent, the counters know what ran.
 
-`-m` defaults to every level. HBM answers "am I limited by main memory", while
-L2 and vL1D show whether caches are absorbing the traffic.
+HBM answers "am I limited by main memory", while L2 and vL1D show whether
+caches are absorbing the traffic.
+
+`--view table` prints one table for all kernels together instead of one per
+kernel. To compare many kernels, write the
+[analysis database](../../docs/how-to/analyze/cli.rst) with
+`--output-format db` and query it with SQL.
 
 ## 4. When roofline data is missing
 

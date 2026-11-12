@@ -76,10 +76,6 @@ namespace DevDriver
         class ContainerBase
         {
         public:
-            using AtomicValueType = decltype(+Platform::Atomic{});
-            static_assert(sizeof(AtomicValueType) == sizeof(Platform::Atomic), "Atomic storage must match Platform::Atomic size.");
-            static_assert(alignof(AtomicValueType) == alignof(Platform::Atomic), "Atomic storage must match Platform::Atomic alignment.");
-
             // Construct container and initialize ref count to zero. This class should never be
             // constructed directly by anything other than a subclass.
             ContainerBase(const AllocCb &allocCb);
@@ -132,13 +128,13 @@ namespace DevDriver
 
             int32 RefCountValue() const
             {
-                return Platform::AtomicAdd(const_cast<Platform::Atomic*>(RefCountAtomic()), 0);
+                return Platform::AtomicGet(RefCountAtomic());
             }
 
             // Allocator callbacks
             const AllocCb       m_allocCb;
             // Reference count
-            AtomicValueType     m_refCount;
+            Platform::Atomic    m_refCount;
 
         };
 

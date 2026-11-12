@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISAddExecutable)
+include(HipFileAddExecutable)
 
-ais_add_executable(
+hipfile_add_executable(
     NAME aiscp
     DEPS hipfile
     SRCS "aiscp.cpp"

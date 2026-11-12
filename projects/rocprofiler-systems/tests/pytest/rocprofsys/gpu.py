@@ -2,17 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 from __future__ import annotations
+
+import os
 import re
 import shutil
 import subprocess
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .cache import persistent_cache
 
-GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+)")
+# An optional "-suffix" keeps target variants such as gfx1250-strict distinct.
+_GFX_ARCH = r"gfx[0-9A-Fa-f]+(?:-[A-Za-z]+)?"
+GFX_XXXX_PATTERN = re.compile(rf"({_GFX_ARCH})")
+# Only match agent "Name:" lines; ISA names start with "amdgcn-amd-amdhsa--".
+ROCMINFO_NAME_GFX_PATTERN = re.compile(rf"^\s*Name:\s+({_GFX_ARCH})", re.MULTILINE)
 
 # Architectures where GPU perf counter (device counting service) validation is
 # unreliable and dependent tests should be skipped.
@@ -47,8 +51,11 @@ class GPUInfo:
 
     @property
     def _is_gfx1250(self) -> bool:
-        """Check if any detected GPU uses the gfx1250 architecture."""
-        return "gfx1250" in self.architectures
+        """Check if any detected GPU uses the gfx1250 architecture (or a variant)."""
+        return any(
+            arch == "gfx1250" or arch.startswith("gfx1250-")
+            for arch in self.architectures
+        )
 
     @property
     def rocm_events_for_test(self) -> str:
@@ -94,7 +101,7 @@ class GPUInfo:
         return [f"rocprof-device-[0-9]-{name}*.txt" for name in self.counter_names]
 
 
-def get_rocminfo(rocm_path: Optional[Path] = None) -> Optional[Path]:
+def get_rocminfo(rocm_path: Path | None = None) -> Path | None:
     """Get the path to the rocminfo executable.
 
     Args:
@@ -125,7 +132,7 @@ def _rocminfo_reports_no_gpu(output: str) -> bool:
     return _ROCMINFO_NO_GPU_MARKER in output.lower()
 
 
-def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
+def run_rocminfo(rocm_path: Path | None = None) -> str | None:
     """Run ``rocminfo`` and return its stdout for further processing.
 
     Args:
@@ -148,6 +155,7 @@ def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise RuntimeError(f"Failed to run rocminfo ({rocminfo}): {exc}") from exc
@@ -165,11 +173,10 @@ def run_rocminfo(rocm_path: Optional[Path] = None) -> Optional[str]:
 
 
 @persistent_cache("gpu.detect_gpu")
-def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
+def detect_gpu(rocm_path: Path | None = None) -> GPUInfo:
     """Detect available AMD GPUs and their capabilities.
 
     Uses rocminfo to get the list of GPU architectures.
-    Regex avoids matching "gfxX-X-generic" which may appear.
     """
     categories: set[str] = set()
     architectures: list[str] = []
@@ -177,11 +184,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
     rocminfo_stdout = run_rocminfo(rocm_path)
     if rocminfo_stdout:
-        # Only match gfx on "Name:"
-        name_gfx_pattern = re.compile(
-            r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+)", re.MULTILINE
-        )
-        all_matches = name_gfx_pattern.findall(rocminfo_stdout)
+        all_matches = ROCMINFO_NAME_GFX_PATTERN.findall(rocminfo_stdout)
         # gfx000 is the cpu, remove it
         filtered = [arch for arch in all_matches if arch != "gfx000"]
         device_count = len(filtered)
@@ -201,7 +204,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
 def lookup_gpu_category(
     arch: str,
-    rocminfo_stdout: Optional[str] = None,
+    rocminfo_stdout: str | None = None,
 ) -> list[str]:
     """Lookup the GPU category for an architecture.
 
@@ -245,6 +248,8 @@ def lookup_gpu_category(
         "gfx1151",
         "gfx1152",
         "gfx1153",
+        "gfx1170",
+        "gfx1171",
     ]
 
     categories: list[str] = []
@@ -268,8 +273,8 @@ def lookup_gpu_category(
 
 @persistent_cache("gpu.get_offload_extractor")
 def get_offload_extractor(
-    rocm_path: Optional[Path] = None,
-) -> tuple[Optional[Path], Optional[bool]]:
+    rocm_path: Path | None = None,
+) -> tuple[Path | None, bool | None]:
     """Get offload extractor path
 
     An offload extractor is one of:
@@ -316,6 +321,7 @@ def get_offload_extractor(
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if version_result.returncode == 0:
                 version_match = re.search(r"version\s+(\d+)", version_result.stdout or "")
@@ -391,6 +397,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    check=False,
                 )
                 if result.returncode == 0:
                     for line in result.stdout.strip().split("\n"):
@@ -422,6 +429,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
             if result.returncode == 0:
                 for line in result.stdout.strip().split("\n"):
@@ -435,7 +443,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
 
 
 @persistent_cache("gpu.get_xnack_support")
-def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
+def get_xnack_support(rocm_path: Path | None = None) -> bool:
     """Check whether the current GPU is XNACK-capable.
 
     Run ``rocminfo`` with ``HSA_XNACK=1`` injected into the subprocess
@@ -458,6 +466,7 @@ def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
             text=True,
             timeout=30,
             env=env,
+            check=False,
         )
         if result.returncode == 0:
             return "xnack+" in result.stdout

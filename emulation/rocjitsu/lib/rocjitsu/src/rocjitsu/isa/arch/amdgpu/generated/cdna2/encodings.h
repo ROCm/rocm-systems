@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -481,6 +481,28 @@ public:
   Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -542,6 +564,15 @@ public:
 class Vopc : public IsaInstruction<Isa> {
 public:
   Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
@@ -596,6 +627,28 @@ public:
   Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn);
   bool has_encoded_dpp() const;
   void append_mnemonic(std::string &out) const override;
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    if (has_encoded_dpp()) {
+      modifiers.dpp = true;
+      modifiers.control = dpp_ctrl_;
+      modifiers.row_mask = dpp_row_mask_;
+      modifiers.bank_mask = dpp_bank_mask_;
+      modifiers.bound_ctrl = dpp_bound_ctrl_;
+      modifiers.fi = dpp_fi_;
+      modifiers.inactive_uses_bound_ctrl = false;
+      modifiers.src0 = src_operand(0);
+      return;
+    }
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
+      modifiers.sdwa = true;
+      modifiers.src0 = sdwa_src0_operand_;
+      modifiers.src1 = sdwa_src1_operand_;
+      modifiers.src0_selection = sdwa_src0_sel_;
+      modifiers.src1_selection = sdwa_src1_sel_;
+      modifiers.dst_selection = sdwa_dst_sel_;
+      modifiers.dst_unused = sdwa_dst_unused_;
+    }
+  }
   bool has_encoded_literal32() const;
   bool has_encoded_sdwa() const;
   void implicit_uses(RegisterSet &uses) const override;
@@ -740,19 +793,45 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (!inst_.lds && inst_.op == 61) [[unlikely]]
+      return emit_error.emit() << mnemonic << " requires an LDS source";
+    if (inst_.lds && !(inst_.op == 0 || (inst_.op >= 16 && inst_.op <= 20) || inst_.op == 61))
+        [[unlikely]]
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    return Result::success();
+  }
+  bool should_print_src_operand(uint8_t index) const override {
+    return !src_operands_[index]->is_fieldless();
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    if (src_operands_[index]->size_bits() == 0)
+      out += "off";
+    else
+      Instruction::append_src_operand(out, index);
+  }
+  bool should_print_dst_operand(uint8_t index) const override {
+    // The return view of a buffer atomic shares the encoded VDATA operand.
+    return !mnemonic_.starts_with("buffer_atomic_") && Instruction::should_print_dst_operand(index);
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
-      out += " offen";
     if (inst->idxen)
       out += " idxen";
+    if (inst->offen)
+      out += " offen";
     if (inst->offset)
       out += " offset:" + std::to_string(inst->offset);
     if (inst->glc)
       out += " glc";
     if (inst->slc)
       out += " slc";
+    if (inst->scc)
+      out += " scc";
     if (inst->lds)
       out += " lds";
   }
@@ -763,9 +842,23 @@ public:
 class Mtbuf : public IsaInstruction<Isa> {
 public:
   Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn);
+  bool should_print_src_operand(uint8_t index) const override {
+    return !src_operands_[index]->is_fieldless();
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    if (src_operands_[index]->size_bits() == 0)
+      out += "off";
+    else
+      Instruction::append_src_operand(out, index);
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
+    const unsigned format = inst->dfmt | (inst->nfmt << 4);
+    if (format != 1)
+      out += " format:" + std::to_string(format);
+    if (inst->idxen)
+      out += " idxen";
     if (inst->offen)
       out += " offen";
     if (inst->offset)
@@ -774,6 +867,8 @@ public:
       out += " glc";
     if (inst->slc)
       out += " slc";
+    if (inst->scc)
+      out += " scc";
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -782,6 +877,29 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const auto *operand = static_cast<const IsaOperand<Isa> *>(src_operands_[index]);
+    if (operand->opr_type_ == OperandType::OPR_VGPR) {
+      // GFX90A encodes only the first coordinate register. Its tuple
+      // length depends on the bound image, including its dimension.
+      out += "v" + std::to_string(inst_.vaddr);
+    } else {
+      Instruction::append_src_operand(out, index);
+    }
+  }
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (inst->dmask) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask];
+    }
+  }
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
 };
@@ -789,9 +907,36 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4,
+        4, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    if (inst_.seg == 1 && inst_.saddr != 0x7f) {
+      // The vector address precedes store data and SADDR, even when disabled.
+      bool first = true;
+      for (uint8_t i = 0; i < index; ++i)
+        first &= !should_print_src_operand(i);
+      if (first)
+        out += "off, ";
+    }
+    Instruction::append_src_operand(out, index);
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
+    if (inst->seg != 0 && inst->saddr == 0x7f)
+      out += ", off";
     int flat_offset = inst->offset | (inst->pad_12 << 12);
     if (inst->seg == 0)
       flat_offset = inst->offset;
@@ -803,6 +948,10 @@ public:
       out += " glc";
     if (inst->slc)
       out += " slc";
+    if (inst->scc)
+      out += " scc";
+    if (inst->lds)
+      out += " lds";
   }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;

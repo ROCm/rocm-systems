@@ -841,8 +841,8 @@ pub struct RunArgs {
     /// would have gone into a synthesised config — `--gpus-per-node`,
     /// `--exec-mode`, `-o`/`--option`, `--plugin` — cannot also be
     /// honoured and are refused rather than ignored. Put them in the
-    /// config file instead. `--cpu-thread-budget` is the exception: it
-    /// is applied to a session copy of the file.
+    /// config file instead. `--cpu-thread-budget` and `--wait-checking`
+    /// are applied to a session copy of the file.
     #[arg(
         long,
         value_name = "PATH",
@@ -858,6 +858,16 @@ pub struct RunArgs {
     /// the run gets a session copy carrying the budget.
     #[arg(long = "cpu-thread-budget", value_name = "N")]
     cpu_thread_budget: Option<u32>,
+    /// Override memory wait checking on every CU and GPU for this run:
+    /// on enables ordinary checks, off disables all checks, and all also
+    /// enables gfx1250 XCNT checks. Omit to keep config settings/defaults.
+    ///
+    /// Use `--wait-checking=off` if warnings appear incorrect or checking slows
+    /// a workload. Beats `-o wait_checking=MODE` and composes with
+    /// `--cpu-thread-budget`, including with `--config`: both settings go
+    /// into the same session copy.
+    #[arg(long, value_name = "MODE", value_parser = ["on", "off", "all"])]
+    wait_checking: Option<String>,
     /// Run the emulator in out-of-process daemon mode. This is the
     /// default; the flag is accepted for explicitness and under the
     /// upstream `rocjitsu` spelling `--attach`, which means the same
@@ -945,6 +955,7 @@ impl Default for RunArgs {
             plugins: Vec::new(),
             config: None,
             cpu_thread_budget: None,
+            wait_checking: None,
             daemon: false,
             in_process: false,
             clear_env_vars: false,
@@ -2118,6 +2129,7 @@ const CONFIG_SECTIONS: [&str; 2] = ["vm", "topology"];
 
 /// The emulator option `--cpu-thread-budget` is a spelling of.
 const CPU_THREAD_BUDGET_OPTION: &str = "cpu_thread_budget";
+const WAIT_CHECKING_OPTION: &str = "wait_checking";
 
 /// Resolve `--config <path>` to an absolute path, having checked that it
 /// is a config file the emulator can actually be given.
@@ -2208,6 +2220,7 @@ fn apply_profile_overrides(
         && a.plugins.is_empty()
         && a.config.is_none()
         && a.cpu_thread_budget.is_none()
+        && a.wait_checking.is_none()
         && a.num_nodes.is_none()
         && a.gpus_per_node.is_none()
         && a.hacks.is_empty()
@@ -2296,12 +2309,14 @@ fn apply_profile_overrides(
     // build does not have compiled in is left to bring-up to report:
     // there is no schema here to check against, and refusing on that
     // basis would blame the option for a missing backend.
-    // `--cpu-thread-budget` is a spelling of the `cpu_thread_budget` option, so it
-    // is checked like one: a backend without that option refuses the flag instead
-    // of accepting it and dropping it.
+    // Dedicated flags also name backend options; reject unsupported options
+    // instead of accepting flags that the selected backend would drop.
     let mut option_keys: Vec<String> = options.iter().map(|(k, _)| k.clone()).collect();
     if a.cpu_thread_budget.is_some() {
         option_keys.push(CPU_THREAD_BUDGET_OPTION.to_string());
+    }
+    if a.wait_checking.is_some() {
+        option_keys.push(WAIT_CHECKING_OPTION.to_string());
     }
     if let Some(spec) = find_emulator(&profile.emulator.emulator) {
         let name = &spec.name;
@@ -2320,6 +2335,12 @@ fn apply_profile_overrides(
         profile.emulator.options.insert(
             CPU_THREAD_BUDGET_OPTION.to_string(),
             SimpleValue::Number(i64::from(budget)),
+        );
+    }
+    if let Some(mode) = &a.wait_checking {
+        profile.emulator.options.insert(
+            WAIT_CHECKING_OPTION.to_string(),
+            SimpleValue::String(mode.clone()),
         );
     }
     // Drop-in `--config <path>`: an explicit emulator config file
@@ -3951,18 +3972,83 @@ mod tests {
         // `--num-nodes` is not in that set: how many nodes the emulated
         // machine has is mirage's business, not the emulator config's.
         parse_run(&["--config", "cfg.json", "--num-nodes", "2", "--", "./app"]).unwrap();
-        // Nor is `--cpu-thread-budget`, which upstream `rocjitsu` also takes
-        // alongside `--config`. The backend applies it to a copy of the file.
+        // Both dedicated launch overrides compose with `--config`:
+        // the backend applies them to a copy of the file.
         let run = parse_run(&[
             "--config",
             "cfg.json",
             "--cpu-thread-budget",
             "4",
+            "--wait-checking=off",
             "--",
             "./app",
         ])
         .unwrap();
         assert_eq!(run.cpu_thread_budget, Some(4));
+        assert_eq!(run.wait_checking.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn wait_checking_alone_overrides_the_profile_and_dash_o() {
+        for mode in ["on", "off", "all"] {
+            let mut profile = sample_profile();
+            profile
+                .emulator
+                .options
+                .insert("wait_checking".into(), SimpleValue::String("all".into()));
+            let args = parse_run(&[
+                "--wait-checking",
+                mode,
+                "-o",
+                "wait_checking=on",
+                "--",
+                "./app",
+            ])
+            .unwrap();
+            let result = apply_profile_overrides(&mut profile, &args).unwrap();
+            assert!(matches!(result, MaybeRef::Owned(_)));
+            assert_eq!(
+                profile.emulator.options.get("wait_checking"),
+                Some(&SimpleValue::String(mode.into()))
+            );
+        }
+        // With no override, keep the profile's policy rather than inserting a CLI default.
+        let mut profile = sample_profile();
+        profile
+            .emulator
+            .options
+            .insert("wait_checking".into(), SimpleValue::String("off".into()));
+        assert!(matches!(
+            apply_profile_overrides(&mut profile, &RunArgs::default()).unwrap(),
+            MaybeRef::Ref(_)
+        ));
+        assert_eq!(
+            profile.emulator.options.get("wait_checking"),
+            Some(&SimpleValue::String("off".into()))
+        );
+    }
+
+    #[test]
+    fn wait_checking_refuses_invalid_missing_or_repeated_modes() {
+        for args in [
+            vec!["--wait-checking"],
+            vec!["--wait-checking", "warn"],
+            vec!["--wait-checking="],
+            vec!["--wait-checking=ALL"],
+        ] {
+            let error = parse_run(&args).unwrap_err().to_string();
+            assert!(error.contains("--wait-checking"), "{error}");
+        }
+        assert!(
+            parse_run(&[
+                "--wait-checking=all",
+                "--wait-checking",
+                "off",
+                "--",
+                "./app",
+            ])
+            .is_err()
+        );
     }
 
     /// The flag is a spelling of the `cpu_thread_budget` option, so it has to

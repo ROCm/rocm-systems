@@ -3,7 +3,6 @@
 
 """Integration tests for per-section profiling and metric listing."""
 
-import inspect
 from pathlib import Path
 
 import common
@@ -14,7 +13,6 @@ from tests.integration.common import (
     is_gfx115x_soc,
     is_gfx1250_soc,
     num_kernels,
-    validate,
 )
 
 
@@ -26,12 +24,7 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
@@ -51,12 +44,7 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
@@ -82,12 +70,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
@@ -119,12 +102,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         custom_config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"

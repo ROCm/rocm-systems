@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
+#include "instruction_failure_test_util.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -21,6 +23,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -29,6 +32,25 @@ class CpuDispatchPoolTestAccess {
 public:
   static void construct_with_failure(uint32_t threads, uint32_t fail_after) {
     CpuDispatchPool pool(threads, fail_after);
+  }
+
+  // The test keeps the submitting caller gated for the lifetime of this view.
+  static CpuDispatchPool::Submission *pending_submission(CpuDispatchPool &pool,
+                                                         std::span<ComputeUnitCore *> tasks) {
+    std::lock_guard lock(pool.mutex_);
+    for (auto *submission = pool.ready_head_; submission; submission = submission->next)
+      if (submission->tasks.data() == tasks.data())
+        return submission;
+    return static_cast<CpuDispatchPool::Submission *>(nullptr);
+  }
+
+  struct Progress {
+    size_t next_task;
+    uint32_t active_workers;
+  };
+  static Progress progress(CpuDispatchPool &pool, const CpuDispatchPool::Submission *submission) {
+    std::lock_guard lock(pool.mutex_);
+    return {submission->next_task.load(std::memory_order_relaxed), submission->active_workers};
   }
 };
 
@@ -40,11 +62,10 @@ using namespace rocjitsu;
 
 constexpr uint32_t kSNop = 0xBF800000u;
 constexpr uint32_t kSMovB32 = 0xBE800000u; // s_mov_b32 s0, s0
-constexpr uint32_t kSSetvskip = 0xBF100000u;
 constexpr uint64_t kProgramBase = 0x100000;
 
 struct DispatchPoolFixture {
-  explicit DispatchPoolFixture(uint32_t cu_count, uint32_t functional_quantum = 1) : l2("pool_l2") {
+  void initialize(uint32_t cu_count, uint32_t functional_quantum = 1) {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
     cfg.num_wf_slots = 1;
@@ -60,9 +81,11 @@ struct DispatchPoolFixture {
     tasks.reserve(cu_count);
     wfs.reserve(cu_count);
     for (uint32_t i = 0; i < cu_count; ++i) {
-      auto cu = amdgpu::ComputeUnitCore::create("pool_cu" + std::to_string(i), cfg, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          cu, "pool_cu" + std::to_string(i), cfg, &memory, &l2));
       auto *wf = cu->dispatch_wf(/*wg_id=*/i, kProgramBase, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-      EXPECT_NE(wf, nullptr);
+      ASSERT_NE(wf, nullptr);
       tasks.push_back(cu.get());
       wfs.push_back(wf);
       cus.push_back(std::move(cu));
@@ -70,7 +93,7 @@ struct DispatchPoolFixture {
   }
 
   amdgpu::GpuMemory memory{"pool_memory"};
-  amdgpu::L2Cache l2;
+  amdgpu::L2Cache l2{"pool_l2"};
   std::vector<std::unique_ptr<amdgpu::ComputeUnitCore>> cus;
   std::vector<amdgpu::ComputeUnitCore *> tasks;
   std::vector<amdgpu::Wavefront *> wfs;
@@ -115,16 +138,154 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
   auto plugin = std::make_unique<GatedInstructionPlugin>();
   auto *gate = plugin.get();
   if (!group->add(std::move(plugin)))
-    throw std::runtime_error("failed to install gated instruction plugin");
+    return nullptr;
   for (auto &cu : fixture.cus)
     cu->set_plugin_group(group);
   return gate;
 }
 
+// Hold the caller and one assigned worker while the other worker drains all
+// remaining CUs. The caller identity is published before run() queues work.
+class DrainingWorkerGate final : public ExecutionPlugin {
+public:
+  DrainingWorkerGate() : ExecutionPlugin("draining_worker_gate") {}
+  void set_caller() {
+    std::lock_guard lock(mutex_);
+    caller_ = std::this_thread::get_id();
+  }
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override {
+    std::unique_lock lock(mutex_);
+    const auto id = std::this_thread::get_id();
+    if (id == caller_) {
+      caller_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return caller_released_; });
+      return;
+    }
+    changed_.wait(lock, [&] { return caller_entered_ || all_released_; });
+    if (worker_ == std::thread::id{})
+      worker_ = id;
+    if (id == worker_) {
+      worker_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return worker_released_; });
+    } else {
+      draining_entered_ = true;
+      changed_.notify_all();
+      changed_.wait(lock, [&] { return draining_released_; });
+    }
+  }
+  bool wait_for_all_roles() {
+    std::unique_lock lock(mutex_);
+    return changed_.wait_for(lock, std::chrono::seconds(2), [&] {
+      return caller_entered_ && worker_entered_ && draining_entered_;
+    });
+  }
+  void release_draining() { release(draining_released_); }
+  void release_caller() { release(caller_released_); }
+  void release_worker() { release(worker_released_); }
+  void release_all() {
+    std::lock_guard lock(mutex_);
+    caller_released_ = worker_released_ = draining_released_ = all_released_ = true;
+    changed_.notify_all();
+  }
+
+private:
+  void release(bool &flag) {
+    std::lock_guard lock(mutex_);
+    flag = true;
+    changed_.notify_all();
+  }
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  std::thread::id caller_;
+  std::thread::id worker_;
+  bool caller_entered_ = false;
+  bool worker_entered_ = false;
+  bool draining_entered_ = false;
+  bool caller_released_ = false;
+  bool worker_released_ = false;
+  bool draining_released_ = false;
+  bool all_released_ = false;
+};
+
+TEST(CpuDispatchPoolTest, WorkerCancelsUnusedTicketsWhileCallerAndPeerAreGated) {
+  using Access = amdgpu::CpuDispatchPoolTestAccess;
+  amdgpu::CpuDispatchPool pool(/*threads=*/5);
+  DispatchPoolFixture foreign, target, probe;
+  ASSERT_NO_FATAL_FAILURE(foreign.initialize(/*cu_count=*/3));
+  ASSERT_NO_FATAL_FAILURE(target.initialize(/*cu_count=*/4));
+  ASSERT_NO_FATAL_FAILURE(probe.initialize(/*cu_count=*/2));
+  auto *foreign_gate = gate_fixture(foreign);
+  ASSERT_NE(foreign_gate, nullptr);
+  auto *probe_gate = gate_fixture(probe);
+  ASSERT_NE(probe_gate, nullptr);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<DrainingWorkerGate>();
+  auto *target_gate = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  target.memory.write32(kProgramBase, kSMovB32);
+  for (auto &cu : target.cus)
+    cu->set_plugin_group(group);
+
+  // Occupy two of the four workers, leaving fewer free workers than the target
+  // batch's three tickets. Its caller and two workers each enter a known gate.
+  auto foreign_run = std::async(std::launch::async, [&] { pool.run(foreign.tasks, 3); });
+  const bool occupied = foreign_gate->wait_for_entries(3);
+  EXPECT_TRUE(occupied);
+  if (!occupied) {
+    foreign_gate->release();
+    foreign_run.get();
+    return;
+  }
+  auto target_run = std::async(std::launch::async, [&] {
+    target_gate->set_caller();
+    pool.run(target.tasks, 4);
+  });
+  const bool held = target_gate->wait_for_all_roles();
+  EXPECT_TRUE(held);
+  auto *submission = held ? Access::pending_submission(pool, target.tasks) : nullptr;
+  EXPECT_NE(submission, nullptr);
+  if (submission) {
+    target_gate->release_draining();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (Access::progress(pool, submission).active_workers != 1 &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    EXPECT_EQ(Access::progress(pool, submission).active_workers, 1u);
+
+    // The only available worker must reach this later submission. Without
+    // worker-side cancellation it first claims the target's leftover ticket,
+    // advancing next_task again despite having no CU left to execute.
+    auto probe_run = std::async(std::launch::async, [&] { pool.run(probe.tasks, 2); });
+    EXPECT_TRUE(probe_gate->wait_for_entries(2));
+    EXPECT_EQ(Access::progress(pool, submission).next_task, target.tasks.size() + 1);
+    target_gate->release_caller();
+    EXPECT_EQ(target_run.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    target_gate->release_worker();
+    EXPECT_EQ(target_run.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    probe_gate->release();
+    EXPECT_NO_THROW(probe_run.get());
+    for (const auto *wf : probe.wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+  }
+  target_gate->release_all();
+  foreign_gate->release();
+  EXPECT_NO_THROW(target_run.get());
+  EXPECT_NO_THROW(foreign_run.get());
+  for (const auto *fixture : {&foreign, &target})
+    for (const auto *wf : fixture->wfs)
+      EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
+}
+
 TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependently) {
-  DispatchPoolFixture first(/*cu_count=*/2), second(/*cu_count=*/2);
+  DispatchPoolFixture first, second;
+  ASSERT_NO_FATAL_FAILURE(first.initialize(/*cu_count=*/2));
+  ASSERT_NO_FATAL_FAILURE(second.initialize(/*cu_count=*/2));
   auto *first_gate = gate_fixture(first);
+  ASSERT_NE(first_gate, nullptr);
   auto *second_gate = gate_fixture(second);
+  ASSERT_NE(second_gate, nullptr);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   std::array<amdgpu::FunctionalQuantumResult, 2> first_results{}, second_results{};
   auto first_run = std::async(std::launch::async,
@@ -147,8 +308,11 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
 }
 
 TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
-  DispatchPoolFixture failing(/*cu_count=*/3), succeeding(/*cu_count=*/4);
+  DispatchPoolFixture failing, succeeding;
+  ASSERT_NO_FATAL_FAILURE(failing.initialize(/*cu_count=*/3));
+  ASSERT_NO_FATAL_FAILURE(succeeding.initialize(/*cu_count=*/4));
   auto *gate = gate_fixture(failing);
+  ASSERT_NE(gate, nullptr);
   auto throwing = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(throwing->add(std::make_unique<test::ThrowingInstructionPlugin>()));
   failing.cus[0]->set_plugin_group(throwing);
@@ -180,8 +344,10 @@ TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
 TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   for (uint32_t width : {1u, 2u}) {
-    DispatchPoolFixture fixture(/*cu_count=*/8);
+    DispatchPoolFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/8));
     auto *gate = gate_fixture(fixture);
+    ASSERT_NE(gate, nullptr);
     auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, /*threads=*/width); });
     EXPECT_TRUE(gate->wait_for_entries(width));
     // All entered CUs remain blocked. Extra entries would require exceeding the
@@ -199,8 +365,10 @@ TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {
   constexpr size_t kSubmitters = 8;
   constexpr uint32_t kRounds = 32;
   std::array<std::unique_ptr<DispatchPoolFixture>, kSubmitters> fixtures;
-  for (auto &fixture : fixtures)
-    fixture = std::make_unique<DispatchPoolFixture>(/*cu_count=*/8);
+  for (auto &fixture : fixtures) {
+    fixture = std::make_unique<DispatchPoolFixture>();
+    ASSERT_NO_FATAL_FAILURE(fixture->initialize(/*cu_count=*/8));
+  }
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   std::barrier start(static_cast<std::ptrdiff_t>(kSubmitters));
   std::vector<std::future<void>> runs;
@@ -222,7 +390,8 @@ TEST(CpuDispatchPoolTest, ConcurrentReusedSubmissionsRunEveryCuOnce) {
 }
 
 TEST(CpuDispatchPoolTest, ReusedBatchesRunEachCuOnceAtRequestedThreadCounts) {
-  DispatchPoolFixture fixture(/*cu_count=*/8);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/8));
   amdgpu::CpuDispatchPool pool(/*threads=*/8);
 
   constexpr std::array<uint32_t, 6> kThreadCounts = {1, 2, 8, 3, 8, 1};
@@ -241,7 +410,8 @@ TEST(CpuDispatchPoolTest, ReusedBatchesRunEachCuOnceAtRequestedThreadCounts) {
 }
 
 TEST(CpuDispatchPoolTest, ZeroThreadsFallsBackToCallingThread) {
-  DispatchPoolFixture fixture(/*cu_count=*/1);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/1));
   amdgpu::CpuDispatchPool pool(/*threads=*/0);
 
   EXPECT_EQ(pool.thread_count(), 1u);
@@ -252,7 +422,8 @@ TEST(CpuDispatchPoolTest, ZeroThreadsFallsBackToCallingThread) {
 TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
   constexpr uint32_t kSEndpgm = 0xBF810000u;
   constexpr uint64_t kSecondProgramBase = kProgramBase + 128 * sizeof(uint32_t);
-  DispatchPoolFixture fixture(/*cu_count=*/2, /*functional_quantum=*/0);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/2, /*functional_quantum=*/0));
   fixture.memory.write32(kProgramBase + 2 * sizeof(uint32_t), kSEndpgm);
   fixture.memory.write32(kSecondProgramBase + 3 * sizeof(uint32_t), kSEndpgm);
   fixture.wfs[1]->pc = kSecondProgramBase;
@@ -273,15 +444,23 @@ TEST(CpuDispatchPoolTest, ZeroFunctionalQuantumRunsUntilWavefrontHalts) {
   EXPECT_EQ(per_cu[1].iterations, 3u);
   EXPECT_TRUE(fixture.cus[0]->is_idle());
   EXPECT_TRUE(fixture.cus[1]->is_idle());
-
-  std::array<amdgpu::FunctionalQuantumResult, 1> wrong_size{};
-  EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/2,
-                        std::span<amdgpu::FunctionalQuantumResult>(wrong_size)),
-               std::invalid_argument);
 }
 
+#ifndef NDEBUG
+TEST(CpuDispatchPoolDeathTest, AssertsMismatchedResultCount) {
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/2));
+  amdgpu::CpuDispatchPool pool(/*threads=*/1);
+  std::array<amdgpu::FunctionalQuantumResult, 1> wrong_size{};
+  EXPECT_DEATH(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/1,
+                        std::span<amdgpu::FunctionalQuantumResult>(wrong_size)),
+               "dispatch result count must match task count");
+}
+#endif
+
 TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
-  DispatchPoolFixture fixture(/*cu_count=*/64);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/64));
   amdgpu::CpuDispatchPool pool(/*threads=*/8);
   fixture.memory.write32(kProgramBase, kSMovB32);
 
@@ -302,7 +481,8 @@ TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
 }
 
 TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
-  DispatchPoolFixture fixture(/*cu_count=*/4);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/4));
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   fixture.memory.write32(kProgramBase, kSMovB32);
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -316,9 +496,11 @@ TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
 }
 
 TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
-  DispatchPoolFixture fixture(/*cu_count=*/8);
+  DispatchPoolFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/8));
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kProgramBase, kSSetvskip);
+  for (size_t i = 0; i < test::kUnimplementedInstruction.size(); ++i)
+    fixture.memory.write32(kProgramBase + i * sizeof(uint32_t), test::kUnimplementedInstruction[i]);
 
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
   for (const auto &cu : fixture.cus)
@@ -341,8 +523,11 @@ TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
 // A caller must not steal pending work from another submission: that work can
 // be waiting for the caller's own submission to complete.
 TEST(CpuDispatchPoolTest, SubmittingThreadRunsOnlyItsOwnSubmission) {
-  DispatchPoolFixture foreign(/*cu_count=*/3), own(/*cu_count=*/1);
+  DispatchPoolFixture foreign, own;
+  ASSERT_NO_FATAL_FAILURE(foreign.initialize(/*cu_count=*/3));
+  ASSERT_NO_FATAL_FAILURE(own.initialize(/*cu_count=*/1));
   auto *gate = gate_fixture(foreign);
+  ASSERT_NE(gate, nullptr);
   amdgpu::CpuDispatchPool pool(/*threads=*/2);
   auto foreign_run = std::async(std::launch::async, [&] { pool.run(foreign.tasks, 2); });
   // Occupy the worker and foreign caller while one foreign CU remains pending.
@@ -375,7 +560,8 @@ TEST(CpuDispatchPoolBenchmark, SparseConcurrentSubmissions) {
     std::vector<std::unique_ptr<DispatchPoolFixture>> fixtures;
     fixtures.reserve(kSubmissions);
     for (uint32_t i = 0; i < kSubmissions; ++i) {
-      auto fixture = std::make_unique<DispatchPoolFixture>(cus_per_submission, kFunctionalQuantum);
+      auto fixture = std::make_unique<DispatchPoolFixture>();
+      ASSERT_NO_FATAL_FAILURE(fixture->initialize(cus_per_submission, kFunctionalQuantum));
       fixture->memory.write32(kProgramBase, kSBranchSelf);
       fixtures.push_back(std::move(fixture));
     }

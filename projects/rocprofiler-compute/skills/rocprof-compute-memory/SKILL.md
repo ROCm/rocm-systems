@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-memory
-description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Windows, host memory profiling, or system-wide tracing.
+description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Nsight, Windows, host-memory leaks, GPU out-of-memory allocation failures, or system-wide tracing.
 ---
 
 # Analyze the AMD GPU memory hierarchy
@@ -9,7 +9,6 @@ Use this after Speed-of-Light points at memory, or when the user asks about
 bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Start with the Memory Chart
 
@@ -23,6 +22,35 @@ cache level served, and what reached HBM. Read it before opening any single
 cache level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
+
+If there is no workload yet, collect only the memory blocks:
+
+```bash
+rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+```
+
+The cache aliases differ by architecture; for example, some GPUs name their
+caches `gl0` and `gl2`.
+
+### Collect only what the question needs
+
+Never run a full profile. It replays the application once per counter pass and
+also runs the roofline benchmarks.
+
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
+- `--set <set_name>` collects a predefined topic in one pass.
+  `rocprof-compute profile --list-sets` lists the sets.
+- Add `-k <kernel_name>` when the user names the kernels that matter.
+- Add `--no-roof` unless the question is about roofline. A `-b` list without
+  block 4 (`roof`) already skips it.
+- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
+  each kernel, so it only helps when every profiled kernel is dispatched many
+  times. Pair it with `-k`. See Iteration multiplexing in
+  [profile mode](../../docs/how-to/profile/mode.rst).
+- Tell the user which analysis panels the narrower profile leaves empty.
 
 ## 2. Open the level the chart points at
 
@@ -85,21 +113,18 @@ What usually follows from what:
 ## 4. Memory bandwidth analysis (experimental, gfx950)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-It is experimental and currently shipped for gfx950 only. It needs block 30 at
-both profile and analyze time:
+It is experimental and currently shipped for gfx950 only; see
+[memory bandwidth analysis](../../docs/how-to/membw_analysis.rst). It needs
+only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
-rocprof-compute profile --experimental --membw-analysis --name <name> -- <application>
+rocprof-compute profile --experimental --membw-analysis -b 3 30 \
+    --name <name> -- <application>
 
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> \
-    --experimental --membw-analysis -k <kernel_id>
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
 ```
 
-Its cutoffs and guidance text are data, not something to restate from memory.
-They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
-`src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml`. Read those files
-when you need to explain a verdict, and report the guidance the tool produced
-rather than substituting your own numbers.
+Report the guidance the tool produced rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.
 

@@ -84,6 +84,7 @@ inline const char* ihipErrorString(hipError_t hip_error) {
     CASE_STR(hipErrorRuntimeOther);
     CASE_STR(hipErrorHostMemoryAlreadyRegistered);
     CASE_STR(hipErrorHostMemoryNotRegistered);
+    CASE_STR(hipErrorNotPermitted);
     CASE_STR(hipErrorTbd);
     default:
       return "hipErrorUnknown";

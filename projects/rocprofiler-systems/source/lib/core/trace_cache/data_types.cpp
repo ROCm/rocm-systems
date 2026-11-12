@@ -62,7 +62,7 @@ enabled_formats_t::enabled_formats_t()
              .name             = "rocpd" },
            { .kind             = format_kind::perfetto,
              .process_parallel = true,
-             .enabled          = get_caching_perfetto(),
+             .enabled          = get_use_perfetto(),
              .name             = "perfetto" },
            { .kind             = format_kind::unified_memory,
              .process_parallel = false,

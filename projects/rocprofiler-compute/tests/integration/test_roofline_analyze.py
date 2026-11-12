@@ -54,8 +54,6 @@ def test_analyze_generates_roofline_html(
             "analyze",
             "--path",
             workload_dir,
-            "--roofline-data-type",
-            "FP32",
         ])
         assert code == 0
 
@@ -72,61 +70,6 @@ def test_analyze_generates_roofline_html(
         }
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_roofline_datatype_independently(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-) -> None:
-    """
-    Analyze with multiple data types.
-    Verifies each datatype can be requested independently.
-    """
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    for dtype in ["FP32", "FP64", "BF16"]:
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--roofline-data-type",
-            dtype,
-        ])
-        assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert [html_file.name for html_file in html_files] == ["empirRoof_gpu-0.html"]
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_analyze_roofline_multiple_datatypes_single_invocation(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-) -> None:
-    """
-    Analyze with multiple data types in a single invocation.
-    Verifies the multi-datatype request path works end to end.
-    """
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "FP32",
-        "FP64",
-        "BF16",
-    ])
-    assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
 
 
 def test_analyze_missing_roofline_csv_graceful(
@@ -166,8 +109,6 @@ def test_analyze_roofline_idempotent(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
-        "FP32",
     ]
 
     code1 = binary_handler_analyze_rocprof_compute(analyze_args)
@@ -205,93 +146,6 @@ def test_analyze_corrupted_roofline_csv_graceful(
         assert code == 0
 
 
-def test_roof_invalid_data_type(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Invalid --roofline-data-type should be rejected by the analyze argparser."""
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--roofline-data-type",
-        "INVALID_TYPE",
-    ])
-
-    err = capsys.readouterr().err
-    assert "--roofline-data-type" in err
-    assert "invalid choice" in err
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_roof_invalid_mem_level(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Invalid --mem-level should be rejected by the analyze argparser."""
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        "INVALID_LEVEL",
-    ])
-
-    err = capsys.readouterr().err
-    assert "--mem-level" in err
-    assert "invalid choice" in err
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-roofline_mem_level_dirs = {
-    "vL1D": "tests/workloads/mem_levels_vL1D/MI200",
-    "LDS": "tests/workloads/mem_levels_LDS/MI200",
-}
-
-
-@pytest.mark.parametrize(
-    "mem_level",
-    ["vL1D", "LDS"],
-    ids=["vL1D", "LDS"],
-)
-def test_roof_mem_levels(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-    mem_level: str,
-) -> None:
-    """Analyze with --mem-level generates roofline HTML output."""
-    workload_src = roofline_mem_level_dirs[mem_level]
-    if not Path(workload_src).exists():
-        pytest.skip(f"Workload directory {workload_src} not found")
-
-    workload_dir = integration_common.setup_workload_dir(
-        workload_src, param_id=mem_level
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        mem_level,
-    ])
-    assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 # Per-datatype HTML output validation
 
 # Each datatype must take the correct roofline branch:
@@ -306,7 +160,7 @@ def test_analyze_roofline_datatype_html_legend(
     binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
     dtype: str,
 ) -> None:
-    """Per-datatype roofline HTML embeds the expected VALU/MFMA legend.
+    """The roofline HTML embeds the expected VALU/MFMA legend for each datatype.
 
     FP8/FP4/FP6 are intentionally excluded: they are unsupported on the
     available gfx90a (MI200) test data and are covered by the unit tests.
@@ -319,13 +173,11 @@ def test_analyze_roofline_datatype_html_legend(
         "analyze",
         "--path",
         workload_dir,
-        "--roofline-data-type",
-        dtype,
     ])
     assert code == 0
 
     html_path = Path(workload_dir) / "empirRoof_gpu-0.html"
-    assert html_path.is_file(), f"Analyze should generate a {dtype} roofline HTML"
+    assert html_path.is_file(), "Analyze should generate the roofline HTML"
 
     html_text = html_path.read_text(encoding="utf-8")
     for legend in DATATYPE_LEGEND_CASES[dtype]["present"]:

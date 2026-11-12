@@ -8,16 +8,19 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from functools import lru_cache
-from typing import Any, Callable, Generator, Optional
 
-import re
+import json
 import os
-import sys
+import re
 import shutil
 import signal
+import subprocess
+import sys
 import traceback
+import warnings
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Callable, Generator, Mapping
 
 try:
     import yaml
@@ -29,35 +32,34 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 from pytest import StashKey
-
-from rocprofsys import environment
 from rocprofsys import (
-    RocprofsysConfig,
-    discover_build_config,
+    BaselineRunner,
+    BinaryRewriteRunner,
+    CausalRunner,
     GPUInfo,
-    get_rocminfo,
-    detect_gpu,
-    get_offload_extractor,
-    get_target_gpu_arch,
-    get_xnack_support,
+    PythonRunner,
+    RocprofsysConfig,
+    RuntimeInstrumentRunner,
+    SamplingRunner,
+    SysRunRunner,
     TestResult,
     ValidationResult,
-    validate_regex,
+    detect_gpu,
+    discover_build_config,
+    environment,
+    get_offload_extractor,
+    get_rocminfo,
+    get_target_gpu_arch,
+    get_xnack_support,
+    safe_remove,
+    validate_causal_json,
+    validate_file_exists,
     validate_file_regex,
     validate_perfetto_trace,
+    validate_regex,
     validate_rocpd_database,
     validate_timemory_json,
-    validate_causal_json,
     validate_unified_memory_outputs,
-    validate_file_exists,
-    BaselineRunner,
-    SamplingRunner,
-    BinaryRewriteRunner,
-    RuntimeInstrumentRunner,
-    SysRunRunner,
-    CausalRunner,
-    PythonRunner,
-    safe_remove,
 )
 
 # Key for storing the single test result on pytest items
@@ -277,6 +279,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "shmem",
         "nic",
         "ainic_required",
+        "backend_include_ompt",
     ]
 
     # Informational markers, only used for test labeling
@@ -333,8 +336,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "unit_tests",
         "hip_stream",
         "presets",
+        "domain_flags",
         "tool_runner",
         "cli_help",
+        "rocsys",
         "hpc",
         "hip",
         "scratch_memory",
@@ -344,7 +349,9 @@ def pytest_configure(config: pytest.Config) -> None:
         "validation_usm",
         "selective_regions",
         "minimal",
+        "backend_flags",
         "rank_filter",
+        "rocattach",
         "pytest_impl",
     ]
     for label in non_functional_markers + generic_functional_markers:
@@ -486,6 +493,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = mpi_unavailable_reason(rocprof_config, config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "backend_include_ompt" in item.keywords:
+            _msg = backend_include_ompt_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "mpi_implementation" in item.keywords:
             req_impl = item.get_closest_marker("mpi_implementation").args[0]
             if req_impl != rocprof_config.capabilities.mpi_implementation:
@@ -498,11 +509,13 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = overflow_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "attach" in item.keywords:
+        # Use the marker, not the keyword. A parametrize id such as "python"
+        # or "attach" is also a keyword and must not skip help-forward tests.
+        if item.get_closest_marker("attach"):
             _msg = attach_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "python" in item.keywords:
+        if item.get_closest_marker("python"):
             _msg = python_base_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
@@ -543,17 +556,19 @@ def pytest_collection_modifyitems(config, items) -> None:
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
+            # None < (major, minor, patch) raises TypeError and aborts collection.
+            # Adding the skip marker does not stop the comparison below.
             if system_version is None:
                 item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
-            # Parse min_version and compare
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
                     )
-                )
         if "oshrun_min_version" in item.keywords:
             req_version = item.get_closest_marker("oshrun_min_version").args[0]
             system_version = rocprof_config.capabilities.oshrun_version
@@ -611,14 +626,13 @@ def pytest_collection_modifyitems(config, items) -> None:
                     )
             except Exception as e:
                 pytest.exit(f"Invalid run_if_gpu_category expression: {e}", returncode=1)
-        if "cap_perfmon" in item.keywords:
-            if not rocprof_config.capabilities.cap_perfmon:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason="Test requires CAP_PERFMON capability; "
-                        "either enable it or use CAP_SYS_ADMIN as a general override"
-                    )
+        if "cap_perfmon" in item.keywords and not rocprof_config.capabilities.cap_perfmon:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="Test requires CAP_PERFMON capability; "
+                    "either enable it or use CAP_SYS_ADMIN as a general override"
                 )
+            )
         if "disable_archs" in item.keywords:
             marker = item.get_closest_marker("disable_archs")
             disabled: set = set()
@@ -663,6 +677,18 @@ def pytest_collection_finish(session) -> None:
             failures = "\n".join(f"  - {r.nodeid}" for r in _collection_errors)
             pytest.exit(
                 f"CTestTestfile.cmake generation failed due to:\n{failures}",
+                returncode=1,
+            )
+        if not session.items:
+            opts = session.config.option
+            active = [
+                f"-m '{opts.markexpr}'" if opts.markexpr else "",
+                f"-k '{opts.keyword}'" if opts.keyword else "",
+            ]
+            filters = " ".join(a for a in active if a) or "none"
+            pytest.exit(
+                f"CTestTestfile.cmake generation collected 0 tests (filters: {filters}); "
+                "check python_files in pytest-generate.ini and the -m/-k filters",
                 returncode=1,
             )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
@@ -784,11 +810,117 @@ def pytest_sessionfinish(session, exitstatus):
 # ============================================================================
 
 # ----------------------------------------------------------------------------
+# Resolved profiler settings: Used to validate the settings actually used by the profiler
+# after configuration parsing.
+# The launcher will output settings found in the environment and in the configuration file, so
+# a simple `regex` is not a reliable way to verify the expected configuration settings are used.
+# These functions help to parse the output `metadata.json` to verify that the expected configuration
+# settings are actually used.
+# ----------------------------------------------------------------------------
+
+
+def parse_metadata_settings(metadata_file: Path) -> dict:
+    """Read the `metadata.json` file, generated by the rocprofiler-systems tests,
+    into a dictionary of key-value pairs.
+
+    The file is expected to be in the format:
+    ```json
+    {
+        "rocprofiler-systems": {
+            "metadata": {
+                "settings": {
+                    "ROCPROFSYS_*": {
+                        "value": "..."
+                    }
+                }
+            }
+        }
+    }
+    ```
+
+    Returns a dictionary of key-value pairs. The keys are the ROCPROFSYS_* settings,
+    and the values are the resolved values.
+    """
+    settings = json.loads(metadata_file.read_text())["rocprofiler-systems"]["metadata"][
+        "settings"
+    ]
+    return {
+        key: entry["value"]
+        for key, entry in settings.items()
+        if isinstance(entry, dict) and "value" in entry
+    }
+
+
+def cpu_frequency_available(
+    sysfs_cpu_root: Path = Path("/sys/devices/system/cpu"),
+) -> bool:
+    """Return True if at least one CPU exposes a readable cpufreq ``scaling_cur_freq``.
+
+    With no readable file to sample CPU frequency, there will be no ``Frequency (S)``
+    counter reaching the trace. Containers and VMs often hide cpufreq.
+    """
+    for freq_file in sysfs_cpu_root.glob("cpu[0-9]*/cpufreq/scaling_cur_freq"):
+        try:
+            with freq_file.open("r") as handle:
+                handle.read(1)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def host_counters_expected(counters: list[str]) -> list[str]:
+    """Drop ``Frequency (S)`` from ``counters`` when cpufreq is unavailable.
+
+    Emits a warning so the dropped check stays visible in the pytest summary.
+    """
+    if "Frequency (S)" not in counters or cpu_frequency_available():
+        return counters
+    warnings.warn(
+        "cpufreq (scaling_cur_freq) is not readable on this host; skipping the "
+        "'Frequency (S)' counter check",
+        stacklevel=2,
+    )
+    return [name for name in counters if name != "Frequency (S)"]
+
+
+def assert_resolved_settings(
+    result: TestResult,
+    expected: Mapping[str, Any],
+    *,
+    metadata_file: Path | None = None,
+) -> None:
+    """Fail unless every key in ``expected`` is present with an equal value.
+
+    Reads ``metadata.json`` from the run's default output directory, or from
+    ``metadata_file`` when the run writes it to a custom path. Only the keys in
+    ``expected`` are checked, and all mismatches are reported together.
+    """
+    __tracebackhide__ = True
+    if metadata_file is None:
+        metadata_file = result.get_output_file("metadata*.json")
+        if metadata_file is None:
+            pytest.fail(f"No metadata.json found under {result.output_dir}")
+    settings = parse_metadata_settings(metadata_file)
+
+    problems = []
+    for key, value in expected.items():
+        if key not in settings:
+            problems.append(f"{key}: missing")
+        elif settings[key] != value:
+            problems.append(f"{key}: got {settings[key]!r}, expected {value!r}")
+    if problems:
+        pytest.fail(
+            f"{metadata_file}: resolved settings mismatch:\n  " + "\n  ".join(problems)
+        )
+
+
+# ----------------------------------------------------------------------------
 # Collection-time availability: return None if OK, else a skip reason string.
 # ----------------------------------------------------------------------------
 
 
-def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if rocprof_config.capabilities.perf_events_usable:
         return None
     return (
@@ -797,14 +929,14 @@ def overflow_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[st
     )
 
 
-def gpu_unavailable_reason() -> Optional[str]:
+def gpu_unavailable_reason() -> str | None:
     gpu_info = get_gpu_info()
     if gpu_info is not None and gpu_info.available:
         return None
     return "No valid GPU available"
 
 
-def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     msg = overflow_unavailable_reason(rocprof_config)
     if msg is not None:
         return msg
@@ -813,7 +945,7 @@ def annotate_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[st
     return None
 
 
-def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     """Gate ``attach`` tests on whether ptrace attach is permitted.
 
     Follows the yama policy documented in the Linux kernel's
@@ -844,14 +976,14 @@ def attach_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]
     )
 
 
-def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     caps = rocprof_config.capabilities
     if caps.papi_nic_events is not None:
         return None
     return "Requires PAPI network events to be available"
 
 
-def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     """Check if AI NIC tracking is available.
 
     Requires ``amd-smi static`` to report at least one NETDEV entry.
@@ -863,7 +995,7 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
 
 def rocprofiler_sdk_min_version_unavailable_reason(
     rocprof_config: RocprofsysConfig, req_version: str
-) -> Optional[str]:
+) -> str | None:
     """Return a skip reason if the detected rocprofiler-sdk is older than req_version.
 
     ``req_version`` is a dotted version string (e.g. ``"1.2.2"``) supplied by the
@@ -885,19 +1017,52 @@ def rocprofiler_sdk_min_version_unavailable_reason(
 
 def mpi_unavailable_reason(
     rocprof_config: RocprofsysConfig, config: pytest.Config
-) -> Optional[str]:
+) -> str | None:
     if rocprof_config.capabilities.mpiexec_exec is None:
         return "MPI not available"
     return None
 
 
-def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+@lru_cache(maxsize=1)
+def _ompt_include_choice_supported(rocprofsys_run: str) -> bool | None:
+    """Cached probe for whether ``-I ompt`` is a valid backend-include choice.
+
+    Returns None if the probe itself failed (binary missing/timeout), so the
+    caller can distinguish "not supported" from "could not tell".
+    """
+    try:
+        result = subprocess.run(
+            [rocprofsys_run, "-I", "ompt", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    combined = (result.stdout or "") + (result.stderr or "")
+    return "Invalid choice: 'ompt'" not in combined
+
+
+def backend_include_ompt_unavailable_reason(
+    rocprof_config: RocprofsysConfig,
+) -> str | None:
+    """Skip ``-I ompt`` tests when this build omits ompt from backend choices."""
+    supported = _ompt_include_choice_supported(str(rocprof_config.rocprofsys_run))
+    if supported is None:
+        return "Could not query backend include choice 'ompt'"
+    if not supported:
+        return "Backend include choice 'ompt' not available in this build"
+    return None
+
+
+def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if rocprof_config.rocprofsys_python is not None:
         return None
     return "rocprof-sys-python binary not found"
 
 
-def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if (
         rocprof_config.capabilities.supported_python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
@@ -909,25 +1074,25 @@ def python_versions_unavailable_reason(rocprof_config: RocprofsysConfig) -> Opti
     )
 
 
-def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def julia_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if rocprof_config.capabilities.julia_exec:
         return None
     return "Julia not available"
 
 
-def xnack_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def xnack_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if get_xnack_support(rocprof_config.rocm_path):
         return None
     return "XNACK not supported"
 
 
-def no_docker_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def no_docker_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if not rocprof_config.capabilities.is_inside_docker:
         return None
     return "Test cannot run inside a Docker container"
 
 
-def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
     if rocprof_config.capabilities.oshrun_exec:
         return None
     return "SHMEM not available"
@@ -945,7 +1110,7 @@ TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
 
 
 @lru_cache(maxsize=1)
-def _load_test_categories() -> Optional[dict]:
+def _load_test_categories() -> dict | None:
     """Load and compile test_categories.yaml from rocprofsys_tests_dir.
 
     Reads the YAML that CMake installs/configures into
@@ -1169,9 +1334,11 @@ def _emit_ctest_header_block() -> list[str]:
 def _emit_prerequisite_block() -> list[str]:
     """``rocprofiler-systems-pytest-config`` prerequisite test (global tmp fixture setup)."""
     return [
-        'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
-        ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")',
+        (
+            'add_test("rocprofiler-systems-pytest-config" "${_ROCPROFSYS_EXE}"'
+            ' "${_ROCPROFSYS_EXE_ARGS}"'
+            ' "${_ROCPROFSYS_NODEID_PFX}" "--show-config-only")'
+        ),
         'set_tests_properties("rocprofiler-systems-pytest-config" PROPERTIES',
         '    FIXTURES_SETUP "rocprofsys-global-tmp-files"',
         '    LABELS "prerequisite;global"',
@@ -1184,9 +1351,11 @@ def _emit_prerequisite_block() -> list[str]:
 def _emit_cleanup_block() -> list[str]:
     """``rocprofiler-systems-test-cleanup`` (global tmp fixture cleanup)."""
     return [
-        'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
-        ' "${_ROCPROFSYS_EXE_ARGS}"'
-        ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")',
+        (
+            'add_test("rocprofiler-systems-test-cleanup" "${_ROCPROFSYS_EXE}"'
+            ' "${_ROCPROFSYS_EXE_ARGS}"'
+            ' "${_ROCPROFSYS_NODEID_PFX}" "--ctest-mode" "cleanup")'
+        ),
         'set_tests_properties("rocprofiler-systems-test-cleanup" PROPERTIES',
         '    FIXTURES_CLEANUP "rocprofsys-global-tmp-files"',
         '    LABELS "cleanup;global"',
@@ -1236,10 +1405,12 @@ def _emit_test_item_block(
             extra_args += f' "--python-versions={py_ver}"'
 
     lines_out: list[str] = [
-        f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
-        f' "${{_ROCPROFSYS_EXE_ARGS}}"'
-        f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
-        f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+        (
+            f'add_test("{escaped_name}" "${{_ROCPROFSYS_EXE}}"'
+            f' "${{_ROCPROFSYS_EXE_ARGS}}"'
+            f' "${{_ROCPROFSYS_NODEID_PFX}}{escaped_nodeid}"'
+            f"{extra_args} ${{_ROCPROFSYS_EXTRA_ARGS}})"
+        )
     ]
     props: list[str] = []
     if labels:
@@ -1261,7 +1432,7 @@ def _emit_test_item_block(
 
 
 def _ctest_generate_tests(
-    items: list[pytest.Item], output_path: Optional[Path] = None
+    items: list[pytest.Item], output_path: Path | None = None
 ) -> None:
     """Generate a CTestTestfile.cmake file and print it to stdout."""
 
@@ -1686,6 +1857,14 @@ def _build_rocprofsys_config_header() -> list[str]:
         ]
     )
 
+    papi_nic_events = cap.papi_nic_events.split() if cap.papi_nic_events else []
+    papi_nic_rows = (
+        [_row("PAPI NIC events:", papi_nic_events[0])]
+        + [_row("", e) for e in papi_nic_events[1:]]
+        if papi_nic_events
+        else [_row("PAPI NIC events:", "None")]
+    )
+
     header = [
         "",
         "=" * 70,
@@ -1709,6 +1888,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Avail:", rocprof_config.rocprofsys_avail),
         _row("Causal:", rocprof_config.rocprofsys_causal),
         _row("Python:", rocprof_config.rocprofsys_python),
+        _row("Attach:", rocprof_config.rocprofsys_attach),
         "-" * 70,
         "Executables:",
         _row("MPI:", cap.mpiexec_exec),
@@ -1735,13 +1915,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("PAPI available:", cap.papi_availability),
         _row("AI NIC devices:", cap.ai_nic_devices),
         _row("Default NIC:", cap.default_nic),
-        *(
-            lambda evts: (
-                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
-                if evts
-                else [_row("PAPI NIC events:", "None")]
-            )
-        )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
+        *papi_nic_rows,
         "-" * 70,
         "GPU Information:",
         _row("Available:", gpu_info.available),
@@ -1787,9 +1961,9 @@ def add_marker_if(
     item,
     marker_to_add: str,
     cond: Callable[[], bool] = lambda: True,
-    req_mark: Optional[str] = None,
-    skip_reason: Optional[str] = None,
-    unavailable_reason: Optional[Callable[[], Optional[str]]] = None,
+    req_mark: str | None = None,
+    skip_reason: str | None = None,
+    unavailable_reason: Callable[[], str | None] | None = None,
 ) -> None:
     """Add a marker to a test item if:
         - target_marker is present (or not specified)
@@ -1905,8 +2079,8 @@ def get_gpu_info() -> GPUInfo:
 
 def _run_cleanup() -> None:
     """Run cleanup of temp files and optionally the test output directory."""
-    import glob
     import getpass
+    import glob
 
     # Clean up temp files
     for pattern in _cleanup_temp_patterns():
@@ -2059,6 +2233,36 @@ def validation_rules_dir(rocprof_config) -> Path:
     return rocprof_config.rocpd_validation_rules
 
 
+# Shared by the domain-flag (test_presets.py) and backend-flag
+# (test_tool_runner.py) transpose tests, so the launch args and baseline
+# env/rules live in one place.
+# threads, iterations, sync-every-N. amd-smi-rules.json wants more than
+# 100 samples; 2 100 50 only captured ~72 on MI355.
+DOMAIN_BACKEND_TRANSPOSE_ARGS = ["4", "300", "50"]
+
+
+@pytest.fixture
+def domain_backend_flag_env() -> dict[str, str]:
+    return {
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_USE_PID": "OFF",
+    }
+
+
+@pytest.fixture
+def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
+    return [validation_rules_dir / "default-rules.json"]
+
+
+@pytest.fixture
+def cpu_workload(rocprof_config) -> str:
+    """CPU workload with real, instrumentable functions (parallel-overhead)."""
+    try:
+        return str(rocprof_config.get_target_executable("parallel-overhead"))
+    except FileNotFoundError:
+        pytest.skip("parallel-overhead example not built")
+
+
 # ----------------------------------------------------------------------------
 # Module-scoped Fixtures
 # ----------------------------------------------------------------------------
@@ -2091,7 +2295,7 @@ def create_config_file(test_output_dir) -> Path:
 
     def _create_config_file(
         env: dict[str, str],
-        name: Optional[str] = "config.cfg",
+        name: str | None = "config.cfg",
         skip_filter: bool = False,
     ) -> Path:
         config_file = test_output_dir / name
@@ -2327,6 +2531,22 @@ class RocprofsysTest:
         self.test_output_dir = test_output_dir
         self.library_path = library_path
 
+    def run_transpose_sample(
+        self, env: dict[str, str], sampling_args: list[str]
+    ) -> object:
+        """Run the transpose HIP workload via rocprof-sys-sample.
+
+        Shared by the domain-flag and backend-flag artifact tests.
+        """
+        return self.run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            sampling_args=sampling_args,
+            run_args=DOMAIN_BACKEND_TRANSPOSE_ARGS,
+            check_target_arch=True,
+        )
+
 
 # ============================================================================
 # Test run and assertion fixtures
@@ -2370,17 +2590,17 @@ def run_test(
     def _run_test(
         runner_type: str,
         target: str,
-        env: Optional[dict[str, str]] = None,
-        run_args: Optional[list[str]] = None,
-        pre_run_args: Optional[list[str]] = None,
-        launcher: Optional[BaselineRunner.Launcher | str] = None,
+        env: dict[str, str] | None = None,
+        run_args: list[str] | None = None,
+        pre_run_args: list[str] | None = None,
+        launcher: BaselineRunner.Launcher | str | None = None,
         num_procs: int = 0,
-        working_directory: Optional[Path] = None,
+        working_directory: Path | None = None,
         check_target_arch: bool = False,
         skip_on_error: bool = False,
         fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
         no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
@@ -2432,9 +2652,12 @@ def run_test(
             env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
 
         # Verify that MPI is available for "mpi_optional" tests
-        if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
-            if not request.node.get_closest_marker("mpi"):
-                num_procs = 0
+        if (
+            request.node.get_closest_marker("mpi_optional")
+            and num_procs > 0
+            and not request.node.get_closest_marker("mpi")
+        ):
+            num_procs = 0
 
         try:
             runner = runner_class(
@@ -2494,13 +2717,13 @@ def assert_regex(subtests):
 
     def _assert_regex(
         result: TestResult,
-        mode: Optional[str] = None,
+        mode: str | None = None,
         subtest_name: str = "Regex validation",
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         use_abort_fail_regex: bool = True,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
         **kwargs,
     ) -> None:
 
@@ -2542,11 +2765,11 @@ def assert_file_regex(subtests):
     def _assert_file_regex(
         file_path: Path,
         subtest_name: str = "File regex validation",
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         use_abort_fail_regex: bool = True,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             validation = validate_file_regex(
@@ -2588,25 +2811,25 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
     def _assert_perfetto(
         result: TestResult,
         subtest_name: str = "Perfetto validation",
-        perfetto_file: Optional[Path] = None,
-        categories: Optional[list[str]] = None,
-        labels: Optional[list[str]] = None,
-        counts: Optional[list[int]] = None,
-        depths: Optional[list[int]] = None,
-        label_substrings: Optional[list[str]] = None,
-        counter_names: Optional[list[str]] = None,
-        counter_names_present: Optional[list[str]] = None,
-        counter_names_zero: Optional[list[str]] = None,
+        perfetto_file: Path | None = None,
+        categories: list[str] | None = None,
+        labels: list[str] | None = None,
+        counts: list[int] | None = None,
+        depths: list[int] | None = None,
+        label_substrings: list[str] | None = None,
+        counter_names: list[str] | None = None,
+        counter_names_present: list[str] | None = None,
+        counter_names_zero: list[str] | None = None,
         check_counter_pairing: bool = False,
-        key_names: Optional[list[str]] = None,
-        key_counts: Optional[list[int]] = None,
-        trace_processor_path: Optional[Path] = None,
+        key_names: list[str] | None = None,
+        key_counts: list[int] | None = None,
+        trace_processor_path: Path | None = None,
         print_output: bool = True,
         timeout: int = 120,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             if not check_use_perfetto():
@@ -2686,13 +2909,13 @@ def assert_rocpd(subtests, tests_dir, request):
     def _assert_rocpd(
         result: TestResult,
         subtest_name: str = "ROCpd validation",
-        rules_files: Optional[list[Path]] = None,
+        rules_files: list[Path] | None = None,
         timeout: int = 60,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
-        gpu_category_to_skip: Optional[list[str]] = None,
+        fail_message: str | None = None,
+        gpu_category_to_skip: list[str] | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             if not check_use_rocpd():
@@ -2744,9 +2967,9 @@ def assert_rocpd(subtests, tests_dir, request):
 def _validate_rocpd_candidates(
     rocpd_files: list[Path],
     validate_candidate: Callable[[Path], ValidationResult],
-    pass_regex: Optional[list[str]] = None,
-    fail_regex: Optional[list[str]] = None,
-) -> tuple[Optional[str], list[str], Optional[str]]:
+    pass_regex: list[str] | None = None,
+    fail_regex: list[str] | None = None,
+) -> tuple[str | None, list[str], str | None]:
     """Validate ROCpd candidates and return the first passing output.
 
     Multi-process runs can emit multiple ROCpd databases. Some rank-local
@@ -2799,15 +3022,15 @@ def assert_timemory(subtests, tests_dir, request):
         file_name: str,
         metric: str,
         subtest_name: str = "Timemory validation",
-        labels: Optional[list[str]] = None,
-        counts: Optional[list[int]] = None,
-        depths: Optional[list[int]] = None,
+        labels: list[str] | None = None,
+        counts: list[int] | None = None,
+        depths: list[int] | None = None,
         print_output: bool = True,
         timeout: int = 60,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             timemory_file = result.output_dir / file_name
@@ -2862,7 +3085,7 @@ def assert_file_exists(subtests):
         description: str = "File",
         subtest_name: str = "File existence validation",
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         paths = [path] if isinstance(path, Path) else path
         with subtests.test(subtest_name):
@@ -2889,10 +3112,10 @@ def assert_unified_memory_output(subtests, tests_dir, request):
         result: TestResult,
         subtest_name: str = "Unified-memory output validation",
         timeout: int = 60,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             validation = validate_unified_memory_outputs(
@@ -2942,12 +3165,12 @@ def assert_causal_json(subtests, tests_dir, request):
         file_name: str,
         subtest_name: str = "Causal JSON validation",
         ci_mode: bool = False,
-        additional_args: Optional[list[str]] = None,
+        additional_args: list[str] | None = None,
         timeout: int = 60,
-        pass_regex: Optional[list[str]] = None,
-        fail_regex: Optional[list[str]] = None,
+        pass_regex: list[str] | None = None,
+        fail_regex: list[str] | None = None,
         skip_on_fail: bool = False,
-        fail_message: Optional[str] = None,
+        fail_message: str | None = None,
     ) -> None:
         with subtests.test(subtest_name):
             causal_file = result.output_dir / file_name

@@ -147,6 +147,28 @@ class TestCliBase(unittest.TestCase):
         "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
     }
 
+    # The only flags ``metric --nic`` accepts. The parser rejects any GPU or CPU
+    # metric flag given with --nic, so a command carrying one expects a failure.
+    NIC_METRIC_FLAGS = frozenset(
+        {
+            "--nic",
+            "--port",
+            "--extended",
+            "--rdma",
+            "--sensors",
+            "--show-unsupported",
+            "--json",
+            "--csv",
+            "--file",
+            "--append",
+            "--overwrite",
+            "--loglevel",
+            "--watch",
+            "--watch_time",
+            "--iterations",
+        }
+    )
+
     # Order for the amd-smi reset commands, putting --clocks last since
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
@@ -234,15 +256,17 @@ class TestCliBase(unittest.TestCase):
                 gpus.append(entry["bdf"])
                 gpus.append(entry["uuid"])
         baseline["gpus"] = gpus
+        baseline["nics"] = cls._nic_sweep_values()
 
         # When parsing, expand each arg with its value(s).
-        # CPU/Core are given default values because their sub-arguments require a value.
+        # CPU/Core/NIC are given default values because their sub-arguments require a value.
         # Otherwise, tests will populate the args incorrectly on CPU/APU-capable systems.
         baseline["sub_args"] = {
             "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
+            "NIC": baseline["nics"],
             "CPU": ["all", "0"],
             "CORE": ["all", "0"],
             "FILE": [
@@ -257,6 +281,22 @@ class TestCliBase(unittest.TestCase):
         }
         baseline["clk_freq"] = cls._read_clk_freq()
         return baseline
+
+    @classmethod
+    def _nic_sweep_values(cls) -> list:
+        """Values for the --nic selector: none on a host without a NIC.
+
+        A host without a NIC answers ``--nic 0`` with DEVICE_NOT_FOUND and
+        ``--nic all`` with no output, so sweeping them could never pass.
+        """
+        (rc, data, _) = cls.util.RunCmdSync("amd-smi list --nic all --json")
+        if rc or not data:
+            return []
+        try:
+            nics = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+        return ["all", "0"] if nics else []
 
     @classmethod
     def _read_clk_freq(cls):
@@ -473,7 +513,9 @@ class TestCliBase(unittest.TestCase):
                                     options.append(f"{items[item_index]} {perf_level}")
                             elif sub_arg == "PROFILE_LEVEL":  # arg --profile
                                 for profile_level in self.profile_levels:
-                                    options.append(f"{items[item_index]} {profile_level}")
+                                    options.append(
+                                        f"{items[item_index]} {{profile_{profile_level}}}"
+                                    )
                             elif sub_arg == "SCLKMAX":  # arg --perf-determinism
                                 options.append("{perf_determinism}")
                             elif sub_arg == "TYPE/INDEX":  # arg
@@ -546,6 +588,8 @@ class TestCliBase(unittest.TestCase):
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
                             pass
+                        elif "Reset" in match_str and items[item_index] == "--profile":
+                            options.append("{reset_profile}")
                         else:
                             options.append(items[item_index])
             if match_str in line:
@@ -753,6 +797,17 @@ class TestCliBase(unittest.TestCase):
                         cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
                     else:
                         cmd = ""
+                elif nameStr.startswith("{profile_"):
+                    profile = nameStr[len("{profile_") : -1]
+                    if self._profile_supported(gpu_index, explicit_gpu, profile):
+                        cmd = cmd.replace(nameStr, profile, 1)
+                    else:
+                        cmd = ""
+                elif nameStr == "{reset_profile}":
+                    if self._profile_supported(gpu_index, explicit_gpu):
+                        cmd = cmd.replace(nameStr, "--profile", 1)
+                    else:
+                        cmd = ""
                 elif nameStr == "{soc_pstate}":
                     soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
                     if type(soc_pstate) is dict:
@@ -783,6 +838,14 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+            words = cmd.split()
+            if "--nic" in words and ("--watch" in words):
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
+            if (words[1:2] == ["metric"]) and ("--nic" in words):
+                given_flags = {word for word in words if word.startswith("--")}
+                if given_flags - self.NIC_METRIC_FLAGS:
+                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands
@@ -859,6 +922,10 @@ class TestCliBase(unittest.TestCase):
             if not cmd:
                 continue
             reason = self._lookup(self.SWEEP_EXCLUDED_ARGS, cmd)
+            if reason is None and self.common.cleaner_shader_resets_gpu():
+                reason = self._lookup(
+                    {"reset": {"--clean-local-data": "resets the GPU on gfx906"}}, cmd
+                )
             if reason is None:
                 continue
             # Name what went untested; a sweep that drops commands silently
@@ -932,6 +999,22 @@ class TestCliBase(unittest.TestCase):
     def _prompt_answer_for(self, cmd):
         """Reply to pipe to a command whose parser prompts, else None."""
         return self._lookup(self.PROMPT_ANSWERS, cmd)
+
+    def _profile_supported(self, gpu_index, explicit_gpu, profile=None):
+        """Whether `amd-smi static --profile` lists *profile* on the target devices.
+
+        Without an explicit --gpu the command runs on every device, so every one
+        must list it. A device without profile support has no profile table and
+        lists nothing. With no *profile*, any profile table will do (reset --profile).
+        """
+        indices = [gpu_index] if explicit_gpu else range(len(self.static_data["gpu_data"]))
+        for index in indices:
+            status = self.static_data["gpu_data"][index].get("profile")
+            if not isinstance(status, dict):
+                return False
+            if profile is not None and profile not in status.get("available_profiles", []):
+                return False
+        return True
 
     def _clk_level_count(self, clk_type, gpu_index, explicit_gpu):
         """How many levels a ``--clk-level`` mask for *clk_type* may name.

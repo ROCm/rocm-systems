@@ -108,10 +108,10 @@ void TestRdciDmon::Run(void) {
   ASSERT_EQ(result, RDC_ST_OK);
 
   result = rdc_field_watch(rdc_handle, -1, field_group_id, 0, 60, 10);
-  ASSERT_EQ(result, RDC_ST_NOT_FOUND);
+  ASSERT_EQ(result, RDC_ST_GROUP_NOT_FOUND);
 
   result = rdc_field_watch(rdc_handle, group_id, -1, 0, 60, 10);
-  ASSERT_EQ(result, RDC_ST_NOT_FOUND);
+  ASSERT_EQ(result, RDC_ST_FLDGROUP_NOT_FOUND);
 
   result = rdc_field_watch(rdc_handle, group_id, field_group_id, 0, 60, 10);
   ASSERT_EQ(result, RDC_ST_OK);

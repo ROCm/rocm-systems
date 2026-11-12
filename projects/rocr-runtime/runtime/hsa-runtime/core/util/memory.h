@@ -57,7 +57,8 @@ namespace rocr {
 /// @brief Converts @ref hsa_access_permission_t to mmap memory protection
 ///        flags.
 __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {
-  switch (perms) {
+  // Execute is a GPU VM permission. Host mappings keep the read/write bits.
+  switch (static_cast<hsa_access_permission_t>(perms & ~HSA_ACCESS_PERMISSION_EX)) {
     case HSA_ACCESS_PERMISSION_RO:
       return PROT_READ;
     case HSA_ACCESS_PERMISSION_WO:
@@ -71,7 +72,8 @@ __forceinline int PermissionsToMmapFlags(hsa_access_permission_t perms) {
 }
 #endif
 __forceinline rocr::os::MemProt PermissionsToMemProt(hsa_access_permission_t perms) {
-  switch (perms) {
+  // Execute is a GPU VM permission. Host mappings keep the read/write bits.
+  switch (static_cast<hsa_access_permission_t>(perms & ~HSA_ACCESS_PERMISSION_EX)) {
     case HSA_ACCESS_PERMISSION_RO:
       return rocr::os::MEM_PROT_READ;
     case HSA_ACCESS_PERMISSION_WO:

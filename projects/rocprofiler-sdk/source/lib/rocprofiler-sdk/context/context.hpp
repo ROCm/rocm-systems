@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 #include "lib/rocprofiler-sdk/spm/core.hpp"
+#include "lib/rocprofiler-sdk/spm/device_counting.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -86,10 +87,27 @@ struct dispatch_counter_collection_service
     // Contains callback information along with other data needed to collect/process
     // counters.
     std::vector<std::shared_ptr<counters::counter_callback_info>> callbacks{};
+    // GPU agents this context collects on. An empty set means every GPU agent, which is what a
+    // plain configure_{buffer,callback}_dispatch call produces;
+    // rocprofiler_dispatch_counting_service_set_agents narrows it. The set is read on the
+    // dispatch path and when scoping serialization, so it is fixed at configure time and never
+    // mutated once the context is started.
+    std::unordered_set<rocprofiler_agent_id_t> agents{};
     // A flag to state whether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
     common::Synchronized<bool> enabled{false};
+
+    // An empty agent set means "all GPU agents", so an unrestricted context keeps behaving
+    // exactly as it did before per-agent scoping existed.
+    bool collects_on(rocprofiler_agent_id_t agent_id) const
+    {
+        return agents.empty() || agents.count(agent_id) > 0;
+    }
+
+    // Two counter-collection contexts can coexist as long as they do not both want the same
+    // GPU. An unrestricted context claims every agent, so it intersects with everything.
+    bool intersects(const dispatch_counter_collection_service& rhs) const;
 };
 
 struct spm_dispatch_counter_collection_service
@@ -148,6 +166,23 @@ struct pc_sampling_service
     std::atomic<bool> enabled{false};
 };
 
+struct spm_device_counting_service
+{
+    std::unordered_set<uint64_t>                           conf_agents;
+    std::vector<rocprofiler::SPM::spm_agent_callback_data> agent_data;
+
+    enum class state
+    {
+        DISABLED,
+        LOCKED,
+        ENABLED,
+        EXIT
+    };
+    std::atomic<state> status{state::DISABLED};
+
+    common::Synchronized<bool> enabled{false};
+};
+
 struct context
 {
     // size is used to ensure that we never read past the end of the version
@@ -165,6 +200,7 @@ struct context
     std::unique_ptr<thread_trace::DeviceThreadTracer>    device_thread_trace         = {};
 
     std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
+    std::unique_ptr<spm_device_counting_service>             device_spm   = {};
 
     template <typename KindT>
     bool is_tracing(KindT _kind) const;

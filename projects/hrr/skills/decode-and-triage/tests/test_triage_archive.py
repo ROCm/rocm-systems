@@ -106,6 +106,17 @@ class ReplayMaskTests(unittest.TestCase):
         self.assertEqual(assignments, [], "ROCR_VISIBLE_DEVICES must not be set")
 
 
+class ReplayWallClockTests(unittest.TestCase):
+    def test_native_replay_passes_the_timeout_to_playback(self) -> None:
+        """hrr-playback ends a replay after 3600 s unless told otherwise.
+
+        HRR_REPLAY_TIMEOUT=0 (disable) or a value above 3600 must reach it as
+        --max-wall-seconds, or the replay still stops at one hour with status 124.
+        """
+        body = _shell_function("run_native_replay")
+        self.assertIn('--max-wall-seconds "$timeout_s"', body)
+
+
 def _bash_at_least(major: int, minor: int) -> bool:
     """The scripts target Linux bash. Expanding an empty array under `set -u`
     is an error before bash 4.4, which the macOS system bash still is."""

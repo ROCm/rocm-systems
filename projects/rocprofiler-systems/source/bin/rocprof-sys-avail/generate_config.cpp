@@ -445,7 +445,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
                     { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
-                      env_vars::TRACE_LEGACY, env_vars::PROFILE, env_vars::USE_SAMPLING,
+                      env_vars::PROFILE, env_vars::USE_SAMPLING,
                       env_vars::USE_PROCESS_SAMPLING, env_vars::USE_AMD_SMI,
                       env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
                       "ROCPROFSYS_USE", env_vars::OUTPUT })

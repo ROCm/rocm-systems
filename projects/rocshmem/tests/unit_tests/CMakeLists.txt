@@ -64,6 +64,8 @@ target_sources(
     atomic_wf_queue_gtest.cpp
     envvar_gtest.cpp
     backend_bc_buffer_register_gtest.cpp
+    anvil_engine_map_gtest.cpp
+    sdma_agreement_gtest.cpp
 )
 
 if (USE_IPC)
@@ -76,12 +78,36 @@ if (USE_IPC)
   )
 endif()
 
+if (USE_IPC AND USE_TDM)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      tdm_raw_put_gtest.cpp
+      tdm_raw_get_gtest.cpp
+      tdm_struct_put_gtest.cpp
+      tdm_wave_put_gtest.cpp
+      tdm_wave_get_gtest.cpp
+  )
+endif()
+
 
 if (USE_GDA)
   target_sources(
     ${PROJECT_NAME}
     PRIVATE
       topology_gtest.cpp
+  )
+endif()
+
+if (USE_HOST_VERBS)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      net_helpers_gtest.cpp
+      ibv_shim_gtest.cpp
+      ib_ctrl_gtest.cpp
+      rdma_loopback_gtest.cpp
+      rma_engine_gtest.cpp
   )
 endif()
 

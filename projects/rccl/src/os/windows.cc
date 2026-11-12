@@ -319,20 +319,21 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
         WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
-             ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries);
+             ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         getWSAErrorMessage(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -359,7 +360,7 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
     return ncclSuccess;
   } else if (ret < 0) {
     int wsaError = WSAGetLastError();
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line),
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)),
          getWSAErrorMessage(wsaError));
     return ncclSystemError;
   }
@@ -403,8 +404,8 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       // WSAEINTR means interrupted by signal
       if (wsaError != WSAEWOULDBLOCK && wsaError != WSAEINPROGRESS && wsaError != WSAEINTR) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %d (%s)",
-             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line), wsaError,
-             getWSAErrorMessage(wsaError));
+             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line, sizeof(line)),
+             wsaError, getWSAErrorMessage(wsaError));
         return ncclRemoteError;
       } else {
         bytes = 0;
@@ -488,7 +489,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, adapterName, MAX_IF_NAME_SIZE, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", adapterName,
-            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line));
+            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line, sizeof(line)));
 
       // Check against user specified interfaces
       if (!(matchIfList(adapterName, -1, userIfs, nUserIfs, searchExact) ^ searchNot)) {
@@ -658,7 +659,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, ifName, ifNameMaxSize, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s", ifName,
-            ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
+            ncclSocketToString(localAddr, line, sizeof(line)), ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
       *found = 1;
     }
   }

@@ -26,6 +26,7 @@
 /// any future re-introduction of a mismatched SIMD functor is caught. The CU and
 /// decoder are built for RDNA3; VOP3 encoding marker is 0x35<<26.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -93,13 +94,17 @@ const std::array<float, 16> kInputs = {{
     255.5f,
     1000.0f,
     -1.0f,
-    60000.0f,
+    std::numeric_limits<float>::quiet_NaN(),
 }};
 
 uint16_t cvt_i16(float f) {
+  if (std::isnan(f))
+    return 0;
   return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f, -32768.0f, 32767.0f)));
 }
-uint16_t cvt_u16(float f) { return static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f)); }
+uint16_t cvt_u16(float f) {
+  return std::isnan(f) ? 0 : static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f));
+}
 
 // Golden: src0 (f0) -> low 16, src1 (f1) -> high 16.
 uint32_t golden(bool is_u16, float f0, float f1) {
@@ -152,7 +157,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_cvt_pk_f32", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_cvt_pk_f32", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -195,6 +202,8 @@ void check_op(uint32_t opcode, bool is_u16, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -209,7 +218,8 @@ void check_op(uint32_t opcode, bool is_u16, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  Fixture ref; // only used for the per-lane input mapping
+  Fixture ref;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure()); // only used for the per-lane input mapping
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (!active) {
@@ -236,6 +246,15 @@ TEST(Vop3CvtPkF32RdnaCorrectness, U16_FullExec) {
 }
 TEST(Vop3CvtPkF32RdnaCorrectness, U16_PartialExec) {
   check_op(kOpCvtPkU16F32, /*is_u16=*/true, /*exec=*/0xA5A58001ULL);
+}
+
+TEST(Vop3CvtPkF32RdnaCorrectness, PackedIntegerSaturationHelpers) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_EQ(amdgpu::cvt_u8_f32(nan), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(-1.0f), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(256.0f), 255u);
+  EXPECT_EQ(amdgpu::cvt_u16_f32(65536.0f), 65535u);
+  EXPECT_EQ(amdgpu::cvt_i16_f32(-32769.0f), 0x8000u);
 }
 
 // Pin the exact value that exposed the bug: 40000.0f converts to 40000 for u16
@@ -284,6 +303,8 @@ void check_cvt_pk_norm_i16(uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t vb = fx.wf->vgpr_alloc().base;

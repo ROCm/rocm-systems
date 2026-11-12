@@ -21,8 +21,6 @@
 
 namespace hip {
 hipError_t ihipFree(void* ptr);
-// forward declaration of methods required for managed variables
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 
 hipError_t DynCO::loadCodeObject(const char* fname, const void* image, bool init_global_vars,
                                  std::vector<char>* image_storage) {
@@ -191,7 +189,8 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
     return status;
   }
   // Allocate managed memory for these symbols
-  status = ihipMallocManaged(&pointer, mem->getSize(), 0, 0);
+  status = ihipMallocManaged(&pointer, mem->getSize(), 0, /*use_host_ptr=*/false,
+                             ManagedMemOwner::kModuleVariable);
   guarantee(status == hipSuccess, "Status %d, failed to allocate managed memory", status);
 
   // update as manager variable and set managed memory pointer and size
@@ -284,12 +283,10 @@ hipError_t DynCO::populateDynGlobalFuncs() {
     // if symbols are init/fini, we trim them out
     // These are ASAN specific symbols and we do not bubble them up to the user
     // This means something like count of kernels in code object remains the same.
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
     if (elem == "amdgcn.device.init" || elem == "amdgcn.device.fini") {
       continue;
     }
-#endif
 #endif
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
@@ -417,7 +414,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
       hipError_t err = hipSuccess;
-      if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
+      if (managedVar->IsManagedVarMapped()) {
         err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {
         void** pointer = static_cast<void**>(managedVar->GetManagedVarPtr());
@@ -491,12 +488,10 @@ void StatCO::RemoveAllFatBinaries() {
 
       // Free the managed memory allocation itself
       void** managed_ptr = static_cast<void**>(managed_var->GetManagedVarPtr());
-      if (managed_var->GetAllocFlag()) {
-        // Memory was allocated with ihipMallocManaged - use ihipFree
+      if (managed_var->IsManagedVarMapped()) {
         [[maybe_unused]] hipError_t err = ihipFree(*managed_ptr);
         assert(err == hipSuccess);
       } else {
-        // Memory was allocated with OS-level allocator - use OS release
         amd::Os::releaseMemory(*managed_ptr, managed_var->GetSize());
       }
       delete managed_var;
@@ -626,7 +621,31 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
   return hipSuccess;
 }
 
+hipError_t StatCO::EnsureAllManagedVarsAreMapped() {
+  std::scoped_lock lock(sclock_);
+  for (const auto& it : managedVars_) {
+    for (const auto& var : it.second) {
+      IHIP_RETURN_ONFAIL(var->EnsureManagedVarIsMapped());
+    }
+  }
+  return hipSuccess;
+}
+
 hipError_t StatCO::RegisterManagedVar(Var* var) {
+  std::scoped_lock lock(sclock_);
+
+  // If this condition is true, it means that this managed variable is being loaded
+  // after runtime has been initialized (e.g. through dlopen).
+  if (!managedDevPtrWrittenUpTo_.empty()) {
+    IHIP_RETURN_ONFAIL(var->EnsureManagedVarIsMapped());
+  }
+
+  // No device has been written up to this number yet, so the next launch on each device
+  // writes this variable's pointer and skips the ones it already wrote.
+  const uint64_t registration = managedVarRegCount_.load(std::memory_order_relaxed) + 1;
+  var->SetManagedRegNum(registration);
+  managedVarRegCount_.store(registration, std::memory_order_release);
+
   managedVars_[var->ModuleInfo()].push_back(var);
   return hipSuccess;
 }
@@ -634,13 +653,12 @@ hipError_t StatCO::RegisterManagedVar(Var* var) {
 // ================================================================================================
 void StatCO::ResizeForDevices(size_t device_count) {
   std::scoped_lock lock(sclock_);
-  managedVarsDevicePtrInitialized_ = std::make_unique<std::atomic<bool>[]>(device_count);
-  // Explicitly initialize each per-device flag to false before it can be read by
-  // the lock-free fast path in InitManagedVarDevicePtr.
-  for (size_t i = 0; i < device_count; ++i) {
-    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_relaxed);
+
+  managedDevPtrWrittenUpTo_ = std::vector<std::atomic<uint64_t>>(device_count);
+  for (auto& written : managedDevPtrWrittenUpTo_) {
+    written.store(0, std::memory_order_relaxed);
   }
-  managedVarsDevicePtrInitializedSize_ = device_count;
+
   for (const auto& it : vars_) {
     it.second->ResizeDVar(device_count);
   }
@@ -654,54 +672,55 @@ void StatCO::ResizeForDevices(size_t device_count) {
   }
 }
 
-// ================================================================================================
 hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
   // Fast lock free path
-  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedVarsDevicePtrInitializedSize_ &&
-      managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_acquire)) {
+  if (deviceId >= 0 && static_cast<size_t>(deviceId) < managedDevPtrWrittenUpTo_.size() &&
+      managedDevPtrWrittenUpTo_[deviceId].load(std::memory_order_acquire) >=
+          managedVarRegCount_.load(std::memory_order_acquire)) {
     return hipSuccess;
   }
 
   std::scoped_lock lock(sclock_);
-  hipError_t err = hipSuccess;
   // Re-check under the lock in case another thread initialized this device while we waited.
-  if (!managedVarsDevicePtrInitialized_[deviceId].load(std::memory_order_relaxed)) {
-    for (auto& vecIter : managedVars_) {
-      for (auto& var : vecIter.second) {
-        // Lazy load
-        FatBinaryInfo** module = var->ModuleInfo();
-        if (*(module) == nullptr) {
-          IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
-        }
-        hip::Stream* stream = g_devices.at(deviceId)->NullStream();
-        if (stream == nullptr) {
-          ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
-          return hipErrorInvalidResourceHandle;
-        }
-        // Allocate managed var for deferred loading
-        IHIP_RETURN_ONFAIL(var->AllocateManagedVarPtr());
-        // Copy from managed var host to device ptr
-        amd::Memory* mem = nullptr;
-        IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
-        err = ihipMemcpy(reinterpret_cast<address>(memDevPtr(mem)), var->GetManagedVarPtr(),
-                         mem->getSize(), hipMemcpyHostToDevice, *stream);
+  const uint64_t registrations = managedVarRegCount_.load(std::memory_order_relaxed);
+  const uint64_t written = managedDevPtrWrittenUpTo_[deviceId].load(std::memory_order_relaxed);
+  if (written >= registrations) {
+    return hipSuccess;
+  }
+
+  amd::Device& device = *g_devices.at(deviceId)->devices()[0];
+  for (auto& vecIter : managedVars_) {
+    for (auto& var : vecIter.second) {
+      // Variables registered at or before this point already have their pointer on this
+      // device, so a dlopen that adds one does not rewrite the rest.
+      if (var->GetManagedRegNum() <= written) {
+        continue;
+      }
+
+      // Lazy load
+      FatBinaryInfo** module = var->ModuleInfo();
+      if (*(module) == nullptr) {
+        IHIP_RETURN_ONFAIL(DigestFatBinary(module_to_hostModule_[module], *module));
+      }
+
+      amd::Memory* mem = nullptr;
+      IHIP_RETURN_ONFAIL(var->GetStatDeviceVar(&mem, deviceId));
+      if (mem == nullptr) {
+        LogPrintfError("Managed var %s has no device symbol on device %d", var->GetName().c_str(),
+                       deviceId);
+        return hipErrorInvalidSymbol;
+      }
+
+      if (!device.writeDeviceGlobal(*mem, 0, mem->getSize(), var->GetManagedVarPtr())) {
+        LogPrintfError("Failed to write the device pointer of managed var %s on device %d",
+                       var->GetName().c_str(), deviceId);
+        return hipErrorRuntimeMemory;
       }
     }
-    managedVarsDevicePtrInitialized_[deviceId].store(true, std::memory_order_release);
   }
-  return err;
-}
 
-// ================================================================================================
-Var* StatCO::FindDeferredManagedVar(const void* ptr) {
-  std::scoped_lock lock(sclock_);
-  for (const auto& [_, vars] : managedVars_) {
-    for (auto* var : vars) {
-      void* base = *static_cast<void**>(var->GetManagedVarPtr());
-      if (base != nullptr && base == ptr) return var;
-    }
-  }
-  return nullptr;
+  managedDevPtrWrittenUpTo_[deviceId].store(registrations, std::memory_order_release);
+  return hipSuccess;
 }
 
 // ================================================================================================

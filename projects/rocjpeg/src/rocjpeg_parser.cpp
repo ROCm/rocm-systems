@@ -321,7 +321,7 @@ bool RocJpegStreamParser::ParseSOF() {
 
     // Clamp SOF dimensions to the safe JPEG maximum (ISO 10918-1 allows up to
     // 65535, but values that large cause downstream arithmetic to overflow).
-    static constexpr uint16_t kMaxSafeDimension = 65500;
+    static constexpr uint16_t kMaxSafeDimension = MAX_SAFE_DIMENSION;
     if (jpeg_stream_parameters_.picture_parameter_buffer.picture_width > kMaxSafeDimension ||
         jpeg_stream_parameters_.picture_parameter_buffer.picture_height > kMaxSafeDimension) {
         ErrorLog(g_rocjpeg_logger, "JPEG dimensions exceed safe maximum (" +

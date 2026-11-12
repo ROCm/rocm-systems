@@ -86,7 +86,7 @@ ncclResult_t ncclGetUserP2pLevel(int* level);
 #define MAX_XGMI_INTER_GPUS 4
 ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph, int channelId,
                                     int type, int64_t* id, int* dev);
-ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, int cudaDev2, bool* isXGMI,
+ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int dev1, int dev2, bool* isXGMI,
                                  int maxInter = MAX_XGMI_INTER_GPUS, int nInter = 0, int* inter = nullptr);
 
 // Find CPU affinity
@@ -108,11 +108,10 @@ ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncc
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN12 1
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN34 2
 #define NCCL_TOPO_CPU_MODEL_AMD_ZEN5 3
-// RCCL-specific AMD CPU models (values chosen to not collide with the upstream ZEN* ids above)
-#define NCCL_TOPO_CPU_MODEL_AMD_ZEN 5
-#define NCCL_TOPO_CPU_MODEL_AMD_ROME 6
 #define NCCL_TOPO_CPU_MODEL_YONGFENG 1
 ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vendor, int* model);
+// RCCL: true when the first CPU is an AMD Rome-class host, which enables the Rome presets and GDR relaxation.
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoGetGpuCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNetCount(struct ncclTopoSystem* system, int* count);
 ncclResult_t ncclTopoGetNvsCount(struct ncclTopoSystem* system, int* count);
@@ -221,6 +220,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
 
 struct ncclTopoRanks {
   int crossNicRing;
+  int nChannels;  // valid channels in the per-channel arrays below; set by Preset, raised by Postset's expansion
   int ringRecv[MAXCHANNELS];
   int ringSend[MAXCHANNELS];
   int ringPrev[MAXCHANNELS];

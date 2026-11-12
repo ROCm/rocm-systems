@@ -52,6 +52,10 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm* comm, struct ncclDevrTeam* t, st
 struct ncclDevrGinSegmentInfo {
   void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
   ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS];
+  // Which generation of each backend's ginComms[] the windows above were
+  // registered against; ncclGinDeregister drops the pair when it no longer
+  // matches. ncclCalloc leaves this 0, which no live connection ever carries.
+  uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS];
   CUmemLocationType memType;
   size_t segmentSize;
 };

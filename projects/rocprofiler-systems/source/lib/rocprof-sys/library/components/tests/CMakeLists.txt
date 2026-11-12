@@ -9,6 +9,7 @@ add_library(
     test_ucx_gotcha.cpp
     test_pthread_mutex_gotcha.cpp
     test_category_region.cpp
+    test_hardware_counter_track_name.cpp
 )
 
 target_link_libraries(
@@ -19,7 +20,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
         rocprofiler-systems-core-library
-        # category_region.hpp pulls in tracing/annotation/rocprofiler-sdk/perfetto headers
+        # category_region.hpp pulls in tracing/rocprofiler-sdk/perfetto headers
         rocprofiler-systems::rocprofiler-systems-interface-library
 )
 

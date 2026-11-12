@@ -10,7 +10,7 @@
 # honors add_test/subdirs/include/set_tests_properties).
 #
 # All paths are resolved RELATIVE to this script's own location, so the tree is
-# fully relocatable. Generated from hipfile_discover.cmake.in by AISInstallTests.
+# fully relocatable. Generated from hipfile_discover.cmake.in by HipFileInstallTests.
 
 # Locate ourselves: <test_dir>/script/hipfile_discover.cmake -> <test_dir>.
 file(REAL_PATH "${CMAKE_CURRENT_LIST_FILE}" _hipfile_self)
@@ -93,5 +93,5 @@ macro(_hipfile_discover_binary _bin_name _label_suffix)
     endforeach()
 endmacro()
 
-# Per-binary discovery calls, baked in by AISInstallTests at configure time.
+# Per-binary discovery calls, baked in by HipFileInstallTests at configure time.
 @_discover_blocks@

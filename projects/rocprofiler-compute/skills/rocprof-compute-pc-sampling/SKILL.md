@@ -12,7 +12,6 @@ have already identified the kernel worth this level of detail.
 PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Check what the hardware supports
 
@@ -53,6 +52,7 @@ rocprof-compute profile \
     --pc-sampling \
     --pc-sampling-method stochastic \
     --pc-sampling-interval <interval-from-the-query> \
+    --no-roof \
     --name <workload_name> \
     -- <application> <args>
 ```

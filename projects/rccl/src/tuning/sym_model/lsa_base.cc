@@ -162,6 +162,12 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
     busBytes = (nRanks - 1) * nBytes; // Wrong. Should be nRanks*nBytes but we want to beat non-MC.
     busMultiplier *= 0.55 * nRanks;
     break;
+  case ncclSymkKernelId_AllGather_HierLsaST:
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    // Slightly more bytes than the flat kernel moves. The win is that all but one copy per rank stays
+    // on-package, which this model has no term for, so selection needs measurement first.
+    busBytes = nRanks * nBytes;
+    break;
 
   case ncclSymkKernelId_ReduceScatter_LL:
     busBytes = nRanks * nBytes * LL_BusFactor;
@@ -180,7 +186,7 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
   bool isAG = ncclSymkAGKernelMask() >> kernelId & 1;
   bool isAR = ncclSymkARKernelMask() >> kernelId & 1;
-  bool isRS = ncclSymkRSKernelMask() >> kernelId & 1;
+  [[maybe_unused]] bool isRS = ncclSymkRSKernelMask() >> kernelId & 1;
   constexpr double GBps = (1 << 30) / 1.e6;
   double baseLat, smBw, peakBw;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

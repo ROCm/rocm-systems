@@ -106,7 +106,7 @@ Build ROCprofiler-SDK
     git sparse-checkout set projects/rocprofiler-sdk shared/sha256
     git checkout develop
     python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
-    cmake                                         \
+    cmake                                       \
         -B rocprofiler-sdk-build                \
         -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
         -DCMAKE_PREFIX_PATH=/opt/rocm           \

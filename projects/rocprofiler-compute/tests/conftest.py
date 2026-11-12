@@ -24,7 +24,6 @@ class ProfileModeImportGuard:
         "rocprof_compute_profile",
         "rocprof_compute_analyze",
         "rocprof_compute_soc",
-        "rocprof_compute_tui",
         "pc_sampling",
         "utils",
         "vendored",
@@ -150,7 +149,8 @@ def pytest_addoption(parser):
         type=int,
         default=20,
         help=(
-            "Sample budget for test_torch_trace_coverage (default 20). "
-            "Structural operators are always included. Use 100 for a nightly run."
+            "Number of operators test_torch_trace_coverage samples, split evenly "
+            "between ATen and structural operators (default 20). "
+            "Use 100 for a nightly run."
         ),
     )

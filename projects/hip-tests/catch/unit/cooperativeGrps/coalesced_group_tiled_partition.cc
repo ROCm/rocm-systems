@@ -13,9 +13,9 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
-#include <cmd_options.hh>
 #include <cpu_grid.h>
 #include <hip_test_common.hh>
+#include <hip_test_params.hh>
 #include <hip/hip_cooperative_groups.h>
 
 /**
@@ -595,7 +595,9 @@ __global__ void coalesced_group_tiled_partition_sync_check(uint64_t* active_mask
 }
 
 template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncTest() {
-  const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
+  const auto cg_iterations = TestParameterStore::instance().getCgIterationsForCurrentLevel();
+
+  const auto randomized_run_count = GENERATE_COPY(range(0, cg_iterations));
   INFO("Run number: " << randomized_run_count + 1);
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);

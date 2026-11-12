@@ -5,6 +5,7 @@
 
 #include "core/config.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
@@ -24,8 +25,6 @@ namespace rocprofsys::pmc::collectors::gpu
  * rocprofiler-systems trace cache for later analysis and visualization.
  * It manages category metadata initialization and per-device PMC metadata
  * registration.
- *
- * @see perfetto_policy for direct Perfetto trace output
  */
 struct cache_policy
 {
@@ -45,36 +44,21 @@ struct cache_policy
     {
         const auto thread_id = std::nullopt;
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_gfx_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_umc_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_mm_busy>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_power>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_temp>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_memory_usage>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_gfx_busy>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_umc_busy>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_mm_busy>(), thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_power>(), thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_temp>(), thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_memory_usage>(),
+            thread_id);
 
         auto const add_vcn_track = [&](std::optional<int> xcp_idx) {
             for(size_t clk = 0; clk < MAX_NUM_VCN; ++clk)
@@ -82,8 +66,7 @@ struct cache_policy
                 auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { .track_name = name, .thread_id = thread_id, .extdata = "{}" });
+                trace_cache::get_metadata_registry().ensure_track(name, thread_id);
             }
         };
 
@@ -93,8 +76,7 @@ struct cache_policy
                 auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                         xcp_idx, clk);
-                trace_cache::get_metadata_registry().add_track(
-                    { .track_name = name, .thread_id = thread_id, .extdata = "{}" });
+                trace_cache::get_metadata_registry().ensure_track(name, thread_id);
             }
         };
 
@@ -104,24 +86,19 @@ struct cache_policy
             add_jpeg_track(xcp);
         }
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_xgmi_link_width>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_xgmi_link_speed>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_xgmi_link_width>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+            thread_id);
 
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto const vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                     std::nullopt, vcn);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = vcn_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(vcn_name, thread_id);
         }
 
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
@@ -129,60 +106,43 @@ struct cache_policy
             auto const jpeg_name =
                 trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                     std::nullopt, jpeg);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = jpeg_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(jpeg_name, thread_id);
         }
 
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
             auto const read_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_read_data>::value, link);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = read_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(read_name, thread_id);
 
             auto const write_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_write_data>::value, link);
-            trace_cache::get_metadata_registry().add_track(
-                { .track_name = write_name, .thread_id = thread_id, .extdata = "{}" });
+            trace_cache::get_metadata_registry().ensure_track(write_name, thread_id);
         }
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(),
+            thread_id);
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name =
-                  trace_cache::info::format_track_name<category::amd_smi_mem_clock>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_mem_clock>(),
+            thread_id);
 
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_link_width>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_link_speed>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_bandwidth_acc>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = trace_cache::info::format_track_name<
-                  category::amd_smi_pcie_bandwidth_inst>(),
-              .thread_id = thread_id,
-              .extdata   = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_link_width>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_link_speed>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
+            thread_id);
+        trace_cache::get_metadata_registry().ensure_track(
+            trace_cache::info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
+            thread_id);
     }
 
     /**
@@ -216,8 +176,8 @@ struct cache_policy
               .description      = trait::name<category::amd_smi_gfx_busy>::description,
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
-              .units            = trace_cache::PERCENTAGE,
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .units            = trace_cache::k_percentage,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -235,8 +195,8 @@ struct cache_policy
               .description      = trait::name<category::amd_smi_umc_busy>::description,
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
-              .units            = trace_cache::PERCENTAGE,
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .units            = trace_cache::k_percentage,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -254,8 +214,8 @@ struct cache_policy
               .description      = trait::name<category::amd_smi_mm_busy>::description,
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
-              .units            = trace_cache::PERCENTAGE,
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .units            = trace_cache::k_percentage,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -274,7 +234,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = CELSIUS_DEGREES,
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -293,7 +253,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "W",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -312,7 +272,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "MB",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -335,8 +295,8 @@ struct cache_policy
                   .description      = "VCN (Video Decode) Engine Activity",
                   .long_description = LONG_DESCRIPTION,
                   .component        = COMPONENT,
-                  .units            = trace_cache::PERCENTAGE,
-                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .units            = trace_cache::k_percentage,
+                  .value_type       = rocprofsys::trace_cache::k_absolute,
                   .block            = BLOCK,
                   .expression       = EXPRESSION,
                   .is_constant      = 0,
@@ -361,8 +321,8 @@ struct cache_policy
                   .description      = "JPEG (Image Decode) Engine Activity",
                   .long_description = LONG_DESCRIPTION,
                   .component        = COMPONENT,
-                  .units            = trace_cache::PERCENTAGE,
-                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .units            = trace_cache::k_percentage,
+                  .value_type       = rocprofsys::trace_cache::k_absolute,
                   .block            = BLOCK,
                   .expression       = EXPRESSION,
                   .is_constant      = 0,
@@ -389,8 +349,8 @@ struct cache_policy
                       .description      = "VCN (Video Decode) Engine Activity",
                       .long_description = LONG_DESCRIPTION,
                       .component        = COMPONENT,
-                      .units            = trace_cache::PERCENTAGE,
-                      .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                      .units            = trace_cache::k_percentage,
+                      .value_type       = rocprofsys::trace_cache::k_absolute,
                       .block            = BLOCK,
                       .expression       = EXPRESSION,
                       .is_constant      = 0,
@@ -417,8 +377,8 @@ struct cache_policy
                       .description      = "JPEG (Image Decode) Engine Activity",
                       .long_description = LONG_DESCRIPTION,
                       .component        = COMPONENT,
-                      .units            = trace_cache::PERCENTAGE,
-                      .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                      .units            = trace_cache::k_percentage,
+                      .value_type       = rocprofsys::trace_cache::k_absolute,
                       .block            = BLOCK,
                       .expression       = EXPRESSION,
                       .is_constant      = 0,
@@ -438,8 +398,8 @@ struct cache_policy
               .description      = trait::name<category::amd_smi_sdma_usage>::description,
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
-              .units            = trace_cache::PERCENTAGE,
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .units            = trace_cache::k_percentage,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -458,7 +418,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "MHz",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -477,7 +437,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "MHz",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -496,7 +456,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "lanes",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -515,7 +475,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "Mbps",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -540,7 +500,7 @@ struct cache_policy
                   .long_description = LONG_DESCRIPTION,
                   .component        = COMPONENT,
                   .units            = "KB",
-                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .value_type       = rocprofsys::trace_cache::k_absolute,
                   .block            = BLOCK,
                   .expression       = EXPRESSION,
                   .is_constant      = 0,
@@ -562,7 +522,7 @@ struct cache_policy
                   .long_description = LONG_DESCRIPTION,
                   .component        = COMPONENT,
                   .units            = "KB",
-                  .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+                  .value_type       = rocprofsys::trace_cache::k_absolute,
                   .block            = BLOCK,
                   .expression       = EXPRESSION,
                   .is_constant      = 0,
@@ -582,7 +542,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "lanes",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -601,7 +561,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "MT/s",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -621,7 +581,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "bytes",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,
@@ -641,7 +601,7 @@ struct cache_policy
               .long_description = LONG_DESCRIPTION,
               .component        = COMPONENT,
               .units            = "bytes/s",
-              .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+              .value_type       = rocprofsys::trace_cache::k_absolute,
               .block            = BLOCK,
               .expression       = EXPRESSION,
               .is_constant      = 0,

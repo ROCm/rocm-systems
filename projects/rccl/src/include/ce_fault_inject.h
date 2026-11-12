@@ -44,6 +44,10 @@
 /** Force ncclCeLaunchBatchOps() to return ncclSystemError. */
 #define CE_FAULT_LAUNCH_OP 0x04U
 
+/** Omit recv window base in CE Phase 3 (legacy: rank * shardBytes, no window offset).
+ * 0x08 is reserved for an in-flight CE fault bit. */
+#define CE_FAULT_LEGACY_RECV_OFFSET 0x10U
+
 // ---------------------------------------------------------------------------
 // Inline implementations – ncclComm is defined in comm.h, ncclResult_t in nccl.h.
 // All three functions are defined here so callers need not link against a

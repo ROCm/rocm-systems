@@ -4,6 +4,7 @@
 /// @file pseudo_scalar_exec_test.cpp
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -36,6 +37,13 @@
 namespace {
 
 using namespace rocjitsu;
+
+// Generated bodies flush the source half under MODE before widening it.
+float flushed_f16_source(uint16_t half, uint32_t denorm_mode) {
+  return util::f16_to_f32(
+      static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+          uint32_t{half}, amdgpu::input_denormal::Policy::make(denorm_mode))));
+}
 
 using BaseEncodingWords = std::array<uint32_t, 2>;
 using InstructionWords = std::array<uint32_t, 3>;
@@ -661,7 +669,7 @@ constexpr auto kSpecialParameters = make_special_parameters();
 
 class PseudoScalarFixture {
 public:
-  explicit PseudoScalarFixture(const PseudoScalarProfile &profile)
+  explicit PseudoScalarFixture(const PseudoScalarProfile &profile, uint32_t wave_size = 0)
       : profile(profile), gpu_memory(std::string(profile.name) + "_pseudo_scalar_memory"),
         l2(std::string(profile.name) + "_pseudo_scalar_l2") {
     config.arch = profile.arch;
@@ -669,11 +677,14 @@ public:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    compute_unit =
-        amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_memory, &l2);
+    rocjitsu::test::initialize_compute_unit(compute_unit, std::string(profile.name), config,
+                                            &gpu_memory, &l2);
+    if (!compute_unit)
+      return;
     decoder = Decoder::create(profile.arch);
     if (compute_unit)
-      wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wavefront =
+          compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~PseudoScalarFixture() {
@@ -766,6 +777,28 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
                     .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
+  }
+}
+
+TEST(PseudoScalarSpecialSourceTest, Rdna4HalfTranscendentalsReadSpecialScalarSources) {
+  PseudoScalarFixture fixture(kProfiles[0], 64);
+  ASSERT_TRUE(fixture.ready());
+  fixture.wavefront->set_m0(0x4400u);
+  fixture.wavefront->set_exec_raw(0x440000004400ull);
+  fixture.wavefront->write_scc(true);
+  fixture.wavefront->set_fp_denorm_mode(0xf);
+  constexpr uint32_t dest = 4;
+  // gfx1201 returns sqrt(4) for M0 and either EXEC half, and sqrt(2^-24) for SCC.
+  for (uint32_t selector : {125u, 126u, 127u, 253u}) {
+    SCOPED_TRACE(selector);
+    const auto words = encode_vop3(fixture.profile, "v_s_sqrt_f16", dest, selector);
+    std::unique_ptr<Instruction> inst(decode_valid(*fixture.decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.compute_unit->write_sgpr(fixture.sgpr_base() + dest, 0xdeadbeef);
+    ASSERT_TRUE(
+        fixture.compute_unit->execute_instruction(inst.get(), *fixture.wavefront).succeeded());
+    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + dest),
+              selector == 253u ? 0x0c00u : 0x4000u);
   }
 }
 
@@ -938,8 +971,9 @@ TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModi
                           false, round_mode, denorm_mode, omod, false, false),
                       test[omod + 1]);
         EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
-                      amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(0x0001), false, false,
-                      round_mode, denorm_mode, 0, false, false),
+                      amdgpu::pseudo_scalar::Operation::RSQ,
+                      flushed_f16_source(0x0001, denorm_mode), false, false, round_mode,
+                      denorm_mode, 0, false, false),
                   (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
       }
   }
@@ -1000,13 +1034,13 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
                                                0, 0, 0, false),
             0x80000000u);
 
-  const float f16_negative_minimum = util::f16_to_f32(0x8001u);
   const float f16_negative_maximum = util::f16_to_f32(0xFBFFu);
-  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT, f16_negative_minimum, false,
-                                                       false, 0, 0, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT,
+                                                       flushed_f16_source(0x8001u, 0), false, false,
+                                                       0, 0, 0, false, false),
             0x00008000u);
   const uint32_t f16_allowed_negative_input = amdgpu::transcendental::execute_pseudo_f16(
-      Operation::SQRT, f16_negative_minimum, false, false, 0, 1, 0, false, false);
+      Operation::SQRT, flushed_f16_source(0x8001u, 1), false, false, 0, 1, 0, false, false);
   EXPECT_EQ(f16_allowed_negative_input & 0x7C00u, 0x7C00u);
   EXPECT_NE(f16_allowed_negative_input & 0x03FFu, 0u);
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
@@ -1014,6 +1048,11 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
             0x00008100u);
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
                                                        false, 0, 0, 0, false, false),
+            0x00008000u);
+  // gfx1201 V_S_RCP_F16 div:2: halving a result in the lowest normal binade
+  // keeps its sign, as for the vector forms.
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, util::f16_to_f32(0xF037u),
+                                                       false, false, 0, 3, 3, false, false),
             0x00008000u);
 }
 

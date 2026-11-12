@@ -44,6 +44,12 @@ typedef std::unordered_map<std::string, uint32_t> fld_name2id_map_t;
 bool get_field_id_from_name(const std::string name, rdc_field_t* value);
 fld_id2name_map_t& get_field_id_description_from_id(void);  // NOLINT
 bool is_field_valid(rdc_field_t field_id);
+// True if RDC knows the field with this ID. Takes any number, so a field ID from outside RDC
+// is checked before it is used as an rdc_field_t.
+bool is_field_id_valid(uint32_t field_id);
+// The field whose decimal ID `text` holds, digits only. False, and *value is left alone, if
+// the text is no such number or RDC does not know the field.
+bool get_field_id_from_number(const std::string& text, rdc_field_t* value);
 
 }  // namespace rdc
 }  // namespace amd

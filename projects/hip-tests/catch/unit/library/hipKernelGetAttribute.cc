@@ -50,7 +50,9 @@ HIP_TEST_CASE(Unit_hipKernelGetAttribute_Positive_Basic) {
     REQUIRE(pi > 0);
   }
 
-#if !defined(ENABLE_ADDRESS_SANITIZER)
+// Device instrumentation adds to the kernel's static shared memory, so the exact byte
+// count below only holds for an uninstrumented device build.
+#if !defined(ENABLE_DEVICE_ADDRESS_SANITIZER)
   SECTION("sharedSizeBytes") {
     hipKernel_t kernel;
     HIP_CHECK(hipLibraryGetKernel(&kernel, library, "reverse"));

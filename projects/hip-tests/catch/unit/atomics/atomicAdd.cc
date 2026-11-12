@@ -18,11 +18,13 @@
 // Helper function to run atomicAdd tests (single kernel)
 template <typename TestType>
 static void runAtomicAddTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       SingleDeviceSingleKernelTest<TestType, AtomicOperation::kAdd>(1, sizeof(TestType));
     }
@@ -40,11 +42,13 @@ static void runAtomicAddTest() {
 // Helper function to run atomicAdd tests (multiple kernels)
 template <typename TestType>
 static void runAtomicAddMultiKernelTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       SingleDeviceMultipleKernelTest<TestType, AtomicOperation::kAdd>(2, 1, sizeof(TestType));
     }

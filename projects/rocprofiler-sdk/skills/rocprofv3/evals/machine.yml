@@ -1,0 +1,5 @@
+# Behavioral cases run rocprofv3 against a real GPU, so they say which
+# hardware and leave the rest to the repo: .github/workflows/evals.yml maps
+# these labels onto the pool that carries them.
+os: [Linux]
+labels: [mi300x, gpu, rocm]

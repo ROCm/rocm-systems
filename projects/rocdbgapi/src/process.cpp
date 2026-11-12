@@ -29,6 +29,7 @@
 #include "initialization.h"
 #include "logging.h"
 #include "os_driver.h"
+#include "property.h"
 #include "queue.h"
 #include "register.h"
 #include "runtime_rdebug.h"
@@ -172,6 +173,9 @@ process_t::detach ()
              state.  */
           set_precise_alu_exceptions (false);
 
+          /* Return LDS exceptions back to its default off state.  */
+          set_reporting_lds_exceptions (false);
+
           /* Resume all the waves halted at launch.  */
           set_wave_launch_mode (os_wave_launch_mode_t::normal);
 
@@ -265,8 +269,8 @@ process_t::detach ()
                  event.pretty_printer_string ().c_str ());
     }
 
-  /* Destruct the waves, workgroups, dispatches, queues, and agents, in this
-     order.  */
+  /* Destruct the waves, workgroups, clusters, dispatches, queues, and
+     agents, in this order.  */
   std::get<handle_object_set_t<watchpoint_t>> (m_handle_object_sets).clear ();
   std::get<handle_object_set_t<wave_t>> (m_handle_object_sets).clear ();
   dbgapi_assert (count<displaced_stepping_t> () == 0
@@ -563,6 +567,45 @@ process_t::set_precise_alu_exceptions (bool enabled)
                  to_cstring (status));
 }
 
+void
+process_t::set_reporting_lds_exceptions (bool enabled)
+{
+  /* If no toggling is needed, bail early.  */
+  if (!!(m_process_flags & os_process_flags_t::report_lds_exception)
+      == enabled)
+    return;
+
+  /* The support status is being checked here after it has become
+     clear that the corresponding flag bit needs to be toggled.
+     This way, we're lenient toward cases where "enabled" is set to
+     "false" during the process_t::detach().  */
+  if (!m_supports_lds_exception)
+    throw api_error_t (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+  auto new_flags = m_process_flags;
+  if (enabled)
+    new_flags = new_flags | os_process_flags_t::report_lds_exception;
+  else
+    new_flags = new_flags & ~os_process_flags_t::report_lds_exception;
+
+  auto set_lds_exception_on_success
+    = utils::make_scope_success ([=] () { m_process_flags = new_flags; });
+
+  /* If this is called before the runtime is loaded (or after the runtime is
+     unloaded), only record the setting in the process_t instance. The actual
+     change to the configuration will be done when the runtime is loaded and
+     the debug mode is activated.  */
+  if (m_runtime_state != AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS)
+    return;
+
+  amd_dbgapi_status_t status = os_driver ().set_process_flags (new_flags);
+
+  if (status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED
+      && status != AMD_DBGAPI_STATUS_SUCCESS)
+    fatal_error ("os_driver::set_reporting_lds_exceptions failed (%s)",
+                 to_cstring (status));
+}
+
 std::vector<process_t *>
 process_t::match (amd_dbgapi_process_id_t process_id)
 {
@@ -650,6 +693,7 @@ process_t::update_agents ()
 
   std::optional<bool> precise_memory_supported;
   std::optional<bool> precise_alu_exceptions_supported;
+  std::optional<bool> lds_exception_supported;
 
   /* Add new agents to the process.  */
   for (auto &&agent_info : agent_infos)
@@ -686,11 +730,13 @@ process_t::update_agents ()
 
       if (agent->supports_debugging ())
         {
-          precise_memory_supported = precise_memory_supported.value_or (true)
-                                     && agent_info.precise_memory_supported;
+          precise_memory_supported = (precise_memory_supported.value_or (true)
+                                      && agent_info.precise_memory_supported);
           precise_alu_exceptions_supported
-            = precise_alu_exceptions_supported.value_or (true)
-              && agent_info.precise_alu_exceptions_supported;
+            = (precise_alu_exceptions_supported.value_or (true)
+               && agent_info.precise_alu_exceptions_supported);
+          lds_exception_supported = (lds_exception_supported.value_or (true)
+                                     && agent_info.lds_exception_supported);
         }
     }
 
@@ -713,6 +759,7 @@ process_t::update_agents ()
   m_supports_precise_memory = precise_memory_supported.value_or (false);
   m_supports_precise_alu_exceptions
     = precise_alu_exceptions_supported.value_or (false);
+  m_supports_lds_exception = lds_exception_supported.value_or (false);
 }
 
 void
@@ -1682,8 +1729,7 @@ process_t::runtime_enable (os_runtime_info_t runtime_info)
       status = os_driver ().set_process_flags (m_process_flags);
       if (status != AMD_DBGAPI_STATUS_SUCCESS
           && status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
-        fatal_error ("Could not set precise memory or precise ALU exceptions "
-                     "for %s (%s).",
+        fatal_error ("Could not set process properties for %s (%s).",
                      to_cstring (id ()), to_cstring (status));
     }
 
@@ -2727,6 +2773,59 @@ amd_dbgapi_set_alu_exceptions_precision (
   CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
          AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
          AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+  TRACE_END ();
+}
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_process_set_property (amd_dbgapi_process_id_t process_id,
+                                 amd_dbgapi_property_id_t property_id,
+                                 size_t value_size, const void *value)
+{
+  TRACE_BEGIN (param_in (property_id), param_in (process_id),
+               param_in (value_size),
+               make_hex (make_ref (param_in (value), value_size)));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    /* A frozen process is read-only; its properties cannot be changed.  */
+    if (process->is_frozen ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN);
+
+    if (process->from_core ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+    const property_t::properties_map_t &all_properties_map
+      = property_t::all ();
+
+    if (all_properties_map.find (property_id) == all_properties_map.end ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID);
+
+    property_t::property_map_value_t &property
+      = all_properties_map.at (property_id);
+
+    if (!!(property->scope () & property_t::property_scope_t::process)
+        == false)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+
+    if (value == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    property->set (process, value_size, value);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY,
          AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }

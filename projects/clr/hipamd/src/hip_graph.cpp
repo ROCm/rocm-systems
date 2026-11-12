@@ -124,6 +124,8 @@ hipError_t ihipGraphAddKernelNode(
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const bool clusterDimsSpecified =
+      clusterDim.x != 0 || clusterDim.y != 0 || clusterDim.z != 0;
   if (hipError_t status =
           ihipResolveGraphClusterDimensions(func, deviceId, pNodeParams->gridDim, &clusterDim);
       status != hipSuccess) {
@@ -159,7 +161,7 @@ hipError_t ihipGraphAddKernelNode(
   auto* kernelNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
                                globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
-                               launchFlags);
+                               clusterDimsSpecified, launchFlags);
   status = kernelNode->GetParamCopyStatus();
   if (status != hipSuccess) {
     delete kernelNode;
@@ -180,6 +182,11 @@ hipError_t ihipGraphAddMemcpyNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidValue;
   }
   hipError_t status = ihipMemcpy3D_validate(pCopyParams);
+  if (status != hipSuccess) {
+    return status;
+  }
+  const HIP_MEMCPY3D desc = hip::getDrvMemcpy3DDesc(*pCopyParams);
+  status = ihipDrvMemcpy3D_validate(&desc);
   if (status != hipSuccess) {
     return status;
   }
@@ -278,14 +285,21 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   return status;
 }
 
-hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction, dim3& gridDim,
-                                  dim3& blockDim, void**& args, size_t& sharedMemBytes) {
+hipError_t capturehipLaunchKernelCommon(hipStream_t& stream, const void*& hostFunction,
+                                        dim3& gridDim, dim3& blockDim, void**& args,
+                                        size_t& sharedMemBytes, dim3& clusterDim,
+                                        bool& clusterDimsSpecified) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
-          "[hipGraph] Current capture node LaunchKernel on stream : %p", stream);
+          "[hipGraph] Current capture node LaunchKernel on stream : %p (cluster %u,%u,%u%s)",
+          stream, clusterDim.x, clusterDim.y, clusterDim.z,
+          clusterDimsSpecified ? "" : ", not specified");
 
   if (!hip::isValid(stream)) {
     return hipErrorContextIsDestroyed;
   }
+  // {0,0,0} tells the kernel node that no cluster dimensions were given, so it resolves the
+  // kernel's own requirement (__cluster_dims__ or a runtime cluster attribute) instead.
+  const dim3 nodeClusterDim = clusterDimsSpecified ? clusterDim : dim3(0, 0, 0);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hipKernelNodeParams nodeParams;
   nodeParams.func = const_cast<void*>(hostFunction);
@@ -296,9 +310,10 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
   nodeParams.sharedMemBytes = sharedMemBytes;
 
   hip::GraphNode* pGraphNode;
-  hipError_t status = ihipGraphAddKernelNode(
-      &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0, s->DeviceId());
+  hipError_t status =
+      ihipGraphAddKernelNode(&pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
+                             s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0,
+                             s->DeviceId(), 0, 0, 0, nodeClusterDim);
   if (status != hipSuccess) {
     return status;
   }
@@ -2031,8 +2046,9 @@ hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
 
 hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemsetNodeGetParams, node, pNodeParams);
-  if (!hip::GraphNode::isNodeValid(reinterpret_cast<hip::GraphNode*>(node)) ||
-      pNodeParams == nullptr) {
+  hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(n) || pNodeParams == nullptr ||
+      n->GetType() != hipGraphNodeTypeMemset) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   reinterpret_cast<hip::GraphMemsetNode*>(node)->GetParams(pNodeParams);
@@ -2041,8 +2057,9 @@ hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNo
 
 hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams* pNodeParams) {
   HIP_INIT_API(hipGraphMemsetNodeSetParams, node, pNodeParams);
-  if (!hip::GraphNode::isNodeValid(reinterpret_cast<hip::GraphNode*>(node)) ||
-      pNodeParams == nullptr) {
+  hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
+  if (!hip::GraphNode::isNodeValid(n) || pNodeParams == nullptr ||
+      n->GetType() != hipGraphNodeTypeMemset) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   if (pNodeParams->height > 1 &&
@@ -3305,7 +3322,10 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, u
 
 hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst) {
   HIP_INIT_API(hipGraphKernelNodeCopyAttributes, hSrc, hDst);
-  if (hSrc == nullptr || hDst == nullptr) {
+  hip::GraphNode* src = reinterpret_cast<hip::GraphNode*>(hSrc);
+  hip::GraphNode* dst = reinterpret_cast<hip::GraphNode*>(hDst);
+  if (!hip::GraphNode::isNodeValid(src) || !hip::GraphNode::isNodeValid(dst) ||
+      src->GetType() != hipGraphNodeTypeKernel || dst->GetType() != hipGraphNodeTypeKernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(reinterpret_cast<hip::GraphKernelNode*>(hDst)->CopyAttr(
@@ -3525,6 +3545,10 @@ hipError_t hipGraphAddExternalSemaphoresSignalNode(
     size_t numDependencies, const hipExternalSemaphoreSignalNodeParams* nodeParams) {
   HIP_INIT_API(hipGraphAddExternalSemaphoresSignalNode, pGraphNode, graph, pDependencies,
                numDependencies, nodeParams);
+  if (pGraphNode == nullptr || graph == nullptr ||
+      (numDependencies > 0 && pDependencies == nullptr) || nodeParams == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   hip::GraphNode* node = new hip::hipGraphExternalSemSignalNode(nodeParams);
   hipError_t status =
       ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),

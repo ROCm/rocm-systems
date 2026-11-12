@@ -37,14 +37,18 @@ __global__ void vectoradd_float(float* __restrict__ a, const float* __restrict__
 
 __global__ void add(int n, float* x, float* y) {
 
-  if(__hip_atomic_load(&counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0){
+  if(__scoped_atomic_load_n(&counter, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) != 0){
     abort();
   }
-  __hip_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = index; i < n; i += stride) y[i] = x[i] + y[i];
-   __hip_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+   __scoped_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+  __syncthreads();
+  if (__scoped_atomic_load_n(&counter, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) != 0) {
+    abort();
+  }
 
 }
 

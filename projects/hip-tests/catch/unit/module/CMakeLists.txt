@@ -242,7 +242,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -253,7 +253,7 @@ if(HIP_PLATFORM MATCHES "amd")
     add_custom_target(addKernel_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -286,6 +286,7 @@ if(HIP_PLATFORM MATCHES "amd")
   --offload-arch=gfx10-1-generic
   --offload-arch=gfx10-3-generic
   --offload-arch=gfx11-generic
+  --offload-arch=gfx11-7-generic
   --offload-arch=gfx12-generic
   --offload-arch=gfx12-5-generic
 )
@@ -477,15 +478,34 @@ target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
+if(UNIX)
+  add_executable(managedForkAfterRegister_exe EXCLUDE_FROM_ALL managedForkAfterRegister_exe.cc)
+  set_source_files_properties(managedForkAfterRegister_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(managedForkAfterRegister_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(build_tests managedForkAfterRegister_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedForkAfterRegister_exe)
+
+  add_executable(managedVarAfterDeviceReset_exe EXCLUDE_FROM_ALL managedVarAfterDeviceReset_exe.cc)
+  set_source_files_properties(managedVarAfterDeviceReset_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(managedVarAfterDeviceReset_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(build_tests managedVarAfterDeviceReset_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedVarAfterDeviceReset_exe)
+endif()
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
   hipFuncSetAttribute.cc
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
   hipManagedKeywordBasic.cc
+  hipManagedKeywordDeferredInit.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
+if(UNIX)
+  list(APPEND TEST_SRC managedForkAfterRegister.cc)
+  list(APPEND TEST_SRC managedVarAfterDeviceReset.cc)
+endif()
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
     hipExtLaunchMultiKernelMultiDevFunctional.cc

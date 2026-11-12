@@ -15,7 +15,9 @@
 
 // Helper function to run atomicExch tests for same address (compile time)
 template <typename TestType> static void runAtomicExchSameAddressCompileTimeTest() {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Positive Same Address" << current) {
       AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
     }
@@ -24,11 +26,13 @@ template <typename TestType> static void runAtomicExchSameAddressCompileTimeTest
 
 // Helper function to run atomicExch tests (single kernel)
 template <typename TestType> static void runAtomicExchTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchSingleDeviceSingleKernelTest<TestType, AtomicScopes::device>(1, sizeof(TestType));
     }
@@ -47,11 +51,13 @@ template <typename TestType> static void runAtomicExchTest() {
 
 // Helper function to run atomicExch tests (multi kernel)
 template <typename TestType> static void runAtomicExchMultiKernelTest() {
+  const auto iterations = TestParameterStore::instance().getIterationsForCurrentLevel();
+
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
 
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
+  for (auto current = 0; current < iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       AtomicExchSingleDeviceMultipleKernelTest<TestType, AtomicScopes::device>(2, 1,
                                                                                sizeof(TestType));

@@ -821,10 +821,9 @@ static uint64_t watchdogDeadlineTicks() {
   return 2000ULL * static_cast<uint64_t>(std::max(rateKhz, 1));
 }
 
-// Watchdog for one block: until state[0] reaches nDone, after ticks it records a rescue in state[1] and keeps
-// cis[pe] at pis[pe], so a wait that ignores abortFlag ends as a test failure instead of a hang.
+// Until state[0] hits nDone; after ticks it sets state[1], drains cis[pe] and raises abortFlag, so stuck waits fail.
 static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe, uint32_t nDone, uint64_t ticks,
-                                          uint32_t* state) {
+                                          uint32_t* state, uint32_t* abortFlag = nullptr) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> done(state[0]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[pe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[pe]);
@@ -833,6 +832,9 @@ static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe
     if (wall_clock64() - startTick >= ticks) {
       state[1] = 1u;
       ci.store(pi.load(cuda::memory_order_acquire), cuda::memory_order_release);
+      if (abortFlag != nullptr) {
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(*abortFlag).store(1u, cuda::memory_order_release);
+      }
     }
   }
 }
@@ -1597,6 +1599,261 @@ TEST_F(GinProxyFlushWaitTest, WaitPublishesLastIssuedGetOnceFlushConsumed) {
 }
 
 // ---------------------------------------------------------------------------
+// ProxyPut: puts above DataChunkSize split into chunk GFDs; only the last has counter/indexed signal, VA gets its own.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct ProxyPutArgs {
+  uint32_t peer;
+  uint64_t dstWnd;
+  uint64_t dstOff;
+  uint64_t srcWnd;
+  uint64_t srcOff;
+  uint64_t bytes;
+  ncclGinSignalType signalType;
+  ncclGinSignal_t signalId;
+  uint64_t signalWindow;
+  uint64_t signalOffset;
+  bool isStrong;
+  ncclGinSignalOp_t signalOp;
+  uint64_t signalVal;
+  bool hasCounter;
+  ncclGinCounter_t counterId;
+  uint64_t srcVal;
+  bool hasInline;
+};
+
+struct ExpectedGfd {
+  uint64_t op;
+  uint64_t size;
+  uint64_t srcOff; // vaSignalOff for a VA signal GFD
+  uint64_t srcHandle; // vaSignalHandle for a VA signal GFD
+  uint64_t dstOff;
+  uint64_t dstHandle;
+  uint64_t counterId;
+  uint64_t signalId;
+  uint64_t signalVal;
+  uint64_t isStrong;
+};
+
+}  // namespace
+
+__global__ void kernelProxyPut(ncclGinProxyGpuCtx_t* ctx, ProxyPutArgs args) {
+  ncclGinSignalDescriptor signal{};
+  signal.type = args.signalType;
+  signal.isStrong = args.isStrong;
+  if (args.signalType == NCCL_GIN_SIGNAL_TYPE_INDEXED) {
+    signal.indexedSignal.signalId = args.signalId;
+  } else if (args.signalType == NCCL_GIN_SIGNAL_TYPE_VA) {
+    signal.vaSignal.signalWindow = reinterpret_cast<ncclGinWindow_t>(args.signalWindow);
+    signal.vaSignal.signalOffset = args.signalOffset;
+  }
+  ncclGinProxyGfd_t gfd{};
+  // Matching system scopes skip the release fence; the fake windows are never dereferenced.
+  nccl::gin::proxy::put<ncclCoopCta, uint64_t>(ncclCoopCta{}, &gfd, ctx, static_cast<int>(args.peer),
+                                               reinterpret_cast<ncclGinWindow_t>(args.dstWnd), args.dstOff,
+                                               args.srcVal, args.hasInline,
+                                               reinterpret_cast<ncclGinWindow_t>(args.srcWnd), args.srcOff, args.bytes,
+                                               signal, args.signalOp, args.signalVal, args.hasCounter, args.counterId,
+                                               cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+class GinProxyPutTest : public GinDeviceTest {
+protected:
+  static constexpr uint64_t kChunk = nccl::gin::proxy::DataChunkSize;
+  static constexpr uint32_t kNranks = 2;
+  static constexpr uint32_t kQueueSize = 8;
+
+  // Posts one proxy::put on a zeroed 2-rank ring and reads back PIs and both peers' queues.
+  // cis stay 0, so kQueueSize caps GFDs per peer; posting more hangs in postGfd's credit wait until the run times out.
+  void runProxyPut(const ProxyPutArgs& args, std::vector<uint32_t>* pis, std::vector<ncclGinProxyGfd_t>* queues) {
+    DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+    DeviceBuffer<uint32_t> d_pis(kNranks);
+    DeviceBuffer<uint32_t> d_cis(kNranks);
+    DeviceBuffer<ncclGinProxyGpuCtx_t> d_ctx(1);
+    ASSERT_NO_FATAL_FAILURE(d_queues.zero());
+    ASSERT_NO_FATAL_FAILURE(d_pis.zero());
+    ASSERT_NO_FATAL_FAILURE(d_cis.zero());
+
+    ASSERT_NO_FATAL_FAILURE(uploadProxyGpuCtxs(d_ctx, static_cast<int>(kNranks), kQueueSize, d_queues.ptr, d_pis.ptr,
+                                               d_cis.ptr, /*lastIssuedGet=*/nullptr, /*lastVisibleGet=*/nullptr));
+
+    kernelProxyPut<<<1, 1>>>(d_ctx.ptr, args);
+    ASSERT_NO_FATAL_FAILURE(syncAndCheck());
+
+    *pis = d_pis.copyTo();
+    *queues = d_queues.copyTo();
+  }
+
+  // inlineVal reads qwords 1-2 as the inline value (expected.srcOff) instead of srcOff/srcHandle.
+  static void expectGfd(const ncclGinProxyGfd_t& gfd, const ExpectedGfd& expected, uint32_t slot,
+                        bool inlineVal = false) {
+    SCOPED_TRACE(::testing::Message() << "GFD slot " << slot);
+    for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[i].flag.v), 1ULL) << "qword " << i << " flag must be set";
+    }
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.version),
+              static_cast<uint64_t>(NCCL_GIN_PROXY_GFD_VERSION));
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op), expected.op) << "op";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeader].header.size), expected.size) << "size";
+    if (inlineVal) {
+      const uint64_t low = gfd.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow;
+      const uint64_t low2 = gfd.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2;
+      const uint64_t high = gfd.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh;
+      EXPECT_EQ(low | (low2 << 32) | (high << 48), expected.srcOff) << "inline value";
+    } else {
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcOff].srcOff.srcOff), expected.srcOff)
+        << "qword 1 offset";
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSrcHandle].srcHandle.srcHandle), expected.srcHandle)
+        << "qword 2 handle";
+    }
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstOff].dstOff.dstOff), expected.dstOff) << "dstOff";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdDstHandle].dstHandle.dstHandle), expected.dstHandle)
+      << "dstHandle";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.counterId), expected.counterId)
+      << "counterId";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalId), expected.signalId)
+      << "signalId";
+    const uint64_t signalVal =
+      static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalValLow) |
+      (static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValLow2) << 16) |
+      (static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.signalValHigh) << 32);
+    EXPECT_EQ(signalVal, expected.signalVal) << "signalVal";
+    EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal), expected.isStrong)
+      << "isStrongSignal";
+  }
+
+  // Slots [0, kQueueSize) are peer 0's ring; peer 1's ring holds numPosted GFDs and nothing after them.
+  static void expectOnlyPeer1Posted(const std::vector<uint32_t>& pis, const std::vector<ncclGinProxyGfd_t>& queues,
+                                    uint32_t numPosted) {
+    EXPECT_EQ(pis[1], numPosted) << "peer 1 PI";
+    EXPECT_EQ(pis[0], 0u) << "peer 0 PI must be untouched";
+    for (uint32_t s = 0; s < kNranks * kQueueSize; s++) {
+      if (s >= kQueueSize && s < kQueueSize + numPosted) {
+        continue;
+      }
+      for (int i = 0; i < ncclGinProxyGfdQwords; i++) {
+        EXPECT_EQ(queues[s].qword[i].raw, 0ULL) << "queue slot " << s << " qword " << i << " was written";
+      }
+    }
+  }
+
+  static ExpectedGfd plainChunk(const ProxyPutArgs& args, uint32_t chunk, uint64_t isStrong) {
+    return {ncclGinProxyOpPut, kChunk, args.srcOff + chunk * kChunk, args.srcWnd, args.dstOff + chunk * kChunk,
+            args.dstWnd, 0, 0, 0, isStrong};
+  }
+};
+
+TEST_F(GinProxyPutTest, SplitsAboveDataChunkSize) {
+  constexpr uint64_t kTail = 0x1234;
+  constexpr uint64_t kSigVal = 0x1122334455667788ULL;
+  constexpr uint64_t kLastOp = ncclGinProxyOpPut | ncclGinProxyOpWithCounter | ncclGinProxyOpWithSignalAdd;
+
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x80;
+  args.srcWnd = 0x00005A5A00001000ULL;
+  args.srcOff = 0x40;
+  args.bytes = 2 * kChunk + kTail;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  args.signalId = 5;
+  args.isStrong = true;
+  args.signalOp = ncclGinSignalAdd;
+  args.signalVal = kSigVal;
+  args.hasCounter = true;
+  args.counterId = 7;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  // Two full chunks plus the tail; the loop chunks are plain puts: no counter, no signal, not strong.
+  expectOnlyPeer1Posted(pis, queues, 3);
+  expectGfd(queues[kQueueSize + 0], plainChunk(args, 0, 0), 0);
+  expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 0), 1);
+  expectGfd(queues[kQueueSize + 2],
+            {kLastOp, kTail, args.srcOff + 2 * kChunk, args.srcWnd, args.dstOff + 2 * kChunk, args.dstWnd,
+             args.counterId, args.signalId, kSigVal, 1},
+            2);
+}
+
+TEST_F(GinProxyPutTest, ExactChunkMultipleWithVASignal) {
+  constexpr uint64_t kSigVal = 0x0000000300000002ULL;
+  constexpr uint64_t kVaOp = ncclGinProxyOpWithSignalInc | ncclGinProxyOpVASignal;
+
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x100;
+  args.srcWnd = 0x00005A5A00001000ULL;
+  args.srcOff = 0x200;
+  args.bytes = 2 * kChunk;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_VA;
+  args.signalWindow = 0x00003C3C00003000ULL;
+  args.signalOffset = 0x48;
+  args.isStrong = true;
+  args.signalOp = ncclGinSignalInc;
+  args.signalVal = kSigVal;
+  args.hasCounter = false;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  // One loop chunk, a full-chunk final put, then the VA signal GFD; no extra empty put for an exact multiple.
+  expectOnlyPeer1Posted(pis, queues, 3);
+  expectGfd(queues[kQueueSize + 0], plainChunk(args, 0, 0), 0);
+  // The VA signal never rides on the put, but put() still copies signal.isStrong onto the signal-less final put.
+  expectGfd(queues[kQueueSize + 1], plainChunk(args, 1, 1), 1);
+  // The VA signal GFD has no put bit, no size and no destination; qwords 1-2 carry the signal VA.
+  expectGfd(queues[kQueueSize + 2], {kVaOp, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0, kSigVal, 1}, 2);
+}
+
+// putValue's shape (inline, no source window, no counter or signal): hasInline alone must keep the final put GFD.
+TEST_F(GinProxyPutTest, InlinePutValuePostsOneInlineGfd) {
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.dstWnd = 0x0000D5D500002000ULL;
+  args.dstOff = 0x180;
+  args.bytes = sizeof(uint64_t);
+  args.srcVal = 0x0123456789ABCDEFULL;
+  args.hasInline = true;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  expectOnlyPeer1Posted(pis, queues, 1);
+  expectGfd(queues[kQueueSize],
+            {ncclGinProxyOpPut | ncclGinProxyOpWithInline, sizeof(uint64_t), args.srcVal, 0, args.dstOff, args.dstWnd,
+             0, 0, 0, 0},
+            0, /*inlineVal=*/true);
+}
+
+// A standalone VA signal (no source window, no bytes, no counter) posts only the VA GFD, with no empty put first.
+TEST_F(GinProxyPutTest, StandaloneVASignalPostsOnlySignalGfd) {
+  ProxyPutArgs args{};
+  args.peer = 1;
+  args.signalType = NCCL_GIN_SIGNAL_TYPE_VA;
+  args.signalWindow = 0x00003C3C00003000ULL;
+  args.signalOffset = 0x48;
+  args.signalOp = ncclGinSignalInc;
+  args.signalVal = 1;
+
+  std::vector<uint32_t> pis;
+  std::vector<ncclGinProxyGfd_t> queues;
+  ASSERT_NO_FATAL_FAILURE(runProxyPut(args, &pis, &queues));
+
+  expectOnlyPeer1Posted(pis, queues, 1);
+  expectGfd(queues[kQueueSize],
+            {ncclGinProxyOpWithSignalInc | ncclGinProxyOpVASignal, 0, args.signalOffset, args.signalWindow, 0, 0, 0, 0,
+             args.signalVal, 0},
+            0);
+}
+
+// ---------------------------------------------------------------------------
 // ResetSignal: proxy signals use an offset/baseline model. The effective value
 //   of an indexed signal is signals[id] measured against a baseline held in
 //   signalOffsets[id] (see ncclGinApi_GetSignalPtr, which returns
@@ -1876,6 +2133,174 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
     << "a no-timeout flush returned before the first abort poll (or testAbort's poll interval shrank); ready="
     << cycles[0] << " pending=" << cycles[1];
   queues.ExpectUnchanged();
+}
+
+// Busy-waits ticks of wall_clock64 (constant rate on every arch, unlike clock64 on gfx11).
+static __device__ void spinWallTicks(uint64_t ticks) {
+  const uint64_t startTick = wall_clock64();
+  while (wall_clock64() - startTick < ticks) {
+  }
+}
+
+// Block 1 posts a GFD after flush read pi, then sets ci to the old pi; state is {returned, rescued, entered, early}.
+__global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint32_t pe, bool timed,
+                                                 uint64_t timeoutCycles, uint64_t graceTicks, uint64_t watchdogTicks,
+                                                 uint32_t* abortFlag, ncclResult_t* outResult, uint32_t* state) {
+  if (threadIdx.x != 0) {
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> entered(state[2]);
+  if (blockIdx.x == 0) {
+    entered.store(1u, cuda::memory_order_release);
+    if (timed) {
+      *outResult = nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag, clock64(), timeoutCycles);
+    } else {
+      nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag);
+    }
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).store(1u, cuda::memory_order_release);
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(ctx->pis[pe]);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(ctx->cis[pe]);
+  const uint64_t startTick = wall_clock64();
+  while (entered.load(cuda::memory_order_acquire) == 0u && wall_clock64() - startTick < watchdogTicks) {
+  }
+  // The pi read is the first thing flush does, so a grace of 1 ms after entry orders the post after the snapshot.
+  spinWallTicks(graceTicks);
+  const uint32_t snapshot = pi.fetch_add(1u, cuda::memory_order_acq_rel);
+  // A second grace lets the post become visible first, so a re-reading flush cannot pair the old pi with the new ci.
+  spinWallTicks(graceTicks);
+  // A flush that returned before ci reached its snapshot did not wait at all.
+  state[3] = cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).load(cuda::memory_order_acquire);
+  ci.store(snapshot, cuda::memory_order_release);
+  drainAfterDeadline(ctx, static_cast<int>(pe), /*nDone=*/1u, watchdogTicks, state, abortFlag);
+}
+
+TEST_F(GinDeviceTest, ProxyFlush_IgnoresGfdPostedAfterPiSnapshot) {
+  constexpr uint32_t kPe = 1;
+  constexpr uint32_t kSnapshot = 0xFFFFFFFFu; // The later post wraps pi to 0, so the wait also crosses the uint32 wrap.
+  int rateKhz = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0), hipSuccess);
+  const uint64_t graceTicks = static_cast<uint64_t>(std::max(rateKhz, 1)); // 1 ms
+  for (bool timed : {false, true}) {
+    SCOPED_TRACE(testing::Message() << (timed ? "timeout overload" : "blocking overload"));
+    if (timed && clock64Wraps()) {
+      continue; // A 20-bit clock64 would fire the production timeout during the grace periods.
+    }
+    // Peer 0 is a decoy with one GFD pending; peer 1 has one GFD in flight at the snapshot.
+    ProxyFlushQueues queues({4u, kSnapshot}, {3u, kSnapshot - 1u});
+    DeviceBuffer<ncclResult_t> d_result(1);
+    DeviceBuffer<uint32_t> d_state(4);
+    DeviceBuffer<uint32_t> d_abort(1);
+    d_result.upload(ncclInProgress);
+    d_state.zero();
+    d_abort.zero();
+
+    kernelProxyFlushIgnoresLaterPost<<<2, 1>>>(queues.d_ctx.ptr, kPe, timed, kProxyFlushLongTimeoutCycles, graceTicks,
+                                               watchdogDeadlineTicks(), d_abort.ptr, d_result.ptr, d_state.ptr);
+    syncAndCheck();
+    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u, 1u, 0u}))
+      << "{returned, rescued, entered, early}: rescued=1: flush outlived the watchdog; early=1: it never waited";
+    if (timed) {
+      EXPECT_EQ(d_result.download(), ncclSuccess) << "flush must return once ci reaches the pi it read on entry";
+    }
+    EXPECT_EQ(queues.d_pis.copyTo(), (std::vector<uint32_t>{4u, kSnapshot + 1u})) << "exactly the one later post";
+    EXPECT_EQ(queues.d_cis.copyTo(), (std::vector<uint32_t>{3u, kSnapshot})) << "ci consumed only up to the snapshot";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DescriptorSmem: a caller-provided ncclGinDescriptorSmem (ncclGin_DescriptorSmem)
+//   is where the proxy builds its 128-byte GFD before posting it. NCCL 2.32.3
+//   (052c879fed) grew the storage from alignas(16) char[64] to alignas(64)
+//   char[128]; before that the GFD overran the storage into the caller's
+//   neighbouring shared memory. Checked at runtime rather than with static_assert,
+//   so the file still builds against headers without the fix.
+// ---------------------------------------------------------------------------
+
+TEST_F(GinDeviceTest, DescriptorSmem_FitsProxyGfd) {
+  EXPECT_LE(sizeof(ncclGinProxyGfd_t), sizeof(ncclGinDescriptorSmem));
+  EXPECT_LE(alignof(ncclGinProxyGfd_t), alignof(ncclGinDescriptorSmem));
+}
+
+constexpr int kDescriptorGuardWords = 16;
+
+struct DescriptorSmemWithGuard {
+  ncclGinDescriptorSmem descriptor;
+  uint64_t guard[kDescriptorGuardWords];
+};
+
+// The leaf that ncclGin::putValue(..., ncclGin_DescriptorSmem{&smem}) dispatches to.
+__global__ void kernelPutValueSmemDescriptor(ncclGinCtx ctx, int peer, uint64_t value,
+                                             uint64_t guardInit, uint64_t* guardOut, uint64_t* descOut) {
+  __shared__ DescriptorSmemWithGuard smem;
+  // __shared__ is not zero-initialised: seed the descriptor's first qword with bit 0 clear, so that its flag bit
+  // afterwards shows whether the GFD was built here rather than in the leaf's own scratch.
+  *reinterpret_cast<uint64_t*>(&smem.descriptor) = guardInit;
+  for (int i = 0; i < kDescriptorGuardWords; i++) smem.guard[i] = guardInit;
+  __syncthreads();
+  ncclGinSignalDescriptor noSignal{};
+  noSignal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY>::call(
+      ctx, ncclCoopThread{}, peer, reinterpret_cast<ncclGinWindow_t>(0x1000), /*dstOff=*/0, value,
+      noSignal, ncclGinSignalInc, /*signalOpArg=*/0, /*hasDescriptor=*/true, &smem.descriptor,
+      cuda::thread_scope_device, cuda::thread_scope_thread);
+  __syncthreads();
+  *descOut = *reinterpret_cast<const volatile uint64_t*>(&smem.descriptor);
+  const volatile uint64_t* guard = smem.guard;
+  for (int i = 0; i < kDescriptorGuardWords; i++) guardOut[i] = guard[i];
+}
+
+TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
+  constexpr uint32_t kNranks    = 2;
+  constexpr uint32_t kQueueSize = 4;
+  constexpr uint32_t kPeer      = 1;
+  constexpr uint64_t kValue     = 0x0123456789ABCDEFULL;
+  // Bit 0 clear: buildGfd sets the flag bit (bit 0) of every one of the 16 GFD qwords.
+  constexpr uint64_t kGuard     = 0xC0FFEE00C0FFEE00ULL;
+
+  DeviceBuffer<ncclGinProxyGfd_t>    d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t>             d_pis(kNranks);
+  DeviceBuffer<uint32_t>             d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<uint64_t>             d_guard(kDescriptorGuardWords);
+  DeviceBuffer<uint64_t>             d_desc(1);
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_guard.zero();
+  d_desc.zero();
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks    = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize = kQueueSize;
+  hostProxyCtx.queues    = d_queues.ptr;
+  hostProxyCtx.pis       = d_pis.ptr;
+  hostProxyCtx.cis       = d_cis.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.nRanks  = static_cast<int>(kNranks);
+  ctx.handle  = d_proxyCtx.ptr;
+
+  kernelPutValueSmemDescriptor<<<1, 1>>>(ctx, kPeer, kValue, kGuard, d_guard.ptr, d_desc.ptr);
+  syncAndCheck();
+
+  // The GFD was built in the descriptor and posted to the peer's queue.
+  EXPECT_EQ(d_desc.copyTo()[0] & 1u, 1u) << "the GFD was not built in the caller's ncclGinDescriptorSmem";
+  EXPECT_EQ(d_pis.copyTo()[kPeer], 1u);
+  const ncclGinProxyGfd_t posted = d_queues.copyTo()[kPeer * kQueueSize];
+  EXPECT_EQ(static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2) << 32) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh) << 48),
+            kValue);
+
+  // Shared memory right after the descriptor storage must be left alone.
+  const std::vector<uint64_t> guard = d_guard.copyTo();
+  for (int i = 0; i < kDescriptorGuardWords; i++) {
+    EXPECT_EQ(guard[i], kGuard) << "shared-memory word " << i << " after ncclGinDescriptorSmem was overwritten";
+  }
 }
 
 } // namespace RcclUnitTesting

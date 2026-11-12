@@ -16,6 +16,18 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 The documentation source files reside in the [`/docs`](/docs) folder of this repository. For information on contributing to the documentation, see
 [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html)
 
+### Quick start
+
+```bash
+rocsys -- ./app
+rocsys profile -- ./app
+```
+
+`rocsys` is the unified command-line entry point. The default (`rocsys -- ./app`
+or `rocsys profile -- ./app`) collects a full trace profile. Use
+`rocsys instrument` for runtime instrumentation and `rocsys rewrite` for
+binary rewrite. Existing `rocprof-sys-*` binaries are unchanged.
+
 ### Data collection modes
 
 - Dynamic instrumentation
@@ -152,7 +164,7 @@ rm -rf rocprof-sys-build
 cmake -B rocprof-sys-build -S .                                                  \
        -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems                          \
        -D ROCPROFSYS_USE_PYTHON=ON      -D ROCPROFSYS_BUILD_DYNINST=ON           \
-       -D ROCPROFSYS_BUILD_ELFUTILS=ON  -D ROCPROFSYS_BUILD_LIBIBERTY=ON         \
+       -D ROCPROFSYS_BUILD_ELFUTILS=ON  -D ROCPROFSYS_BUILD_LIBIBERTY=AUTO       \
        -D ROCPROFSYS_BUILD_EXAMPLES=ON  -D ROCPROFSYS_BUILD_TESTING=ON
 cmake --build rocprof-sys-build --target all --parallel 8
 cmake --build rocprof-sys-build --target install

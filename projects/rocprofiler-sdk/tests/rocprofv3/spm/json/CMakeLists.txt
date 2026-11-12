@@ -17,6 +17,33 @@ rocprofiler_add_integration_execute_test(
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
 
+# Reference-clock sampling is enabled for gfx1200, gfx1201, and gfx1250. IS_DISABLED and
+# SANITIZER keep this off with the rest of the SPM suite.
+set(IS_REFCLK_DISABLED True)
+if(NOT IS_DISABLED
+   AND NOT SANITIZER
+   AND rocprofiler-sdk-tests-gfx-info)
+    list(GET rocprofiler-sdk-tests-gfx-info 0 spm-refclk-gpu-0-gfx-info)
+    if("${spm-refclk-gpu-0-gfx-info}" MATCHES "^(gfx1200|gfx1201|gfx1250)(-strict)?$")
+        set(IS_REFCLK_DISABLED False)
+    endif()
+endif()
+
+# SPM JSON execute with the reference clock
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-spm-refclk-json-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
+        ${COUNTER_LIST} --spm-sample-interval-unit refclk_cycles --spm-sample-interval
+        1200 --kernel-trace --hip-trace -d ${CMAKE_CURRENT_BINARY_DIR}/out_refclk
+        --output-format json -o spm_refclk -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 60
+    LABELS "integration-tests;spm"
+    ENVIRONMENT "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_REFCLK_DISABLED})
+
 # PMC compare execute
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-json-compare-to-pmc
@@ -45,6 +72,21 @@ rocprofiler_add_integration_validate_test(
         "rocprofv3-test-spm-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     DISABLED ${IS_DISABLED})
+
+# REFCLK JSON validation
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-spm-refclk-json-validate
+    TEST_PATHS validate.py
+    DISCOVERY_ARGS -k "not multigpu"
+    ARGS --pmc-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_results.json --spm-json
+         ${CMAKE_CURRENT_BINARY_DIR}/out_refclk/spm_refclk_results.json
+    CONFIG pytest.ini
+    COPY spm_input.json conftest.py
+    LABELS "integration-tests;spm"
+    FIXTURES_REQUIRED
+        "rocprofv3-test-spm-refclk-json-execute;rocprofv3-test-spm-json-compare-to-pmc"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    DISABLED ${IS_REFCLK_DISABLED})
 
 # Multi-gpu JSON execute
 rocprofiler_add_integration_execute_test(

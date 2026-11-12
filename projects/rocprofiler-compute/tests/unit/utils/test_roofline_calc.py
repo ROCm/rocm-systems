@@ -20,8 +20,8 @@ from utils.roofline_calc import (
     calc_ceilings,
     construct_roof,
     machine_ceilings,
+    roofline_mem_levels,
     sanitize_ai_value,
-    sanitize_mem_level,
 )
 
 
@@ -231,14 +231,14 @@ def test_calc_ai_analyze_joins_per_kernel_stats(
         top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
     )
     assert joined["counts"] == [128]
-    assert joined["totalTime"] == [154000.0]
-    assert joined["pctRuntime"] == [12.4]
+    assert joined["kernelTime"] == [154000.0]
+    assert joined["kernelPctRuntime"] == [12.4]
     assert joined["timeUnit"] == "ns", "the unit is only recoverable from the column"
 
     missing = run_calc_ai_analyze_with_values(monkeypatch, ai_values)
     assert missing["counts"] == [None]
-    assert missing["totalTime"] == [None]
-    assert missing["pctRuntime"] == [None]
+    assert missing["kernelTime"] == [None]
+    assert missing["kernelPctRuntime"] == [None]
     assert missing["timeUnit"] == ""
 
 
@@ -254,60 +254,19 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
 
 
 ##############################################################################
-# sanitize_mem_level Tests
+# roofline_mem_levels Tests
 ##############################################################################
 
 
-def test_sanitize_mem_level_all_falls_back_to_hierarchy() -> None:
-    """'ALL' results in full memory levels for the model, minus MALL."""
-    result = sanitize_mem_level("ALL", "mi210")
-    # mi210 has no MALL, so result equals memory_levels directly
-    assert result == mi_gpu_specs.get_memory_levels("mi210")
+def test_roofline_mem_levels_is_the_model_hierarchy() -> None:
+    """A model without MALL gets its full memory hierarchy."""
+    assert roofline_mem_levels("mi210") == mi_gpu_specs.get_memory_levels("mi210")
 
 
-def test_sanitize_mem_level_all_list_falls_back_to_hierarchy() -> None:
-    """['ALL'] behaves the same as 'ALL'."""
-    result = sanitize_mem_level(["ALL"], "mi210")
-    assert result == mi_gpu_specs.get_memory_levels("mi210")
-
-
-def test_sanitize_mem_level_supported_string() -> None:
-    """A supported single string level is returned as a single-item list."""
-    result = sanitize_mem_level("HBM", "mi210")
-    assert result == ["HBM"]
-
-
-def test_sanitize_mem_level_supported_list() -> None:
-    """A list of supported levels is returned unchanged."""
-    result = sanitize_mem_level(["HBM", "L2"], "mi210")
-    assert result == ["HBM", "L2"]
-
-
-def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy() -> None:
-    """Fully unsupported input falls back to full memory levels, minus MALL."""
-    result = sanitize_mem_level("HBM", "rdna35_halo")
-    # rdna35_halo memory_levels includes MALL, which is stripped by sanitize_mem_level
+def test_roofline_mem_levels_skips_mall() -> None:
+    """MALL is left out because the roofline benchmark does not measure it."""
     expected = [m for m in mi_gpu_specs.get_memory_levels("rdna35_halo") if m != "MALL"]
-    assert result == expected
-
-
-def test_sanitize_mem_level_mixed_filters_unsupported() -> None:
-    """Unsupported levels in a mixed list are filtered out."""
-    # rdna35_halo supports L0, L1, L2, MALL, LDS — not HBM; MALL is also stripped
-    result = sanitize_mem_level(["HBM", "L2"], "rdna35_halo")
-    assert result == ["L2"]
-
-
-def test_sanitize_mem_level_mall_is_stripped() -> None:
-    """MALL is always removed from results even when explicitly requested."""
-    result = sanitize_mem_level("MALL", "rdna35_halo")
-    assert "MALL" not in result
-
-
-def test_sanitize_mem_level_vl1d_normalised() -> None:
-    """'vL1D' is normalised to 'L1' before filtering."""
-    result = sanitize_mem_level("vL1D", "mi210")
-    assert result == ["L1"]
+    assert roofline_mem_levels("rdna35_halo") == expected
 
 
 ##############################################################################
@@ -400,7 +359,6 @@ def roofline_parameters(
     # matrix_ops_type is "MFMA" for CDNA (MI-series) and "WMMA" for RDNA.
     return {
         "device_id": 0,
-        "mem_level": "ALL",
         "workload_dir": "/tmp",
         "matrix_ops_type": matrix_ops_type,
         "gpu_arch": gpu_arch,

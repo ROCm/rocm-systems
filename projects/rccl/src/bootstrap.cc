@@ -202,7 +202,7 @@ ncclResult_t bootstrapNetInit() {
       }
       char line[SOCKET_NAME_MAXLEN + MAX_IF_NAME_SIZE + 2];
       snprintf(line, sizeof(line), " %s:", bootstrapNetIfName);
-      ncclSocketToString(&bootstrapNetIfAddr, line + strlen(line));
+      ncclSocketToString(&bootstrapNetIfAddr, line + strlen(line), sizeof(line) - strlen(line));
       INFO(NCCL_BOOTSTRAP, "Bootstrap: Using%s", line);
       bootstrapNetInitDone = 1;
     }
@@ -433,23 +433,17 @@ struct extInfo {
 #define NET_HANDLE(h, rank) ((h) + (rank * NCCL_NET_HANDLE_MAXSIZE))
 #define BOOTSTRAP_HANDLE(h, i) ((struct ncclBootstrapHandle*)((char*)h + i * NCCL_UNIQUE_ID_BYTES))
 
-// Bootstrap-side accept wrapper. ncclSocketAccept's default behavior
-// (retry=true) loops internally on bad-handshake events, which can
-// monopolize CPU and starve legitimate peer connects when a non-NCCL TCP
-// peer hits the bootstrap listen socket. We pass retry=false and
-// drive the retry from here: close the rejected socket, yield 1ms, retry.
-// abortFlag is honored between iterations.
+// Accept progress can succeed without a ready peer. Keep progressing the same
+// socket; rejected peers are closed by the socket layer.
 static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* listenSock,
                                     volatile uint32_t* abortFlag) {
+  NCCLCHECK(ncclSocketInit(sock));
   while (1) {
     if (abortFlag != NULL && __atomic_load_n(abortFlag, __ATOMIC_ACQUIRE) != 0) {
       return ncclInternalError;
     }
-    NCCLCHECK(ncclSocketInit(sock));
     NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
-    if (sock->state != ncclSocketStateBadHandshake) return ncclSuccess;
-    INFO(NCCL_INIT | NCCL_NET, "bootstrap: rejected bad-magic peer connection on listen sock, retrying accept");
-    (void)ncclSocketClose(sock);
+    if (sock->state == ncclSocketStateReady) return ncclSuccess;
     usleep(1000);
   }
 }
@@ -1172,7 +1166,8 @@ ncclResult_t bootstrapInit(int nHandles, void* handles, struct ncclComm* comm, s
 
   uint64_t timers[BOOTSTRAP_INIT_TIME_N] = {0};
   // Multi-root rendezvous can't propagate revHandle cross-root; bidir requires nHandles==1.
-  bool wantNetBidir = (nHandles == 1) && bootstrapBidirEnabled(nranks, 1);
+  // Grow excluded too: ranks disagree on nHandles, and revHandle comes from rank+1, so the reverse ring would hang.
+  bool wantNetBidir = (nHandles == 1) && !comm->isGrow && bootstrapBidirEnabled(nranks, 1);
 
   NEW_NOTHROW(state, bootstrapState);
   ncclIntruQueueConstruct(&state->asyncSendQueue);

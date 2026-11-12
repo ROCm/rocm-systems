@@ -52,7 +52,7 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     if (rank == 0) {
         // n=9 > NCCL_NET_IB_MAX_RECVS (8) — must return ncclInternalError
@@ -96,7 +96,6 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
         // for a worker that is never coming and the reported cause stays the real
         // one rather than "only K of N".
         std::atomic<bool> registerFailed{false};
-        static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
 
         RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
@@ -122,7 +121,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
                     release(mh1);
                     return result;
                 }
-                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls, &registerFailed)) {
+                if (!WorkerRendezvous(bothHeld, nThreads, kWorkerGatePolls, &registerFailed)) {
                     release(mh1);
                     release(mh2);
                     result.ok = false;
@@ -152,7 +151,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -189,7 +188,7 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     static constexpr size_t kRecvSize = 4096;
     static constexpr size_t kSendSize = 65536;  // larger than kRecvSize — will be clamped
@@ -261,6 +260,36 @@ TEST_F(NetIbMPITest, NullCommClose) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// IB-CAST entry points must reject a null communicator without dereferencing it.
+TEST_F(NetIbMPITest, NullCommCastDataPath) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+
+    char   buf[kSmallBufferSize];
+    const size_t sz = sizeof(buf);
+
+    void*  mhandle     = nullptr;
+    void*  request     = nullptr;
+    void*  bufs[1]     = {buf};
+    size_t sizes64[1]  = {sz};
+    int    sizes32[1]  = {static_cast<int>(sz)};
+    int    tags[1]     = {0};
+    void*  mhandles[1] = {nullptr};
+    void*  phandles[1] = {nullptr};
+
+    EXPECT_EQ(netIbCast.regMr(nullptr, buf, sz, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
+    // deregMr needs a non-null handle to reach its communicator guard.
+    EXPECT_EQ(netIbCast.deregMr(nullptr, &mhandle), ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.isend(nullptr, buf, sz, /*tag=*/0, /*mhandle=*/nullptr,
+                              /*phandle=*/nullptr, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.irecv(nullptr, 1, bufs, sizes64, tags, mhandles, phandles, &request),
+              ncclInvalidArgument);
+    EXPECT_EQ(netIbCast.iflush(nullptr, 1, bufs, sizes32, mhandles, &request), ncclInvalidArgument);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // E4.  TagZeroReuse — 50 messages all sent with tag=0.
 //      Verifies FIFO ordering: messages arrive in send order because
 //      the FIFO is a strict ring (slot = fifoHead % MAX_REQUESTS).
@@ -315,7 +344,7 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_SETUP_CONNECTION(/*dev=*/0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -350,7 +379,7 @@ TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 16384;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -391,7 +420,7 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -408,6 +437,50 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
         DoSendRecv(cp.sendComm, cp.recvComm,
                    buf.get(), buf.get(), sz,
                    tag++, mh, mh, static_cast<int>(sz));
+    }
+
+    // A multi-receive writes one CTS entry per receive, more than the CTS QP's
+    // inline limit of one entry, so irecv must post it without IBV_SEND_INLINE.
+    constexpr int kNRecvs = 4;
+    constexpr size_t kSubSize = 4096;
+    constexpr int kTagBase = 100;
+    char* base = static_cast<char*>(buf.get());
+    void* req = nullptr;
+    void* sreqs[kNRecvs] = {};
+    if (rank == 0) {
+        void* bufs[kNRecvs];
+        size_t subSizes[kNRecvs];
+        int tags[kNRecvs];
+        void* mhs[kNRecvs];
+        for (int i = 0; i < kNRecvs; i++) {
+            bufs[i] = base + i * kSubSize;
+            subSizes[i] = kSubSize;
+            tags[i] = kTagBase + i;
+            mhs[i] = mh;
+        }
+        EXPECT_EQ(PostRecv(cp.recvComm, kNRecvs, bufs, subSizes, tags, mhs, &req), ncclSuccess)
+            << "multi-receive irecv with NCCL_IB_USE_INLINE=1";
+        int got[kNRecvs] = {};
+        EXPECT_EQ(WaitForCompletion(req, got), ncclSuccess);
+        for (int i = 0; i < kNRecvs; i++) EXPECT_EQ(got[i], (int)kSubSize) << "receive " << i;
+    } else {
+        for (int i = 0; i < kNRecvs && !HasFailure(); i++) {
+            fillHostBufferWithPattern<uint8_t>(base + i * kSubSize, kSubSize, makeBytePattern(kTagBase + i));
+            PostSendWithRetry(cp.sendComm, base + i * kSubSize, kSubSize, kTagBase + i, mh, &sreqs[i]);
+        }
+        for (int i = 0; i < kNRecvs; i++) {
+            if (sreqs[i]) EXPECT_EQ(WaitForCompletion(sreqs[i], nullptr), ncclSuccess) << "send " << i;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        for (int i = 0; i < kNRecvs; i++) {
+            size_t errIdx;
+            uint8_t errExp, errGot;
+            EXPECT_TRUE(verifyHostBufferData<uint8_t>(base + i * kSubSize, kSubSize, makeBytePattern(kTagBase + i),
+                                                      0, 0.0, &errIdx, &errExp, &errGot))
+                << "receive " << i << ": data mismatch at byte " << errIdx;
+        }
     }
 }
 
@@ -435,7 +508,7 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     // From the shared ladder, not a constant beside it: a size added to
     // kBarrageSizes would otherwise send DoSendRecv past the end of this buffer.
@@ -589,7 +662,7 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -726,7 +799,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t sz = 256;
     auto buf = makeHostBufferAutoGuard(malloc(sz * kMaxReqsPerComm));
@@ -881,7 +954,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -1322,7 +1395,7 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -1369,7 +1442,7 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t maxSz = 1024 * 1024;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -1873,7 +1946,7 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -2028,7 +2101,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     static constexpr int kCycles = 5;
     const size_t sizes[] = {512 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024};
@@ -2125,7 +2198,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_SETUP_CONNECTION(0, cp, guard);
 
     static constexpr int kCycles = 100;
     const size_t sz = 256;
@@ -2354,52 +2427,91 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     const double serialized = measure(nThreads);
     serialize = false;
 
-    // A worker can fail on one rank only, and the harness reports that on both
-    // ranks already. What must not happen here is a fatal assertion: this rank
-    // would leave the test while the peer, whose own timings are fine, waits in
-    // the barrier below forever. So a missing measurement is reported and the
-    // verdict skipped, and both ranks reach the barrier either way.
-    const bool measured = singleBefore > 0.0 && singleAfter > 0.0 && parallel > 0.0
-                          && serialized > 0.0;
-    EXPECT_TRUE(measured)
-        << "a phase produced no timing on this rank (single " << singleBefore << "/"
-        << singleAfter << " ms, parallel " << parallel << " ms, serialized " << serialized
-        << " ms), so the scaling verdict is skipped";
+    // Phases are gathered so the rank that is read prints every rank's numbers and both share one verdict.
+    struct PhaseTimes {
+        double singleBefore;
+        double singleAfter;
+        double parallel;
+        double serialized;
+    };
+    const PhaseTimes mine{singleBefore, singleAfter, parallel, serialized};
+    std::array<PhaseTimes, kExactTwoProcesses> gathered{};
+    // MPI_BYTE over doubles is safe: both ranks run the same build.
+    const bool gatheredOk =
+        MPI_Gather(&mine, sizeof(PhaseTimes), MPI_BYTE, gathered.data(), sizeof(PhaseTimes),
+                   MPI_BYTE, 0, MPI_COMM_WORLD)
+        == MPI_SUCCESS;
 
-    if (measured) {
-        const double single = (singleBefore + singleAfter) / 2.0;
-        const double factor = parallel / single;
-        const double budget = kSerializedFraction * nThreads;
-        const double serializedFactor = serialized / single;
+    const double budget = kSerializedFraction * nThreads;
+    int verdict = 1;
+    std::string why;
+    if (rank == 0) {
+        auto f2 = [](double v) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.2f", v);
+            return std::string(buf);
+        };
+        if (!gatheredOk) {
+            verdict = 0;
+            why = "the phase timings could not be gathered, so no rank's scaling was judged";
+        }
+        for (int r = 0; gatheredOk && r < kExactTwoProcesses; r++) {
+            const PhaseTimes& p = gathered[r];
+            const std::string at = "rank " + std::to_string(r) + ": ";
+            if (!(p.singleBefore > 0.0 && p.singleAfter > 0.0 && p.parallel > 0.0
+                  && p.serialized > 0.0)) {
+                verdict = 0;
+                why += at + "a phase produced no timing (single " + f2(p.singleBefore) + "/"
+                       + f2(p.singleAfter) + " ms, parallel " + f2(p.parallel)
+                       + " ms, serialized " + f2(p.serialized) + " ms). ";
+                continue;
+            }
+            const double single = (p.singleBefore + p.singleAfter) / 2.0;
+            const double factor = p.parallel / single;
+            const double serializedFactor = p.serialized / single;
+            // A machine that changed speed under us would invalidate the ratio.
+            const double drift =
+                std::max(p.singleBefore, p.singleAfter) / std::min(p.singleBefore, p.singleAfter);
 
-        TEST_INFO("progress scaling: %d workers, single %.1f/%.1f ms, parallel %.1f ms, "
-                  "factor %.2f; deliberately serialized %.1f ms, factor %.2f; budget %.2f",
-                  nThreads, singleBefore, singleAfter, parallel, factor, serialized,
-                  serializedFactor, budget);
+            TEST_INFO("progress scaling: rank %d, %d workers, single %.1f/%.1f ms, parallel "
+                      "%.1f ms, factor %.2f; deliberately serialized %.1f ms, factor %.2f; "
+                      "calibration drift %.2f; budget %.2f",
+                      r, nThreads, p.singleBefore, p.singleAfter, p.parallel, factor,
+                      p.serialized, serializedFactor, drift, budget);
 
-        // Without this the gate could pass by being blind: a wait that sleeps, or a
-        // workload that spends its time off the progress path, would report a flat
-        // factor no matter what. The same measurement has to flag a lock it knows is
-        // there before its verdict on the plugin means anything.
-        EXPECT_GT(serializedFactor, budget)
-            << "the measurement did not notice a mutex held across every transfer (factor "
-            << serializedFactor << ", budget " << budget
-            << "), so it cannot be trusted to notice one inside the plugin either";
-
-        EXPECT_LT(factor, budget)
-            << nThreads << " workers each moved " << kIters << " messages in " << parallel
-            << " ms while one worker needed " << single << " ms, a factor of " << factor
-            << " where full serialization is " << nThreads << ". Concurrent progress is being "
-            << "serialized somewhere under isend/irecv/test: a lock held across a progress "
-            << "call would do exactly this.";
-
-        // A machine that changed speed under us would invalidate the ratio above.
-        const double drift =
-            std::max(singleBefore, singleAfter) / std::min(singleBefore, singleAfter);
-        EXPECT_LT(drift, 1.5) << "single-worker calibration drifted between " << singleBefore
-                              << " ms and " << singleAfter
-                              << " ms, so the scaling factor cannot be trusted";
+            // Control: the gate must flag a known lock before its verdict on the plugin means anything.
+            if (!(serializedFactor > budget)) {
+                verdict = 0;
+                why += at + "the measurement did not notice a mutex held across every transfer "
+                            "(factor " + f2(serializedFactor) + ", budget " + f2(budget)
+                       + "), so it cannot be trusted to notice one inside the plugin either. ";
+            }
+            if (!(factor < budget)) {
+                verdict = 0;
+                why += at + std::to_string(nThreads) + " workers each moved "
+                       + std::to_string(kIters) + " messages in " + f2(p.parallel)
+                       + " ms while one worker needed " + f2(single) + " ms, a factor of "
+                       + f2(factor) + " where full serialization is "
+                       + std::to_string(nThreads)
+                       + ". Concurrent progress is being serialized somewhere under "
+                         "isend/irecv/test: a lock held across a progress call would do "
+                         "exactly this. ";
+            }
+            if (!(drift < 1.5)) {
+                verdict = 0;
+                why += at + "single-worker calibration drifted between " + f2(p.singleBefore)
+                       + " ms and " + f2(p.singleAfter)
+                       + " ms, so its scaling factor cannot be trusted. ";
+            }
+        }
     }
+
+    // Both ranks leave with the same verdict.
+    if (MPI_Bcast(&verdict, 1, MPI_INT, 0, MPI_COMM_WORLD) != MPI_SUCCESS) verdict = 0;
+    EXPECT_EQ(verdict, 1)
+        << (rank == 0 ? why
+                      : std::string("the progress-scaling verdict failed; rank 0's report "
+                                    "carries the per-rank numbers"));
 
     MPI_Barrier(MPI_COMM_WORLD);
 }

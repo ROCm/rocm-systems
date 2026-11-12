@@ -25,7 +25,12 @@ from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
 from rocm_kpack.coff.kpack_transform import HIPK_MAGIC as COFF_HIPK_MAGIC
 from rocm_kpack.coff.kpack_transform import WRAPPER_SIZE as COFF_WRAPPER_SIZE
 from rocm_kpack.coff.surgery import CoffSurgery
-from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler, RocBLASHandler
+from rocm_kpack.database_handlers import (
+    AotritonHandler,
+    ComposableKernelHandler,
+    MIOpenHandler,
+    RocBLASHandler,
+)
 from rocm_kpack.elf.kpack_transform import HIPF_MAGIC as ELF_HIPF_MAGIC
 from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.kpack_transform import kpack_offload_binary, read_kpack_ref_marker
@@ -1048,6 +1053,91 @@ class TestArtifactSplitterIntegration:
         # Verify the symlink chain works (can resolve to real file)
         assert (generic_lib_dir / "librocrand.so").resolve().name == "librocrand.so.1.1"
 
+    def test_split_never_copies_onto_existing_destination(self, toolchain, tmp_path):
+        """
+        Re-driving a split into an output tree that already has content must not
+        copy2() onto a pre-existing destination file.
+
+        shutil.copy2() calls copystat(), which chmod/utimes the destination. If
+        the destination already exists and is owned by a *different* user - the
+        case when a prebuilt artifacts tree is re-driven by another user, e.g. a
+        container build whose tree was staged by another UID - those calls fail
+        with EPERM ("Operation not permitted") and the split aborts, even though
+        the file contents themselves are writable.
+
+        Creating a second UID requires root, so rather than reproduce the
+        ownership itself this test asserts the invariant that makes the failure
+        impossible: every destination is unlinked before copy2() runs, exactly as
+        the symlink branch of GenericCopyVisitor.visit_file() already does.
+
+        Covers both copy2() call sites: GenericCopyVisitor.visit_file() (regular
+        files) and ArtifactSplitter.process_database_files() (database files).
+        """
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/BLAS/rocBLAS/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        lib_dir = input_dir / prefix / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libtest.so").write_text("mock host library")
+
+        # A database file exercises the second copy2() call site.
+        db_dir = lib_dir / "rocblas" / "library"
+        db_dir.mkdir(parents=True)
+        (db_dir / "TensileLibrary_gfx1100.dat").write_text("mock tensile data")
+
+        output_dir = tmp_path / "output"
+
+        def make_splitter():
+            return ArtifactSplitter(
+                artifact_prefix="blas_lib",
+                toolchain=toolchain,
+                database_handlers=[RocBLASHandler()],
+                verbose=False,
+            )
+
+        # First split populates the output tree.
+        make_splitter().split(input_dir, output_dir)
+
+        generic_lib = output_dir / "blas_lib_generic" / prefix / "lib" / "libtest.so"
+        arch_db = (
+            output_dir
+            / "blas_lib_gfx1100"
+            / prefix
+            / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
+        )
+        assert generic_lib.exists(), "first split should populate the generic artifact"
+        assert arch_db.exists(), "first split should populate the per-arch artifact"
+
+        # Second split re-drives the same output tree. Emulate a destination
+        # owned by another user: copystat() on an existing destination raises
+        # EPERM. If the splitter unlinks first, this never triggers.
+        real_copy2 = shutil.copy2
+        copied_onto_existing = []
+
+        def guarded_copy2(src, dst, *args, **kwargs):
+            if Path(dst).exists() or Path(dst).is_symlink():
+                copied_onto_existing.append(str(dst))
+                raise PermissionError(1, "Operation not permitted")
+            return real_copy2(src, dst, *args, **kwargs)
+
+        with patch.object(shutil, "copy2", guarded_copy2):
+            make_splitter().split(input_dir, output_dir)
+
+        assert not copied_onto_existing, (
+            "copy2() was called onto pre-existing destination(s), which EPERMs in "
+            "copystat() when the destination is owned by another user: "
+            f"{copied_onto_existing}"
+        )
+
+        # The re-driven split still produces correct output.
+        assert generic_lib.exists()
+        assert generic_lib.read_text() == "mock host library"
+        assert arch_db.exists()
+        assert arch_db.read_text() == "mock tensile data"
+
     def test_overlay_produces_merged_kpack_directory(
         self, test_assets_dir, toolchain, tmp_path
     ):
@@ -1174,6 +1264,99 @@ class TestArtifactSplitterIntegration:
         assert len(visitor.database_files_by_arch["gfx942"]) == 1
         assert visitor.database_files_by_arch["gfx942"][0][0] == ck_dll
         assert ck_dll in visitor.exclude_from_generic
+
+    def test_ck_static_libs_classified_as_database(self, toolchain, tmp_path):
+        """CK per-arch static archives are database files; the unsuffixed
+        archive is not."""
+        test_dir = tmp_path / "prefix"
+        lib_dir = test_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        names = [
+            "libdevice_conv_operations_gfx942.a",
+            "libdevice_conv_operations_gfx942_xnackp.a",
+            "libdevice_conv_operations_gfx1100.a",
+            "libdevice_conv_operations.a",
+        ]
+        for name in names:
+            (lib_dir / name).write_bytes(b"!<arch>\n" + b"\x00" * 100)
+
+        visitor = FileClassificationVisitor(
+            toolchain=toolchain,
+            database_handlers=[ComposableKernelHandler()],
+            verbose=False,
+        )
+        for name in names:
+            visitor.visit_file(lib_dir / name, test_dir)
+
+        assert {p.name for p, _ in visitor.database_files_by_arch["gfx942"]} == {
+            "libdevice_conv_operations_gfx942.a",
+            "libdevice_conv_operations_gfx942_xnackp.a",
+        }
+        assert [p.name for p, _ in visitor.database_files_by_arch["gfx1100"]] == [
+            "libdevice_conv_operations_gfx1100.a"
+        ]
+        assert set(visitor.database_files_by_arch) == {"gfx942", "gfx1100"}
+        assert {p.name for p in visitor.exclude_from_generic} == set(names[:3])
+
+    @pytest.mark.parametrize("gpu_targets", [None, ["gfx942"]])
+    def test_ck_static_libs_split_per_arch(self, toolchain, tmp_path, gpu_targets):
+        """CK per-target archives and their CMake exports shard together into
+        <prefix>_<arch>, xnack spellings side by side; the unsuffixed archive,
+        its export and the package config stay generic; gpu_targets drops
+        unselected arches entirely."""
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+        prefix = "math-libs/composable_kernel/stage"
+        write_artifact_manifest(input_dir, [prefix])
+        stage = input_dir / prefix
+        exports = "lib/cmake/composable_kernel"
+        (stage / exports).mkdir(parents=True)
+
+        def per_target(token):
+            stem = f"{exports}/composable_kerneldevice_conv_operations_{token}Targets"
+            return [
+                f"lib/libdevice_conv_operations_{token}.a",
+                f"{stem}.cmake",
+                f"{stem}-release.cmake",
+            ]
+
+        files = {
+            "gfx942": per_target("gfx942")
+            + per_target("gfx942_xnackp")
+            + per_target("gfx942_xnack_"),
+            "gfx1100": per_target("gfx1100"),
+        }
+        generic = [
+            "lib/libdevice_conv_operations.a",
+            f"{exports}/composable_kernelConfig.cmake",
+            f"{exports}/composable_kerneldevice_conv_operationsTargets.cmake",
+        ]
+        for relative in [*generic, *(r for rs in files.values() for r in rs)]:
+            (stage / relative).write_text(relative)
+
+        output_dir = tmp_path / "output"
+        splitter = ArtifactSplitter(
+            artifact_prefix="composable-kernel_dev",
+            toolchain=toolchain,
+            database_handlers=[ComposableKernelHandler()],
+            verbose=True,
+            gpu_targets=gpu_targets,
+        )
+        splitter.split(input_dir, output_dir)
+
+        def contents(artifact):
+            root = output_dir / artifact / prefix
+            return sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+            )
+
+        assert contents("composable-kernel_dev_generic") == sorted(generic)
+        for arch, relatives in files.items():
+            if gpu_targets is not None and arch not in gpu_targets:
+                assert not (output_dir / f"composable-kernel_dev_{arch}").exists()
+            else:
+                assert contents(f"composable-kernel_dev_{arch}") == sorted(relatives)
 
     def test_gpu_targets_filters_database_files(self, toolchain, tmp_path):
         """

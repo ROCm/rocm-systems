@@ -21,35 +21,38 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaFabricMPITestFixture.hpp"
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
 #include "TestChecks.hpp"
+#include "ce_coll.h" // internal: NCCL_CE_REDUCE_THREADS and ncclCeImplemented, see DdaMPI_AllReduceRegistered
 #include "comm.h" // internal: struct ncclComm::doneEvent, see CapturedForkJoinStaysInsideGraph
 #include "rccl_common.h"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <random>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+using namespace DdaMPITestHelpers;
 
 namespace
 {
-constexpr size_t kOneShotCount = 65536; // 256 KiB f32; below default 1 MiB one-shot threshold
-
-// Default thresholds put two-shot above 1 MiB; 262176 floats is 1 MiB + 128 B and
-// satisfies the two-shot shard alignment rules at typical MPI rank counts (see
-// DdaFabricEligibilityTests.cpp AllReduceLL_TwoShotClaimsPastOneShotThreshold).
-constexpr size_t kTwoShotBaseCount = 262176;
-
 constexpr char kOneShotLogNeedle[] = "taking DDA fabric LL one-shot path";
 constexpr char kTwoShotLogNeedle[] = "taking DDA fabric LL two-shot path";
 
@@ -77,50 +80,43 @@ bool launchesOnUserStream(int algo)
     }
 }
 
-bool isGfx1250Device()
+void fillRankScalar(void* buf, size_t nElem, int rank, float scale = 1.0f)
 {
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
-
-void fillRankScalar(void* buf, size_t nElem, int rank)
-{
-    std::vector<float> host(nElem, static_cast<float>(rank + 1));
+    std::vector<float> host(nElem, static_cast<float>(rank + 1) * scale);
     HIP_CHECK(hipMemcpy(buf, host.data(), nElem * sizeof(float), hipMemcpyHostToDevice));
 }
 
-bool ddaLLTwoShotShapeOk(size_t count, int nRanks)
+// Rank i%n holds +big, the next -big, the rest 1.0, so the sum depends on the fold order.
+std::vector<uint8_t> makeOrderSensitiveInput(ncclDataType_t type, size_t count, int rank, int nRanks)
 {
-    const size_t bytes = count * sizeof(float);
-    if(bytes % static_cast<size_t>(nRanks) != 0)
-        return false;
-    return (bytes / static_cast<size_t>(nRanks)) % 16 == 0;
-}
-
-// Pick a count past the default one-shot threshold whose total bytes satisfy the
-// two-shot per-rank shard alignment for the active communicator width.
-size_t twoShotCountForRanks(int nRanks)
-{
-    size_t count = kTwoShotBaseCount;
-    if(!ddaLLTwoShotShapeOk(count, nRanks))
+    const float big = (type == ncclBfloat16) ? 1024.0f : 33554432.0f;
+    std::vector<uint8_t> host(count * (type == ncclBfloat16 ? sizeof(uint16_t) : sizeof(float)));
+    for(size_t i = 0; i < count; ++i)
     {
-        count = (count + 3) & ~size_t(3);
-        for(int i = 0; i < 1024; ++i, count += 4)
+        const int owner = static_cast<int>(i % static_cast<size_t>(nRanks));
+        float     v     = 1.0f;
+        if(rank == owner)
         {
-            if(ddaLLTwoShotShapeOk(count, nRanks))
-                return count;
+            v = big;
         }
-        return 0;
+        else if(rank == (owner + 1) % nRanks)
+        {
+            v = -big;
+        }
+        uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(bits));
+        if(type == ncclBfloat16)
+        {
+            // Every value here is a power of two, so dropping the low half is the exact bf16 value.
+            const uint16_t hi = static_cast<uint16_t>(bits >> 16);
+            std::memcpy(host.data() + i * sizeof(hi), &hi, sizeof(hi));
+        }
+        else
+        {
+            std::memcpy(host.data() + i * sizeof(bits), &bits, sizeof(bits));
+        }
     }
-    return count;
-}
-
-bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
-{
-    const std::string merged = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
-    return merged.find(needle) != std::string::npos;
+    return host;
 }
 
 // Kernel, copy and memset nodes of a graph. The captures below enqueue no work of their own, so
@@ -193,39 +189,19 @@ size_t countEventNodes(hipGraph_t graph, hipGraphNodeType type, hipEvent_t event
  * @class DdaAllReduceMPITest
  * @brief Shared fixture: COLL log capture and gfx1250 gate for DDA fabric LL tiers.
  */
-class DdaAllReduceMPITest : public MPITestBase
+class DdaAllReduceMPITest : public DdaFabricMPITest
 {
 protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
-
-    void SetUp() override
-    {
-        MPITestBase::SetUp();
-        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
-        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "NET,INIT,COLL,TUNING");
-        logCtx_           = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
-    }
-
-    void TearDown() override
-    {
-        MPITestBase::TearDown();
-        logCtx_.reset();
-        debugSubsysGuard_.reset();
-        debugGuard_.reset();
-    }
-
     void runAllReduce(size_t count, const char* logNeedle, const char* testId)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        //if(!isGfx1250Device())
-        //    GTEST_SKIP() << "DDA fabric LL requires gfx1250";
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
 
-        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -241,6 +217,19 @@ protected:
         ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
+        // With fabric DDA up, RCCL must offer an LL tier for this message; a non-fabric pick is a selection regression.
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query
+            = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32,
+                                  ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                  &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        const char* algoName = nullptr;
+        rcclGetAlgoName(algo, &algoName);
+        EXPECT_TRUE(algo == RCCL_DDA_FABRIC_LL || algo == RCCL_DDA_FABRIC_LL128)
+            << "Rank " << rank << ": " << testId << " selected " << (algoName ? algoName : "?")
+            << " (algo " << algo << "), not DDA fabric LL/LL128";
+
         fillRankScalar(sendBuf, count, rank);
         ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
 
@@ -254,7 +243,7 @@ protected:
                                             [expectedSum](size_t) { return expectedSum; }))
             << "Rank " << rank << ": DDA LL AllReduce verification failed";
 
-        const bool tookExpectedPath = logContainsNeedle(*logCtx_, logNeedle);
+        const bool tookExpectedPath = logContainsNeedle(logNeedle);
         EXPECT_TRUE(tookExpectedPath)
             << "Rank " << rank << ": " << testId
             << " did not log the expected DDA LL tier (needle: \"" << logNeedle << "\")";
@@ -293,6 +282,116 @@ protected:
                       testId,
                       algoName ? algoName : "?");
     }
+
+    // Every rank must get the same bits back; logNeedle pins the DDA tier, nullptr allows any.
+    void runBitIdenticalAcrossRanks(const std::vector<ncclDataType_t>& types, const std::vector<size_t>& sizes,
+                                    const char* logNeedle, const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinProcessesForMPI))
+        {
+            GTEST_SKIP() << "Need at least 2 MPI ranks";
+        }
+
+        // a + b == b + a exactly, so only a third operand can expose a rank-dependent fold order.
+        const std::string rankSkip
+            = mpiCoordinatedSkipReason(MPIEnvironment::world_size < 3, "Need at least 3 MPI ranks");
+        if(!rankSkip.empty())
+        {
+            GTEST_SKIP() << rankSkip;
+        }
+
+        if(logNeedle != nullptr)
+        {
+            DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
+        }
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        if(logNeedle != nullptr)
+        {
+            DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
+        }
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        for(const ncclDataType_t type : types)
+        {
+            for(const size_t bytes : sizes)
+            {
+                const size_t eltSize = (type == ncclBfloat16) ? sizeof(uint16_t) : sizeof(float);
+                const size_t count   = bytes / eltSize;
+                SCOPED_TRACE(std::string(testId) + " type=" + std::to_string(static_cast<int>(type))
+                             + " bytes=" + std::to_string(bytes));
+
+                void* sendBuf = nullptr;
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+                DeviceBufferAutoGuard sendGuard(sendBuf);
+                void* recvBuf = nullptr;
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+                DeviceBufferAutoGuard recvGuard(recvBuf);
+
+                const std::vector<uint8_t> input = makeOrderSensitiveInput(type, count, rank, nRanks);
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, input.data(), bytes, hipMemcpyHostToDevice));
+                // A per-rank fill means an output the kernel never wrote cannot compare equal across ranks.
+                ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, rank + 1, bytes));
+
+                if(rank == 0)
+                {
+                    int                algo = -1, protocol = -1, maxChannels = -1;
+                    const char*        algoName = nullptr;
+                    const ncclResult_t query
+                        = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, type, ncclSum,
+                                              sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                              &maxChannels);
+                    if(query == ncclSuccess)
+                    {
+                        rcclGetAlgoName(algo, &algoName);
+                    }
+                    TEST_INFO("%s: type %d, %zu bytes ran on %s", testId, static_cast<int>(type), bytes,
+                              algoName ? algoName : "?");
+                }
+
+                ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, type, ncclSum,
+                                                         getActiveCommunicator(), getActiveStream()));
+                ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+                std::vector<uint8_t> mine(bytes);
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(mine.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
+                std::vector<uint8_t> ref = mine;
+                ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(ref.data(), static_cast<int>(bytes), MPI_BYTE, 0, MPI_COMM_WORLD));
+
+                int64_t mismatches = 0;
+                size_t  firstBad   = count;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(std::memcmp(mine.data() + i * eltSize, ref.data() + i * eltSize, eltSize) != 0)
+                    {
+                        if(mismatches == 0)
+                        {
+                            firstBad = i;
+                        }
+                        ++mismatches;
+                    }
+                }
+                int64_t totalMismatches = mismatches;
+                MPI_Allreduce(MPI_IN_PLACE, &totalMismatches, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD);
+
+                EXPECT_EQ(0, mismatches) << "Rank " << rank << ": " << mismatches << " of " << count
+                                         << " elements differ from rank 0, first at index " << firstBad;
+                EXPECT_EQ(0, totalMismatches) << "Rank " << rank << ": AllReduce output is not bit-identical"
+                                              << " across ranks (" << totalMismatches << " element mismatches)";
+            }
+        }
+
+        if(logNeedle != nullptr)
+        {
+            EXPECT_TRUE(logContainsNeedle(logNeedle))
+                << "Rank " << rank << ": " << testId << " did not log the expected DDA tier (needle: \""
+                << logNeedle << "\")";
+        }
+    }
 };
 
 class DdaMPI_AllReduce : public DdaAllReduceMPITest
@@ -330,6 +429,7 @@ TEST_F(DdaMPI_AllReduce, LLTwoShotMultiRank)
 //
 //   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128OneShot*
 //   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128TwoShot*
+//   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=DdaMPI_AllReduce.LL128StagedWire*
 //
 // Run in a process that already touched those thresholds, the guards are inert
 // and the COLL-log assertion reports whichever tier actually claimed the message.
@@ -364,6 +464,214 @@ TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count for nRanks=" << nRanks;
 
     runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
+}
+
+// RCCL_DDA_LL128_ASYNC_WIRE=1 gives LL128 two-shot shards from 2 MiB the LDS-staged writer. Same thresholds as
+// LL128TwoShotMultiRank, so it needs its own process. Integer sums are exact in any fold order, hence bit for bit what
+// the cooperative writer returns; the COLL log names the writer of each launch.
+TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+    {
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+    }
+
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard ll128OneShotGuard("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard asyncWireGuard("RCCL_DDA_LL128_ASYNC_WIRE", "1");
+
+    DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL128 requires gfx1250"));
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
+
+    int rank{}, nRanks{};
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    // A 1 MiB shard keeps the cooperative writer; a 2 MiB shard (16 MiB at 8 ranks) takes the staged one.
+    constexpr size_t kStagedMinShardBytes = size_t(2) * 1024 * 1024;
+    for(const size_t shardBytes : {kStagedMinShardBytes / 2, kStagedMinShardBytes})
+    {
+        const size_t count = shardBytes / sizeof(float) * static_cast<size_t>(nRanks);
+        const size_t bytes = count * sizeof(float);
+        SCOPED_TRACE("shardBytes=" + std::to_string(shardBytes));
+
+        // Index-dependent integers below 251: every partial sum stays exact in f32.
+        auto value = [](size_t i, int r) { return static_cast<float>((i * 7 + static_cast<size_t>(r) * 13) % 251); };
+        std::vector<float> host(count);
+        for(size_t i = 0; i < count; ++i)
+        {
+            host[i] = value(i, rank);
+        }
+
+        void* sendBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+        DeviceBufferAutoGuard sendGuard(sendBuf);
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+        DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, host.data(), bytes, hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, bytes));
+
+        ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum,
+                                                 getActiveCommunicator(), getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
+
+        int64_t bad      = 0;
+        size_t  firstBad = count;
+        for(size_t i = 0; i < count; ++i)
+        {
+            float want = 0.0f;
+            for(int r = 0; r < nRanks; ++r)
+            {
+                want += value(i, r);
+            }
+            if(std::memcmp(&host[i], &want, sizeof(want)) != 0)
+            {
+                if(bad == 0)
+                {
+                    firstBad = i;
+                }
+                ++bad;
+            }
+        }
+        EXPECT_EQ(0, bad) << "Rank " << rank << ": " << bad << " of " << count << " elements wrong, first at "
+                          << firstBad;
+    }
+
+    EXPECT_TRUE(logContainsNeedle(kLL128TwoShotLogNeedle)) << "Rank " << rank << ": no LL128 two-shot launch";
+    EXPECT_TRUE(logContainsNeedle("wire=0 lds=0")) << "Rank " << rank << ": 1 MiB shards left the cooperative writer";
+    EXPECT_TRUE(logContainsNeedle("wire=1 lds=")) << "Rank " << rank << ": 2 MiB shards missed the staged writer";
+}
+
+// Whatever backend the default selection picks for 256 KiB to 4 MiB, every rank must get the same bits back.
+TEST_F(DdaMPI_AllReduce, BitIdenticalAcrossRanksDefaultSelection)
+{
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024, 1024 * 1024, 4 * 1024 * 1024},
+                               /*logNeedle=*/nullptr, "DdaMPI_AllReduce/BitIdenticalAcrossRanksDefaultSelection");
+}
+
+// 256 KiB is under the default LL one-shot threshold, so the LL one-shot kernel produces every byte compared.
+TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
+{
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kOneShotLogNeedle,
+                               "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
+}
+
+// Fresh comms, staggered arrival, two LL calls on a non-blocking stream right after init: a late init zero fill hangs.
+TEST_F(DdaMPI_AllReduce, LLFreshCommNonBlockingStream)
+{
+    if(!validateTestPrerequisites(kMinProcessesForMPI))
+        GTEST_SKIP() << "Need at least 2 MPI ranks";
+
+    DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
+
+    constexpr int    kIters        = 32;
+    constexpr int    kMaxStaggerMs = 100;
+    constexpr size_t kCount        = 12288; // 48 KiB of f32: one LL one-shot launch that finishes fast
+    const size_t     bytes         = kCount * sizeof(float);
+
+    const int rank   = MPIEnvironment::world_rank;
+    const int nRanks = MPIEnvironment::world_size;
+
+    hipStream_t stream = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    HipStreamAutoGuard streamGuard(stream);
+
+    void *sendA = nullptr, *sendB = nullptr, *recvA = nullptr, *recvB = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendA, bytes));
+    DeviceBufferAutoGuard sendAGuard(sendA);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendB, bytes));
+    DeviceBufferAutoGuard sendBGuard(sendB);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvA, bytes));
+    DeviceBufferAutoGuard recvAGuard(recvA);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvB, bytes));
+    DeviceBufferAutoGuard recvBGuard(recvB);
+
+    std::vector<float> host(kCount);
+    const float        rankSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+
+    std::mt19937                       rng(1234u + static_cast<unsigned>(rank));
+    std::uniform_int_distribution<int> staggerMs(0, kMaxStaggerMs);
+
+    for(int iter = 0; iter < kIters; ++iter)
+    {
+        SCOPED_TRACE("iteration " + std::to_string(iter));
+
+        // Per-iteration values, so stale packets from an earlier comm can't pass the check.
+        const float scaleA = static_cast<float>(2 * iter + 1);
+        const float scaleB = static_cast<float>(2 * iter + 2);
+        fillRankScalar(sendA, kCount, rank, scaleA);
+        fillRankScalar(sendB, kCount, rank, scaleB);
+        const float sumA = rankSum * scaleA;
+        const float sumB = rankSum * scaleB;
+
+        ncclUniqueId id{};
+        if(rank == 0)
+            ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&id));
+        ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD));
+
+        // Stream-ordered, so it cannot drain the null stream the way a blocking call after init would.
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvA, 0, bytes, stream));
+        ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(recvB, 0, bytes, stream));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(staggerMs(rng)));
+
+        ncclComm_t comm = nullptr;
+        ASSERT_EQ(ncclSuccess, ncclCommInitRank(&comm, nRanks, id, rank));
+        auto commGuard = makeScopeGuard([&]() { (void)ncclCommDestroy(comm); });
+
+        // Nothing between init and these launches may synchronize the device or the ranks.
+        const ncclResult_t launchA = ncclAllReduce(sendA, recvA, kCount, ncclFloat32, ncclSum, comm, stream);
+        const ncclResult_t launchB = ncclAllReduce(sendB, recvB, kCount, ncclFloat32, ncclSum, comm, stream);
+        hipError_t         drained = DdaFabricMPI::waitStreamBounded(stream, std::chrono::seconds(30));
+        if(launchA != ncclSuccess || launchB != ncclSuccess)
+        {
+            ADD_FAILURE() << "Rank " << rank << ": ncclAllReduce failed: " << ncclGetErrorString(launchA) << ", "
+                          << ncclGetErrorString(launchB);
+            if(drained == hipSuccess)
+                drained = hipErrorLaunchFailure;
+        }
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(drained, "LL AllReduce pair on a fresh communicator");
+
+        if(iter == 0)
+            DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason(comm));
+
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query = rcclGetCollImplInfo(comm, ncclFuncAllReduce, kCount, ncclFloat32, ncclSum, sendA,
+                                                       recvA, /*graphCapturing=*/0, &algo, &protocol, &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        EXPECT_EQ(RCCL_DDA_FABRIC_LL, algo) << "Rank " << rank << ": this comm did not select DDA fabric LL";
+
+        int64_t bad = 0;
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvA, bytes, hipMemcpyDeviceToHost));
+        bad += std::count_if(host.begin(), host.end(), [sumA](float v) { return v != sumA; });
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), recvB, bytes, hipMemcpyDeviceToHost));
+        const int64_t badB = std::count_if(host.begin(), host.end(), [sumB](float v) { return v != sumB; });
+        bad += badB;
+        EXPECT_EQ(0, bad) << "Rank " << rank << ": " << bad << " wrong elements (" << badB
+                          << " in the second AllReduce, first sample " << host[0] << ", expected " << sumB << ")";
+
+        int64_t totalBad = bad + ((query == ncclSuccess && algo == RCCL_DDA_FABRIC_LL) ? 0 : 1);
+        MPI_Allreduce(MPI_IN_PLACE, &totalBad, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD);
+        if(totalBad != 0)
+            break;
+    }
+
+    EXPECT_TRUE(logContainsNeedle(kOneShotLogNeedle))
+        << "Rank " << rank << ": the AllReduce pairs did not take the DDA fabric LL one-shot path";
+}
+
+// Sets the same thresholds as LL128OneShotMultiRank, so it needs its own process (see the note above).
+TEST_F(DdaMPI_AllReduce, LL128OneShotBitIdenticalAcrossRanks)
+{
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kLL128OneShotLogNeedle,
+                               "DdaMPI_AllReduce/LL128OneShotBitIdenticalAcrossRanks");
 }
 
 // AICOMRCCL-2184: RCCL selects the collective's device itself, and the device the caller left
@@ -850,6 +1158,233 @@ TEST_F(DdaMPI_AllReduce, CapturedOnGraphOriginJoinsSerialEvent)
 
     reportSelectedTier("DdaMPI_AllReduce/CapturedOnGraphOriginJoinsSerialEvent", bufA, bufB,
                        kContractCount, /*graphCapturing=*/1);
+}
+
+
+namespace
+{
+constexpr size_t kMiB = 1024 * 1024;
+constexpr char   kDdaArTakenNeedle[] = "AllReduce: taking DDA fabric";
+constexpr char   kRerouteOffReason[] = "the arch table keeps this re-route off (DPX or RCCL_IGNORE_ARCH_TABLE=1)";
+
+// Grid and block of the last DDA fabric AllReduce kernel launch logged in `log`; false when there is none.
+bool lastDdaArLaunchGeometry(const std::string& log, unsigned* grid, unsigned* block)
+{
+    const std::string kGrid = " grid=";
+    for(size_t at = log.rfind(kGrid); at != std::string::npos;
+        at        = at == 0 ? std::string::npos : log.rfind(kGrid, at - 1))
+    {
+        const size_t      bol  = log.rfind('\n', at);
+        const size_t      from = bol == std::string::npos ? 0 : bol + 1;
+        const size_t      eol  = log.find('\n', at);
+        const std::string line = log.substr(from, eol == std::string::npos ? std::string::npos : eol - from);
+        if(line.find("DDA fabric AllReduce") != std::string::npos)
+        {
+            return std::sscanf(line.c_str() + (at - from), " grid=%u block=%u", grid, block) == 2;
+        }
+    }
+    return false;
+}
+
+// Rank r holds (r + 1) x (i % 509 + 1): exact in float, distinct per rank, and a misplaced shard shows.
+float registeredInput(int rank, size_t i)
+{
+    return static_cast<float>(rank + 1) * static_cast<float>(i % 509 + 1);
+}
+} // namespace
+
+/**
+ * @class DdaMPI_AllReduceRegistered
+ * @brief gfx1250 registered sum AllReduce past symMinR2: symk withdraws and DDA runs within the replaced grid.
+ *
+ * With the gfx1250 SPX table, capture replaces Ring from symMinR2 (8 MiB) up to max(32 MiB, nRanks x 2 MiB), and eager
+ * replaces CE-registered for 512 KiB to 1 MiB shards, so it needs 8+ ranks at the default thresholds.
+ */
+class DdaMPI_AllReduceRegistered : public DdaAllReduceMPITest
+{
+protected:
+    // Both windows registered: the decision is DDA with a cap, the launch stays within it, and every sum is exact.
+    void runRegistered(size_t bytes, bool capture, const char* testId)
+    {
+        SCOPED_TRACE(std::string(testId) + " bytes=" + std::to_string(bytes));
+        ncclComm_t comm = getActiveCommunicator();
+        int        rank{}, nRanks{};
+        ncclCommUserRank(comm, &rank);
+        ncclCommCount(comm, &nRanks);
+        const size_t count = bytes / sizeof(float);
+
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&sendBuf, bytes));
+        auto sendFree = makeScopeGuard([&]() { (void)ncclMemFree(sendBuf); });
+        ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&recvBuf, bytes));
+        auto recvFree = makeScopeGuard([&]() { (void)ncclMemFree(recvBuf); });
+        ncclWindow_t sendWin = nullptr;
+        ncclWindow_t recvWin = nullptr;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, sendBuf, bytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+        auto sendDereg = makeScopeGuard([&]() { (void)ncclCommWindowDeregister(comm, sendWin); });
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, recvBuf, bytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+        auto recvDereg = makeScopeGuard([&]() { (void)ncclCommWindowDeregister(comm, recvWin); });
+
+        rcclCollDecision decision{};
+        ASSERT_MPI_EQ(ncclSuccess, rcclSelectAllReduce(comm, sendBuf, recvBuf, count, ncclFloat32, ncclSum,
+                                                       /*stream=*/nullptr, /*query=*/true, capture, &decision));
+        const char* algoName = nullptr;
+        rcclGetAlgoName(decision.algo, &algoName);
+        if(capture)
+        {
+            EXPECT_TRUE(decision.algo == RCCL_DDA_FABRIC_LL || decision.algo == RCCL_DDA_FABRIC_LL128
+                        || decision.algo == RCCL_DDA_FABRIC_VMM)
+                << "Rank " << rank << ": captured call selected " << (algoName ? algoName : "?") << ", not DDA";
+            EXPECT_EQ(0, static_cast<int>(decision.ddaCap.threads) % comm->WarpSize) << "Ring's block is whole warps";
+        }
+        else
+        {
+            EXPECT_EQ(RCCL_DDA_FABRIC_LL128, decision.algo)
+                << "Rank " << rank << ": eager call selected " << (algoName ? algoName : "?");
+            EXPECT_EQ(static_cast<uint32_t>(NCCL_CE_REDUCE_THREADS), decision.ddaCap.threads) << "CE's reduce block";
+        }
+        EXPECT_GE(decision.ddaCap.blocks, 1u) << "Rank " << rank << ": no cap, so DDA did not replace a backend";
+        EXPECT_GE(decision.ddaCap.threads, 1u);
+        EXPECT_LE(static_cast<uint32_t>(decision.nMaxChannels), decision.ddaCap.blocks);
+
+        std::vector<float> host(count);
+        for(size_t i = 0; i < count; ++i)
+        {
+            host[i] = registeredInput(rank, i);
+        }
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, host.data(), bytes, hipMemcpyHostToDevice));
+
+        hipStream_t    stream    = getActiveStream();
+        const size_t   launches  = countLogNeedle(kDdaArTakenNeedle);
+        hipGraphExec_t graphExec = nullptr;
+        auto           execGuard = makeScopeGuard([&]() {
+            if(graphExec != nullptr)
+            {
+                (void)hipGraphExecDestroy(graphExec);
+            }
+        });
+        if(capture)
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+            const ncclResult_t captured = ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, comm, stream);
+            hipGraph_t         graph    = nullptr;
+            // End the capture before judging the call, or the fixture stream stays capturing.
+            const hipError_t ended      = hipStreamEndCapture(stream, &graph);
+            auto             graphGuard = makeScopeGuard([&]() { (void)hipGraphDestroy(graph); });
+            ASSERT_MPI_EQ(ncclSuccess, captured);
+            ASSERT_MPI_EQ(hipSuccess, ended);
+            ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+        }
+
+        // Two runs: a replayed graph and a repeated eager call must each write every sum again.
+        const float rankSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
+        for(int run = 0; run < 2; ++run)
+        {
+            ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0xff, bytes));
+            if(capture)
+            {
+                ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(graphExec, stream));
+            }
+            else
+            {
+                ASSERT_MPI_EQ(ncclSuccess,
+                              ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, comm, stream));
+            }
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+            EXPECT_TRUE(verifyBufferData<float>(recvBuf, count, [rankSum](size_t i) {
+                return rankSum * static_cast<float>(i % 509 + 1);
+            })) << "Rank " << rank << ": run " << run << " of the registered AllReduce wrote a wrong sum";
+        }
+
+        // Replays log nothing, so the last DDA launch logged is the captured one or the second eager call.
+        EXPECT_GT(countLogNeedle(kDdaArTakenNeedle), launches) << "Rank " << rank << ": no DDA launch was logged";
+        unsigned grid = 0, block = 0;
+        ASSERT_TRUE(lastDdaArLaunchGeometry(logCtx_->readNcclDebugLog(), &grid, &block)
+                    || lastDdaArLaunchGeometry(logCtx_->readPerRankStderrLog(), &grid, &block))
+            << "Rank " << rank << ": the DDA launch logged no grid";
+        EXPECT_LE(grid, decision.ddaCap.blocks) << "Rank " << rank << ": the launch grid exceeds the replaced one";
+        EXPECT_LE(block, decision.ddaCap.threads) << "Rank " << rank << ": the launch block exceeds the replaced one";
+        if(rank == 0)
+        {
+            TEST_INFO("%s: %zu bytes ran on %s, cap %ux%u, launched %ux%u", testId, bytes, algoName ? algoName : "?",
+                      decision.ddaCap.blocks, decision.ddaCap.threads, grid, block);
+        }
+    }
+
+    // Shared gates: skips the test, together on every rank, when a prerequisite is missing.
+    void setUpRegistered(int minRanks, const char* rankReason)
+    {
+        if(!validateTestPrerequisites(kMinProcessesForMPI))
+        {
+            GTEST_SKIP() << "Need at least 2 MPI ranks";
+        }
+        if(MPIEnvironment::world_size < minRanks)
+        {
+            GTEST_SKIP() << rankReason;
+        }
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("the registered AllReduce re-route is gfx1250 only"));
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
+        const std::string symSkip = mpiCoordinatedSkipReason(getActiveCommunicator()->symmetricSupport == 0,
+                                                             "registered windows need symmetric memory support");
+        if(!symSkip.empty())
+        {
+            GTEST_SKIP() << symSkip;
+        }
+    }
+};
+
+// Graph capture: symMinR2 and the capture bound, where DDA replaces Ring within Ring's grid.
+TEST_F(DdaMPI_AllReduceRegistered, CapturedSumsWithinRingGrid)
+{
+    setUpRegistered(kMinProcessesForMPI, "Need at least 2 MPI ranks");
+    if(IsSkipped() || HasFatalFailure())
+    {
+        return;
+    }
+    const size_t      captureMax = rcclDdaArRegCaptureMaxBytes(getActiveCommunicator());
+    const std::string offSkip    = mpiCoordinatedSkipReason(captureMax < 8 * kMiB, kRerouteOffReason);
+    if(!offSkip.empty())
+    {
+        GTEST_SKIP() << offSkip;
+    }
+    for(const size_t bytes : {8 * kMiB, captureMax})
+    {
+        runRegistered(bytes, /*capture=*/true, "DdaMPI_AllReduceRegistered/CapturedSumsWithinRingGrid");
+        if(HasFatalFailure())
+        {
+            return;
+        }
+    }
+}
+
+// Eager: 1 MiB shards, where the DDA LL128 two-shot replaces CE-registered within CE's reduce grid.
+TEST_F(DdaMPI_AllReduceRegistered, EagerSumsWithinCeGrid)
+{
+    setUpRegistered(8, "Need at least 8 MPI ranks: 1 MiB shards reach the 8 MiB symMinR2 from 8 ranks");
+    if(IsSkipped() || HasFatalFailure())
+    {
+        return;
+    }
+    ncclComm_t        comm   = getActiveCommunicator();
+    const std::string ceSkip = mpiCoordinatedSkipReason(
+        !ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32) || comm->nNodes > 1,
+        "CE-registered, the backend the eager re-route replaces, needs CE driver support and one node");
+    if(!ceSkip.empty())
+    {
+        GTEST_SKIP() << ceSkip;
+    }
+    int nRanks{};
+    ncclCommCount(comm, &nRanks);
+    const std::string offSkip = mpiCoordinatedSkipReason(
+        !rcclDdaArRegEagerShardFits(comm, static_cast<size_t>(nRanks) * kMiB), kRerouteOffReason);
+    if(!offSkip.empty())
+    {
+        GTEST_SKIP() << offSkip;
+    }
+    runRegistered(static_cast<size_t>(nRanks) * kMiB, /*capture=*/false,
+                  "DdaMPI_AllReduceRegistered/EagerSumsWithinCeGrid");
 }
 
 #endif // MPI_TESTS_ENABLED

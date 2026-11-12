@@ -7,12 +7,9 @@
 # section with the bundled AMDGPU device code. The code object loader
 # (Executable) extracts and parses the device ELF from this section.
 #
-# Requires an ROCm installation with amdclang++. When the compiler is not
-# found the kernel targets are silently skipped and tests that depend on them
-# are disabled at runtime via the HAS_DEVICE_KERNELS compile definition.
-
-include(rj_find_amdcxx)
-rj_find_amdcxx(AMDCXX)
+# Requires a working ROCm HIP toolchain. When it is unavailable, the kernel
+# targets are skipped and tests that depend on them are disabled at runtime
+# via the HAS_DEVICE_KERNELS compile definition.
 
 if(NOT AMDCXX)
     message(
@@ -27,6 +24,10 @@ if(DEFINED SKIP_DEVICE_KERNELS AND SKIP_DEVICE_KERNELS)
         STATUS
         "SKIP_DEVICE_KERNELS set - device kernel tests will be disabled"
     )
+    return()
+endif()
+
+if(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
     return()
 endif()
 
@@ -50,21 +51,12 @@ rj_add_device_kernel(multikernel_indirect_branch gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part0 gfx950)
 rj_add_device_kernel(multikernel_indirect_branch_part1 gfx950)
 
-# gfx1250 was added after older installed ROCm compilers. Probe the selected
-# compiler before registering this fixture so a checkout remains buildable with
-# an otherwise supported toolchain. `-nogpulib` keeps the probe independent of
-# device-library packaging; the real custom command still uses ROCM_PATH.
-execute_process(
-    COMMAND
-        ${AMDCXX} -x hip --offload-arch=gfx1250 -nogpulib --cuda-device-only -c
-        /dev/null -o /dev/null
-    RESULT_VARIABLE RJ_AMDCXX_SUPPORTS_GFX1250
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
+# gfx1250 was added after older installed ROCm compilers. Keep the fixture
+# optional for toolchains that cannot parse it.
+rj_amdcxx_supports_arch(RJ_AMDCXX_SUPPORTS_GFX1250 "${AMDCXX}" gfx1250)
 set(HAS_GFX1250_DEVICE_KERNELS FALSE)
 set(RJ_GFX1250_DEVICE_KERNEL_TARGET)
-if(RJ_AMDCXX_SUPPORTS_GFX1250 EQUAL 0)
+if(RJ_AMDCXX_SUPPORTS_GFX1250)
     rj_add_device_kernel(relocation_function_table_dispatch gfx1250)
     set(HAS_GFX1250_DEVICE_KERNELS TRUE)
     set(RJ_GFX1250_DEVICE_KERNEL_TARGET

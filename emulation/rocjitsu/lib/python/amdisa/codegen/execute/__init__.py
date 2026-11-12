@@ -197,12 +197,21 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
+        is_vop3=c.is_vop3,
+        stage_after_destination=c.arch_name == 'rdna3_5',
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
-        c.dst_ops, c.src_ops, c.profile.uses_vgpr_msb_indexing
+        c.dst_ops,
+        c.src_ops,
+        c.profile.uses_vgpr_msb_indexing,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
-        c.dst_ops, c.src_ops, c.op
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
     )
     DISPATCH['vector_mullit'] = lambda c: gen_vector_mullit(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
@@ -216,6 +225,7 @@ def _register_handlers() -> None:
         c.op,
         c.profile.uses_vgpr_msb_indexing,
         c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
+        c.arch_name == 'rdna3_5',
     )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
@@ -312,7 +322,12 @@ def _register_handlers() -> None:
 
     # Packed
     DISPATCH['pk_binop'] = lambda c: gen_pk_binop(
-        c.dst_ops, c.src_ops, c.op, c.dtype, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        c.dtype,
+        opsel_exprs=c.opsel_exprs,
+        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -360,12 +375,14 @@ def _register_handlers() -> None:
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
-        fused_result=c.arch_name.startswith('rdna') or c.arch_name == 'cdna5',
+        fused_result=c.arch_name.startswith('rdna')
+        or c.arch_name in ('cdna1', 'cdna5'),
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
         c.src_ops,
         is_lo=True,
+        fused_f32_intermediate=c.arch_name == 'cdna1',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
@@ -375,6 +392,7 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         is_lo=False,
+        fused_f32_intermediate=c.arch_name == 'cdna1',
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
@@ -404,17 +422,34 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
         use_cdna5_helpers=c.arch_name == 'cdna5',
     )
-    DISPATCH['dot2'] = lambda c: gen_dot2(
-        c.dst_ops,
-        c.src_ops,
-        c.cls,
-        opsel_exprs=c.opsel_exprs,
-        arch_name=c.arch_name,
-    )
-    DISPATCH['dot2_f16_f16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot2_bf16_bf16'] = lambda c: gen_dot2_true16(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot4'] = lambda c: gen_dot4(c.dst_ops, c.src_ops, c.cls)
-    DISPATCH['dot8'] = lambda c: gen_dot8(c.dst_ops, c.src_ops, c.cls)
+    # DOT: every semantic class routes here, so the generator keeps no
+    # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
+    # fails if a new class arrives without an entry.
+    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16', 'dot2_i32_i16', 'dot2_u32_u16'):
+        DISPATCH[_cls] = lambda c: gen_dot2(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            opsel_exprs=c.opsel_exprs,
+            dot_accumulation=c.profile.float_dot_accumulation,
+        )
+    for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
+        DISPATCH[_cls] = lambda c: gen_dot2_true16(
+            c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
+        )
+    for _cls in ('dot4_i32_i8', 'dot4_i32_iu8', 'dot4_u32_u8', 'dot4_f32_fp8'):
+        DISPATCH[_cls] = lambda c: gen_dot4(
+            c.dst_ops,
+            c.src_ops,
+            c.cls,
+            operation=c.sem.operation,
+            dot_accumulation=c.profile.float_dot_accumulation,
+            opsel_exprs=c.opsel_exprs,
+        )
+    for _cls in ('dot8_i32_i4', 'dot8_i32_iu4', 'dot8_u32_u4'):
+        DISPATCH[_cls] = lambda c: gen_dot8(
+            c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
+        )
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)

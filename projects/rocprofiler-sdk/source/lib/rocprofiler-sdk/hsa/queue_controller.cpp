@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -32,6 +33,7 @@
 #include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 
+#include <fmt/ranges.h>
 #include <hsa/amd_hsa_queue.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa_ext_amd.h>
@@ -39,9 +41,11 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace rocprofiler
 {
@@ -49,6 +53,11 @@ namespace hsa
 {
 namespace
 {
+// True once this process installs its own hsa_queue_destroy, the only path that reaches
+// QueueController::destroy_queue. Set during init, read on application threads that
+// discover queues.
+std::atomic<bool> queue_destruction_intercepted = {false};
+
 // Read AGENT's own GPU-clock counter -- the same tick domain as fw_record::ts for
 // records emitted by AGENT. Called exactly twice per queue lifetime, never
 // per dispatch. Returns 0 on any failure or on an untrustworthy sentinel; the
@@ -201,21 +210,31 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
                 // then hand that back to the caller in place of the original queue.
                 //
                 // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
-                // the descriptor's device-memory ring-buffer flag is not honored while a
-                // non-inline profiling context (e.g. --sys-trace / HIP graph tracing) is active;
-                // the queue falls back to a system-memory ring.
+                // the descriptor's device-memory flags are not honored while a non-inline
+                // profiling context (e.g. --sys-trace / HIP graph tracing) is active; the queue
+                // falls back to a system-memory ring. The flags are cleared in the descriptor
+                // below because callers (HIP) read them back after the call to decide how to
+                // write packets and kernel arguments.
                 //
                 // Known limitation: the replacement InterceptQueue does not preserve the
                 // descriptor's priority or CU-mask settings. A CU-partitioned or high-priority
                 // stream may behave differently while profiled. Passing these attributes through
                 // (e.g. via SetPriority / SetCUMasking on the replacement queue) is deferred to a
                 // follow-up change.
-                ROCP_WARNING
-                    << "[queue-intercept] device-memory ring-buffer requested but profiling "
-                       "requires system-memory InterceptQueue; falling back to system-memory "
-                       "ring for agent "
-                    << agent.handle
-                    << " (priority and CU-mask from the descriptor are not preserved)";
+                constexpr uint16_t device_mem_flags =
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
+                    HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
+                const bool device_mem_requested = (descs[desc_idx].flags & device_mem_flags) != 0;
+                descs[desc_idx].flags &= static_cast<uint16_t>(~device_mem_flags);
+
+                ROCP_WARNING << "[queue-intercept] replacing hsa_amd_queue_create queue with a "
+                                "system-memory InterceptQueue for agent "
+                             << agent.handle
+                             << (device_mem_requested
+                                     ? " (device-memory placement was requested; cleared from "
+                                       "the descriptor flags)"
+                                     : "")
+                             << "; priority and CU mask from the descriptor are not preserved";
 
                 const auto&    compute_params = descs[desc_idx].engine.compute;
                 const uint32_t ring_packets   = static_cast<uint32_t>(
@@ -489,6 +508,43 @@ QueueController::add_queue(hsa_queue_t*           id,
     }
 }
 
+bool
+QueueController::adopt_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
+{
+    CHECK(queue);
+    const auto agent_id = queue->get_agent().get_rocp_agent()->id;
+
+    bool _inserted = false;
+    _callback_cache.wlock([&](auto& callbacks) {
+        _queues.wlock([&](auto& map) {
+            // Checked under the same lock that inserts: a concurrent discovery of this
+            // queue on another thread must not replace a Queue a caller may already hold.
+            if(map.find(id) != map.end()) return;
+
+            map[id]   = std::move(queue);
+            _inserted = true;
+            for(const auto& [cbid, cb_data] : callbacks)
+            {
+                const auto& [agent, cb] = cb_data;
+                if(agent.id == default_agent.id || agent.id == agent_id)
+                {
+                    map[id]->register_callback(cbid, cb);
+                }
+            }
+        });
+    });
+
+    // A refused Queue is never registered, so its block_signal is released here rather
+    // than on queue destruction. Null on the inserted path, moved into the map.
+    if(!_inserted && queue && queue->block_signal.handle != 0 &&
+       get_core_table().hsa_signal_destroy_fn != nullptr)
+    {
+        get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    }
+
+    return _inserted;
+}
+
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
@@ -652,6 +708,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         {
             core_table.hsa_queue_create_fn  = hsa::create_queue;
             core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+            queue_destruction_intercepted.store(true, std::memory_order_release);
 #if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
             ext_table.hsa_amd_queue_create_fn = hsa::create_amd_queue;
 #endif
@@ -899,12 +956,135 @@ get_queue_controller()
     return controller;
 }
 
+namespace
+{
+// Comma-separated names of every counter-collection, SPM and thread-trace service active
+// across the registered contexts, deduplicated so a service requested by several contexts is
+// named once. Empty when none is active.
+std::string
+describe_services_blocking_adoption()
+{
+    auto _contexts = context::get_registered_contexts([](const context::context* ctx) {
+        return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                ctx->device_thread_trace);
+    });
+
+    auto       _names = common::container::small_vector<const char*>{};
+    auto       _seen  = uint32_t{0};
+    const auto _add   = [&_names, &_seen](bool _active, uint32_t _bit, const char* _name) {
+        if(_active && (_seen & _bit) == 0)
+        {
+            _seen |= _bit;
+            _names.emplace_back(_name);
+        }
+    };
+
+    for(const auto* ctx : _contexts)
+    {
+        _add(ctx->dispatch_counter_collection != nullptr, 1U << 0U, "dispatch counter collection");
+        _add(ctx->device_counter_collection != nullptr, 1U << 1U, "device counter collection");
+        _add(ctx->dispatch_spm != nullptr, 1U << 2U, "dispatch SPM");
+        _add(ctx->device_spm != nullptr, 1U << 3U, "device SPM");
+        _add(ctx->dispatch_thread_trace != nullptr, 1U << 4U, "dispatch thread trace");
+        _add(ctx->device_thread_trace != nullptr, 1U << 5U, "device thread trace");
+    }
+
+    return fmt::format("{}", fmt::join(_names.begin(), _names.end(), ", "));
+}
+}  // namespace
+
+// Registers a Queue for one the application created before any dispatch-tracing context
+// existed, discovered on an application thread's first touch of its write index. Without
+// a registered Queue its packets execute uninstrumented and emit no records.
+bool
+queue_controller_adopt_existing_queue(const hsa_queue_t* queue)
+{
+    auto* qc = get_queue_controller();
+    if(qc == nullptr || queue == nullptr) return false;
+
+    // Already registered: created under interception, or adopted by an earlier first touch.
+    // Unsynchronized. Two threads reaching an undiscovered queue together both construct a
+    // Queue; adopt_queue admits one and disposes of the other.
+    if(qc->get_queue(*queue) != nullptr) return true;
+
+    // _queues is keyed on the hsa_queue_t pointer and get_queue() dereferences those keys, so
+    // an entry must be removable when its queue is destroyed. destroy_queue() is the only
+    // eraser and it runs only from this process's hsa_queue_destroy.
+    if(!queue_destruction_intercepted.load(std::memory_order_acquire))
+    {
+        ROCP_INFO << "[queue-intercept] not adopting pre-existing queue: queue destruction is "
+                     "not intercepted, so the registration could not be removed";
+        return false;
+    }
+
+    // Counter collection, SPM and thread trace need setup a queue adopted mid-life never
+    // received. Adoption covers tracing only.
+    if(!context::get_registered_contexts([](const context::context* ctx) {
+            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
+        }).empty())
+    {
+        const auto blocking_services = describe_services_blocking_adoption();
+        ROCP_WARNING << fmt::format(
+            "[queue-intercept] not adopting pre-existing queue: queue setup for {} cannot be "
+            "applied retroactively",
+            blocking_services);
+        return false;
+    }
+
+    // The application's live queue, not a constant; const is only the discovery path's
+    // view of it, and registration is keyed on the mutable pointer.
+    auto* _queue = const_cast<hsa_queue_t*>(queue);
+
+    hsa_agent_t agent = {};
+    const auto& ext   = qc->get_ext_table();
+    if(ext.hsa_amd_queue_get_info_fn == nullptr ||
+       ext.hsa_amd_queue_get_info_fn(_queue, HSA_AMD_QUEUE_INFO_AGENT, &agent) !=
+           HSA_STATUS_SUCCESS)
+    {
+        ROCP_INFO << "[queue-intercept] could not resolve the agent of a pre-existing "
+                     "queue; it will not emit records";
+        return false;
+    }
+
+    for(const auto& [_, agent_info] : qc->get_supported_agents())
+    {
+        if(agent_info.get_hsa_agent().handle != agent.handle) continue;
+
+        // Packets are read through the write-index wrappers, so no packet interceptor is
+        // attached. Marked a non-participant: this ring is already in use.
+        auto _new_queue = std::make_unique<Queue>(
+            agent_info,
+            qc->get_core_table(),
+            qc->get_ext_table(),
+            _queue,
+            [](write_interceptor_t, void*) {},
+            /*tracked_queue=*/false);
+
+        // Not registered with the serializer, which keeps any async handler off its
+        // ready_signal, and holds no owner-registry entry or doorbell window, so no
+        // signal-less batch can be admitted against it. A refusal below means another
+        // thread registered this queue first; it is registered either way.
+        if(!qc->adopt_queue(_queue, std::move(_new_queue))) return true;
+
+        ROCP_INFO << "[queue-intercept] adopted pre-existing queue on HSA agent handle "
+                  << agent.handle;
+        return true;
+    }
+
+    ROCP_INFO << "[queue-intercept] no supported agent matches a pre-existing queue; it "
+                 "will not emit records";
+    return false;
+}
+
 bool
 enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 224UL;
+        constexpr auto expected_context_size = 232UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -928,7 +1108,8 @@ enable_queue_intercept()
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_HIP_EVENT);
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
+           itr->dispatch_spm || itr->device_spm || has_scratch_reporting ||
+           itr->device_counter_collection ||
            (itr->device_thread_trace && itr->device_thread_trace->requires_queue_intercept()) ||
            itr->dispatch_thread_trace || has_hip_graph_tracing || has_kernel_replay ||
            has_hip_event_tracing)
@@ -955,14 +1136,21 @@ queue_controller_init(HsaApiTable* table)
     if(enable_queue_intercept()) queue_init();
 }
 
-void
+bool
 queue_controller_sync()
 {
     // sync the queue interceptor
     queue_interposition::interposition_sync();
 
+    bool _drained = true;
     if(get_queue_controller())
-        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    {
+        // Every queue is synced even after one times out, so a slow queue cannot hide the state of
+        // the ones behind it.
+        get_queue_controller()->iterate_queues(
+            [&_drained](const Queue* _queue) { _drained = _queue->sync() && _drained; });
+    }
+    return _drained;
 }
 
 void

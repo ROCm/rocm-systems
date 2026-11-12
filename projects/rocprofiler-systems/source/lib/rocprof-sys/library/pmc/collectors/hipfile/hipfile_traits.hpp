@@ -72,23 +72,6 @@ struct hipfile_traits
         Cache::initialize_pmc_metadata(device->get_index());
     }
 
-    // Perfetto customization points are no-ops: hipFile counter tracks reach Perfetto
-    // from the same hipfile_pmc_sample records that populate RocPD, not the legacy
-    // per-collector Perfetto policy that the AMD SMI collectors still carry.
-    template <typename Perfetto, typename DeviceEntries>
-    static void init_perfetto_storage(const DeviceEntries& /*device_entries*/)
-    {}
-
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t& /*device*/,
-                                     const enabled_metrics_t& /*enabled*/)
-    {}
-
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries& /*device_entries*/,
-                                      const enabled_metrics_t& /*enabled*/)
-    {}
-
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
                                                const enabled_metrics_t& enabled,
                                                std::uint64_t            timestamp)

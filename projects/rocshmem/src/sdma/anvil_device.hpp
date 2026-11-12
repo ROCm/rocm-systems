@@ -47,34 +47,6 @@ constexpr bool BREAK_ON_RETRIES = false;
 
 #if defined(__HIPCC__) || defined(__CUDACC__)
 
-// RCCL device TUs poison __hip_atomic_* (poison_hip_atomics.h). Clang scoped
-// atomics are the supported replacement. HIP agent scope and Clang device scope
-// lower to the same thing on this target; system stays system (doorbell).
-namespace hip_scoped {
-
-__device__ __forceinline__ unsigned int hipScopeToClang(int hipScope) {
-  if (hipScope == __HIP_MEMORY_SCOPE_SYSTEM) return __MEMORY_SCOPE_SYSTEM;
-  return __MEMORY_SCOPE_DEVICE;
-}
-
-template <typename T>
-__device__ __forceinline__ T atomicLoad(T* ptr, int memorder, int hipScope) {
-  return __scoped_atomic_load_n(ptr, memorder, hipScopeToClang(hipScope));
-}
-
-template <typename T>
-__device__ __forceinline__ void atomicStore(T* ptr, T val, int memorder, int hipScope) {
-  __scoped_atomic_store_n(ptr, val, memorder, hipScopeToClang(hipScope));
-}
-
-__device__ __forceinline__ bool atomicCmpXchg(uint64_t* ptr, uint64_t& expected, uint64_t desired,
-                                              int succ, int fail, int hipScope) {
-  return __scoped_atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, succ, fail,
-                                            hipScopeToClang(hipScope));
-}
-
-}  // namespace hip_scoped
-
 __device__ __forceinline__ SDMA_PKT_COPY_LINEAR CreateCopyPacket(void* srcBuf, void* dstBuf,
                                                                  long long int packetSize) {
   SDMA_PKT_COPY_LINEAR copy_packet = {};
@@ -236,7 +208,7 @@ struct SdmaQueueDeviceHandle {
 
       if (CanWriteUpto(new_index)) {
         if (__scoped_atomic_compare_exchange_n(
-                cachedWptr, &cur_index, new_index, false,
+                cachedWptr, &cur_index, new_index, /* weak */ false,
                 __ATOMIC_RELAXED, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)) {
           break;
         }
@@ -282,8 +254,7 @@ struct SdmaQueueDeviceHandle {
   __device__ __forceinline__ void submitPacket(uint64_t base, uint64_t pendingWptr) {
     int retries = 0;
     while (true) {
-      uint64_t val =
-        __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      uint64_t val = __scoped_atomic_load_n(committedWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
       if (val == base) {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:
@@ -327,9 +298,9 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        // Relaxed device-scope atomic store writes directly to GL2, making
-        // maxWritePtr visible to quiet callers on other CUs.
-        __scoped_atomic_store_n(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        // committedWptr releases the next writer before this point, so a later writer can finish first.
+        // Take the max so maxWritePtr never moves back. Device scope makes it visible to quiet callers on other CUs.
+        __scoped_atomic_fetch_max(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         break;
       }
       __builtin_amdgcn_s_sleep(1);
@@ -343,24 +314,25 @@ struct SdmaQueueDeviceHandle {
     }
   }
 
+  // True once HW has consumed packets up to upToIndex
+  __device__ __forceinline__ bool isFlushed(uint64_t upToIndex) {
+    return __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) >= upToIndex;
+  }
+
   // Spin-poll rptr until HW has consumed packets up to upToIndex
   __device__ __forceinline__ void flushTo(uint64_t upToIndex) {
-    uint64_t hw_read_index;
-    do {
-      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    } while (hw_read_index < upToIndex);
+    while (!isFlushed(upToIndex)) {
+    }
+  }
+
+  // Write index covering every packet submitted so far. An agent-scope load, since a different CU
+  // can set maxWritePtr.
+  __device__ __forceinline__ uint64_t quietTarget() {
+    return __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 
   // Spin-poll rptr until HW has consumed all submitted packets
-  __device__ __forceinline__ void quietAll() {
-    // One agent-scope load to read maxWritePtr set by a potentially different CU.
-    // Held in a register for the loop — it does not need updated during quietAll.
-    uint64_t target = __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    uint64_t hw_read_index;
-    do {
-      hw_read_index = __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-    } while (hw_read_index < target);
-  }
+  __device__ __forceinline__ void quietAll() { flushTo(quietTarget()); }
 
  private:
   __device__ __forceinline__ bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
@@ -628,6 +600,16 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
 
 __device__ __forceinline__ void quiet(SdmaQueueSingleProducerDeviceHandle& handle) {
   handle.quietAll();
+}
+
+// Write index covering every packet submitted so far, the index quiet() waits for
+__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+  return handle.quietTarget();
+}
+
+// Non-blocking flush: true once HW has consumed up to upToIndex
+__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+  return handle.isFlushed(upToIndex);
 }
 
 // Assumes signal is allocated in device memory (kept for backward compat)

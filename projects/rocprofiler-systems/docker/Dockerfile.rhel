@@ -58,7 +58,7 @@ RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
         dnf clean all; \
     fi
 
-ARG PYTHON_VERSIONS="8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13 14 15"
 
 # Install pytest test dependencies into each conda env
 COPY requirements.txt /tmp/requirements.txt
@@ -89,3 +89,7 @@ ENV LC_ALL C.UTF-8
 SHELL [ "/bin/bash", "--login", "-c" ]
 COPY ./docker/entrypoint-rhel.sh /docker-entrypoint.sh
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

@@ -338,6 +338,44 @@ TEST(GpuUnit, CperSlotExhaustionMoreData) {
   EXPECT_EQ(cursor, 1u);
 }
 
+// Pages through a big record then a header-only one, one record per call. The
+// second call's buffer fits only the record it returns; the record the first
+// call already returned is skipped, so its size must not count against it.
+TEST(GpuUnit, CperNextPageSkipsReturnedRecordLargerThanItsBuffer) {
+  const uint64_t one_record = sizeof(amdsmi_cper_hdr_t);
+  std::vector<char> blob = MakeOneRecordBlob();
+  amdsmi_cper_hdr_t big{};
+  std::memcpy(&big, blob.data(), sizeof(big));
+  big.record_length = static_cast<uint32_t>(one_record + 512);
+  std::memcpy(blob.data(), &big, sizeof(big));
+  blob.resize(big.record_length, 0);
+  const std::vector<char> small = MakeOneRecordBlob();
+  blob.insert(blob.end(), small.begin(), small.end());
+  std::string path;
+  WriteTempFile(blob, &path);
+  ASSERT_FALSE(path.empty());
+
+  std::vector<char> data(4096, 0);
+  amdsmi_cper_hdr_t* hdr = nullptr;
+  uint64_t buf_size = data.size();
+  uint64_t entry_count = 1;
+  uint64_t cursor = 0;
+  amdsmi_status_t first = amdsmi_get_gpu_cper_entries_by_path(
+      path.c_str(), 0xFFFFFFFF, data.data(), &buf_size, &hdr, &entry_count, &cursor, 0);
+
+  buf_size = one_record;
+  entry_count = 1;
+  amdsmi_status_t second = amdsmi_get_gpu_cper_entries_by_path(
+      path.c_str(), 0xFFFFFFFF, data.data(), &buf_size, &hdr, &entry_count, &cursor, 0);
+  unlink(path.c_str());
+
+  EXPECT_EQ(first, AMDSMI_STATUS_MORE_DATA);
+  EXPECT_EQ(second, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(entry_count, 1u);
+  EXPECT_EQ(buf_size, one_record);
+  EXPECT_EQ(cursor, 2u);
+}
+
 // Invalid arguments are rejected with OUT_OF_RESOURCES before any file read.
 TEST(GpuUnit, CperByPathRejectsInvalidArgs) {
   std::string path;

@@ -40,6 +40,13 @@ class AMDSMILogger:
         self.store_memory_partition_json_output = []
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
+        # Node-scoped fields, merged into the top level of the combined JSON
+        # document beside `gpu_data` rather than into a per-device record.
+        self.store_node_json_output = {}
+
+        # The event command prints one record at a time. The CSV header is
+        # captured from the first event so subsequent events emit only a row.
+        self._event_csv_header = None
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
@@ -132,10 +139,6 @@ class AMDSMILogger:
             elif key == "gpu":
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
-            elif key == "brcm_nic":
-                table_values += string_value.rjust(3)
-            elif key == "brcm_switch":
-                table_values += string_value.rjust(3)
             elif key == "xcp":
                 stored_gpu = string_value
                 table_values += string_value.rjust(5)
@@ -168,27 +171,6 @@ class AMDSMILogger:
                 table_values += string_value.rjust(12)
             elif key in ("pcie_replay"):
                 table_values += string_value.rjust(13)
-            # BRCM Device Metrics
-            # NIC
-            elif key == "NIC_TEMP_CURRENT":
-                table_values += string_value.rjust(21)
-            elif key == "NIC_TEMP_CRIT_ALARM":
-                table_values += string_value.rjust(22)
-            elif key == "NIC_TEMP_EMERGENCY_ALARM":
-                table_values += string_value.rjust(26)
-            elif key == "NIC_TEMP_SHUTDOWN_ALARM":
-                table_values += string_value.rjust(25)
-            elif key == "NIC_TEMP_MAX_ALARM":
-                table_values += string_value.rjust(20)
-            # SWITCH
-            elif key == "CURRENT_LINK_SPEED":
-                table_values += string_value.rjust(25)
-            elif key == "MAX_LINK_SPEED":
-                table_values += string_value.rjust(20)
-            elif key == "CURRENT_LINK_WIDTH":
-                table_values += string_value.rjust(20)
-            elif key == "MAX_LINK_WIDTH":
-                table_values += string_value.rjust(20)
             # Only for handling topology tables
             elif "gpu_" in key:
                 table_values += string_value.ljust(13)
@@ -304,7 +286,7 @@ class AMDSMILogger:
         # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
-            if key not in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]:
+            if key not in ["GPU", "CPU", "CORE", "NIC"]:
                 tabbed_dictionary[key] = value
             # Filter out N/A values under clock
             if key == "CLOCK":
@@ -346,6 +328,15 @@ class AMDSMILogger:
         # Remove process_info indices for Host parity:
         yaml_output = re.sub(r"PROCESS_INFO_[0-9]+:", "PROCESS_INFO:", yaml_output)
 
+        # Fold AMPP's indexed profile marker + opaque NAME field into a single
+        # "PROFILE: <name>" header line, so each profile's ACTIVE/WRITABLE/
+        # CONFIGURED/FIELDS render nested beneath it. Unlike PROCESS_INFO_N
+        # above (which just merges duplicate labels), the opaque profile name
+        # isn't derivable from the index, so it's recovered from NAME instead.
+        yaml_output = re.sub(
+            r"( *)AMPP_PROFILE_[0-9]+:\n *NAME: (.+)\n", r"\1PROFILE: \2\n", yaml_output
+        )
+
         clean_yaml_output = ""
         for line in yaml_output.splitlines():
             # Continuation lines (no ":") must not run replace("  ", "    ") on leading
@@ -380,7 +371,12 @@ class AMDSMILogger:
                     if isinstance(item, dict):
                         yaml_string += self.custom_dump(item, indent + 1)
                     else:  # If the list is not a dictionary, print it as a string
-                        yaml_string += "  " * (indent + 1) + f"- {item}\n"
+                        item_indent = "  " * (indent + 1)
+                        # The key pass in _convert_json_to_human_readable skips a line with no
+                        # colon, so scale the indent here to keep the item under its key.
+                        if ":" not in str(item):
+                            item_indent = item_indent.replace("  ", "    ")
+                        yaml_string += item_indent + f"- {item}\n"
             else:
                 key_prefix = "  " * indent
                 if isinstance(value, str) and "\n" in value:
@@ -462,17 +458,24 @@ class AMDSMILogger:
         gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
         self._store_output_amdsmi(gpu_id=gpu_id, argument=argument, data=data)
 
-    def store_nic_output(self, device_handle, argument, data):
-        """Convert device handle to nic id and store output
-        params:
-            device_handle - device handle object to the target device output
-            argument (str) - key to store data
-            data (dict | list) - Data store against argument
-        return:
-            Nothing
+    def store_event_output(self, device_handle, values_dict):
+        """Store one streamed event as a fresh, self-contained record.
+
+        Keep each event payload isolated from previous records. CSV output uses a
+        single stable ``message`` column containing the event's serialized payload,
+        so later events with a different schema do not inherit stale flattened
+        keys or silently lose data.
         """
-        nic_id = self.helpers.get_nic_id_from_device_handle(device_handle)
-        self._store_nic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
+        gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+        message = values_dict.get("message", {})
+        if self.is_csv_format():
+            message = json.dumps(message, separators=(",", ":")) if message else "{}"
+        self.output = {
+            "gpu": int(gpu_id),
+            "timestamp": values_dict.get("timestamp"),
+            "event": values_dict.get("event"),
+            "message": message,
+        }
 
     def store_ainic_output(self, device_handle, argument, data):
         """Convert device handle to ainic id and store output
@@ -485,18 +488,6 @@ class AMDSMILogger:
         """
         nic_id = self.helpers.get_ainic_id_from_device_handle(device_handle)
         self._store_ainic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
-
-    def store_switch_output(self, device_handle, argument, data):
-        """Convert device handle to switch id and store output
-        params:
-            device_handle - device handle object to the target device output
-            argument (str) - key to store data
-            data (dict | list) - Data store against argument
-        return:
-            Nothing
-        """
-        switch_id = self.helpers.get_switch_id_from_device_handle(device_handle)
-        self._store_switch_output_amdsmi(switch_id=switch_id, argument=argument, data=data)
 
     def store_cpu_output(self, device_handle, argument, data):
         """Convert device handle to cpu id and store output
@@ -585,60 +576,18 @@ class AMDSMILogger:
         else:
             raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
-    def _store_nic_output_amdsmi(self, nic_id, argument, data):
-        if argument == "timestamp":  # Make sure timestamp is the first element in the output
-            self.output["timestamp"] = int(time.time())
-
-        if self.is_json_format() or self.is_human_readable_format():
-            self.output["brcm_nic"] = int(nic_id)
-            if argument == "values" and isinstance(data, dict):
-                self.output.update(data)
-            else:
-                self.output[argument] = data
-        elif self.is_csv_format():
-            self.output["brcm_nic"] = int(nic_id)
-
-            if argument == "values" or isinstance(data, dict):
-                flat_dict = self.flatten_dict(data)
-                self.output.update(flat_dict)
-            else:
-                self.output[argument] = data
-        else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
-
     def _store_ainic_output_amdsmi(self, nic_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
             self.output["timestamp"] = int(time.time())
 
         if self.is_json_format() or self.is_human_readable_format():
-            self.output["ai_nic"] = int(nic_id)
+            self.output["nic"] = int(nic_id)
             if argument == "values" and isinstance(data, dict):
                 self.output.update(data)
             else:
                 self.output[argument] = data
         elif self.is_csv_format():
-            self.output["ai_nic"] = int(nic_id)
-
-            if argument == "values" or isinstance(data, dict):
-                flat_dict = self.flatten_dict(data)
-                self.output.update(flat_dict)
-            else:
-                self.output[argument] = data
-        else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
-
-    def _store_switch_output_amdsmi(self, switch_id, argument, data):
-        if argument == "timestamp":  # Make sure timestamp is the first element in the output
-            self.output["timestamp"] = int(time.time())
-
-        if self.is_json_format() or self.is_human_readable_format():
-            self.output["brcm_switch"] = int(switch_id)
-            if argument == "values" and isinstance(data, dict):
-                self.output.update(data)
-            else:
-                self.output[argument] = data
-        elif self.is_csv_format():
-            self.output["brcm_switch"] = int(switch_id)
+            self.output["nic"] = int(nic_id)
 
             if argument == "values" or isinstance(data, dict):
                 flat_dict = self.flatten_dict(data)
@@ -685,6 +634,15 @@ class AMDSMILogger:
             self.watch_output.append(output)
 
             self.output = {}
+
+    def print_no_ainics_found(self):
+        """Report a --nic selection that resolved to no NICs, in the selected format."""
+        self.output = {}
+        self.clear_multiple_devices_output()
+        if self.is_human_readable_format():
+            print("No AI NICs found")
+        else:
+            self.print_output(multiple_device_enabled=True, emit_empty=True)
 
     def print_output(
         self,
@@ -736,6 +694,69 @@ class AMDSMILogger:
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
 
+    def _format_event_human_readable(self, event):
+        """Render one event as the classic indented multi-line block.
+
+        Reuses the generic human-readable renderer so the block matches the rest
+        of the CLI (uppercased keys, GPU as the device header, nested MESSAGE),
+        while now including the ``TIMESTAMP`` line carried on the record. The
+        returned string keeps its single trailing newline so consecutive event
+        blocks are separated by a blank line.
+        """
+        return self._convert_json_to_human_readable(dict(event))
+
+    def print_event_output(self):
+        """Print a single event record in the configured format.
+
+        The event command streams one record per call. Each format emits a single
+        well-formed record: human-readable is one indented block (including its
+        TIMESTAMP), CSV writes the header once followed by a row per event, and
+        JSON emits one object per line (newline-delimited JSON so every line is
+        independently parseable).
+        """
+        if self.is_human_readable_format():
+            self._write_event_line(self._format_event_human_readable(self.output))
+        elif self.is_csv_format():
+            self._print_event_csv_output()
+        elif self.is_json_format():
+            self._write_event_line(json.dumps(self.output))
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+
+    def _write_event_line(self, line):
+        """Emit a single event line to stdout or append it to the output file."""
+        if self.destination == "stdout":
+            print(line)
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(line + "\n")
+
+    def _print_event_csv_output(self):
+        """Emit one CSV row per event, writing the header only on the first event.
+
+        The header is fixed from the first event's keys so the stream stays a
+        single valid CSV document. Later events fill missing columns with ``N/A``
+        and ignore any extra keys, keeping every row aligned to that header.
+        """
+        write_header = self._event_csv_header is None
+        if write_header:
+            self._event_csv_header = list(self.output.keys())
+        header = self._event_csv_header
+        row = {key: self.output.get(key, "N/A") for key in header}
+
+        builder = self.CsvStdoutBuilder()
+        writer = csv.DictWriter(builder, header, lineterminator="\n", extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+        text = str(builder)
+
+        if self.destination == "stdout":
+            print(text, end="")
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(text)
+
     def _print_json_output(
         self, multiple_device_enabled=False, watching_output=False, emit_empty=False
     ):
@@ -762,6 +783,8 @@ class AMDSMILogger:
 
     def combine_arrays_to_json(self):
         combined_json = {}
+        if self.store_node_json_output:
+            combined_json.update(self.store_node_json_output)
         if self.store_cpu_json_output:
             combined_json["cpu_data"] = self.store_cpu_json_output
         if self.store_nic_json_output:
@@ -1341,7 +1364,7 @@ class AMDSMILogger:
             power_usage = gpu_info["power_usage"]
             if power_usage != "N/A":
                 power_limit = gpu_info["power_usage"]["power_limit"]
-                if power_limit != 0:
+                if power_limit not in (0, "N/A"):
                     power_limit = f"/{power_limit}"
                 else:
                     power_limit = ""

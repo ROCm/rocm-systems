@@ -101,6 +101,9 @@ void RdciXgmiLinkStatusSubSystem::process() {
       throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command");
       break;
   }
+  if (result != RDC_ST_OK) {
+    throw RdcException(result, rdc_status_string(result));
+  }
 }
 }  // namespace rdc
 }  // namespace amd

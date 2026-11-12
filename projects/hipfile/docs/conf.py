@@ -20,9 +20,9 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
 
 
 def _cmake_version_part(part):
-    match = re.search(rf"set\(AIS_LIBRARY_{part}\s+(\d+)\)", _cmake)
+    match = re.search(rf"set\(HIPFILE_LIBRARY_{part}\s+(\d+)\)", _cmake)
     if not match:
-        raise ValueError(f"AIS_LIBRARY_{part} not found in CMakeLists.txt")
+        raise ValueError(f"HIPFILE_LIBRARY_{part} not found in CMakeLists.txt")
     return match.group(1)
 
 

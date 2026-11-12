@@ -28,6 +28,10 @@ namespace amd::activity_prof {
 extern std::atomic<int (*)(activity_domain_t domain, uint32_t operation_id, void* data)>
     report_activity;
 
+//! A rocprofiler tool received the HIP API tables. Such a tool may interpose on queues, where it
+//! reads and updates completion signals from the host and may do so after they are destroyed.
+extern std::atomic<bool> tool_attached;
+
 #if defined(__linux__)
 extern __thread activity_correlation_id_t correlation_id __attribute__((tls_model("initial-exec")));
 #elif defined(_WIN32)
@@ -56,6 +60,7 @@ constexpr OpId OperationId(cl_command_type commandType) {
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE:
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
     case ROCCLR_COMMAND_BATCH_COPY_BUFFER:
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER_RECT:
     case ROCCLR_COMMAND_BATCH_WRITE_BUFFER:
     case ROCCLR_COMMAND_BATCH_READ_BUFFER:
       return OP_ID_COPY;

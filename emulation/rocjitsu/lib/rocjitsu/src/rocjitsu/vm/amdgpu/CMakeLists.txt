@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 rj_add_object_library(rocjitsu_vm_amdgpu
+    arithmetic_policy.cpp
     aql/aql_packet_processor.cpp
     compute_queue_binding_factory.cpp
     circular_ring_reader.cpp
@@ -10,12 +11,16 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     command_processor.cpp
     completion_tracker.cpp
     compute_unit.cpp
+    coalesced_lane_runs.cpp
     consumer_cursor_journal.cpp
     device_cache_coherence.cpp
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
+    gws_device.cpp
     hwreg.cpp
+    image_addressing.cpp
+    instruction_timing.cpp
     iod.cpp
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
@@ -32,15 +37,26 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     sdma_ring_consumer.cpp
     shader_engine.cpp
     wavefront.cpp
+    wavefront_slot.cpp
     xcd.cpp
 )
+
+target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith)
 
 # Share ISA wait decoding with the offline checker, without its dataflow state.
 # Final VM consumers need the objects; transitive object-library linking alone
 # propagates usage requirements without including those object files.
 target_link_libraries(
     rocjitsu_vm_amdgpu
-    INTERFACE $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    INTERFACE
+        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+        $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+)
+# Linking the objects by path adds no build dependency, so build them first.
+add_dependencies(
+    rocjitsu_vm_amdgpu
+    rocjitsu_wait_counter_policy
+    rocjitsu_waitcheck_target
 )
 
 add_subdirectory(pci)

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 # The one shared image carries the HSA native ABI version and both public ABIs.

@@ -81,10 +81,21 @@ def derive_rocm_path(script_dir: Path) -> Path:
 
 
 def is_asan() -> bool:
+    """True when the ROCm libraries under test are sanitized, in either mode."""
     explicit = os.getenv("HIP_TESTS_ASAN")
     if explicit:
         return explicit.lower() in ("1", "on", "true", "yes")
     return "asan" in os.getenv("ARTIFACT_GROUP", "").lower()
+
+
+def is_device_asan() -> bool:
+    """True only when device code is instrumented."""
+    if not is_asan():
+        return False
+    explicit = os.getenv("HIP_TESTS_DEVICE_ASAN")
+    if explicit:
+        return explicit.lower() in ("1", "on", "true", "yes")
+    return "host-asan" not in os.getenv("ARTIFACT_GROUP", "").lower()
 
 
 def get_asan_lib_path(rocm_path: Path) -> str:
@@ -131,7 +142,9 @@ def setup_env(env: Dict[str, str], rocm_path: Path, catch_tests_path: Path) -> N
             env["LD_LIBRARY_PATH"] = str(hip_lib_path)
         if is_asan():
             env["LD_PRELOAD"] = get_asan_lib_path(rocm_path)
-            env["HSA_XNACK"] = "1"
+            # Device instrumentation is the only thing that needs xnack+.
+            if is_device_asan():
+                env["HSA_XNACK"] = "1"
     else:
         copy_dlls_exe_path(rocm_bin_dir, catch_tests_path)
 

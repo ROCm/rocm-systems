@@ -1,12 +1,18 @@
 /* Copyright © Advanced Micro Devices, Inc., or its affiliates. */
 
+#ifndef RCCL_RECORDER_H_
+#define RCCL_RECORDER_H_
+
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <mutex>
 #include <chrono>
 
-#include "info.h"
+#include "nccl.h"
+
+// Only references to ncclInfo appear here, so tools such as RcclReplayer build without the internal headers.
+struct ncclInfo;
 
 namespace rccl {
 // API opcode covered by rccl replayer
@@ -143,3 +149,5 @@ public:
 void parseJsonEntry(const char* entry, std::vector<rcclApiCall>& calls);
 void parseBinLog();
 } // namespace rccl
+
+#endif // RCCL_RECORDER_H_

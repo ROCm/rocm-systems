@@ -55,6 +55,10 @@ class LibraryContainer {
   hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
   hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
 
+  // Module handle of the underlying DynCO, for hipLibraryGetModule. It returns
+  // the module for the device the library was built on.
+  hipError_t Module(hipModule_t* module);
+
  private:
   LibraryContainer() = delete;
   LibraryContainer(const LibraryContainer&) = delete;
@@ -68,6 +72,8 @@ class LibraryContainer {
   const char* input_image_ = nullptr; // caller-owned image, used only when filename_ is empty
   std::vector<char> image_storage_;   // image copy needed for lazy-load of secondary devices
   std::unique_ptr<hip::DynCO> dynco_;
+  // Set once Module() has registered dynco_ into PlatformState.
+  bool module_registered_ = false;
   // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
   std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
   // Cache of hipKernel_t handles keyed by (name, device).
