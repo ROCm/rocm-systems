@@ -60,6 +60,8 @@
 #endif
 #endif
 
+#include <cinttypes>
+
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
 #include "core/util/timer.h"
@@ -91,7 +93,29 @@ extern "C" void __sanitizer_purge_allocator(void);
 #include "core/util/memory.h"
 #include "core/util/os.h"
 #include "core/util/poll_backoff.h"
+#include "core/util/logging.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
+
+// Thunk (libhsakmt) verbosity control used by hsa_amd_enable_logging().
+//
+// hsakmt_debug_level is a free global in the native KFD thunk only. The thunk
+// exposes no setter for it, and the only supported control is the
+// HSAKMT_DEBUG_LEVEL environment variable, which this code defers to.
+//
+// The reference is weak so that a build or link in which the symbol is not
+// present leaves the thunk level alone instead of failing to link. Note what
+// this guard does NOT cover: the DXG and DTIF thunks are selected at run time
+// and are reachable on Linux (WSL2 opens /dev/dxg), and they keep the level
+// inside their own runtime object, while the virtio thunk keeps it in a
+// separate global of its own. On those thunks this writes the native global
+// that nothing reads, so raising thunk verbosity is a no-op there. It cannot
+// corrupt them either, because no value ever crosses between the two.
+//
+// Levels: ERR=3, WARNING=4, INFO=6, DEBUG=7, DEFAULT(off)=-1
+#if defined(__linux__) && !defined(_WIN32)
+#define ROCR_HAVE_THUNK_DEBUG_LEVEL 1
+extern "C" __attribute__((weak)) int hsakmt_debug_level;
+#endif
 
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
@@ -121,6 +145,58 @@ extern r_debug _amdgpu_r_debug;
 namespace rocr {
 extern void _loader_debug_state();
 namespace core {
+
+// ============================================================================
+// File-scope metrics for memory and IPC tracking (fixes thread-safety bug)
+// ============================================================================
+namespace {
+// Memory allocation metrics for pressure/fragmentation tracking
+struct MemoryMetrics {
+  std::atomic<size_t> total_allocated{0};
+  std::atomic<size_t> peak_allocated{0};
+  std::atomic<uint64_t> allocation_count{0};
+};
+static MemoryMetrics g_mem_metrics;
+
+// IPC attachment metrics for leak detection
+struct IPCMetrics {
+  std::atomic<uint64_t> attach_count{0};  // Total attachments ever
+  std::atomic<uint64_t> active_count{0};  // Currently active attachments
+};
+static IPCMetrics g_ipc_metrics;
+
+// Records one successful IPC attachment. Called from every success path of
+// IPCAttach so that the live count matches the number of IPCDetach calls that
+// can follow.
+static void TrackIPCAttach(void* mapped_ptr, size_t len, uint32_t num_agents) {
+  uint64_t attach_num = g_ipc_metrics.attach_count.fetch_add(1, std::memory_order_relaxed) + 1;
+  uint64_t active = g_ipc_metrics.active_count.fetch_add(1, std::memory_order_relaxed) + 1;
+
+  LogDebug(rocr::LOG_IPC,
+           "IPCAttach: mapped=%p len=%zu num_agents=%u attach_id=%" PRIu64 " active=%" PRIu64,
+           mapped_ptr, len, num_agents, attach_num, active);
+
+  if (active > 100) {
+    LogWarning(rocr::LOG_IPC | rocr::LOG_HEALTH,
+               "High IPC attachment count: active=%" PRIu64 " total=%" PRIu64
+               " POTENTIAL_LEAK ptr=%p",
+               active, attach_num, mapped_ptr);
+  }
+}
+
+// Records one IPC detachment. Saturates at zero so that an unmatched detach
+// cannot wrap the live count and trip the leak warning.
+static void TrackIPCDetach(void* ptr) {
+  uint64_t active = g_ipc_metrics.active_count.load(std::memory_order_relaxed);
+  while (active != 0 && !g_ipc_metrics.active_count.compare_exchange_weak(
+                            active, active - 1, std::memory_order_relaxed)) {
+  }
+  uint64_t remaining = (active == 0) ? 0 : active - 1;
+
+  LogDebug(rocr::LOG_IPC, "IPCDetach: ptr=%p remaining_active=%" PRIu64, ptr, remaining);
+}
+}  // anonymous namespace
+
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
 bool g_use_yielding_poll;
@@ -131,7 +207,6 @@ hsa_status_t Runtime::Acquire() {
   std::lock_guard<std::mutex> boot(bootstrap_lock());
 
   if (runtime_singleton_ == NULL) {
-    memset(log_flags, 0, sizeof(log_flags));
     runtime_singleton_ = new Runtime();
   }
 
@@ -345,26 +420,81 @@ hsa_status_t Runtime::IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent, v
 hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags, void** address,
                                      int agent_node_id) {
+  // agent_node_id is an optional override and is 0 ("unspecified") on every
+  // public allocation path. The driver resolves the node it actually asks KFD
+  // for from the owning region unless the override applies, so both values are
+  // reported rather than guessing which one the driver chose. See
+  // core/driver/kfd/amd_kfd_driver.cpp, AllocateMemory().
+  const uint32_t owner_node = region->owner()->node_id();
+
+  ROCR_TRACE_ENTER(rocr::LOG_MEM, "region=%p size=%zu flags=0x%x node=%u agent_node=%d",
+                   (const void*)region, size, alloc_flags, owner_node, agent_node_id);
+
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
   DriverMemoryHandle driver_handle{};
   hsa_status_t status = region->Allocate(size, alloc_flags, agent_node_id, &driver_handle);
   // Track the allocation result so that it could be freed properly.
   if (status == HSA_STATUS_SUCCESS) {
     *address = driver_handle.vaddr;
-    std::lock_guard<std::shared_mutex> lock(memory_lock_);
-    allocation_map_[*address] =
-        AllocationRegion(region, size, size_requested, alloc_flags, driver_handle);
+
+    size_t current = 0;
+    size_t current_peak = 0;
+    uint64_t alloc_num = 0;
+    {
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_[*address] =
+          AllocationRegion(region, size, size_requested, alloc_flags, driver_handle);
+
+      // Track the live footprint. The aligned size is used here and in FreeMemory
+      // so that the running total cannot drift or wrap.
+      current = g_mem_metrics.total_allocated.fetch_add(size, std::memory_order_relaxed) + size;
+      size_t peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
+      while (current > peak &&
+             !g_mem_metrics.peak_allocated.compare_exchange_weak(
+                 peak, current, std::memory_order_release, std::memory_order_relaxed))
+        ;
+      current_peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
+      alloc_num = g_mem_metrics.allocation_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+
+    // Logging is deliberately outside memory_lock_. Emitting a line takes the
+    // logging file lock and flushes, and memory_lock_ is the writer lock that
+    // every allocate, free and pointer query in the process contends on.
+
+    // Log large allocations that might cause fragmentation
+    if (size > 256 * 1024 * 1024) {  // >256MB
+      LogInfo(rocr::LOG_MEM | rocr::LOG_INFO_CAT,
+              "Large allocation: ptr=%p size=%zu requested=%zu total_live=%zu peak=%zu "
+              "num_allocations=%" PRIu64 " node=%u agent_node=%d",
+              *address, size, size_requested, current, current_peak, alloc_num, owner_node,
+              agent_node_id);
+    }
+
+    LogDebug(rocr::LOG_MEM,
+             "AllocateMemory: ptr=%p size=%zu requested=%zu flags=0x%x node=%u agent_node=%d "
+             "total=%zu",
+             *address, size, size_requested, alloc_flags, owner_node, agent_node_id, current);
+  } else {
+    LogWarning(rocr::LOG_MEM,
+               "AllocateMemory failed: size=%zu flags=0x%x node=%u agent_node=%d status=%d",
+               size_requested, alloc_flags, owner_node, agent_node_id, status);
   }
 
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM, status);
   return status;
 }
 
 hsa_status_t Runtime::FreeMemory(void* ptr) {
+  ROCR_TRACE_ENTER(rocr::LOG_MEM, "ptr=%p", ptr);
+
   if (ptr == nullptr) {
+    ROCR_TRACE_EXIT(rocr::LOG_MEM, " -> HSA_STATUS_SUCCESS (null ptr)");
     return HSA_STATUS_SUCCESS;
   }
 
   const MemoryRegion* region = nullptr;
+  size_t size = 0;
+  size_t remaining = 0;
   std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
   MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateNoFlags;
   DriverMemoryHandle driver_handle{};
@@ -379,6 +509,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
     region = it->second.region;
+    size = it->second.size;
     alloc_flags = it->second.alloc_flags;
     driver_handle = it->second.driver_handle;
 
@@ -406,6 +537,12 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     }
 
     allocation_map_.erase(it);
+
+    // The live-footprint total mirrors the allocate/free pair, so it is
+    // decremented here rather than on the success path below. Every later exit
+    // from this function leaves the entry erased. Other paths insert into and
+    // erase from allocation_map_ without touching the counter.
+    remaining = g_mem_metrics.total_allocated.fetch_sub(size, std::memory_order_relaxed) - size;
   }
 
   // Remove IPC socket server bookkeeping for this allocation.
@@ -487,6 +624,9 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     return HSA_STATUS_ERROR;
   }
 
+  LogDebug(rocr::LOG_MEM, "FreeMemory: ptr=%p size=%zu remaining=%zu", ptr, size, remaining);
+
+  ROCR_TRACE_EXIT(rocr::LOG_MEM, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1557,6 +1697,8 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
 }
 
 hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* handle) {
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "ptr=%p len=%zu handle=%p", ptr, len, (const void*)handle);
+
   static_assert(sizeof(hsa_amd_ipc_memory_t) == sizeof(HsaSharedMemoryHandle),
                 "Thunk IPC mismatch.");
 
@@ -1724,6 +1866,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // TODO: fragment block discard for better memory performance causes memory violations
   // with DMABuf export even when synchronously called. Bypass for now.
 
+  // The handle contents are a capability token and are deliberately not logged.
+  LogDebug(rocr::LOG_IPC, "IPCCreate: ptr=%p len=%zu", ptr, len);
+
+  ROCR_TRACE_EXIT(rocr::LOG_IPC, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1871,6 +2017,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
 
 hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, uint32_t num_agents,
                                 Agent** agents, void** mapped_ptr) {
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "handle=%p len=%zu num_agents=%u", (const void*)handle, len,
+                   num_agents);
+
   static const int tinyArraySize = 8;
   void* importAddress;
   HSAuint64 importSize;
@@ -1967,7 +2116,13 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     hsa_status_t err = importMemory(0, NULL, isDmabufSysMem);
     if (err != HSA_STATUS_SUCCESS) return err;
-    if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
+    if (!isDmabufSysMem) {
+      // A success here is a third attach path and must be counted, or the live
+      // count permanently understates the attachments a detach can follow.
+      hsa_status_t map_err = mapMemoryToNodes(0, NULL);
+      if (map_err == HSA_STATUS_SUCCESS) TrackIPCAttach(*mapped_ptr, len, num_agents);
+      return map_err;
+    }
 
     // System memory DMA Buf import
     void* cpuPtr = nullptr;
@@ -2028,6 +2183,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     registerImport(bo, gpu_node_id, std::move(peerImports), intermediateAddr);
 
     *mapped_ptr = importAddress;
+    TrackIPCAttach(*mapped_ptr, len, num_agents);
+    ROCR_TRACE_EXIT_STATUS(rocr::LOG_IPC, HSA_STATUS_SUCCESS);
     return HSA_STATUS_SUCCESS;
   }
 
@@ -2046,12 +2203,23 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     agents[i]->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, &nodes[i]);
 
   hsa_status_t err = importMemory(num_agents, nodes, false);
-  if (err != HSA_STATUS_SUCCESS) return err;
+  if (err != HSA_STATUS_SUCCESS) {
+    LogWarning(rocr::LOG_IPC, "IPCAttach failed: len=%zu num_agents=%u status=%d", len,
+                   num_agents, err);
+    return err;
+  }
 
-  return mapMemoryToNodes(num_agents, nodes);
+  err = mapMemoryToNodes(num_agents, nodes);
+  if (err == HSA_STATUS_SUCCESS) {
+    TrackIPCAttach(*mapped_ptr, len, num_agents);
+  }
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_IPC, err);
+  return err;
 }
 
 hsa_status_t Runtime::IPCDetach(void* ptr) {
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "ptr=%p", ptr);
+
   bool ldrmImportCleaned = false;
   {  // Handle imported fragments.
     std::unique_lock<std::shared_mutex> lock(memory_lock_);
@@ -2094,6 +2262,10 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+
+  TrackIPCDetach(ptr);
+
+  ROCR_TRACE_EXIT(rocr::LOG_IPC, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2825,7 +2997,6 @@ Runtime::Runtime()
   g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
-  log_file = stderr;
 }
 
 hsa_status_t Runtime::Load() {
@@ -2841,6 +3012,11 @@ hsa_status_t Runtime::Load() {
   }
 
   flag_.Refresh();
+
+  // Initialize logging system after flags are parsed
+  rocr::log_init();
+
+  LogInfo(rocr::LOG_INIT, "Runtime::Load() starting");
 
   if (flag_.device_mem_no_host_access()) {
     log_warning_n(1,
@@ -2932,10 +3108,15 @@ hsa_status_t Runtime::Load() {
   }
 #endif
 
+  LogInfo(rocr::LOG_INIT, "Runtime::Load() completed: %zu GPU agents, %zu CPU agents",
+              gpu_agents_.size(), cpu_agents_.size());
+
   return HSA_STATUS_SUCCESS;
 }
 
 void Runtime::Unload() {
+  LogInfo(rocr::LOG_INIT, "Runtime::Unload() starting");
+
   // Close IPC socket server. Capture thread handle under lock to avoid race
   // with IPCCreate which may be restarting the server concurrently.
   os::Thread thread_to_close = nullptr;
@@ -3021,6 +3202,11 @@ void Runtime::Unload() {
     delete thunkLoader_;
     thunkLoader_ = nullptr;
   }
+
+  LogInfo(rocr::LOG_INIT, "Runtime::Unload() completed");
+
+  // Shutdown logging system last
+  rocr::log_shutdown();
 }
 
 void Runtime::LoadExtensions() {
@@ -5227,13 +5413,78 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
-  memcpy(log_flags, flags, sizeof(log_flags));
+// Raises the thunk verbosity while ROCR logging is on, and puts it back when
+// ROCR logging is turned off. A process that set HSAKMT_DEBUG_LEVEL itself keeps
+// the level it chose. Compiled only for the thunk that exposes the level as a
+// free global, and tolerates the symbol being absent at load time.
+static void SetThunkDebugLevel(bool enable) {
+#if defined(ROCR_HAVE_THUNK_DEBUG_LEVEL)
+  constexpr int kThunkLevelInfo = 6;  // HSAKMT_DEBUG_LEVEL_INFO
 
-  if (file)
-    log_file = reinterpret_cast<FILE*>(file);
-  else
-    log_file = stderr;
+  if (&hsakmt_debug_level == nullptr) return;
+  if (!os::GetEnvVar("HSAKMT_DEBUG_LEVEL").empty()) return;
+
+  static std::mutex thunk_level_lock;
+  static bool level_saved = false;
+  static int saved_level = 0;
+
+  std::lock_guard<std::mutex> lock(thunk_level_lock);
+  if (enable) {
+    if (!level_saved) {
+      saved_level = hsakmt_debug_level;
+      level_saved = true;
+    }
+    if (hsakmt_debug_level < kThunkLevelInfo) hsakmt_debug_level = kThunkLevelInfo;
+  } else if (level_saved) {
+    hsakmt_debug_level = saved_level;
+    level_saved = false;
+  }
+#else
+  (void)enable;
+#endif
+}
+
+hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
+  // Public API: hsa_amd_enable_logging(). CLR calls this when AMD_LOG_LEVEL
+  // selects level 6 or above.
+  if (flags == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // Check if any flag is set
+  bool any_flag_set = false;
+  for (size_t i = 0; i < 8; ++i) {
+    if (flags[i] != 0) {
+      any_flag_set = true;
+      break;
+    }
+  }
+
+  if (any_flag_set) {
+    // Map the public flags to the MEM/INFO/ERROR categories
+    uint64_t mask = 0;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_AQL)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_SDMA)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_INFO)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_MEM)) mask |= rocr::LOG_MEM;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_ERROR)) mask |= rocr::LOG_ERROR_CAT;
+
+    // Swap the output stream under the logging file lock. The caller keeps
+    // ownership of its handle.
+    rocr::log_set_output(file ? reinterpret_cast<FILE*>(file) : stderr);
+
+    rocr::g_log_state.log_mask.store(mask, std::memory_order_relaxed);
+    // The caller selects WHAT to log through the flags, so the level must admit
+    // every site in the selected categories. The least verbose level that does
+    // that is LOG_VERBOSE: sites in these categories run from LOG_ERROR up to
+    // LOG_VERBOSE (the entry/exit tracing macros and the signal pool traces),
+    // and any lower value here would accept the category and still emit
+    // nothing for them. Selectivity is the mask's job, not the level's.
+    rocr::g_log_state.log_level.store(rocr::LOG_VERBOSE, std::memory_order_relaxed);
+
+    SetThunkDebugLevel(true);
+  } else {
+    rocr::g_log_state.log_level.store(rocr::LOG_NONE, std::memory_order_relaxed);
+    SetThunkDebugLevel(false);
+  }
 
   return HSA_STATUS_SUCCESS;
 }

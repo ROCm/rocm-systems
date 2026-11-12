@@ -208,3 +208,74 @@ These settings may impact performance and stability and should only be used when
       - ``0``
       - | 0: Normal caching behavior (L2 cache enabled).
         | 1: Disables L2 cache entirely. Sets all memory regions as uncacheable (MTYPE=UC) in the GPU, bypassing the L2 cache. Useful for diagnosing cache-related performance or correctness issues.
+
+Logging Environment Variables
+-----------------------------
+
+ROCR provides a logging system for debugging. Logging is disabled by default.
+
+**CLR/HIP integration:** for HIP applications set ``AMD_LOG_LEVEL`` to 6 or above for unified
+CLR and ROCR logging. In that case the ``HSA_LOG_*`` variables below are ignored, CLR configures
+ROCR logging through the ``hsa_amd_enable_logging()`` API, and both CLR and ROCR records go to
+the same output.
+
+For standalone HSA applications, which do not use HIP or CLR, use the ``HSA_LOG_*`` variables
+directly.
+
+Thunk (libhsakmt) logging is a separate facility controlled by ``HSAKMT_DEBUG_LEVEL``, and its
+output always goes to stderr. ``hsa_amd_enable_logging()`` raises the thunk level as well, but
+only when the process has not set ``HSAKMT_DEBUG_LEVEL`` itself.
+
+.. _rocr-log-env:
+.. list-table::
+    :header-rows: 1
+    :widths: 35,14,51
+
+    * - Environment variable
+      - Default value
+      - Value
+
+    * - | ``HSA_LOG_LEVEL``
+        | Controls log verbosity. Each level includes all lower-numbered levels.
+      - ``0``
+      - | 0: Disabled (default).
+        | 1: ERROR - error and exception paths.
+        | 2: WARNING - warnings and errors.
+        | 3: INFO - general operational information.
+        | 4: DEBUG - detailed debug information.
+        | 5: TRACE - very detailed tracing.
+        | 6: VERBOSE - function entry and exit with arguments.
+        | ``help``: print usage information to stderr and continue with logging disabled.
+        | Values outside 0 to 6 are clamped into that range.
+
+    * - | ``HSA_LOG_MASK``
+        | Bitmask selecting which categories are recorded. Combine values with a bitwise OR.
+        | A record carrying more than one category is emitted when any of its categories is
+        | selected.
+      - all categories
+      - | 0x1: MEM - memory allocation and free, IPC sharing, copies, scratch and pools.
+        | 0x2: INFO - init and shutdown, queues, signals, agent discovery, AQL, SDMA, waits.
+        | 0x4: ERROR - error paths, exception handlers and hang detection.
+
+    * - | ``HSA_LOG_FILE``
+        | Output file prefix. The process id is appended, so a value of ``/tmp/rocr`` writes to
+        | ``/tmp/rocr.<PID>``. The file is truncated on open. If it cannot be opened, a notice is
+        | printed and logging falls back to stderr.
+      - None (stderr)
+      - Path prefix for the log file.
+
+**Logging examples:**
+
+- Unified CLR and ROCR logging for HIP applications: ``AMD_LOG_LEVEL=6 ./app``
+- Errors only: ``HSA_LOG_LEVEL=1 ./app``
+- Debug memory and IPC activity: ``HSA_LOG_LEVEL=4 HSA_LOG_MASK=0x1 ./app``
+- Info level for queues and signals: ``HSA_LOG_LEVEL=3 HSA_LOG_MASK=0x2 ./app``
+- Full trace to a file: ``HSA_LOG_LEVEL=5 HSA_LOG_FILE=/tmp/rocr ./app``
+- Print the usage text: ``HSA_LOG_LEVEL=help ./app``
+
+**Health warnings:**
+
+At WARNING level, which is ``HSA_LOG_LEVEL=2`` or above, the runtime reports:
+
+- IPC leak detection when the live IPC attachment count exceeds 100.
+- Queue saturation when queue depth exceeds 75 percent at the time of a queue exception.

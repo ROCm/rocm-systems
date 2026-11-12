@@ -72,6 +72,9 @@
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
+#include <cinttypes>
+
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -359,9 +362,18 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   QueueGuard.Dismiss();
   EventGuard.Dismiss();
   SignalGuard.Dismiss();
+
+  LogInfo(rocr::LOG_QUEUE,
+          "AqlQueue created: id=%llu node=%u size=%u ring=%p doorbell=%p scratch_limit=%zu",
+          (unsigned long long)queue_id_, node_id, queue_size_pkts, ring_buf_,
+          (void*)signal_.hardware_doorbell_ptr,
+              queue_scratch_.use_once_limit);
+
+  LogVerbose(rocr::LOG_QUEUE, "EXIT AqlQueue() -> queue_id=%llu", (unsigned long long)queue_id_);
 }
 
 AqlQueue::~AqlQueue() {
+  LogVerbose(rocr::LOG_QUEUE, "ENTER ~AqlQueue() queue_id=%llu", (unsigned long long)queue_id_);
   agent_->UnregisterAqlQueue(this);
 
   // Remove error handler synchronously.
@@ -416,14 +428,20 @@ AqlQueue::~AqlQueue() {
     }
   }
   agent_->system_deallocator()(pm4_ib_buf_);
+
+  LogInfo(rocr::LOG_QUEUE, "AqlQueue destroyed: id=%llu", (unsigned long long)queue_id_);
 }
 
 void AqlQueue::Destroy() {
+  ROCR_TRACE_ENTER(rocr::LOG_QUEUE, "queue_id=%llu", (unsigned long long)queue_id_);
+
   if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
     agent_->GWSRelease();
+    LogVerbose(rocr::LOG_QUEUE, "EXIT Destroy() -> cooperative release");
     return;
   }
   delete this;
+  // Note: can't log EXIT after delete this
 }
 
 uint64_t AqlQueue::LoadReadIndexAcquire() {
@@ -1181,6 +1199,11 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   assert((pkt && dispatch_id != UINT64_MAX) &&
          "Could not find dispatch packet with private_segment_size > 0");
 
+  LogDebug(rocr::LOG_SCRATCH,
+           "HandleInsufficientScratch: queue=%llu dispatch_id=%llu private_seg=%u",
+           (unsigned long long)queue_id_, (unsigned long long)dispatch_id,
+           pkt ? pkt->dispatch.private_segment_size : 0u);
+
   tool::notify_event_scratch_alloc_start(
       public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE, dispatch_id);
 
@@ -1264,6 +1287,9 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
     dynamicScratchState |= ERROR_HANDLER_SCRATCH_RETRY;
     changeWait = true;
     waitVal = error_code;
+    LogDebug(rocr::LOG_SCRATCH,
+             "HandleInsufficientScratch: queue=%llu retry needed, requested=%zu",
+             (unsigned long long)queue_id_, scratch.main_size);
   } else if (scratch.main_queue_base == nullptr) {
     // We could not allocate memory to fit even 1 wave
     tool::notify_event_scratch_alloc_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE,
@@ -1495,6 +1521,68 @@ bool AqlQueue::ExceptionHandler(hsa_signal_value_t error_code, void* arg) {
     if (error_code & (1UL << (error.code - 1))) {
       errorCode = error.status;
       break;
+    }
+  }
+
+  // Capture full queue state snapshot for debugging. Both indices are volatile
+  // and read_dispatch_id is written by CP, so these are two separate loads, not
+  // a snapshot - active_packets is an estimate. The subtraction is clamped
+  // rather than relying on the read being sampled first, so that a reordering
+  // here cannot turn the depth into a near-2^64 value and trip STALL_RISK on
+  // every exception.
+  uint64_t read_idx = queue->amd_queue_.read_dispatch_id;
+  uint64_t write_idx = queue->amd_queue_.write_dispatch_id;
+  uint64_t active_packets = (write_idx >= read_idx) ? (write_idx - read_idx) : 0;
+
+  LogError(rocr::LOG_EXCEPT,
+           "EXCEPTION_SNAPSHOT: queue=%llu error=0x%llx read_idx=%llu write_idx=%llu "
+           "active_packets=%llu scratch_base=%p scratch_size=%zu status=%d",
+           (unsigned long long)queue->queue_id_, (unsigned long long)error_code,
+           (unsigned long long)read_idx,
+               (unsigned long long)write_idx, (unsigned long long)active_packets,
+               queue->queue_scratch_.main_queue_base, queue->queue_scratch_.main_size, errorCode);
+
+  // Dump scratch state for debugging (at DEBUG level)
+  // The gate must carry the same mask the line is emitted with, or selecting
+  // only one of the two categories silences a site that declares both.
+  if (LOG_ENABLED(rocr::LOG_DEBUG, rocr::LOG_EXCEPT | rocr::LOG_SCRATCH)) {
+    LogDebug(rocr::LOG_EXCEPT | rocr::LOG_SCRATCH,
+                 "Scratch state: main_base=%p main_size=%zu alt_base=%p alt_size=%zu "
+                 "dispatch_size=%zu lanes_per_wave=%u async_reclaim=%d",
+                 queue->queue_scratch_.main_queue_base, queue->queue_scratch_.main_size,
+                 queue->queue_scratch_.alt_queue_base, queue->queue_scratch_.alt_size,
+                 queue->queue_scratch_.dispatch_size, queue->queue_scratch_.main_lanes_per_wave,
+                 queue->queue_scratch_.async_reclaim ? 1 : 0);
+  }
+
+  // Check queue saturation at time of exception
+  uint32_t queue_size = queue->public_handle()->size;
+  float utilization = (queue_size > 0) ? (float)active_packets / queue_size * 100.0f : 0.0f;
+  if (utilization > 75.0f) {
+    LogWarning(
+        rocr::LOG_QUEUE | rocr::LOG_INFO_CAT,
+        "Queue near saturation at exception: id=%llu depth=%llu/%u (%.1f%%) STALL_RISK=HIGH",
+        (unsigned long long)queue->queue_id_, (unsigned long long)active_packets, queue_size,
+        (double)utilization);
+  }
+
+  // Dump last few packets for forensics (only at VERBOSE level)
+  if (LOG_ENABLED(rocr::LOG_VERBOSE, rocr::LOG_EXCEPT) && active_packets > 0) {
+    uint64_t queue_mask = queue->public_handle()->size - 1;
+    // Walk back up to three packets from the read index without going below
+    // index zero. read_idx is unsigned, so the start is clamped rather than
+    // formed by adding a negative offset.
+    constexpr uint64_t kPacketHistory = 3;
+    uint64_t first_idx = (read_idx > kPacketHistory) ? (read_idx - kPacketHistory) : 0;
+    for (uint64_t idx = first_idx; idx <= read_idx && idx < write_idx; idx++) {
+      auto* pkt = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+                      queue->public_handle()->base_address) +
+          (idx & queue_mask);
+      LogVerbose(rocr::LOG_EXCEPT,
+                 "Recent packet[%" PRId64 "]: idx=%" PRIu64
+                 " header=0x%x type=%u setup=0x%x grid=[%u,%u,%u]",
+                 (int64_t)(idx - read_idx), idx, pkt->header, pkt->header & 0xFF, pkt->setup,
+                 pkt->grid_size_x, pkt->grid_size_y, pkt->grid_size_z);
     }
   }
 

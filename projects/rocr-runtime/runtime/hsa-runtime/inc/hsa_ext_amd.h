@@ -100,9 +100,10 @@
  *          (development and BKC snapshots only), so the 1.36 query is removed without a
  *          deprecation period.
  * - 1.40 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_BROADCAST_DESTINATIONS
+ * - 1.41 - hsa_amd_log_flag_t: HSA_AMD_LOG_FLAG_MEM, HSA_AMD_LOG_FLAG_ERROR
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 40
+#define HSA_AMD_INTERFACE_VERSION_MINOR 41
 
 #ifdef __cplusplus
 extern "C" {
@@ -5540,16 +5541,27 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
- * @brief logging types
+ * @brief Logging flag bit positions for hsa_amd_enable_logging().
+ *
+ * These are bit positions used with hsa_flag_set64/hsa_flag_isset64 macros
+ * when calling hsa_amd_enable_logging(). They are NOT bitmask values.
+ *
+ * For HIP applications, use AMD_LOG_LEVEL for unified CLR+ROCR+Thunk logging.
+ * For standalone HSA applications, use HSA_LOG_LEVEL environment variable.
  */
 typedef enum hsa_amd_log_flag_s {
-  /* Log AQL packets internally enqueued by ROCr */
+  /* Log AQL packets internally enqueued by ROCr. The BLIT_KERNEL_PKTS name is
+     retained as an alias so existing callers keep compiling. */
   HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = 0,
   HSA_AMD_LOG_FLAG_AQL = 0,
   /* Log SDMA packets */
   HSA_AMD_LOG_FLAG_SDMA = 1,
-  /* Log INFO */
+  /* Log general INFO messages */
   HSA_AMD_LOG_FLAG_INFO = 2,
+  /* Log memory allocation/free (MEM category) */
+  HSA_AMD_LOG_FLAG_MEM = 3,
+  /* Log error conditions (ERROR category) */
+  HSA_AMD_LOG_FLAG_ERROR = 4,
 } hsa_amd_log_flag_t;
 
 /**
@@ -5557,11 +5569,24 @@ typedef enum hsa_amd_log_flag_s {
  * If this function is called multiple times, the last call to this function will overwrite the
  * previous @p flags and @p file.
  *
+ * Where the active thunk exposes its verbosity level, this function also raises it, so that one
+ * call configures both layers. This is the case for the native KFD thunk; on thunks that keep the
+ * level privately the ROCR level is still applied and the thunk level is left alone. Two
+ * consequences follow where the thunk level is raised:
+ * - Thunk output is written to stderr and is never written to @p file.
+ * - A process that set HSAKMT_DEBUG_LEVEL in its environment keeps the thunk level it chose;
+ *   this function does not override it. When this function does raise the thunk level, it
+ *   restores the previous level once @p flags is 0.
+ *
+ * The caller retains ownership of @p file. The runtime does not close it.
+ *
  * @param[in] flags is used to filter types of logging. Type is uint8_t[8].
  * Can be set using the hsa_flag_set64 macro. Setting @p flags to 0 will disable logging.
  * @param[in] file file stream to output logging. If file is NULL, prints are sent to stderr.
  *
  * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p flags is NULL.
  *
  * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
  * initialized.

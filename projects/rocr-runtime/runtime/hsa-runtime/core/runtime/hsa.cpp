@@ -58,6 +58,9 @@
 #include "core/inc/queue.h"
 #include "core/inc/signal.h"
 #include "core/inc/cache.h"
+#include <cinttypes>
+
+#include "core/util/logging.h"
 #include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/amd_loader_context.hpp"
@@ -724,6 +727,9 @@ hsa_status_t hsa_queue_create(hsa_agent_t agent_handle, uint32_t size, hsa_queue
                               void* data, uint32_t private_segment_size,
                               uint32_t group_segment_size, hsa_queue_t** queue) {
   TRY;
+  ROCR_TRACE_ENTER(rocr::LOG_QUEUE | rocr::LOG_INFO_CAT,
+                   "agent=0x%" PRIx64 " size=%u type=%u private_seg=%u group_seg=%u",
+                   agent_handle.handle, size, type, private_segment_size, group_segment_size);
   IS_OPEN();
 
   if ((queue == nullptr) || (size == 0) || (!IsPowerOfTwo(size)) ||
@@ -756,6 +762,11 @@ hsa_status_t hsa_queue_create(hsa_agent_t agent_handle, uint32_t size, hsa_queue
 
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
   *queue = core::Queue::Convert(cmd_queue);
+
+  LogDebug(rocr::LOG_QUEUE, "hsa_queue_create: agent=0x%" PRIx64 " size=%u type=%u queue=%p",
+           agent_handle.handle, size, type, (void*)*queue);
+
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_QUEUE | rocr::LOG_INFO_CAT, status);
   return status;
 
   CATCH;
@@ -804,6 +815,9 @@ hsa_status_t hsa_queue_destroy(hsa_queue_t* queue) {
   IS_BAD_PTR(queue);
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
+
+  LogDebug(rocr::LOG_QUEUE, "hsa_queue_destroy: queue=%p", (void*)queue);
+
   cmd_queue->Destroy();
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -1115,6 +1129,8 @@ hsa_status_t hsa_memory_deregister(void* address, size_t size) {
 
 hsa_status_t hsa_memory_allocate(hsa_region_t region, size_t size, void** ptr) {
   TRY;
+  ROCR_TRACE_ENTER(rocr::LOG_MEM | rocr::LOG_INFO_CAT, "region=0x%" PRIx64 " size=%zu",
+                   region.handle, size);
   IS_OPEN();
 
   core::MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
@@ -1126,19 +1142,33 @@ hsa_status_t hsa_memory_allocate(hsa_region_t region, size_t size, void** ptr) {
   const core::MemoryRegion* mem_region = core::MemoryRegion::Convert(region);
   IS_VALID(mem_region);
 
-  return core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
+  hsa_status_t status =
+      core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
+
+  // *ptr is only defined when the allocation succeeded.
+  LogDebug(rocr::LOG_MEM, "hsa_memory_allocate: region=0x%" PRIx64 " size=%zu ptr=%p status=0x%x",
+           region.handle, size, (status == HSA_STATUS_SUCCESS) ? *ptr : nullptr, status);
+
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM | rocr::LOG_INFO_CAT, status);
+  return status;
   CATCH;
 }
 
 hsa_status_t hsa_memory_free(void* ptr) {
   TRY;
+  ROCR_TRACE_ENTER(rocr::LOG_MEM | rocr::LOG_INFO_CAT, "ptr=%p", ptr);
   IS_OPEN();
 
   if (ptr == NULL) {
+    ROCR_TRACE_EXIT(rocr::LOG_MEM | rocr::LOG_INFO_CAT, " -> HSA_STATUS_SUCCESS (null)");
     return HSA_STATUS_SUCCESS;
   }
 
-  return core::Runtime::runtime_singleton_->FreeMemory(ptr);
+  LogDebug(rocr::LOG_MEM, "hsa_memory_free: ptr=%p", ptr);
+
+  hsa_status_t status = core::Runtime::runtime_singleton_->FreeMemory(ptr);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM | rocr::LOG_INFO_CAT, status);
+  return status;
   CATCH;
 }
 
@@ -1180,14 +1210,32 @@ hsa_status_t hsa_memory_copy(void* dst, const void* src, size_t size) {
 
 hsa_status_t hsa_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                                const hsa_agent_t* consumers, hsa_signal_t* hsa_signal) {
-  return AMD::hsa_amd_signal_create(initial_value, num_consumers, consumers, 0, hsa_signal);
+  ROCR_TRACE_ENTER(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, "initial=%lld num_consumers=%u",
+                   (long long)initial_value, num_consumers);
+
+  hsa_status_t status =
+      AMD::hsa_amd_signal_create(initial_value, num_consumers, consumers, 0, hsa_signal);
+
+  LogDebug(rocr::LOG_SIGNAL,
+           "hsa_signal_create: initial=%lld num_consumers=%u signal=0x%" PRIx64 " status=0x%x",
+           (long long)initial_value, num_consumers,
+           (status == HSA_STATUS_SUCCESS && hsa_signal) ? hsa_signal->handle : uint64_t(0), status);
+
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, status);
+  return status;
 }
 
 hsa_status_t hsa_signal_destroy(hsa_signal_t hsa_signal) {
   TRY;
+  ROCR_TRACE_ENTER(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, "signal=0x%" PRIx64,
+                   hsa_signal.handle);
   IS_OPEN();
+
+  LogDebug(rocr::LOG_SIGNAL, "hsa_signal_destroy: signal=0x%" PRIx64, hsa_signal.handle);
+
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   signal->DestroySignal();
+  ROCR_TRACE_EXIT(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -1243,7 +1291,33 @@ hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t hsa_signal,
   TRY;
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   assert(IsValid(signal));
-  return signal->WaitAcquire(condition, compare_value, timeout_hint, wait_state_hint);
+
+  // Track wait start time for timeout detection
+  uint64_t start_time = 0;
+  // Gated at the level the warning is emitted at. Gating any stricter would
+  // skip the timestamp and so silence a LogWarning for users who asked for
+  // warnings.
+  bool should_track = LOG_ENABLED(rocr::LOG_WARNING, rocr::LOG_WAIT | rocr::LOG_HANG) &&
+      timeout_hint > 0 && timeout_hint != UINT64_MAX;
+  if (should_track) {
+    start_time = rocr::get_timestamp_us();
+  }
+
+  hsa_signal_value_t result =
+      signal->WaitAcquire(condition, compare_value, timeout_hint, wait_state_hint);
+
+  // Warn on long waits (>1 second)
+  if (should_track) {
+    uint64_t elapsed = rocr::get_timestamp_us() - start_time;
+    if (elapsed > 1000000) {  // >1 second
+      LogWarning(rocr::LOG_WAIT | rocr::LOG_HANG,
+                 "Signal wait slow: handle=0x%" PRIx64 " expect=%lld got=%lld elapsed=%" PRIu64
+                 " us",
+                 hsa_signal.handle, (long long)compare_value, (long long)result, elapsed);
+    }
+  }
+
+  return result;
   CATCHRET(hsa_signal_value_t);
 }
 
