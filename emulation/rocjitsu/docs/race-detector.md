@@ -41,6 +41,7 @@ a barrier. The reads race with the writes.
 // race_example.hip
 #include <hip/hip_runtime.h>
 #include <cstdio>
+#include <cstdlib>
 
 __global__ void transpose_lds(const int *in, int *out) {
   __shared__ int tile[128];
@@ -51,15 +52,23 @@ __global__ void transpose_lds(const int *in, int *out) {
   out[tid] = tile[127 - tid];
 }
 
+void check_hip(hipError_t status) {
+  if (status != hipSuccess) {
+    std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(status));
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 int main() {
   int *d_in, *d_out;
-  hipMalloc(&d_in, 128 * sizeof(int));
-  hipMalloc(&d_out, 128 * sizeof(int));
+  check_hip(hipMalloc(&d_in, 128 * sizeof(int)));
+  check_hip(hipMalloc(&d_out, 128 * sizeof(int)));
   transpose_lds<<<1, 128>>>(d_in, d_out);
-  hipDeviceSynchronize();
-  hipFree(d_in);
-  hipFree(d_out);
-  printf("done\n");
+  check_hip(hipGetLastError());
+  check_hip(hipDeviceSynchronize());
+  check_hip(hipFree(d_in));
+  check_hip(hipFree(d_out));
+  std::puts("done");
 }
 ```
 
@@ -75,11 +84,15 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
 Copy `configs/gfx950_mi350x.json` to `my_config.json` and enable the race
-detector by adding a `plugins` section to that configuration:
+detector by adding these top-level settings to that configuration:
 
 ```json
-{ "plugins": { "race": {} } }
+{ "require_all_plugins": true, "plugins": { "race": {} } }
 ```
+
+`require_all_plugins` makes a missing or invalid plugin fail initialization.
+The example checks HIP errors and exits with a failure status in that case,
+so a skipped detector cannot look like a successful race check.
 
 Run it under the emulator:
 
@@ -138,6 +151,7 @@ and add a `sinks` section to your config:
 
 ```json
 {
+  "require_all_plugins": true,
   "plugins": { "race": {} },
   "sinks": { "types": ["file"], "dir": "/tmp/output" }
 }
@@ -155,8 +169,10 @@ read-after-write (RAW), write-after-read (WAR), or write-after-write (WAW). The
 next lines identify the current access and the conflicting memory event by
 where its data moves, such as from VGPRs into LDS. Register-load conflicts name
 the destination (VGPRs, SGPRs, or TTMPs) without guessing the source memory space.
-A FLAT instruction can load from different spaces in different lanes, and
-scalar memory loads can read scratch. The event does not retain that source.
+Direct-to-LDS loads likewise say “load into LDS” because they can read global
+memory or scratch. A FLAT instruction can load from different spaces in
+different lanes, and scalar memory loads can read scratch. These events do
+not retain that source.
 
 For a pending event, the report lists the completion counters that remain unsatisfied, using
 the architectural wait names for the target. Internal GFX11 subsets are
@@ -188,8 +204,11 @@ integers from 2 to 256; an odd value gives the extra record to the end. Setting
 it to 256 disables middle elision. For example:
 
 ```json
-{ "plugins": { "race": { "trace_context": 256 } } }
+{ "require_all_plugins": true, "plugins": { "race": { "trace_context": 256 } } }
 ```
+
+Keep `require_all_plugins` enabled when changing this option. An invalid value,
+such as 257, otherwise warns and skips the detector instead of failing the run.
 
 Synchronization and control-flow instructions remain visible in the middle,
 even when they exceed the configured context. A gap of one instruction is
@@ -205,10 +224,13 @@ context and gap counts still count individual executed instructions. Waits,
 barriers (including split-barrier signals and LDS barrier arrivals), and
 control-flow instructions are always shown individually.
 
-The final summary counts emitted reports and observations suppressed by the
-existing PC-based deduplication. These counts are not the number of affected
-lanes or independent bugs. The structured `RACE` header and `END_RACE` delimiter
-remain available for tools that consume reports.
+The plugin writes a summary when it is destroyed during VM teardown. It counts
+emitted reports and observations suppressed by the existing PC-based
+deduplication, not affected lanes or independent bugs. A successful application
+exit can occur without that teardown, so complete race reports can appear
+without a summary. Its absence does not mean zero races or zero suppressed
+observations. The structured `RACE` header and `END_RACE` delimiter remain
+available for tools that consume individual reports.
 
 The separate memory-wait warning states the threshold required immediately
 before its reported access. That threshold need not be sufficient at an earlier

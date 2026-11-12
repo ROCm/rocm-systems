@@ -31,6 +31,7 @@ has not yet written.
 // race_example.hip
 #include <hip/hip_runtime.h>
 #include <cstdio>
+#include <cstdlib>
 
 __global__ void transpose_lds(const int *in, int *out) {
   __shared__ int tile[128];
@@ -41,15 +42,23 @@ __global__ void transpose_lds(const int *in, int *out) {
   out[tid] = tile[127 - tid];
 }
 
+void check_hip(hipError_t status) {
+  if (status != hipSuccess) {
+    std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(status));
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 int main() {
   int *d_in, *d_out;
-  hipMalloc(&d_in, 128 * sizeof(int));
-  hipMalloc(&d_out, 128 * sizeof(int));
+  check_hip(hipMalloc(&d_in, 128 * sizeof(int)));
+  check_hip(hipMalloc(&d_out, 128 * sizeof(int)));
   transpose_lds<<<1, 128>>>(d_in, d_out);
-  hipDeviceSynchronize();
-  hipFree(d_in);
-  hipFree(d_out);
-  printf("done\n");
+  check_hip(hipGetLastError());
+  check_hip(hipDeviceSynchronize());
+  check_hip(hipFree(d_in));
+  check_hip(hipFree(d_out));
+  std::puts("done");
 }
 ```
 
@@ -69,11 +78,16 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ## Run under the race detector
 
 From `emulation/rocjitsu`, copy `configs/gfx950_mi350x.json` to
-`my_config.json` and add a `plugins` section to activate the race detector:
+`my_config.json` and add these top-level settings to activate the race detector:
 
 ``` json
-{ "plugins": { "race": {} } }
+{ "require_all_plugins": true, "plugins": { "race": {} } }
 ```
+
+`require_all_plugins` makes initialization fail if the race detector cannot
+load, including when its configuration is invalid. The example checks HIP
+errors and exits with a failure status, so a skipped detector cannot be
+mistaken for a successful race check.
 
 Launch the binary with that configuration, where `BUILD_DIR` is your
 rocJITsu build directory:
@@ -146,7 +160,8 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
-The output should complete with `done` and no `RACE` reports.
+The run should exit successfully with `done` and no `RACE` reports. A HIP
+error or a failed process exit does not establish that the kernel is race-free.
 
 ## Save reports to a file
 
