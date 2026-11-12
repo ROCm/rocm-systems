@@ -193,7 +193,7 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)
     {
-        printf("Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
+        fprintf(stderr, "Streaming Performance Monitor (SPM) is not supported on gfx90a devices\n");
         return false;
     }
     else if(strncmp(agentInfo->gfxip, "gfx942", 6) == 0)
@@ -201,8 +201,9 @@ is_agent_supported_for_spm(const AgentInfo* agentInfo)
         // if the device is gfx942, check if virtualization is enabled
         if(is_virtualization_enabled())
         {
-            printf("Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
-                   "when GPU virtualization (SR-IOV) is enabled\n");
+            fprintf(stderr,
+                    "Streaming Performance Monitor (SPM) is not supported on gfx942 devices "
+                    "when GPU virtualization (SR-IOV) is enabled\n");
             return false;
         }
     }
