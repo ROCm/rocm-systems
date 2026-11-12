@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "counting_gpu_memory.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
@@ -80,7 +81,8 @@ public:
     cfg.sgprs_per_wf = is_gfx9(arch) ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("scalar_buffer", cfg, &mem, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_buffer", cfg, &mem, &l2));
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
@@ -148,7 +150,9 @@ TEST(ScalarBufferTest, TranslatedNarrowLoadsSuppressMaskedReadsAndZeroDestinatio
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("narrow_scalar", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "narrow_scalar", cfg, &memory, &l2));
     cu->set_gpu_vm(&vm);
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
@@ -333,7 +337,9 @@ TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
     cfg.sgprs_per_wf = 128;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("high_buffer_cu", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "high_buffer_cu", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 128, 16);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -402,7 +408,9 @@ TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("scalar_bounds", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_bounds", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
     const uint32_t sb = wf->sgpr_alloc().base;
@@ -467,7 +475,9 @@ TEST(Gfx1250AddrCalcTest, ScalarBufferUsesWideDescriptorAndUnscaledStride) {
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 16;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("wide_scalar_buffer", cfg, &mem, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "wide_scalar_buffer", cfg, &mem, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 106, 16);
   ASSERT_NE(wf, nullptr);
   const auto sb = wf->sgpr_alloc().base;
@@ -525,7 +535,9 @@ TEST(Gfx12AddrCalcTest, ScalarLoadsAlignEachComponentAndBufferSize) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("scalar_component", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_component", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
     const auto sb = wf->sgpr_alloc().base;

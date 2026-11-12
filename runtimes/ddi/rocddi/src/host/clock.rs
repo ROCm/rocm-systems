@@ -4,7 +4,7 @@
 //! Host profiling timebase shared by runtime frontends.
 //!
 //! Its nanosecond counter rate is not a CPU core frequency. A read is a live
-//! observation rather than a field of the host topology snapshot.
+//! observation rather than a field of the host topology graph snapshot.
 
 use crate::{Error, os};
 

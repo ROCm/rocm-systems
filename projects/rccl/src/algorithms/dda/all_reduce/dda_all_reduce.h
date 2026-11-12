@@ -9,6 +9,7 @@
 #define DDA_ALL_REDUCE_H_
 
 #include "nccl.h"
+#include "rccl_decision.h"
 
 #include <cstdint>
 
@@ -25,8 +26,9 @@ ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t co
 bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op);
 
+// `cap` (rcclCollDecision::ddaCap) bounds the grid of a call that replaces another backend; the launchers below too.
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+                                    ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap = {});
 
 // LL-protocol fabric path (small-message fast lane, flag-based sync, no barrier).
 //
@@ -58,20 +60,24 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
                                ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+                                      ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
+                                      rcclDdaLaunchCap cap = {});
 
 // LL128-protocol fabric path (mid-message fast lane, 128B lines, no barrier).
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream,
+                                         rcclDdaLaunchCap cap = {});
 
 // Total CTAs (grid blocks) each DDA allreduce launcher would use for the given
 // operands. Mirrors the launch grid math so reporting reflects real occupancy.
 uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
-uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
-uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
-uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap = {});
+uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                        rcclDdaLaunchCap cap = {});
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                           rcclDdaLaunchCap cap = {});
 
 #endif

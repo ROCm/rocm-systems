@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -80,8 +81,9 @@ struct DispatchPoolFixture {
     tasks.reserve(cu_count);
     wfs.reserve(cu_count);
     for (uint32_t i = 0; i < cu_count; ++i) {
-      auto cu = amdgpu::ComputeUnitCore::create("pool_cu" + std::to_string(i), cfg, &memory, &l2);
-      ASSERT_NE(cu, nullptr);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          cu, "pool_cu" + std::to_string(i), cfg, &memory, &l2));
       auto *wf = cu->dispatch_wf(/*wg_id=*/i, kProgramBase, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
       tasks.push_back(cu.get());
@@ -497,7 +499,8 @@ TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
   DispatchPoolFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/8));
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kProgramBase, test::kUnimplementedInstruction);
+  for (size_t i = 0; i < test::kUnimplementedInstruction.size(); ++i)
+    fixture.memory.write32(kProgramBase + i * sizeof(uint32_t), test::kUnimplementedInstruction[i]);
 
   EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/4));
   for (const auto &cu : fixture.cus)

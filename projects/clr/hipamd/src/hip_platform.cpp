@@ -157,7 +157,6 @@ struct __CudaFatBinaryWrapper {
 };
 
 // Forward declarations
-hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0, bool use_host_ptr = 0);
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent,
@@ -300,7 +299,8 @@ void __hipRegisterManagedVar(
     ::memcpy(*pointer, init_value, size);
   } else {
     HIP_INIT_VOID();
-    hipError_t status = ihipMallocManaged(pointer, size, align, 0);
+    hipError_t status = ihipMallocManaged(pointer, size, align, /*use_host_ptr=*/false,
+                                         ManagedMemOwner::kModuleVariable);
     var_ptr->SetManagedVarMapped(true);
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();

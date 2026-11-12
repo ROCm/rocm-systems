@@ -485,6 +485,15 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
     clangToPy(arguments)
 
     replace_line(output_file, line_to_replace, new_line)
+    if os_platform == "Linux":
+        # clang2py binds a declared function the -l library does not export
+        # to a stub whose call raises TypeError. Look it up in the real
+        # library instead, so a missing symbol stays unbound.
+        replace_line(
+            output_file,
+            "_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')",
+            "_libraries['FIXME_STUB'] = _libraries['libamd_smi.so']",
+        )
     write_header(output_file)
 
     # Custom handling for <anonymous|unnamed> struct in Linux
