@@ -2446,7 +2446,9 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.</p>
 <p>The optional top-level <code>arithmetic</code> object selects one semantics mode for
 instructions executed through rj-arith, regardless of GPU architecture.
 Instructions not yet migrated to rj-arith retain their existing implementations
-and do not use this setting.</p>
+and do not use this setting.
+On RDNA2 this includes FP32 FMA/FMAC, FP64 FMA, FP16 add/subtract/multiply,
+and VOP3 floating-point comparisons.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">"arithmetic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="nt">"semantics"</span><span class="p">:</span><span class="w"> </span><span class="s2">"compatibility"</span>
 <span class="p">}</span>
