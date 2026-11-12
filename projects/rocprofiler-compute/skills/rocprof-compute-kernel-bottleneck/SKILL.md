@@ -67,8 +67,10 @@ a timeout; profile mode has no such option.
 Start with Speed-of-Light for the kernels that matter:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b sol -k <kernel_name> -- <application> <args>
+rocprof-compute profile --name <workload_name> --speed-of-light -k <kernel_name> -- <application> <args>
 ```
+
+On ROCm 10.2 and earlier, use `-b sol` instead of `--speed-of-light`.
 
 Drop `-k` when the user has not named kernels. Once Speed-of-Light points at a
 limit, profile again with only the blocks section 5 opens, such as `wavefront`,
@@ -139,7 +141,7 @@ regex, so `-k gemm` matches every kernel whose name contains `gemm`.
 Get the overview, then open exactly one detailed block:
 
 ```bash
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 -b sol
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k 0 --speed-of-light
 ```
 
 Read the `Percent of Peak` column. The report prints the peak for each metric,
