@@ -64,6 +64,10 @@ rules when it crosses borders.
 Replay runs the recorded GPU code on your GPU, with your user's rights: replay
 an archive only if you trust whoever produced it.
 
+What HRR is responsible for, and what it leaves to you, is listed under Scope
+in projects/hrr/PRIVACY.md of the ROCm source:
+https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/PRIVACY.md
+
 HRR is provided "as is", without warranty of any kind, as stated in its
 licence. You, not AMD, are responsible for the content of archives you create
 and for how they are shared. Report security issues in HRR to psirt@amd.com.
