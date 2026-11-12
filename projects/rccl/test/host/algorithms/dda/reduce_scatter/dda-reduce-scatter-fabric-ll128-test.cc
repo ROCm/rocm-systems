@@ -376,6 +376,9 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, PollBatch_WalkVisitsEveryPeerOnceIn
   static_assert(dda::common::kDdaLL128RsPollBatch<dda::common::fp8e5m2> == 4);
   ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<float>>();
   ExpectPollWalkCoversPeersInRankOrder<dda::common::kDdaLL128RsPollBatch<dda::common::fp8e4m3>>();
+  // The 4- and 8-rank instances cap the batch at their peer count.
+  ExpectPollWalkCoversPeersInRankOrder<3>();
+  ExpectPollWalkCoversPeersInRankOrder<7>();
 }
 
 }  // namespace
