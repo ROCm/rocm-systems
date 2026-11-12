@@ -231,17 +231,26 @@ TEST_F(ConSanAnalysis, OverlappingWriteReadProducesAttributedUnorderedCrossWaveF
 TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot) {
   capture_.header.manifest.target = 1250;
   capture_.header.manifest.sites[0].width = 8;
-  for (const uint32_t offset : {4u, 8u}) {
-    capture_.executions.clear();
-    append_execution();
-    access(0, 0, 1, 0);
-    access(1, 1, 1, offset);
-    const FailureOr<LdsRaceResult> result = analyze();
-    ASSERT_TRUE(result.succeeded()) << error_.message;
-    EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
-    EXPECT_EQ(result.value().cross_wave_pairs, offset == 4 ? 1u : 0u);
-    EXPECT_TRUE(result.value().coverage_complete);
-  }
+  for (const AccessKind wide_access : {AccessKind::Write, AccessKind::Read})
+    for (const AccessKind narrow_access : {AccessKind::Read, AccessKind::Write})
+      for (const uint32_t offset : {4u, 8u}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "wide_access=" << static_cast<uint32_t>(wide_access) << ", narrow_access="
+                     << static_cast<uint32_t>(narrow_access) << ", narrow_offset=" << offset);
+        capture_.header.manifest.sites[0].access = wide_access;
+        capture_.header.manifest.sites[1].access = narrow_access;
+        capture_.executions.clear();
+        append_execution();
+        access(0, 0, 1, 0);
+        access(1, 1, 1, offset);
+        const FailureOr<LdsRaceResult> result = analyze();
+        ASSERT_TRUE(result.succeeded()) << error_.message;
+        const bool conflict =
+            offset == 4 && (wide_access == AccessKind::Write || narrow_access == AccessKind::Write);
+        EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
+        EXPECT_EQ(result.value().cross_wave_pairs, conflict ? 1u : 0u);
+        EXPECT_TRUE(result.value().coverage_complete);
+      }
 }
 
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
