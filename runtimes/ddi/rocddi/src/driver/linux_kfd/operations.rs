@@ -19,6 +19,18 @@ pub(super) fn matching_device_info(
         .filter(|info| info.device_id == pci.device_id)
 }
 
+/// Uses active matching DRM information when it reports a family; discovery
+/// remains the fallback and is never rewritten with activation results.
+pub(super) fn resolved_family_id(discovered: u32, native: Option<drm::DeviceInfoPrefix>) -> u32 {
+    native.map_or(discovered, |info| {
+        if info.family_id == 0 {
+            discovered
+        } else {
+            info.family_id
+        }
+    })
+}
+
 pub(super) fn device_counter_frequency_hz(info: drm::DeviceInfoPrefix) -> Option<u64> {
     (info.gpu_counter_frequency_khz != 0)
         .then_some(u64::from(info.gpu_counter_frequency_khz) * 1000)
@@ -38,7 +50,6 @@ pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
     if let (Some(device_info), crate::topology::EndpointKind::Gpu { info }) =
         (device_info, &mut endpoint.kind)
     {
-        info.drm_asic_family_id = (device_info.family_id != 0).then_some(device_info.family_id);
         info.counter_frequency_hz = device_counter_frequency_hz(device_info);
     }
     endpoint.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
@@ -106,6 +117,7 @@ impl GpuSurfaceOperations for LinuxKfdDriver {
             .tile_config(device.native.gpu_id)
             .map_err(|source| native_error("KFD tile configuration query", source))?;
         Ok(crate::device::gpu::GpuSurfaceConfig {
+            asic_family_id: device.asic_family_id,
             gb_addr_config: config.gb_addr_config,
         })
     }

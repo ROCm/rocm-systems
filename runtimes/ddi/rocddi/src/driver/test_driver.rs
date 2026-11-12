@@ -166,6 +166,7 @@ pub(crate) struct TestDriver {
 #[derive(Clone)]
 pub(crate) struct TestDevice {
     id: [u8; 16],
+    pub(crate) asic_family_id: u32,
     events: Arc<TestEvents>,
 }
 
@@ -525,7 +526,6 @@ impl Driver for TestDriver {
     fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         endpoint.product_name = Some("Test endpoint".to_owned());
         if let EndpointKind::Gpu { info } = &mut endpoint.kind {
-            info.drm_asic_family_id = Some(42);
             info.counter_frequency_hz = Some(1_000_000);
         }
         Ok(())
@@ -540,6 +540,7 @@ impl Driver for TestDriver {
         }
         Ok(TestDevice {
             id: self.id,
+            asic_family_id: 42,
             events: self.events.clone(),
         })
     }

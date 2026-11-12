@@ -260,7 +260,6 @@ impl Endpoint {
         if let (EndpointKind::Gpu { info: expected }, EndpointKind::Gpu { info: actual }) =
             (&mut expected.kind, &other.kind)
         {
-            expected.drm_asic_family_id = actual.drm_asic_family_id;
             expected.counter_frequency_hz = actual.counter_frequency_hz;
         }
         expected == *other
