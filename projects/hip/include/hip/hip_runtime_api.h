@@ -6592,10 +6592,10 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
  * @param [out] sparseProperties - Pointer to hipArraySparseProperties
  * @param [in] array - HIP array to get the sparse properties of
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
  *
  * @note Sparse HIP arrays are not currently supported on AMD devices;
- * hipDeviceProp_t::sparseHipArraySupported reports 0 and #hipMemMapArrayAsync is unsupported.
+ * This function always reports #hipErrorNotSupported for well-formed arguments.
  */
 hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
                                        hipArray_t array);
