@@ -204,12 +204,14 @@ fn validate_update(
     update: amdf_memory_mapping_update_t,
 ) -> Result<(), u64> {
     let granularity = reservation.info.mapping_granularity;
-    if update.byte_length == 0
-        || update.target_byte_offset % granularity != 0
-        || update.target_byte_offset > reservation.info.byte_length
-        || update.byte_length > reservation.info.byte_length - update.target_byte_offset
-        || (update.byte_length % granularity != 0
-            && update.byte_length != reservation.info.byte_length - update.target_byte_offset)
+    if rocddi::memory::constraints::CheckedRange::new(
+        reservation.info.byte_length,
+        update.target_byte_offset,
+        update.byte_length,
+        granularity,
+        rocddi::memory::constraints::RangeTail::EndOfReservation,
+    )
+    .is_none()
     {
         return Err(INVALID);
     }
