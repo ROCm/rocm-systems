@@ -740,19 +740,19 @@ that contains both ``roofline.csv`` and application performance counters
    On gfx1201 (Navi 48, for example the Radeon RX 9070), the roofline has two
    device-memory roofs:
 
-   * ``GDDR6`` is the measured device-memory bandwidth (CSV column ``GDDR6Bw``).
-     Navi 48 has no HBM. Its 256-bit, 20 Gbps GDDR6 interface peaks at 640 GB/s
+   * ``VRAM`` is the measured device-memory bandwidth (CSV column ``VRAMBw``).
+     Navi 48 has no HBM. Its 256-bit, 20 Gbps VRAM interface peaks at 640 GB/s
      at the default performance level. The measured roof is lower under
      ``STABLE_STD``.
    * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache. The
      benchmark reads a buffer of half the Infinity Cache capacity repeatedly,
      so the reads miss in the 8 MB L2 and hit in the Infinity Cache.
 
-   The ``AI GDDR6`` point counts GL2C/EA requests destined for memory. The
+   The ``AI VRAM`` point counts GL2C/EA requests destined for memory. The
    Infinity Cache serves some of those requests, and no performance counter
-   separates its hits from physical GDDR6 traffic, so read the point against
+   separates its hits from physical VRAM traffic, so read the point against
    both roofs. A kernel whose working set fits in the Infinity Cache can sit
-   above the ``GDDR6`` roof and below the ``MALL`` roof.
+   above the ``VRAM`` roof and below the ``MALL`` roof.
 
    The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and
    aqlprofile installation that supports SQ event 233. Check profiling warnings

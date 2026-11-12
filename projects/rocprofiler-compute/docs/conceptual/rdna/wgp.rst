@@ -31,13 +31,13 @@ performance state that is active, and ``STABLE_STD`` fixes lower clocks than
 the default state, so its roofs are lower. Do not compare ``roofline.csv``
 files or roofline percentages across performance states.
 
-On gfx1201, the measured roofs are GDDR6, MALL (the 64 MB Infinity Cache), GL2,
+On gfx1201, the measured roofs are VRAM, MALL (the 64 MB Infinity Cache), GL2,
 the GL1 write-combining cache, GL0, and LDS, plus VALU (FP16, FP32, FP64, I32)
 and WMMA (FP8, BF8, FP16, BF16). BF8 is ``V_WMMA_F32_16X16X16_BF8_BF8``,
 the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
 
-* ``GDDR6`` (column ``GDDR6Bw``) is the measured device-memory bandwidth of the
-  256-bit, 20 Gbps GDDR6 interface. The benchmark streams a dataset far larger
+* ``VRAM`` (column ``VRAMBw``) is the measured device-memory bandwidth of the
+  256-bit, 20 Gbps VRAM interface. The benchmark streams a dataset far larger
   than the 64 MB Infinity Cache.
 * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache, from a buffer
   that misses in the 8 MB L2 and fits in the Infinity Cache.
@@ -46,13 +46,13 @@ the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
   path for a set that misses GL0. gfx1201 has no ``AI L1`` or ``AI L2`` point,
   so the ``L1`` and ``L2`` roofs have no kernel point.
 
-The ``AI GDDR6`` point counts 32-byte GL2C/EA requests destined for memory.
+The ``AI VRAM`` point counts 32-byte GL2C/EA requests destined for memory.
 Infinity Cache can serve those requests, and no counter separates its hits from
-traffic to physical GDDR6. The plot marks the point once, at the ``GDDR6`` level.
-Compare its performance with both the ``GDDR6`` and ``MALL`` roofs. A working set
-that fits in the Infinity Cache can sit above the ``GDDR6`` roof and below the
-``MALL`` roof, so such a kernel is not limited by GDDR6. The "Limited by" mode
-and the hover text consider the ``GDDR6`` level only, and never name ``MALL``.
+traffic to physical VRAM. The plot marks the point once, at the ``VRAM`` level.
+Compare its performance with both the ``VRAM`` and ``MALL`` roofs. A working set
+that fits in the Infinity Cache can sit above the ``VRAM`` roof and below the
+``MALL`` roof, so such a kernel is not limited by VRAM. The "Limited by" mode
+and the hover text consider the ``VRAM`` level only, and never name ``MALL``.
 The analysis database stores this point in its ``hbm_cache_data`` column, which
 MI architectures fill with ``AI HBM``.
 

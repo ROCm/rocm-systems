@@ -40,10 +40,10 @@ The table provides key details for the RDNA architectures covered by these chapt
      - AMD Radeon RX 9070 and RX 9070 XT, Navi 48 (gfx1201)
    * - Chip packaging
      - APU with shared system memory
-     - Discrete GPU with dedicated GDDR6
+     - Discrete GPU with dedicated VRAM
    * - Device memory in the tool
      - System memory through GCEA
-     - GDDR6. The 64 MB Infinity Cache (MALL) has a roofline and no MALL counters
+     - VRAM. The 64 MB Infinity Cache (MALL) has a roofline and no MALL counters
    * - Compute organization
      - Each WGP pairs two CUs. Wave32 is the primary mode, and wave64 is supported
      - Navi 48 has 4 shader engines, 64 CUs, and 32 WGPs. Wave32 is the primary mode, and wave64 is supported

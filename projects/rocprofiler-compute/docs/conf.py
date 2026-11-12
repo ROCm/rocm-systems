@@ -192,7 +192,7 @@ rdna_gfx1201_section_map = {
     "navi48-memory-chart-gl2-gfx1201": "Memory chart - GL2 Cache (L2)",
     "navi48-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
     "navi48-memory-chart-infinity-cache-gfx1201": (
-        "Memory chart - Infinity Cache and GDDR6"
+        "Memory chart - Infinity Cache and VRAM"
     ),
     "navi48-memory-chart-wgp-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
     "navi48-gl2-utilization-gfx1201": "GL2 Cache Request Statistics",

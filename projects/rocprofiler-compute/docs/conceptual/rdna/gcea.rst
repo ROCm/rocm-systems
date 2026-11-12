@@ -106,13 +106,13 @@ Memory chart - GCEA to system memory
 
 ``DRAM Read Bandwidth`` and ``DRAM Write Bandwidth`` count requests that L2 sends
 toward memory, including requests served or absorbed by the Infinity Cache. They
-do not measure the bytes that physically reach GDDR6. A value above the GDDR6
+do not measure the bytes that physically reach VRAM. A value above the VRAM
 peak does not by itself indicate an invalid counter.
 
-Memory chart - Infinity Cache and GDDR6
----------------------------------------
+Memory chart - Infinity Cache and VRAM
+--------------------------------------
 
-``Infinity Cache Hit Rate``, ``GDDR6 Read Bandwidth``, and ``GDDR6 Write Bandwidth``
+``Infinity Cache Hit Rate``, ``VRAM Read Bandwidth``, and ``VRAM Write Bandwidth``
 display ``N/A`` because this configuration does not collect the counters needed to
 measure them. Do not infer those values from memory-destined traffic.
 
@@ -120,7 +120,7 @@ measure them. Do not infer those values from memory-destined traffic.
 
    .. tab-item:: RDNA3.5 (gfx115x)
 
-      gfx115x does not publish an Infinity Cache or GDDR6 table. Device memory on
+      gfx115x does not publish an Infinity Cache or VRAM table. Device memory on
       these APUs is system memory, in the table above.
 
    .. tab-item:: RDNA4 (gfx1201)
