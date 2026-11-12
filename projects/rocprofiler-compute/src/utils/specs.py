@@ -84,6 +84,7 @@ def check_experimental_arch(
         console_error(
             f"{gpu_arch} is an experimental GPU. Use --experimental to enable it."
         )
+        return
     console_warning(f"{gpu_arch} is experimental and may change in future releases.")
 
 
