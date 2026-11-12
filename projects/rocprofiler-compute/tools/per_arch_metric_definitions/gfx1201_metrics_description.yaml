@@ -176,7 +176,7 @@ Roofline Performance Rates:
     plain: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
     rst: Matrix operations per second scored against the measured FP16 roof. The formula is 8192 * SQ_WMMA_VALU_INSTS. SQ_WMMA_VALU_INSTS counts every WMMA issue, and the counter does not separate FP16, BF16, FP8, and BF8, so the achieved rate is not FP16-only. V_WMMA_F32_16X16X16_BF8_BF8 is a separate roof.
     unit: GFLOP/s
-  VALU FLOPs (F64):
+  VALU FLOPs (FP64):
     plain: 64-bit floating-point operations per second on the VALU.
     rst: 64-bit floating-point operations per second on the VALU.
     unit: GFLOP/s
