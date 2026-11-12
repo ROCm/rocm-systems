@@ -415,10 +415,7 @@ struct SharedHooks {
   ScopedHook<ncclResult_t(ncclInfo*)> enqueueCheck{g_enqueueCheck, [](ncclInfo* info) {
     fake.trace.push_back(std::string("enqueue ") + info->opName);
     std::vector<size_t> sizes;
-    if (info->sizes != nullptr) {
-      const size_t n = info->comm->nRanks;
-      sizes.assign(info->sizes, info->sizes + 4 * n * n);
-    }
+    if (info->sizes != nullptr) sizes.assign(info->sizes, info->sizes + info->sizesCount);
     fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
     if (fake.enqueueResults.empty()) return ncclSuccess;
     ncclResult_t res = fake.enqueueResults.front();
@@ -2073,7 +2070,7 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
   ncclDevrWindow recvWin_{};
 };
 
-TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PostsEveryPeerAtItsDisplacement) {
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_EnqueuesOneAlltoAllvWithThisRanksSizes) {
   EXPECT_EQ(ncclSuccess, AlltoAllv());
   ASSERT_EQ(1u, fake.recorded.size());
   EXPECT_EQ(rccl::rrAllToAllv, fake.recorded[0].type);
@@ -2082,24 +2079,16 @@ TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PostsEveryPeerAtItsDisplacement
   EXPECT_EQ(0u, fake.recorded[0].count);
   EXPECT_EQ(sendcounts_, fake.recorded[0].sendcounts);
   EXPECT_EQ(rdispls_, fake.recorded[0].rdispls);
-  EXPECT_EQ((std::vector<bool>{true, false}), g_recorderSkips);
-  ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
-  for (int r = 0; r < kNRanks; r++) {
-    SCOPED_TRACE(r);
-    const P2p& send = fake.p2ps[2 * r];
-    const P2p& recv = fake.p2ps[2 * r + 1];
-    EXPECT_TRUE(send.send);
-    EXPECT_EQ(send_.data() + sdispls_[r], send.buff);
-    EXPECT_EQ(sendcounts_[r], send.count);
-    EXPECT_EQ(ncclFloat32, send.datatype);
-    EXPECT_EQ(r, send.peer);
-    EXPECT_FALSE(recv.send);
-    EXPECT_EQ(recv_.data() + rdispls_[r], recv.buff);
-    EXPECT_EQ(recvcounts_[r], recv.count);
-    EXPECT_EQ(r, recv.peer);
-  }
-  EXPECT_EQ((std::vector<std::string>{"record", "findWindow", "findWindow", "groupStart", "groupEnd"}), fake.trace);
-  EXPECT_TRUE(fake.enqueued.empty());
+  EXPECT_TRUE(g_recorderSkips.empty());
+  EXPECT_TRUE(fake.p2ps.empty());
+  EXPECT_EQ((std::vector<std::string>{"record", "findWindow", "findWindow", "enqueue AlltoAllv"}), fake.trace);
+  ASSERT_EQ(1u, fake.enqueued.size());
+  EXPECT_EQ(ncclFuncAlltoAllv, Info().coll);
+  EXPECT_EQ(send_.data(), Info().sendbuff);
+  EXPECT_EQ(recv_.data(), Info().recvbuff);
+  EXPECT_EQ(0u, Info().count);
+  EXPECT_EQ(ncclFloat32, Info().datatype);
+  EXPECT_EQ(LocalBlock(), fake.enqueued[0].sizes);
   EXPECT_TRUE(fake.memAllocSizes.empty());
 }
 
@@ -2158,29 +2147,11 @@ TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed post returns without ncclGroupEnd or skip(false), so the caller's group stays open.
-// Pins AICOMRCCL-2980; a fix flips this pin.
-TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_KnownBug_FailureLeavesTheGroupOpen) {
-  fake.groupStartResult = ncclInvalidUsage;
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_ReturnsTheEnqueueResult) {
+  fake.enqueueResults = {ncclInvalidUsage};
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
   EXPECT_TRUE(fake.p2ps.empty());
-  fake.groupStartResult = ncclSuccess;
-  for (int failAt : {3, 4}) {
-    SCOPED_TRACE(failAt);
-    fake.p2ps.clear();
-    g_recorderSkips.clear();
-    fake.trace.clear();
-    fake.p2pFailAt = failAt;
-    EXPECT_EQ(ncclInternalError, AlltoAllv());
-    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
-    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
-  }
-  fake.p2pFailAt = 0;
-  g_recorderSkips.clear();
-  fake.groupEndResult = ncclRemoteError;
-  EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupStart"));
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
