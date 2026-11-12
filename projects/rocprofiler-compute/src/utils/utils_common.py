@@ -626,15 +626,12 @@ def parse_pmc_perf(pmc_perf_file: str) -> List[str]:
     return jobs[0].get("pmc") or []
 
 
-def is_roofline_block(block: str) -> bool:
-    """Return True if a --block value selects roofline: 4, 4.x, or the alias."""
-    block = str(block)
-    return block in ROOFLINE_BLOCK_IDS or block.startswith("4.")
-
-
 def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
-    """Return True if nothing is selected (everything) or a block is roofline."""
-    return not filter_blocks or any(is_roofline_block(b) for b in filter_blocks)
+    """Return True if nothing is selected (everything) or a block is 4, 4.x or roof."""
+    return not filter_blocks or any(
+        str(block) in ROOFLINE_BLOCK_IDS or str(block).startswith("4.")
+        for block in filter_blocks
+    )
 
 
 def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
