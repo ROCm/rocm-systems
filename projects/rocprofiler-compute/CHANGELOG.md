@@ -89,9 +89,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--bench-only` → `--roofline-bench-only`
   * `--device` → `--roofline-device`
 
-* The `-b` block alias `roof` is now `roofline`. For example, use `-b roofline` instead of `-b roof`.
-
-* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roofline`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
+* Roofline metric ids such as `-b 4.1` now count as selecting roofline, like `-b 4` and `-b roof`. In profile mode they run the roofline benchmark, and in analyze mode they show the roofline section.
 
 ### Removed
 

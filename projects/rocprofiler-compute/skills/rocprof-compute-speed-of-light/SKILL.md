@@ -45,7 +45,7 @@ also runs the roofline benchmarks.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
 - Unless the question is about roofline, select blocks with `-b` and leave out
-  block 4 (`roofline`), so the roofline benchmark is skipped.
+  block 4 (`roof`), so the roofline benchmark is skipped.
 - `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
   each kernel, so it only helps when every profiled kernel is dispatched many
   times. Pair it with `-k`. See Iteration multiplexing in

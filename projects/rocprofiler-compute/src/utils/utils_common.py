@@ -47,7 +47,7 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 # Block 4 and its alias; ids such as 4.1 are roofline metrics
-ROOFLINE_BLOCK_IDS = ("4", "roofline")
+ROOFLINE_BLOCK_IDS = ("4", "roof")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
 # in the workload directory, and analyze reads them back by these prefixes.
