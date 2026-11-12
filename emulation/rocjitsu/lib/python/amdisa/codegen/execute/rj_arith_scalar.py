@@ -155,6 +155,10 @@ FLOAT_ARITHMETIC.update(
         'S_FMAMK_F32': ScalarFloatOperation(3, 32, 32),
     }
 )
+ROUNDED_RESULTS = {
+    f'S_{op}_F{bits}' for bits in (16, 32) for op in ('ADD', 'SUB', 'MUL', 'FMAC')
+} | {'S_FMAAK_F32', 'S_FMAMK_F32', 'S_CVT_F32_I32', 'S_CVT_F32_U32', 'S_CVT_F16_F32'}
+GFX1250_ROUNDED_RESULTS = {'S_FMAC_F32', 'S_FMAAK_F32', 'S_FMAMK_F32'}
 MOVES = {f'S_{op}_B{bits}' for op in ('MOV', 'CMOV') for bits in (32, 64)} | {
     'S_MOVK_I32',
     'S_CMOVK_I32',
@@ -356,8 +360,15 @@ def _gen_float(mnemonic, dst, src, *, gfx1250=False):
                 f'  if (!(wf.{denorm}() & {mask}u))',
                 f'    flags |= RJ_ARITH_FP_FLUSH_{flag}_DENORMALS;',
             ]
-    if mnemonic in ('S_FMAC_F32', 'S_FMAAK_F32', 'S_FMAMK_F32'):
-        lines.append('  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;')
+    # gfx1250 keeps its inherited model, which honors MODE rounding only for FP32 FMA.
+    if mnemonic in (GFX1250_ROUNDED_RESULTS if gfx1250 else ROUNDED_RESULTS):
+        # The destination format selects the MODE rounding field.
+        rounding = (
+            'fp_round_mode_f32'
+            if operation.output_fp_bits == 32
+            else 'fp_round_mode_f16_f64'
+        )
+        lines.append(f'  flags |= uint64_t(wf.{rounding}()) << 24;')
     for i, operand in enumerate(src):
         # Numeric FP16 inlines differ from raw scalar register/literal carriers.
         if operation.input_fp_bits == 16:
