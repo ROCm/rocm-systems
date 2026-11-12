@@ -84,7 +84,7 @@ def test_loss_wins_over_congestion(tmp_path):
 
 def test_overlapped_and_unavailable_are_excluded(tmp_path):
     lines = [_rec(i) for i in range(3)]
-    lines += [_rec(10, overlapped=True, rdma={"tx_rdma_retx_pkts": 9})]
+    lines += [_rec(10, overlapped=True, rdma={"resp_rx_outouf_seq": 9})]
     lines += [_rec(11, unavailable=True)]
     v = _verdict(tmp_path, lines)
     assert v.verdict == "CLEAN"
@@ -123,7 +123,7 @@ def test_no_traffic_is_inconclusive(tmp_path):
 
 
 def test_stale_ethtool_never_drives_a_verdict(tmp_path):
-    eth = {"stale": True, "frames_rx_pripause": 1000}
+    eth = {"stale": True, "frames_rx_pri_3": 1000}
     v = _verdict(tmp_path, [_rec(i, ethtool=eth) for i in range(3)])
     assert v.verdict == "CLEAN"
     assert (v.pause_rx, v.pause_tx) == (3000, 0)
@@ -153,7 +153,7 @@ def test_records_without_net_counters_are_counted(tmp_path):
 
 def test_comms_are_judged_separately(tmp_path):
     a = _write(tmp_path, [_rec(i, n_ranks=1) for i in range(3)], comm="0x1")
-    b = _write(tmp_path, [_rec(i, n_ranks=1, rdma={"tx_rdma_retx_pkts": 1}) for i in range(3)], comm="0x2")
+    b = _write(tmp_path, [_rec(i, n_ranks=1, rdma={"tx_rdma_ack_timeout": 1}) for i in range(3)], comm="0x2")
     recs, _ = load([a, b], warmup=0)
     vs = verdicts(recs)
     assert vs[("0x1", "AllReduce", S)].verdict == "CLEAN"
@@ -217,7 +217,7 @@ def test_skew_correction_stays_within_a_comm(tmp_path):
 
 
 def test_trace_has_windows_reads_and_counters(tmp_path):
-    a = _write(tmp_path, [_rec(0, n_ranks=1), _rec(1, rdma={"tx_rdma_retx_pkts": 2}, n_ranks=1)],
+    a = _write(tmp_path, [_rec(0, n_ranks=1), _rec(1, rdma={"resp_rx_outouf_seq": 2}, n_ranks=1)],
                rank=0)
     recs, _ = load([a], warmup=0)
     correct_skew(recs)
@@ -225,11 +225,12 @@ def test_trace_has_windows_reads_and_counters(tmp_path):
     ev = t["traceEvents"]
     windows = [e for e in ev if e["ph"] == "X" and e["cat"] != "read"]
     assert [w["cat"] for w in windows] == ["window", "suspect"]
-    assert windows[1]["args"]["tx_rdma_retx_pkts"] == 2
+    assert windows[1]["args"]["drops"] == {"OOS (resp_rx_outouf_seq)": 2}
     assert windows[0]["ts"] == 0 and windows[0]["dur"] == 600
     assert sum(1 for e in ev if e.get("cat") == "read") == 2
     assert any(e["ph"] == "M" and e["args"]["name"].startswith("nodeA") for e in ev)
-    assert all(e["ph"] != "C" or "tx_MB" in e["args"] for e in ev)
+    drops = [e["args"] for e in ev if e["ph"] == "C" and e["name"].endswith("drops")]
+    assert drops == [{"OOS": 0}, {"OOS": 2}]
     assert windows[0]["args"]["exec_corrected_us"] == 100.0
 
 
@@ -290,7 +291,7 @@ def test_skew_correction_clamps_at_zero(tmp_path):
 
 
 def test_tx_per_coll_and_pause_use_usable_records_only(tmp_path):
-    eth = {"stale": True, "frames_tx_pripause": 4, "rx_pripause_3_1us_count": 99}
+    eth = {"stale": True, "frames_tx_pri_3": 4, "rx_pripause_3_1us_count": 99}
     lines = [_rec(i, ethtool=eth) for i in range(3)]
     lines.append(_rec(9, overlapped=True, rdma={"tx_rdma_ucast_bytes": 10 * S}, ethtool=eth))
     v = _verdict(tmp_path, lines)
@@ -301,11 +302,11 @@ def test_tx_per_coll_and_pause_use_usable_records_only(tmp_path):
 def test_devices_are_summed(tmp_path):
     r = json.loads(_rec(0))
     r["net_counters"]["devices"].append(
-        {"name": "rdma1", "rdma": {"tx_rdma_ucast_bytes": S, "tx_rdma_retx_pkts": 1},
+        {"name": "rdma1", "rdma": {"tx_rdma_ucast_bytes": S, "req_rx_pkt_seq_err": 1},
          "ethtool": None})
     lines = [json.dumps(r)] + [_rec(i) for i in range(1, 3)]
     v = _verdict(tmp_path, lines)
-    assert v.drivers["tx_rdma_retx_pkts"] == (1, 1, [0])
+    assert v.drivers["req_rx_pkt_seq_err"] == (1, 1, [0])
     assert v.tx_bytes_per_coll == S * 4 / 3
 
 
@@ -366,7 +367,7 @@ def test_raw_snapshots_are_deduplicated_and_activity_is_separate(tmp_path):
     assert len(reads) == 4 and len(activity) == len(windows) == 3
     assert activity[0]['dur'] == 350 and windows[0]['dur'] == 900
     assert activity[0]['tid'] != windows[0]['tid'] != reads[0]['tid']
-    assert activity[0]['args']['all_ranks_coordinated'] is True
+    assert activity[0]["args"]["coordinated"] is True
 
 
 def test_discontinuous_counter_window_is_not_usable(tmp_path):
@@ -420,3 +421,19 @@ def test_passive_without_symptoms_cannot_be_clean(tmp_path):
     v = _verdict(tmp_path, _passive([_rec(i) for i in range(4)]))
     assert v.verdict == "INCONCLUSIVE"
     assert "ACCL_NET_STRICT=1" in v.reason
+
+
+def test_trace_shows_only_selected_counters(tmp_path):
+    eth = {"stale": True, "frames_rx_pri_3": 7, "rx_pripause_3_1us_count": 500}
+    a = _write(tmp_path, [_rec(0, n_ranks=1, ethtool=eth,
+                               rdma={"rx_rdma_cnp_pkts": 3, "req_rx_dup_response": 1})])
+    recs, _ = load([a], warmup=0)
+    ev = build_trace(recs)["traceEvents"]
+    w = [e for e in ev if e["ph"] == "X" and e["cat"] != "read"][0]["args"]
+    assert w["tx_bytes"] == S and w["rx_bytes"] == S
+    assert w["ecn_cnp"] == {"CNP received (rx_rdma_cnp_pkts)": 3}
+    assert w["pfc_frames (stale)"] == {"rx prio 3": 7}
+    assert "drops" not in w
+    assert not any("dup_response" in k for k in w)
+    tracks = {e["name"] for e in ev if e["ph"] == "C"}
+    assert tracks == {"rank 0 MB per collective", "rank 0 ECN/CNP", "rank 0 PFC frames (stale)"}

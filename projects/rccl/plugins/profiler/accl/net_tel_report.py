@@ -21,36 +21,46 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-# RDMA hw counters (ionic names) that mean the network misbehaved, and the side
-# of a transfer whose NIC counts them. Loss shows up on the receiver
-# (out-of-sequence, out-of-buffer) and as NAKs/retransmits on the sender, so a
+# The counters shown, with their category and the side of a transfer whose NIC
+# counts them (ionic names, then mlx5). Drops show up on the receiver
+# (out-of-buffer, out-of-sequence) and as NAKs/timeouts on the sender, so a
 # verdict pools every rank of a size.
-NET_LOSS_COUNTERS = {
-    'tx_rdma_retx_pkts': 'sender',
-    'tx_rdma_retx_bytes': 'sender',
-    'tx_rdma_ack_timeout': 'sender',
-    'req_tx_retry_excd_err': 'sender',
-    'req_rx_pkt_seq_err': 'sender (NAK from receiver)',
-    'req_rx_impl_nak_seq_err': 'sender (NAK from receiver)',
-    'req_rx_rnr_retry_err': 'sender (RNR from receiver)',
-    'resp_rx_outouf_seq': 'receiver',
-    'resp_rx_outof_buf': 'receiver',
-    'resp_tx_pkt_seq_err': 'receiver',
-    'resp_tx_rnr_retry_err': 'receiver',
-    'tx_rdma_ccl_cts_retx_pkts': 'receiver (CTS)',
-    'tx_rdma_ccl_cts_ack_timeout': 'receiver (CTS)',
-    'resp_rx_ccl_cts_outouf_seq': 'sender (CTS)',
+DROP_COUNTERS = {
+    'resp_rx_outof_buf': ('OOB', 'receiver'),
+    'out_of_buffer': ('OOB', 'receiver'),
+    'req_rx_rnr_retry_err': ('RNR', 'sender'),
+    'resp_tx_rnr_retry_err': ('RNR', 'receiver'),
+    'rnr_nak_retry_err': ('RNR', 'sender'),
+    'req_rx_pkt_seq_err': ('NAK', 'sender, NAK received'),
+    'req_rx_impl_nak_seq_err': ('NAK', 'sender, NAK received'),
+    'resp_tx_pkt_seq_err': ('NAK', 'receiver, NAK sent'),
+    'packet_seq_err': ('NAK', 'sender, NAK received'),
+    'resp_rx_outouf_seq': ('OOS', 'receiver'),
+    'resp_rx_ccl_cts_outouf_seq': ('OOS', 'sender, CTS'),
+    'out_of_sequence': ('OOS', 'receiver'),
+    'tx_rdma_ack_timeout': ('ACK timeout', 'sender'),
+    'tx_rdma_ccl_cts_ack_timeout': ('ACK timeout', 'receiver, CTS'),
+    'local_ack_timeout_err': ('ACK timeout', 'sender'),
 }
-NET_CONGESTION_COUNTERS = {
-    'rx_rdma_ecn_pkts': 'receiver',
-    'tx_rdma_cnp_pkts': 'receiver',
-    'rx_rdma_cnp_pkts': 'sender',
+CONGESTION_COUNTERS = {
+    'rx_rdma_ecn_pkts': ('ECN', 'receiver'),
+    'np_ecn_marked_roce_packets': ('ECN', 'receiver'),
+    'tx_rdma_cnp_pkts': ('CNP sent', 'receiver'),
+    'np_cnp_sent': ('CNP sent', 'receiver'),
+    'rx_rdma_cnp_pkts': ('CNP received', 'sender'),
+    'rp_cnp_handled': ('CNP received', 'sender'),
 }
+NET_LOSS_COUNTERS = {k: f'{c}, {side}' for k, (c, side) in DROP_COUNTERS.items()}
+NET_CONGESTION_COUNTERS = {k: f'{c}, {side}' for k, (c, side) in CONGESTION_COUNTERS.items()}
 VOLUME = ('tx_rdma_ucast_bytes', 'rx_rdma_ucast_bytes')
 # Volume, including AINIC's hardware CTS control traffic: never a symptom.
 VOLUME_ALL = VOLUME + ('tx_rdma_ucast_pkts', 'rx_rdma_ucast_pkts',
                        'tx_rdma_ccl_cts_bytes', 'tx_rdma_ccl_cts_pkts',
                        'rx_rdma_ccl_cts_bytes', 'rx_rdma_ccl_cts_pkts')
+# PFC ethtool stats per priority. ionic: frames_{rx,tx}_pri_N and
+# {rx,tx}_pripause_N_1us_count; mlx5: {rx,tx}_prioN_pause(_duration).
+PFC_FRAMES_RE = re.compile(r'^(?:frames_(rx|tx)_pri_?(\d)|(rx|tx)_prio(\d)_pause)$')
+PFC_TIME_RE = re.compile(r'^(?:(rx|tx)_pripause_(\d)_1us_count|(rx|tx)_prio(\d)_pause_duration)$')
 MIN_USABLE = 3
 
 FILE_RE = re.compile(r'accl_profiler_rank(\d+)_(.+)_pid(\d+)_(0x[0-9a-fA-F]+)\.jsonl$')
@@ -158,20 +168,92 @@ def rdma_deltas(net: dict) -> Dict[str, int]:
     return out
 
 
-def pause_frames(net: dict) -> Tuple[int, int]:
-    """(rx, tx) pause/PFC frame counts; durations and transitions excluded."""
-    rx = tx = 0
+def pfc_key(name: str, pattern) -> Optional[Tuple[str, int]]:
+    """('rx'|'tx', priority) for a per-priority PFC stat, else None."""
+    m = pattern.match(name)
+    if not m:
+        return None
+    direction = m.group(1) or m.group(3)
+    return direction, int(m.group(2) or m.group(4))
+
+
+def pfc_frames(net: dict) -> Dict[Tuple[str, int], int]:
+    """Per-window PFC frames by (direction, priority). Stale on ionic."""
+    out: Dict[Tuple[str, int], int] = defaultdict(int)
     for dev in net.get('devices') or []:
         for k, v in (dev.get('ethtool') or {}).items():
-            if k == 'stale' or not ('pause' in k or 'pfc' in k):
+            key = pfc_key(k, PFC_FRAMES_RE)
+            if key and v:
+                out[key] += v
+    return out
+
+
+def pause_frames(net: dict) -> Tuple[int, int]:
+    """(rx, tx) PFC frames over all priorities."""
+    f = pfc_frames(net)
+    return (sum(v for (d, _), v in f.items() if d == 'rx'),
+            sum(v for (d, _), v in f.items() if d == 'tx'))
+
+
+def pfc_pause_summary(recs: List[Rec]) -> List[dict]:
+    """Whole-run PFC per (host, device, priority) from the first and last raw
+    snapshot of each device, so ionic's ~5 s ethtool refresh averages out.
+    rx pause time: this host's NIC was paused by its switch port. tx pause
+    time: this NIC paused its peer. Percentages are of the snapshot span."""
+    first: Dict[Tuple[str, str], Tuple[int, dict]] = {}
+    last: Dict[Tuple[str, str], Tuple[int, dict]] = {}
+    for r in recs:
+        if not r.net:
+            continue
+        for snap in (r.net.get('snapshot_before'), r.net.get('snapshot_after')):
+            for dev in (snap or {}).get('devices') or []:
+                eth = dev.get('ethtool')
+                if not eth:
+                    continue
+                key = (r.host, dev['name'])
+                if key not in first or dev['read_start_us'] < first[key][0]:
+                    first[key] = (dev['read_start_us'], eth)
+                if key not in last or dev['read_end_us'] > last[key][0]:
+                    last[key] = (dev['read_end_us'], eth)
+    rows = []
+    for key in sorted(first):
+        (t0, a), (t1, b) = first[key], last[key]
+        span = t1 - t0
+        per: Dict[int, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for name, v in b.items():
+            delta = v - a.get(name, v)
+            if delta <= 0:
                 continue
-            if any(x in k for x in ('us_count', 'duration', 'transition')):
-                continue
-            if 'rx' in k:
-                rx += v
-            elif 'tx' in k:
-                tx += v
-    return rx, tx
+            fk, tk = pfc_key(name, PFC_FRAMES_RE), pfc_key(name, PFC_TIME_RE)
+            if fk:
+                per[fk[1]][f'{fk[0]}_frames'] += delta
+            elif tk:
+                per[tk[1]][f'{tk[0]}_pause_us'] += delta
+        for prio, c in sorted(per.items()):
+            rows.append({'host': key[0], 'device': key[1], 'priority': prio, 'span_us': span,
+                         'rx_frames': c['rx_frames'], 'tx_frames': c['tx_frames'],
+                         'rx_pause_us': c['rx_pause_us'], 'tx_pause_us': c['tx_pause_us'],
+                         'host_paused_pct': 100.0 * c['rx_pause_us'] / span if span > 0 else 0.0,
+                         'peer_paused_pct': 100.0 * c['tx_pause_us'] / span if span > 0 else 0.0})
+    return rows
+
+
+def print_pfc(recs: List[Rec]) -> None:
+    rows = pfc_pause_summary(recs)
+    if not rows:
+        return
+    print(f"\n{'='*140}")
+    print("  PFC per priority, whole run (first to last snapshot of each NIC)")
+    print("  Host paused: pause frames received (rx pause time). Peer paused by host: "
+          "pause frames sent (tx pause time).")
+    print(f"{'='*140}")
+    print(f"{'Host':>20s} {'Device':>8s} {'Prio':>4s} | {'RxFrames':>10s} {'TxFrames':>10s} | "
+          f"{'HostPaused%':>11s} {'PeerPaused%':>11s} | {'Span_s':>8s}")
+    for row in rows:
+        print(f"{row['host']:>20s} {row['device']:>8s} {row['priority']:>4d} | "
+              f"{row['rx_frames']:10d} {row['tx_frames']:10d} | "
+              f"{row['host_paused_pct']:10.3f}% {row['peer_paused_pct']:10.3f}% | "
+              f"{row['span_us'] / 1e6:8.2f}")
 
 
 def measured(r: Rec) -> bool:
@@ -322,10 +404,10 @@ def print_verdicts(vs: Dict[Tuple[str, str, int], Verdict]) -> None:
     multi = len({k[0] for k in vs}) > 1
     print(f"\n{'='*140}")
     print("  NETWORK VERDICT per message size "
-          "(clean windows only; ethtool pause frames rx/tx are stale context)")
+          "(PFC frames rx/tx are stale context: ionic refreshes them about every 5 s)")
     print(f"{'='*140}")
     print(f"{'Coll':>14s} {'Size':>8s} | {'Usable':>9s} | {'Verdict':>15s} | "
-          f"{'HW-TxMB/coll':>12s} {'Pause*rx/tx':>13s} | Drivers (sum, records hit, side, ranks)")
+          f"{'HW-TxMB/coll':>12s} {'PFC rx/tx':>13s} | Drivers (sum, records hit, category, side, ranks)")
     for (comm, coll, sz), v in vs.items():
         parts = []
         for name, (total, hits, ranks) in sorted(v.drivers.items(), key=lambda kv: -kv[1][0]):
@@ -409,6 +491,20 @@ def build_trace(recs: List[Rec]) -> dict:
             events.append({'ph': 'M', 'name': 'thread_sort_index', 'pid': pids[h], 'tid': base + lane,
                            'args': {'sort_index': rank * 10 + lane}})
     seen_reads = set()
+    # Series each rank's symptom tracks need: only what the run ever saw.
+    has_drops: Dict[tuple, set] = defaultdict(set)
+    has_cong: Dict[tuple, set] = defaultdict(set)
+    has_pfc: Dict[tuple, set] = defaultdict(set)
+    for r in recs:
+        if r.net and measured(r):
+            key = (r.host, r.pid, r.comm, r.rank)
+            for k, v in rdma_deltas(r.net).items():
+                if v and k in DROP_COUNTERS:
+                    has_drops[key].add(DROP_COUNTERS[k][0])
+                if v and k in CONGESTION_COUNTERS:
+                    has_cong[key].add(CONGESTION_COUNTERS[k][0])
+            for (dr, p) in pfc_frames(r.net):
+                has_pfc[key].add(f'{dr} prio {p}')
     for r in recs:
         n = r.net
         if not n or 'before_ts_us' not in n:
@@ -424,31 +520,28 @@ def build_trace(recs: List[Rec]) -> dict:
                 'unclassified' if unclassified else ('window' if usable(r) else 'uncoordinated'))))
         color = 'grey' if quality in ('overlapped', 'unavailable') else (
             'terrible' if symptoms else ('bad' if unclassified else ('good' if quality == 'window' else 'yellow')))
-        args = {'hardware_ucast_tx_bytes': d.get('tx_rdma_ucast_bytes'),
-                'hardware_CTS_tx_bytes': d.get('tx_rdma_ccl_cts_bytes', 0),
-                'software_payload_tx_bytes': sum(x['tx_bytes'] for x in n['sw']) if n.get('sw') else None,
-                'hardware_ucast_rx_bytes': d.get('rx_rdma_ucast_bytes'),
-                'hardware_CTS_rx_bytes': d.get('rx_rdma_ccl_cts_bytes', 0),
-                'software_payload_rx_bytes': sum(x['rx_bytes'] for x in n['sw']) if n.get('sw') else None,
-                'collective_sequence': r.sn, 'rank': r.rank, 'message_bytes': r.size,
-                'GPU_execution_us': r.exec_us, 'launch_wait_us': n.get('launch_wait_us', 0),
-                'attribution': quality, 'completion_verified': n.get('completion_verified', False),
-                'all_ranks_coordinated': n.get('coordinated', False),
-                'counter_meaning': 'total delta for this collective window; not instantaneous',
-                'devices': n.get('devices'), 'software_counters': n.get('sw'),
-                'counter_discontinuities': n.get('counter_discontinuities', []), **symptoms,
-                **{k: d[k] for k in VOLUME if k in d}}
-        args['AINIC_byte_semantics'] = 'hardware ucast bytes include CTS control traffic; software counters report payload'
-        # Retain familiar names as detail fields for older trace consumers.
-        args.update(sn=r.sn, overlapped=n.get('overlapped'), unavailable=n.get('unavailable'), exec_us=r.exec_us)
+        pfc = pfc_frames(n)
+        drops = {f'{DROP_COUNTERS[k][0]} ({k})': v for k, v in sorted(d.items())
+                 if v and k in DROP_COUNTERS}
+        congestion = {f'{CONGESTION_COUNTERS[k][0]} ({k})': v for k, v in sorted(d.items())
+                      if v and k in CONGESTION_COUNTERS}
+        args = {'tx_bytes': d.get('tx_rdma_ucast_bytes'),
+                'rx_bytes': d.get('rx_rdma_ucast_bytes'),
+                **({'drops': drops} if drops else {}),
+                **({'ecn_cnp': congestion} if congestion else {}),
+                **({'pfc_frames (stale)': {f'{dr} prio {p}': v for (dr, p), v in sorted(pfc.items())}}
+                   if pfc else {}),
+                'sn': r.sn, 'rank': r.rank, 'message_bytes': r.size,
+                'gpu_exec_us': r.exec_us, 'launch_wait_us': n.get('launch_wait_us', 0),
+                'window': quality, 'overlapped': n.get('overlapped'),
+                'unavailable': n.get('unavailable'),
+                'completion_verified': n.get('completion_verified', False),
+                'coordinated': n.get('coordinated', False)}
         if r.corrected_us is not None:
             args['exec_corrected_us'] = round(r.corrected_us, 2)
             args['correction_warning'] = 'heuristic estimate; not a recovered measurement'
         name = f'{r.coll} {fmt_size(r.size)} · #{r.sn}'
         before, after = n.get('snapshot_before'), n.get('snapshot_after')
-        args['unclassified_counter_changes'] = unclassified
-        args['before_snapshot_id'] = before['id'] if before else None
-        args['after_snapshot_id'] = after['id'] if after else None
         left = before['read_end_us'] if before else n['before_ts_us']
         right = after['read_start_us'] if after else n['after_ts_us']
         events.append({'ph': 'X', 'cat': quality, 'name': name,
@@ -474,12 +567,27 @@ def build_trace(recs: List[Rec]) -> dict:
                            'dur': max(0, snap['read_end_us'] - snap['read_start_us']),
                            'cname': 'thread_state_iowait', 'args': snap})
         if measured(r):
-            events.append({'ph': 'C', 'cat': 'interval_totals',
-                           'name': f'rank {r.rank} totals per collective · pid {r.pid}' + (f' · {r.comm}' if multi_comm else ''),
-                           'pid': pid, 'ts': (after['read_end_us'] if after else n['after_ts_us']) - zero,
-                           'args': {'tx_MB': d.get('tx_rdma_ucast_bytes', 0) / 1e6,
-                                    'rx_MB': d.get('rx_rdma_ucast_bytes', 0) / 1e6,
-                                    **({'loss': sum(v for k, v in symptoms.items() if k in NET_LOSS_COUNTERS)} if any(k in NET_LOSS_COUNTERS for k in symptoms) else {})}})
+            ts = (after['read_end_us'] if after else n['after_ts_us']) - zero
+            track = f'rank {r.rank}' + (f' · {r.comm}' if multi_comm else '')
+            events.append({'ph': 'C', 'name': f'{track} MB per collective', 'pid': pid, 'ts': ts,
+                           'args': {'tx': d.get('tx_rdma_ucast_bytes', 0) / 1e6,
+                                    'rx': d.get('rx_rdma_ucast_bytes', 0) / 1e6}})
+            # Symptom tracks only for ranks where the run ever saw one.
+            key = (r.host, r.pid, r.comm, r.rank)
+            for title, cats, has in (('drops', DROP_COUNTERS, has_drops), ('ECN/CNP', CONGESTION_COUNTERS, has_cong)):
+                if has.get(key):
+                    per_cat = {c: 0 for c in sorted(has[key])}
+                    for k, v in d.items():
+                        if k in cats:
+                            per_cat[cats[k][0]] += v
+                    events.append({'ph': 'C', 'name': f'{track} {title}', 'pid': pid, 'ts': ts,
+                                   'args': per_cat})
+            if has_pfc.get(key):
+                series = {name: 0 for name in sorted(has_pfc[key])}
+                for (dr, p), v in pfc.items():
+                    series[f'{dr} prio {p}'] = v
+                events.append({'ph': 'C', 'name': f'{track} PFC frames (stale)', 'pid': pid, 'ts': ts,
+                               'args': series})
     return {'traceEvents': events, 'displayTimeUnit': 'ms',
             'otherData': {'clock': 'CLOCK_MONOTONIC, normalized independently per host; hosts are NOT synchronized',
                           'host_origins_us': origin,
@@ -518,6 +626,7 @@ def main(argv=None) -> int:
         correct_skew(with_net)
     print_raw_timing(with_net)
     print_verdicts(verdicts(recs))
+    print_pfc(with_net)
     print_timing(with_net)
     if args.trace:
         with open(args.trace, 'w', encoding='utf-8') as f:

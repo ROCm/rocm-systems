@@ -2892,7 +2892,7 @@ struct FakeNic {
     std::mutex mu;
     CounterList counters = {{"tx_rdma_ucast_bytes", 0}, {"tx_rdma_ucast_pkts", 0},
                             {"rx_rdma_ucast_bytes", 0}, {"rx_rdma_ucast_pkts", 0},
-                            {"tx_rdma_retx_pkts", 0}};
+                            {"resp_rx_outouf_seq", 0}, {"tx_rdma_retx_pkts", 0}};
     std::vector<std::pair<std::string, uint32_t>> devs = {{"mlx5_0", 0}, {"rdma0", 3}, {"rdma1", 4}};
     std::deque<std::vector<char>> replies;
     std::vector<std::vector<char>> requests;
@@ -3090,11 +3090,16 @@ static int FakeEthIoctl(int, unsigned long req, void* arg) {
     return 0;
 }
 
-TEST(AcclNetEthtool, KeepsOnlyPauseStats) {
+TEST(AcclNetEthtool, KeepsOnlyPfcStats) {
     EXPECT_TRUE(acclEthKeepName("frames_rx_pripause"));
+    EXPECT_TRUE(acclEthKeepName("frames_rx_pri_3"));
+    EXPECT_TRUE(acclEthKeepName("frames_tx_pri_3"));
     EXPECT_TRUE(acclEthKeepName("rx_pripause_3_1us_count"));
-    EXPECT_TRUE(acclEthKeepName("tx_pause_ctrl_phy"));
+    EXPECT_TRUE(acclEthKeepName("tx_prio3_pause"));
+    EXPECT_TRUE(acclEthKeepName("tx_prio3_pause_duration"));
     EXPECT_TRUE(acclEthKeepName("rx_pfc_frames"));
+    EXPECT_FALSE(acclEthKeepName("rx_prio3_pause_transition"));
+    EXPECT_FALSE(acclEthKeepName("tx_pause_ctrl_phy"));
     EXPECT_FALSE(acclEthKeepName("rx_bytes"));
     EXPECT_FALSE(acclEthKeepName("tx_rdma_ucast_pkts"));
 }
@@ -3320,9 +3325,11 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
                 SCOPED_TRACE(recs[i]);
                 EXPECT_TRUE(Has(recs[i], "\"overlapped\":false,\"unavailable\":false"));
                 EXPECT_EQ(JsonNumber(recs[i], "tx_rdma_ucast_bytes"), 1000.0 * (i + 1));
-                EXPECT_EQ(JsonNumber(recs[i], "tx_rdma_ucast_pkts"), 1.0);
+                // Only bytes, drops and ECN/CNP are recorded.
+                EXPECT_FALSE(Has(recs[i], "tx_rdma_ucast_pkts"));
+                EXPECT_FALSE(Has(recs[i], "tx_rdma_retx_pkts"));
                 EXPECT_EQ(JsonNumber(recs[i], "rx_rdma_ucast_bytes"), 0.0);
-                EXPECT_FALSE(Has(recs[i].substr(0, recs[i].find("snapshot_before")), "tx_rdma_retx_pkts")) << "zero symptoms are omitted";
+                EXPECT_FALSE(Has(recs[i].substr(0, recs[i].find("snapshot_before")), "resp_rx_outouf_seq")) << "zero symptoms are omitted";
                 EXPECT_TRUE(Has(recs[i], "\"name\":\"rdma0\""));
                 EXPECT_TRUE(Has(recs[i], "\"ethtool\":null"));
                 EXPECT_EQ(JsonNumber(recs[i], "tx_bytes"), 100.0 * (i + 1));
@@ -4124,7 +4131,7 @@ TEST(AcclNetAccuracy, StrictSnapshotRetainsLateHardwareCounterUpdates) {
         FakeNic nic;
         CounterList base = nic.counters, first = base, settled = base;
         first[0].second = settled[0].second = 4096;
-        settled[4].second = 5;
+        settled[4].second = 5;  // resp_rx_outouf_seq
         // Probe, two stable baseline reads, then an error counter that becomes
         // visible only on the second after-read and settles on the third.
         nic.script = {base, base, base, first, settled, settled};
@@ -4139,7 +4146,7 @@ TEST(AcclNetAccuracy, StrictSnapshotRetainsLateHardwareCounterUpdates) {
         auto records = CollRecords(ReadLines(NetOutputPath(ProfilerDirRoot(dir),0,"0xe3")));
         ASSERT_EQ(records.size(),1u);
         EXPECT_TRUE(Has(records[0],"\"unavailable\":false"));
-        EXPECT_EQ(JsonNumber(records[0],"tx_rdma_retx_pkts"),5.0);
+        EXPECT_EQ(JsonNumber(records[0],"resp_rx_outouf_seq"),5.0);
         EXPECT_TRUE(Has(records[0],"\"read_attempts\":3"));
     }, {{"ACCL_PROFILER_OUTPUT_DIR",dir.path()}, {"ACCL_NET_COUNTERS","1"},
         {"ACCL_NET_STRICT","1"}, {"ACCL_NET_DEVICES","rdma0"}});

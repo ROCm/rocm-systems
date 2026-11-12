@@ -41,8 +41,22 @@ extern ncclDebugLogger_t gLogFn;
 #define ACCL_NET_SETTLE_US  200   // lets a late-waking proxy thread start its ops
 #define ACCL_NET_STUCK_US   10000000  // in flight this long: never going to complete
 
+// Always recorded.
 static const char* const kAcclVolumeCounters[] = {
-  "tx_rdma_ucast_bytes", "tx_rdma_ucast_pkts", "rx_rdma_ucast_bytes", "rx_rdma_ucast_pkts",
+  "tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes",
+};
+
+// Recorded when non-zero: drops (out of buffer, RNR, NAK, out of sequence,
+// local ACK timeout) and ECN/CNP. ionic names, then mlx5.
+static const char* const kAcclSymptomCounters[] = {
+  "resp_rx_outof_buf",
+  "req_rx_rnr_retry_err", "resp_tx_rnr_retry_err",
+  "req_rx_pkt_seq_err", "req_rx_impl_nak_seq_err", "resp_tx_pkt_seq_err",
+  "resp_rx_outouf_seq", "resp_rx_ccl_cts_outouf_seq",
+  "tx_rdma_ack_timeout", "tx_rdma_ccl_cts_ack_timeout",
+  "rx_rdma_ecn_pkts", "rx_rdma_cnp_pkts", "tx_rdma_cnp_pkts",
+  "out_of_buffer", "rnr_nak_retry_err", "packet_seq_err", "out_of_sequence",
+  "local_ack_timeout_err", "np_ecn_marked_roce_packets", "np_cnp_sent", "rp_cnp_handled",
 };
 
 struct acclNetDev {
@@ -182,6 +196,15 @@ static int acclNetNameOk(const char* s) {
 static int acclNetIsVolume(const char* name) {
   for (size_t i = 0; i < sizeof(kAcclVolumeCounters) / sizeof(kAcclVolumeCounters[0]); i++) {
     if (strcmp(name, kAcclVolumeCounters[i]) == 0) return 1;
+  }
+  return 0;
+}
+
+// Counters that reach records, raw snapshots and the summary.
+static int acclNetIsSelected(const char* name) {
+  if (acclNetIsVolume(name)) return 1;
+  for (size_t i = 0; i < sizeof(kAcclSymptomCounters) / sizeof(kAcclSymptomCounters[0]); i++) {
+    if (strcmp(name, kAcclSymptomCounters[i]) == 0) return 1;
   }
   return 0;
 }
@@ -423,8 +446,14 @@ static int acclRdmaRead(struct acclNetDev* d, char* rx, uint64_t* out, int learn
 // ============================================================================
 // ethtool
 // ============================================================================
+// PFC only: per-priority frames and pause time. ionic: frames_{rx,tx}_pri_N,
+// frames_{rx,tx}_pripause, {rx,tx}_pripause_N_1us_count; mlx5:
+// {rx,tx}_prioN_pause, {rx,tx}_prioN_pause_duration.
 int acclEthKeepName(const char* name) {
-  return strstr(name, "pause") != NULL || strstr(name, "pfc") != NULL;
+  if (strstr(name, "transition")) return 0;
+  return strstr(name, "frames_rx_pri") != NULL || strstr(name, "frames_tx_pri") != NULL ||
+         strstr(name, "pripause") != NULL || strstr(name, "pfc") != NULL ||
+         (strstr(name, "prio") != NULL && strstr(name, "pause") != NULL);
 }
 
 static int acclEthIoctl(struct acclNetDev* d, void* data) {
@@ -585,9 +614,24 @@ static void acclNetRawSnapshot(struct acclStr* js, const struct acclNetSnapshot*
     acclStrAppend(js, "%s{\"name\":\"%s\",\"ok\":%s,\"read_start_us\":%lu,\"read_end_us\":%lu,\"rdma\":{",
       i ? "," : "", g.devs[i].name, s->dev[i].rdmaOk ? "true" : "false",
       (unsigned long)s->dev[i].rdmaStartUs, (unsigned long)s->dev[i].rdmaEndUs);
-    for (int k = 0; k < g.devs[i].nRdma; k++) acclStrAppend(js, "%s\"%s\":%lu",
-      k ? "," : "", g.devs[i].rdmaNames[k], (unsigned long)s->dev[i].rdma[k]);
-    acclStrAppend(js, "}}");
+    int first = 1;
+    for (int k = 0; k < g.devs[i].nRdma; k++) {
+      if (!acclNetIsSelected(g.devs[i].rdmaNames[k])) continue;
+      acclStrAppend(js, "%s\"%s\":%lu", first ? "" : ",", g.devs[i].rdmaNames[k],
+                    (unsigned long)s->dev[i].rdma[k]);
+      first = 0;
+    }
+    acclStrAppend(js, "},\"ethtool\":");
+    // Absolute values: the report takes whole-run PFC pause time from these.
+    if (s->dev[i].ethOk) {
+      acclStrAppend(js, "{");
+      for (int k = 0; k < g.devs[i].nEth; k++)
+        acclStrAppend(js, "%s\"%s\":%lu", k ? "," : "", g.devs[i].ethNames[k], (unsigned long)s->dev[i].eth[k]);
+      acclStrAppend(js, "}");
+    } else {
+      acclStrAppend(js, "null");
+    }
+    acclStrAppend(js, "}");
   }
   acclStrAppend(js, "],\"stable\":%s,\"read_attempts\":%d}", s->stable ? "true" : "false", s->readAttempts);
 }
@@ -656,6 +700,7 @@ static void acclNetFormat(struct acclStr* js, struct acclNetJob* job, struct acc
         if (a->dev[i].rdma[k] < b->dev[i].rdma[k]) continue;
         uint64_t delta = a->dev[i].rdma[k] - b->dev[i].rdma[k];
         if (!job->overlapped) st->totals[i][k] += delta;
+        if (!acclNetIsSelected(d->rdmaNames[k])) continue;
         if (delta == 0 && !acclNetIsVolume(d->rdmaNames[k])) continue;
         acclStrAppend(js, "%s\"%s\":%lu", first ? "" : ",", d->rdmaNames[k], (unsigned long)delta);
         first = 0;
@@ -1298,6 +1343,7 @@ static char* acclNetSummaryJsonLocked(struct acclNetCommStats* st, int lost) {
     acclStrAppend(&js, "%s\"%s\":{", i ? "," : "", g.devs[i].name);
     int first = 1;
     for (int k = 0; k < g.devs[i].nRdma; k++) {
+      if (!acclNetIsSelected(g.devs[i].rdmaNames[k])) continue;
       if (st->totals[i][k] == 0 && !acclNetIsVolume(g.devs[i].rdmaNames[k])) continue;
       acclStrAppend(&js, "%s\"%s\":%lu", first ? "" : ",", g.devs[i].rdmaNames[k],
                     (unsigned long)st->totals[i][k]);
