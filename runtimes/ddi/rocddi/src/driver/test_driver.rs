@@ -428,6 +428,7 @@ impl TestDriver {
                 doorbell_host_address: 0x7000,
                 doorbell_device_address: request.device_producer.then_some(0x8000),
                 doorbell_width: QueueAccessWidth::Bits64,
+                host_publication: crate::device::gpu::queue::HostQueuePublication::Ordered64BitMmio,
             },
             fail_destroy: self.fail_queue_destroy.clone(),
             destroys: self.queue_destroys.clone(),
