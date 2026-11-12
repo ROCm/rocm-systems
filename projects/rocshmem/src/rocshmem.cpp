@@ -707,7 +707,7 @@ __host__ void rocshmem_query_thread(int *provided) {
 }
 
 __host__ size_t rocshmem_query_lds_stage_bytes() {
-#if defined(USE_LDS_STAGE)
+#if defined(USE_LDS_STAGE) || defined(USE_TDM)
   return lds_stage::lds_bytes_for_tile(backend->lds_stage_resolved_tile_bytes);
 #else
   return 0;

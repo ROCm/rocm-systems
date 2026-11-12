@@ -56,7 +56,7 @@ void init_constant_memory(void) {
   constmem_values.lds_stage_put_threshold = envvar::lds_stage::put_threshold;
   constmem_values.lds_stage_get_threshold = envvar::lds_stage::get_threshold;
 
-#if defined(USE_LDS_STAGE)
+#if defined(USE_LDS_STAGE) || defined(USE_TDM)
   bool device_supports_lds_stage = false;
   {
     int device_id = 0;

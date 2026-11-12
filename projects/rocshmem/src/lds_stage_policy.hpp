@@ -34,6 +34,19 @@
 
 namespace rocshmem {
 
+#if defined(ROCSHMEM_LDS_STAGE_BACKEND_TDM) || defined(ROCSHMEM_LDS_STAGE_BACKEND_ASYNC)
+// Caps constmem.lds_stage_tile_bytes at half the available scratch capacity
+// (for double buffering) and rounds down to a whole element so tiles don't
+// leave gaps. Returns 0 if the capacity doesn't allow a nonzero tile.
+__device__ __forceinline__ uint32_t resolve_tile_bytes(size_t cap_bytes) {
+  constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
+  uint32_t tile_bytes = static_cast<uint32_t>(
+      min(static_cast<size_t>(constmem.lds_stage_tile_bytes), cap_bytes / 2));
+  tile_bytes -= tile_bytes % element_bytes;
+  return tile_bytes;
+}
+#endif
+
 #if defined(ROCSHMEM_LDS_STAGE_BACKEND_TDM)
 
 // Thread 0 drives TDM; the rest covers what TDM doesn't.
@@ -58,11 +71,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   const lds_stage::LdsRegistration reg = lds_stage::get_lds();
   // Below 16 bytes there's no room for a double-buffered tile.
   if (reg.ptr != nullptr && reg.bytes >= 16) {
-    constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
-    uint32_t tile_bytes = static_cast<uint32_t>(
-        min(static_cast<size_t>(constmem.lds_stage_tile_bytes), reg.bytes / 2));
-    // Round down to a whole element -- avoids gaps between tiles.
-    tile_bytes -= tile_bytes % element_bytes;
+    const uint32_t tile_bytes = resolve_tile_bytes(reg.bytes);
     if (tile_bytes > 0) {
       if (is_thread_zero_in_block()) {
         lds_stage::tdm::copy_pipelined_deep<LoadPolicy, StorePolicy>(dst, src, size, reg.ptr,
@@ -110,17 +119,15 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   slot_bytes -= slot_bytes % element_bytes;
   // Below 16 bytes there's no room for a double-buffered tile in this slot.
   if (reg.ptr != nullptr && slot_bytes >= 16) {
-    uint32_t tile_bytes = static_cast<uint32_t>(
-        min(static_cast<size_t>(constmem.lds_stage_tile_bytes), slot_bytes / 2));
-    tile_bytes -= tile_bytes % element_bytes;
+    const uint32_t tile_bytes = resolve_tile_bytes(slot_bytes);
     if (tile_bytes > 0) {
       const int wave_id = get_flat_block_id() / WF_SIZE;
       void* wave_lds = static_cast<uint8_t*>(reg.ptr) +
-                        static_cast<size_t>(wave_id) * slot_bytes;
+                       static_cast<size_t>(wave_id) * slot_bytes;
       if (is_thread_zero_in_wave()) {
         if constexpr (is_put(Kind)) {
           lds_stage::tdm::copy_pipelined_shallow<LoadPolicy, StorePolicy>(
-              dst, src, size, wave_lds, tile_bytes, /*double_buffered=*/true);
+            dst, src, size, wave_lds, tile_bytes, /*double_buffered=*/true);
         } else {
           lds_stage::tdm::copy_pipelined_deep<LoadPolicy, StorePolicy>(dst, src, size, wave_lds,
                                                                         tile_bytes);
@@ -151,19 +158,16 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   const lds_stage::LdsRegistration reg = lds_stage::get_lds();
   // Below 16 bytes there's no room for a double-buffered tile.
   if (reg.ptr != nullptr && reg.bytes >= 16) {
-    constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
-    uint32_t tile_bytes = static_cast<uint32_t>(
-        min(static_cast<size_t>(constmem.lds_stage_tile_bytes), reg.bytes / 2));
-    tile_bytes -= tile_bytes % element_bytes;
+    const uint32_t tile_bytes = resolve_tile_bytes(reg.bytes);
     if (tile_bytes > 0) {
       // Swap to copy_pipelined_deep_asynccnt to benchmark the s_wait_asynccnt path.
       constexpr int LoadPolicy = static_cast<int>(cache_policy_aux(
-           is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope));
-       constexpr int StorePolicy = static_cast<int>(cache_policy_aux(
-           is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard));
-       lds_stage::async_lds::copy_pipelined_deep_mark<LoadPolicy, StorePolicy>(
-          dst, src, size, reg.ptr, tile_bytes, static_cast<uint32_t>(get_flat_block_id()),
-          static_cast<uint32_t>(get_flat_block_size()));
+        is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope));
+      constexpr int StorePolicy = static_cast<int>(cache_policy_aux(
+        is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard));
+      lds_stage::async_lds::copy_pipelined_deep_mark<LoadPolicy, StorePolicy>(
+        dst, src, size, reg.ptr, tile_bytes, static_cast<uint32_t>(get_flat_block_id()),
+        static_cast<uint32_t>(get_flat_block_size()));
       const size_t covered = lds_stage::covered_bytes(size, tile_bytes);
       if (covered < size) {
         memcpy_wg<Kind, 4>(static_cast<char*>(dst) + covered,
@@ -192,9 +196,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   slot_bytes -= slot_bytes % element_bytes;
   // Below 16 bytes there's no room for a double-buffered tile in this slot.
   if (reg.ptr != nullptr && slot_bytes >= 16) {
-    uint32_t tile_bytes = static_cast<uint32_t>(
-        min(static_cast<size_t>(constmem.lds_stage_tile_bytes), slot_bytes / 2));
-    tile_bytes -= tile_bytes % element_bytes;
+    const uint32_t tile_bytes = resolve_tile_bytes(slot_bytes);
     if (tile_bytes > 0) {
       const int wave_id = get_flat_block_id() / WF_SIZE;
       void* wave_lds = static_cast<uint8_t*>(reg.ptr) +
@@ -202,8 +204,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
       const uint32_t wave_tid = static_cast<uint32_t>(get_flat_block_id() % WF_SIZE);
       const uint32_t wave_size = static_cast<uint32_t>(wave_SZ());
       // Swap to copy_pipelined_deep_asynccnt to benchmark the s_wait_asynccnt path.
-      lds_stage::async_lds::copy_pipelined_deep_mark(dst, src, size, wave_lds, tile_bytes, wave_tid,
-                                                     wave_size);
+      constexpr int LoadPolicy = static_cast<int>(cache_policy_aux(
+        is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope));
+      constexpr int StorePolicy = static_cast<int>(cache_policy_aux(
+        is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard));
+      lds_stage::async_lds::copy_pipelined_deep_mark<LoadPolicy, StorePolicy>(
+        dst, src, size, wave_lds, tile_bytes, wave_tid, wave_size);
       const size_t covered = lds_stage::covered_bytes(size, tile_bytes);
       if (covered < size) {
         memcpy_wave<Kind>(static_cast<char*>(dst) + covered,

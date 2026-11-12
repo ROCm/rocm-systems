@@ -14,8 +14,9 @@
   `global_store_async_from_lds_b32`-class instructions) into a single mechanism. Both
   backends are gfx1250-only; every other architecture is unaffected.
   * New primary build option `USE_LDS_STAGE` (selects the async backend on gfx1250).
-    `USE_TDM` is kept as a legacy flag: it implies `USE_LDS_STAGE` but selects TDM
-    specifically, so existing `-DUSE_TDM=ON` builds behave exactly as before.
+    `USE_TDM` selects the TDM backend specifically and is independent of
+    `USE_LDS_STAGE`: setting `USE_TDM=ON` alone is enough to build and use the
+    TDM path.
   * Public API renamed (TDM never shipped in a tagged release, so this is a straight
     rename, not a deprecation): `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
     `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.

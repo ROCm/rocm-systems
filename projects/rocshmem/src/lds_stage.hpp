@@ -77,15 +77,15 @@
 namespace rocshmem {
 namespace lds_stage {
 
-// Host code needs this too; gated on USE_LDS_STAGE, not ENABLED, since host
-// compiles lack the arch macros ENABLED depends on.
-#if defined(USE_LDS_STAGE)
+// Host code needs this too; gated on the USE_LDS_STAGE/USE_TDM build options,
+// not ENABLED, since host compiles lack the arch macros ENABLED depends on.
+#if defined(USE_LDS_STAGE) || defined(USE_TDM)
 constexpr uint32_t FlatCopyElementLog2 = 3;  // 8 bytes/element
 
 __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
   return 2 * static_cast<size_t>(tile_bytes);
 }
-#endif  // USE_LDS_STAGE
+#endif  // USE_LDS_STAGE || USE_TDM
 
 #if ROCSHMEM_LDS_STAGE_ENABLED
 
@@ -388,8 +388,9 @@ namespace async_lds {
 // 4 bytes/issue; the builtins support larger sizes too, unused here.
 constexpr uint32_t ElementBytes = 4;
 
-// Cache-policy ("aux"/cpol) bitfield: bit0=sc0, bit1=sc1, bit4=scc, bit31=
-// volatile. An immediate, so it rides as a template parameter like TDM's.
+// Cache-policy ("aux"/cpol) bitfield; see cache_policy_aux() in assembly.hpp
+// for the authoritative encoding. An immediate, so it rides as a template
+// parameter like TDM's.
 constexpr int DefaultLoadCachePolicy = 0;
 constexpr int DefaultStoreCachePolicy = 0;
 
@@ -418,7 +419,7 @@ __device__ __forceinline__ void wait_mark() {
 
 // Op-granular: waits until at most Cnt async ops are in flight (Cnt immediate).
 template <uint16_t Cnt>
-__device__ __forceinline__ void wait_async_cnt() {
+[[maybe_unused]] __device__ __forceinline__ void wait_async_cnt() {
   __builtin_amdgcn_s_wait_asynccnt(Cnt);
 }
 
@@ -468,7 +469,7 @@ __device__ __forceinline__ void issue_store_tile_lane(void *dst_tile, const void
 // Tile-by-tile copy, striped across [lane_id, lane_id+num_lanes). pipeline
 // depth 1 when double_buffered (wait_mark<0>() drains each pair).
 template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-__device__ inline void copy_pipelined_shallow_mark(void *dst, const void *src, size_t bytes,
+[[maybe_unused]] __device__ inline void copy_pipelined_shallow_mark(void *dst, const void *src, size_t bytes,
                                                    void *lds_scratch, uint32_t tile_bytes_cap,
                                                    bool double_buffered, uint32_t lane_id = 0,
                                                    uint32_t num_lanes = 1) {
@@ -588,7 +589,7 @@ __device__ inline void copy_pipelined_deep_mark(void *dst, const void *src, size
 
 // Mirrors copy_pipelined_shallow_mark.
 template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-__device__ inline void copy_pipelined_shallow_asynccnt(void *dst, const void *src, size_t bytes,
+[[maybe_unused]] __device__ inline void copy_pipelined_shallow_asynccnt(void *dst, const void *src, size_t bytes,
                                                        void *lds_scratch, uint32_t tile_bytes_cap,
                                                        bool double_buffered, uint32_t lane_id = 0,
                                                        uint32_t num_lanes = 1) {
@@ -647,7 +648,7 @@ __device__ inline void copy_pipelined_shallow_asynccnt(void *dst, const void *sr
 // Depth-2 isn't expressible with an immediate asynccnt, so this drains each
 // tile fully while still double-buffering the next load behind the store.
 template <int LoadCachePolicy = DefaultLoadCachePolicy, int StoreCachePolicy = DefaultStoreCachePolicy>
-__device__ inline void copy_pipelined_deep_asynccnt(void *dst, const void *src, size_t bytes,
+[[maybe_unused]] __device__ inline void copy_pipelined_deep_asynccnt(void *dst, const void *src, size_t bytes,
                                                     void *lds_scratch, uint32_t tile_bytes_cap,
                                                     uint32_t lane_id = 0, uint32_t num_lanes = 1) {
   copy_pipelined_shallow_asynccnt<LoadCachePolicy, StoreCachePolicy>(dst, src, bytes, lds_scratch, tile_bytes_cap,
