@@ -35,6 +35,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_BC_MAX_BLOCKS` (default `0`): lowers the per-rank block budget of the DDA `ncclBroadcast` kernels below the CU-derived cap (`RCCL_DDA_FABRIC_MAXBLOCKS` or the CU count); it cannot raise it. `0` keeps the cap.
 * `RCCL_DDA_LL_BC_THREADS` (default `256`): block size of the DDA LL one-shot `ncclBroadcast` kernel. Values that are not a multiple of the wave size or exceed 512 fall back to the default.
 * `RCCL_DDA_BC_ALLOW_IPC` (default `0`): development only. Lets the `ncclBroadcast` selector also consider the DDA LL tier on the non-fabric (IPC) path. Not intended for production use.
+* `rccl_ep` internode dispatch and combine: a group spanning several nodes keeps load/store access within each node and reaches the other nodes with `ncclSend`/`ncclRecv`, so any RCCL network transport works. New C entry points `ep_create_nodes`, `ep_inter_counts` and `ep_inter_bind`; up to 64 ranks, 16 per node and 16 nodes.
 
 ### Changed
 * An empty `NCCL_GIN_TYPE` now counts as unset for the in-tree GIN backends, as it already did for the backend filter: Anvil SDMA initializes and `RCCL_GIN_TYPE_LIST` applies. Previously an empty value turned Anvil SDMA off.

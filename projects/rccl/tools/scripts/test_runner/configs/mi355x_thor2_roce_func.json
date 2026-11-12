@@ -139,6 +139,21 @@
           "test_filter": "RcclEpDispatchCombineTest.DataPathRejectsBadArguments"
         },
         {
+          "name": "RcclEp_InternodeDirectRoundTrip",
+          "description": "Internode direct round trip on two virtual nodes of four ranks",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeDirectRoundTrip"
+        },
+        {
+          "name": "RcclEp_InternodeFp8AndWeightedCombines",
+          "description": "Internode fp8 rows, expanded layout and weighted combines",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeFp8AndWeightedCombines"
+        },
+        {
+          "name": "RcclEp_InternodeBindIsRequiredAndBounded",
+          "description": "ep_inter_bind is required for internode calls and bounds its counts",
+          "test_filter": "RcclEpDispatchCombineTest.InternodeBindIsRequiredAndBounded"
+        },
+        {
           "name": "RcclEp_Fp8DispatchIsExact",
           "description": "fp8 payloads and scales arrive bit-exact",
           "test_filter": "RcclEpDispatchCombineTest.Fp8DispatchIsExact"

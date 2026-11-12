@@ -34,7 +34,11 @@
 // The tests after the bandwidth one cover the rest of the C ABI the Python layer drives: fp8 payloads and scales, the
 // expanded layout and the combines that read it (also at num_topk 12, with more than 8 rows to a token), ranks that
 // receive or send nothing, malformed routing, the cross-rank checks of the architecture and the wave size, a window
-// registration RCCL declines, configure and destroy from another current device, and the argument guards.
+// registration RCCL declines, configure and destroy from another current device, the argument guards, and the internode
+// direct mode: the round trip, fp8 rows, the per-slot combine of the expanded layout, combines with weights that only
+// some ranks pass, and the bind that its dispatch and combine need. Internode runs on one host: ep_create_nodes'
+// node_size splits the eight ranks into nodes by index, and the inter-node legs go over RCCL send/recv whatever
+// transport RCCL picks between them.
 
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
@@ -68,6 +72,8 @@ int ep_unique_id_size();
 int ep_get_unique_id(char* out);
 void* ep_create(int rank, int num_ranks, const char* unique_id, int max_tokens_per_rank, int hidden,
                 int device);
+void* ep_create_nodes(int rank, int num_ranks, const char* unique_id, int max_tokens_per_rank,
+                      int hidden, int device, int node_size);
 int ep_configure(void* handle, int num_experts, int num_topk);
 void ep_destroy(void* handle);
 size_t ep_window_bytes(void* handle);
@@ -90,6 +96,9 @@ int ep_combine(void* handle, uintptr_t y, uintptr_t in_w, uintptr_t row_map, uin
                uintptr_t recv_src, int num_recv, uintptr_t topk_idx, int num_tokens,
                uintptr_t bias0, uintptr_t bias1, int grouped, uintptr_t out, uintptr_t out_w,
                int num_sms, uintptr_t stream);
+int ep_inter_counts(void* handle, uintptr_t sendc, int32_t* out, uintptr_t stream);
+int ep_inter_bind(void* handle, const int32_t* sendc, const int32_t* recvc, uintptr_t send_list,
+                  int num_tokens);
 }
 
 namespace RcclUnitTesting
@@ -100,7 +109,7 @@ namespace {
 // The MoE shape these kernels are built for. Anything much smaller measures the fixed
 // per-call cost (launch plus the device-side barrier) rather than the transfer: at
 // 256 x 1024 that floor is ~62 us against ~5 us of payload.
-constexpr int kRanks         = 8;     // one node's worth; rccl_ep dispatch is intranode
+constexpr int kRanks         = 8;     // one node's worth; the internode tests split it by kNodeSize
 constexpr int kTokens        = 4096;
 constexpr int kHidden        = 7168;  // multiple of 8: ep_create rejects odd hidden
 constexpr int kTopk          = 6;
@@ -112,6 +121,8 @@ constexpr int kIters         = 20;   // each timed separately; the minimum is re
 // multiple of 16, so fp8 runs too (16 scale blocks of 128 per row).
 constexpr int kSmallTokens   = 1024;
 constexpr int kSmallHidden   = 2048;
+
+constexpr int kNodeSize = 4;       // internode tests: two nodes of four ranks
 
 // 2^e, exactly.
 __host__ __device__ inline float Pow2(int e)
@@ -466,7 +477,7 @@ struct Dispatch
     std::vector<int32_t> topk;          // [T, K]
     DevBuf x, topkIdx, topkW;
     DevBuf slot, sendList, sendc, recvc, counts;
-    std::vector<int32_t> recvcH;        // rows received from each source rank
+    std::vector<int32_t> sendcH, recvcH;  // rows sent to (internode) and received from each rank
     std::vector<int32_t> expertCounts;  // received (token, slot) pairs per local expert
     int nRecv = 0;
     int cap   = 0;
@@ -479,6 +490,7 @@ protected:
     void* handle_ = nullptr;
     int   rank_ = 0, nRanks_ = 0, device_ = 0, numExperts_ = 0, topk_ = kTopk;
     int   tokens_ = kTokens, hidden_ = kHidden;  // the handle's num_max_tokens_per_rank and hidden
+    int   nodeSize_ = 0;   // 0 for an intranode handle
 
     void TearDown() override
     {
@@ -524,9 +536,6 @@ protected:
     // `num_experts` must be a multiple of the rank count, so the owner of an expert is
     // simply index / experts_per_rank.
     void CreateEp(int numExperts, int numTopk, int tokens = kTokens, int hidden = kHidden);
-    // ep_create on every rank with one shared unique id, without configuring; records tokens_ and
-    // hidden_.
-    void CreateHandle(int tokens, int hidden);
 
     int DistinctDestinations(const std::vector<int32_t>& topk, int token) const
     {
@@ -577,6 +586,11 @@ protected:
     // numExperts_ and topk_, so it can be re-run after a reconfigure at a different shape.
     void RoundTrip();
 
+    // ep_create_nodes for nRanks_ / nodeSize nodes.
+    void CreateEpNodes(int numExperts, int numTopk, int nodeSize, int tokens = kTokens, int hidden = kHidden);
+    // ep_create (ep_create_nodes for a nodeSize) on every rank with one shared unique id, without
+    // configuring; records tokens_, hidden_ and nodeSize_.
+    void CreateHandle(int tokens, int hidden, int nodeSize = 0);
     void DestroyEp();
     int  ExpertsPerRank() const { return numExperts_ / nRanks_; }
 
@@ -588,6 +602,10 @@ protected:
     // the rows from each source rank (ep_recv_counts) and the pairs per local expert
     // (ep_expert_counts).
     void DispatchBarrier(Dispatch& d, hipStream_t stream);
+    // On an internode handle: ep_plan, the count exchange (ep_inter_counts), Bind and ep_dispatch,
+    // then the pairs per local expert (ep_expert_counts).
+    void DispatchInternode(Dispatch& d, hipStream_t stream);
+    void Bind(Dispatch& d);
     // Grouped combine of `y` (received rows) into `out`.
     void Combine(Dispatch& d, const DevBuf& y, DevBuf& out, hipStream_t stream);
 
@@ -623,6 +641,9 @@ protected:
     // `expert` applied to the rows and both combines through the row map checked against the host's sums,
     // every element. With ExpandedExpert::kExpertValue it also checks that the rows make the order visible.
     void ExpandedRoundTrip(ExpertFn expertFor, ExpandedExpert expert);
+    // On an internode handle: dispatch, check the receive counts and rows, combine and check the
+    // result.
+    void InternodeRoundTrip();
 };
 
 // CreateEp and RoundTrip have to be void to use the ASSERT_MPI_* macros, and an
@@ -685,16 +706,6 @@ void RcclEpDispatchCombineTest::CreateEp(int numExperts, int numTopk, int tokens
     topk_       = numTopk;
     ASSERT_EP_STEP(CreateHandle(tokens, hidden));
     ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
-}
-
-void RcclEpDispatchCombineTest::CreateHandle(int tokens, int hidden)
-{
-    tokens_ = tokens;
-    hidden_ = hidden;
-    std::vector<char> uid;
-    ASSERT_EP_STEP(BroadcastUid(&uid));
-    handle_ = ep_create(rank_, nRanks_, uid.data(), tokens, hidden, device_);
-    ASSERT_MPI_TRUE(handle_ != nullptr);
 }
 
 void RcclEpDispatchCombineTest::RoundTrip()
@@ -784,10 +795,31 @@ void RcclEpDispatchCombineTest::RoundTrip()
     ASSERT_MPI_TRUE(K <= 3 || orderSensitive > 0);
 }
 
+void RcclEpDispatchCombineTest::CreateEpNodes(int numExperts, int numTopk, int nodeSize, int tokens, int hidden)
+{
+    numExperts_ = numExperts;
+    topk_       = numTopk;
+    ASSERT_EP_STEP(CreateHandle(tokens, hidden, nodeSize));
+    ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
+}
+
+void RcclEpDispatchCombineTest::CreateHandle(int tokens, int hidden, int nodeSize)
+{
+    tokens_   = tokens;
+    hidden_   = hidden;
+    nodeSize_ = nodeSize;
+    std::vector<char> uid;
+    ASSERT_EP_STEP(BroadcastUid(&uid));
+    handle_ = nodeSize > 0 ? ep_create_nodes(rank_, nRanks_, uid.data(), tokens, hidden, device_, nodeSize)
+                           : ep_create(rank_, nRanks_, uid.data(), tokens, hidden, device_);
+    ASSERT_MPI_TRUE(handle_ != nullptr);
+}
+
 void RcclEpDispatchCombineTest::DestroyEp()
 {
     if (handle_ != nullptr) ep_destroy(handle_);
-    handle_ = nullptr;
+    handle_   = nullptr;
+    nodeSize_ = 0;
 }
 
 void RcclEpDispatchCombineTest::MakeInputs(Dispatch& d, ExpertFn expertFor)
@@ -838,12 +870,43 @@ void RcclEpDispatchCombineTest::DispatchBarrier(Dispatch& d, hipStream_t stream)
     ASSERT_MPI_TRUE(Download(d.recvc, nRanks_, d.recvcH) && Download(d.counts, epr, d.expertCounts));
 }
 
+void RcclEpDispatchCombineTest::DispatchInternode(Dispatch& d, hipStream_t stream)
+{
+    const int    T   = tokens_;
+    const int    epr = ExpertsPerRank();
+    const size_t rt  = static_cast<size_t>(nRanks_) * T;
+    ASSERT_MPI_TRUE(d.slot.Alloc(rt * sizeof(int32_t)) && d.sendList.Alloc(rt * sizeof(int32_t)) &&
+                    d.sendc.Alloc(nRanks_ * sizeof(int32_t)) && d.counts.Alloc(epr * sizeof(int32_t)));
+    ASSERT_MPI_EQ(0, ep_plan(handle_, d.topkIdx.u(), T, d.slot.u(), d.sendList.u(), d.sendc.u(),
+                             (uintptr_t)stream));
+    std::vector<int32_t> out(static_cast<size_t>(2 * nRanks_), 0);
+    ASSERT_MPI_EQ(0, ep_inter_counts(handle_, d.sendc.u(), out.data(), (uintptr_t)stream));
+    d.sendcH.assign(out.begin(), out.begin() + nRanks_);
+    d.recvcH.assign(out.begin() + nRanks_, out.end());
+    int total = 0;
+    for (int r = 0; r < nRanks_; ++r) total += d.recvcH[r];
+    ASSERT_EP_STEP(AllocOutputs(d, std::max(total, 1)));
+    ASSERT_EP_STEP(Bind(d));
+    d.nRecv = ep_dispatch(handle_, d.x.u(), 0, d.topkIdx.u(), d.topkW.u(), T, d.sendList.u(), d.sendc.u(), 0,
+                          kNumSms, d.outX.u(), 0, d.outTopk.u(), d.outTw.u(), d.outSrc.u(), (uintptr_t)stream);
+    ASSERT_MPI_EQ(total, d.nRecv);
+    ASSERT_MPI_EQ(0, ep_expert_counts(handle_, d.outTopk.u(), d.nRecv, d.counts.u(), (uintptr_t)stream));
+    ASSERT_MPI_TRUE(Download(d.counts, epr, d.expertCounts));
+}
+
+void RcclEpDispatchCombineTest::Bind(Dispatch& d)
+{
+    if (nodeSize_ == 0) return;
+    ASSERT_MPI_EQ(0, ep_inter_bind(handle_, d.sendcH.data(), d.recvcH.data(), d.sendList.u(), tokens_));
+}
+
 void RcclEpDispatchCombineTest::Combine(Dispatch& d, const DevBuf& y, DevBuf& out, hipStream_t stream)
 {
     const size_t bytes = static_cast<size_t>(tokens_) * hidden_ * sizeof(__hip_bfloat16);
     ASSERT_MPI_TRUE(out.Alloc(bytes));
     // 0xFF reads back as NaN in bf16, so a token that combine never writes cannot match.
     ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(out.p, 0xFF, bytes, stream));
+    ASSERT_EP_STEP(Bind(d));
     ASSERT_MPI_EQ(0, ep_combine(handle_, y.u(), 0, 0, d.outTopk.u(), d.outSrc.u(), d.nRecv, d.topkIdx.u(), tokens_, 0,
                                 0, /*grouped=*/1, out.u(), 0, kNumSms, (uintptr_t)stream));
     ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
@@ -1005,6 +1068,59 @@ void RcclEpDispatchCombineTest::CheckScaledByDestinations(const Dispatch& d, con
     std::vector<float> got;
     ASSERT_MPI_TRUE(SampleColumns(out, n, got, hidden_));
     ASSERT_MPI_EQ(0, MismatchesScaled(got, d.topk, n));
+}
+
+void RcclEpDispatchCombineTest::InternodeRoundTrip()
+{
+    hipStream_t stream = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream));
+    SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
+
+    Dispatch d;
+    ASSERT_EP_STEP(MakeInputs(d, ExpertFor));
+    ASSERT_EP_STEP(DispatchInternode(d, stream));
+    int                  wantRecv = 0;
+    std::vector<int32_t> wantCounts;
+    ExpectedReceive(ExpertFor, wantRecv, wantCounts);
+    ASSERT_MPI_EQ(wantRecv, d.nRecv);
+    ASSERT_MPI_TRUE(d.expertCounts == wantCounts);
+    // Remote sources' rows land in the same place a local push puts them, so the receive order is
+    // the intranode one.
+    ASSERT_EP_STEP(CheckReceivedRows(d, ExpertFor));
+    DevBuf out;
+    ASSERT_EP_STEP(Combine(d, d.outX, out, stream));
+    ASSERT_EP_STEP(CheckScaledByDestinations(d, out, stream));
+}
+
+// ExpertFor's routing with each odd rank's experts moved to the even rank below it: the odd ranks
+// own experts that no token picks, so on both nodes some ranks receive rows and some receive none.
+int EvenRankExpert(int rank, int token, int k, int numExperts, int nRanks)
+{
+    const int perRank = numExperts / nRanks;
+    const int e       = ExpertFor(rank, token, k, numExperts, nRanks);
+    return ((e / perRank) & ~1) * perRank + e % perRank;
+}
+
+// Slots of `rank`'s first numTokens tokens whose returned weight (w, [numTokens, K]) is not the slot's
+// own top-k weight (WeightFor), or 0 for a slot that names no expert. The first eight are reported.
+int WeightMismatches(const std::vector<float>& w, const std::vector<int32_t>& topk, int rank, int numTokens, int K,
+                     int numExperts)
+{
+    int bad = 0;
+    for (int t = 0; t < numTokens; ++t) {
+        for (int k = 0; k < K; ++k) {
+            const size_t at   = static_cast<size_t>(t) * K + k;
+            const float  want = ValidExpert(topk[at], numExperts) ? WeightFor(rank, t, k) : 0.0f;
+            if (!(w[at] == want)) {
+                if (bad < 8) {
+                    ADD_FAILURE() << "rank " << rank << " token " << t << " slot " << k << ": weight " << w[at]
+                                  << ", expected " << want;
+                }
+                ++bad;
+            }
+        }
+    }
+    return bad;
 }
 
 void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedExpert expert)
@@ -1602,9 +1718,10 @@ TEST_F(RcclEpDispatchCombineTest, MalformedRoutingIsIgnored)
 // A mixed-architecture group fails ep_configure on every rank, before any payload moves, instead of
 // exchanging fp8 bytes the ranks would decode differently. RCCL_EP_FAKE_ARCH stands in for another
 // architecture on one rank (include/ep_arch.h): set on every rank with RCCL_EP_FAKE_ARCH_RANK
-// naming that rank, and set on that rank alone. The check travels over the window. Each rejection
-// releases what the configure took and leaves the handle as it was: the same configure without
-// the fake then succeeds.
+// naming that rank, and set on that rank alone. Intranode the check travels over the window;
+// internode it is an all-gather over the global communicator. Each rejection releases what the
+// configure took and leaves the handle as it was: the same configure without the fake then
+// succeeds.
 TEST_F(RcclEpDispatchCombineTest, MixedArchitectureFailsConfigure)
 {
     if (!EnvReady()) {
@@ -1614,16 +1731,17 @@ TEST_F(RcclEpDispatchCombineTest, MixedArchitectureFailsConfigure)
     struct Case
     {
         const char* what;
+        int         nodeSize;   // 0: intranode
         int         fakeRank;
         bool        everyRank;  // RCCL_EP_FAKE_ARCH on every rank and RCCL_EP_FAKE_ARCH_RANK, or on fakeRank only
     };
     const Case cases[] = {
-        {"named by RCCL_EP_FAKE_ARCH_RANK", 3, true},
-        {"set on that rank alone", 5, false},
+        {"intranode", 0, 3, true},
+        {"internode direct", kNodeSize, 5, false},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.what);
-        ASSERT_EP_STEP(CreateHandle(kT, kH));
+        ASSERT_EP_STEP(CreateHandle(kT, kH, c.nodeSize));
         int rc = 0;
         {
             const std::string fakeRank = std::to_string(c.fakeRank);
@@ -1748,15 +1866,19 @@ TEST_F(RcclEpDispatchCombineTest, CreateAndNullHandleRejectBadArguments)
     struct Case
     {
         const char* what;
-        int rank, ranks, tokens, hidden;
+        int rank, ranks, tokens, hidden, nodeSize;
     };
     const Case cases[] = {
-        {"num_ranks 0", 0, 0, kTokens, kHidden},
-        {"rank outside num_ranks", 8, 8, kTokens, kHidden},
+        {"node_size not dividing num_ranks", 0, 8, kTokens, kHidden, 3},
+        {"num_ranks 0", 0, 0, kTokens, kHidden, 0},
+        {"rank outside num_ranks", 8, 8, kTokens, kHidden, 8},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.what);
-        ASSERT_MPI_TRUE(ep_create(c.rank, c.ranks, uid.data(), c.tokens, c.hidden, device) == nullptr);
+        void* h = c.nodeSize == c.ranks
+                      ? ep_create(c.rank, c.ranks, uid.data(), c.tokens, c.hidden, device)
+                      : ep_create_nodes(c.rank, c.ranks, uid.data(), c.tokens, c.hidden, device, c.nodeSize);
+        ASSERT_MPI_TRUE(h == nullptr);
     }
     ASSERT_MPI_TRUE(ep_create(0, 8, nullptr, kTokens, kHidden, device) == nullptr);
 
@@ -1802,6 +1924,7 @@ TEST_F(RcclEpDispatchCombineTest, DataPathRejectsBadArguments)
                     xSf.Alloc(static_cast<size_t>(kT) * kH * sizeof(float)) &&
                     outSf.Alloc(cap * kH * sizeof(float)) &&
                     out.Alloc(static_cast<size_t>(kT) * kH * sizeof(__hip_bfloat16)));
+    std::vector<int32_t> host(static_cast<size_t>(2 * R), 0);
 
     struct Rejected
     {
@@ -1839,6 +1962,7 @@ TEST_F(RcclEpDispatchCombineTest, DataPathRejectsBadArguments)
                               0, 0, 1, 0, 0, 0, s));
     rejects("ep_expand_build with alignment 0",
             ep_expand_build(handle_, d.outTopk.u(), 0, 0, d.counts.u(), d.counts.u(), d.counts.u(), 0, 0, s));
+    rejects("ep_inter_counts on an intranode handle", ep_inter_counts(handle_, d.sendc.u(), host.data(), s));
     rejects("ep_configure with num_topk past kMaxTopk", ep_configure(handle_, numExperts_, 17));
     rejects("ep_configure with experts not a multiple of the ranks", ep_configure(handle_, numExperts_ + 1, K));
     for (const Rejected& r : rejected) {
@@ -1857,6 +1981,304 @@ TEST_F(RcclEpDispatchCombineTest, DataPathRejectsBadArguments)
                   hipMemsetAsync(out.p, 0xFF, static_cast<size_t>(kT) * kH * sizeof(__hip_bfloat16), stream));
     ASSERT_MPI_EQ(0, combine(d.nRecv, kT, out.u()));
     ASSERT_EP_STEP(CheckScaledByDestinations(d, out, stream));
+}
+
+// Internode, direct mode: one flat domain; peers on the other node get their rows through
+// RCCL send/recv, with the counts exchanged by ep_inter_counts.
+TEST_F(RcclEpDispatchCombineTest, InternodeDirectRoundTrip)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+    ASSERT_EP_STEP(CreateEpNodes(nRanks_ * kExpertsPerRank, kTopk, kNodeSize));
+    ASSERT_EP_STEP(InternodeRoundTrip());
+}
+
+// Internode, the rest of the direct data path, at the small shape. One bf16 dispatch supplies the
+// plan and the received rows of the first two parts. An fp8 dispatch through that plan is checked
+// as Fp8DispatchIsExact checks the intranode one: every payload byte and per-128 scale of every
+// row, then the decoded grouped combine, every element bit for bit. The fp8 rows reach a remote
+// peer through outbox views laid out for one byte per element. Then the expanded layout, combined
+// one row per (token, slot) through the row map, with the expanded weights passed in and read back
+// at the origin: each token's K rows of hidden and their weights cross between the nodes and are
+// unpacked into the origin's window, and every element must be the host's ascending-k sum of the
+// ExpertValue rows with one rounding, every weight the slot's own. Last, a dispatch that reaches
+// only the even ranks and a grouped combine in which the odd ranks, which received nothing, pass no
+// weights while the even ranks pass theirs: whether to pass weights is each rank's own choice, so
+// the weight region travels either way, the transfers still pair up, and every rank that asks for
+// the weights gets them.
+TEST_F(RcclEpDispatchCombineTest, InternodeFp8AndWeightedCombines)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+    ASSERT_EP_STEP(CreateEpNodes(nRanks_ * kExpertsPerRank, kTopk, kNodeSize, kSmallTokens, kSmallHidden));
+    hipStream_t stream = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream));
+    SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
+    constexpr int   kAlignment = 16;
+    constexpr int   kSalt      = 1;
+    const uintptr_t s          = reinterpret_cast<uintptr_t>(stream);
+    const int       T = tokens_, H = hidden_, K = topk_, epr = ExpertsPerRank();
+    const int       nsf      = (H + 127) / 128;
+    const size_t    tokBytes = static_cast<size_t>(T) * H * sizeof(__hip_bfloat16);
+    const size_t    wBytes   = static_cast<size_t>(T) * K * sizeof(float);
+
+    Dispatch d;
+    ASSERT_EP_STEP(MakeInputs(d, ExpertFor));
+    ASSERT_EP_STEP(DispatchInternode(d, stream));
+    ASSERT_EP_STEP(CheckReceivedRows(d, ExpertFor));
+    const int    n   = d.nRecv;
+    const size_t cap = static_cast<size_t>(d.cap);
+    DevBuf       out, outW;
+    ASSERT_MPI_TRUE(out.Alloc(tokBytes) && outW.Alloc(wBytes));
+    std::vector<uint16_t> got;
+    std::vector<float>    gotW;
+
+    // fp8 through the same plan, bound again as a cached dispatch is. Poisoned, so a byte or a scale
+    // the epilogue never writes cannot match.
+    Dispatch f;
+    DevBuf   x8, sf8, outSf, y8;
+    ASSERT_EP_STEP(AllocOutputs(f, d.cap));
+    ASSERT_MPI_TRUE(x8.Alloc(static_cast<size_t>(T) * H) && sf8.Alloc(static_cast<size_t>(T) * nsf * sizeof(float)) &&
+                    outSf.Alloc(cap * nsf * sizeof(float)) && y8.Alloc(cap * H * sizeof(__hip_bfloat16)));
+    FillFp8<<<GridFor(static_cast<size_t>(T) * H), 256>>>(static_cast<uint8_t*>(x8.p), static_cast<float*>(sf8.p),
+                                                           rank_, T, H, kSalt);
+    ASSERT_MPI_EQ(hipSuccess, hipGetLastError());
+    ASSERT_MPI_EQ(hipSuccess, hipDeviceSynchronize());
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(f.outX.p, 0xFF, cap * H, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(outSf.p, 0xFF, cap * nsf * sizeof(float), stream));
+    ASSERT_EP_STEP(Bind(d));
+    f.nRecv = ep_dispatch(handle_, x8.u(), sf8.u(), d.topkIdx.u(), d.topkW.u(), T, d.sendList.u(), d.sendc.u(),
+                          /*use_fp8=*/1, kNumSms, f.outX.u(), outSf.u(), f.outTopk.u(), f.outTw.u(), f.outSrc.u(), s);
+    ASSERT_MPI_EQ(n, f.nRecv);
+    ASSERT_EP_STEP(CheckReceivedBuffers(nullptr, f.outTopk, f.outTw, f.outSrc, n, ExpertFor));
+    {
+        std::vector<int32_t> src;
+        std::vector<uint8_t> rx;
+        std::vector<float>   rsf;
+        ASSERT_MPI_TRUE(Download(f.outSrc, n, src) && Download(f.outX, static_cast<size_t>(n) * H, rx) &&
+                        Download(outSf, static_cast<size_t>(n) * nsf, rsf));
+        int bad = 0;
+        for (int i = 0; i < n; ++i) {
+            const int      r   = src[i] / T, t = src[i] % T;
+            const uint8_t* row = rx.data() + static_cast<size_t>(i) * H;
+            const float*   rs  = rsf.data() + static_cast<size_t>(i) * nsf;
+            int            c = 0, j = 0;
+            while (c < H && row[c] == Fp8Byte(r, t, c, kSalt)) ++c;
+            while (j < nsf && rs[j] == Fp8Scale(r, t, j, kSalt)) ++j;
+            if (c < H || j < nsf) {
+                if (bad < 8) {
+                    ADD_FAILURE() << "rank " << rank_ << " row " << i << " (source " << src[i] << "): "
+                                  << (c < H ? "byte " + std::to_string(c) : "scale " + std::to_string(j)) << " differs";
+                }
+                ++bad;
+            }
+        }
+        ASSERT_MPI_EQ(0, bad);
+    }
+    // The identity expert decodes each row; every element of every token comes back as its decoded
+    // value x the number of distinct ranks that own the token's experts.
+    if (n > 0) {
+        Fp8Decode<<<GridFor(static_cast<size_t>(n) * H), 256, 0, stream>>>(
+            static_cast<const uint8_t*>(f.outX.p), static_cast<const float*>(outSf.p), n, H, nsf, 1,
+            static_cast<__hip_bfloat16*>(y8.p));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipGetLastError());
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(out.p, 0xFF, tokBytes, stream));
+    ASSERT_EP_STEP(Bind(d));
+    ASSERT_MPI_EQ(0, ep_combine(handle_, y8.u(), 0, 0, f.outTopk.u(), f.outSrc.u(), n, d.topkIdx.u(), T, 0, 0,
+                                /*grouped=*/1, out.u(), 0, kNumSms, s));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    ASSERT_MPI_TRUE(Download(out, static_cast<size_t>(T) * H, got));
+    {
+        int bad = 0;
+        for (int t = 0; t < T && bad < 8; ++t) {
+            const float dests = static_cast<float>(DistinctDestinations(d.topk, t));
+            for (int c = 0; c < H; ++c) {
+                const float want =
+                    Bf16Round(Fp8Decoded(Fp8Byte(rank_, t, c, kSalt), Fp8Scale(rank_, t, c / 128, kSalt)) * dests);
+                const float g = Bf16Bits(got[static_cast<size_t>(t) * H + c]);
+                if (!(g == want)) {
+                    ADD_FAILURE() << "rank " << rank_ << " fp8 token " << t << " element " << c << ": got " << g
+                                  << ", expected " << want;
+                    ++bad;
+                    break;
+                }
+            }
+        }
+        ASSERT_MPI_EQ(0, bad);
+    }
+
+    // The expanded layout the host expects, as in ExpandedLayoutGroupsByExpert: per local expert, its
+    // pairs in (token, slot) order from a base that is a multiple of the alignment.
+    std::vector<int32_t> ids;
+    ASSERT_MPI_TRUE(Download(d.outTopk, static_cast<size_t>(n) * K, ids));
+    std::vector<int32_t> base(static_cast<size_t>(epr), 0), wantMap(static_cast<size_t>(n) * K, -1);
+    for (int32_t id : ids) {
+        if (id >= 0) ++base[id];
+    }
+    int total = 0;
+    for (int le = 0; le < epr; ++le) {
+        const int pairs = base[le];
+        base[le]        = total;
+        total += (pairs + kAlignment - 1) / kAlignment * kAlignment;
+    }
+    std::vector<int32_t> rowPair(static_cast<size_t>(std::max(total, 1)), -1);
+    for (size_t p = 0; p < ids.size(); ++p) {
+        if (ids[p] < 0) continue;
+        wantMap[p]          = base[ids[p]]++;
+        rowPair[wantMap[p]] = static_cast<int32_t>(p);
+    }
+    DevBuf counts, offsets, psum, hist, rowMap, rowPairBuf, ex, ew, y;
+    ASSERT_MPI_TRUE(counts.Alloc(epr * sizeof(int32_t)) && offsets.Alloc(epr * sizeof(int32_t)) &&
+                    psum.Alloc(epr * sizeof(int32_t)) &&
+                    hist.Alloc(static_cast<size_t>(std::max(n, 1)) * epr * sizeof(int32_t)) &&
+                    rowMap.Alloc(static_cast<size_t>(n) * K * sizeof(int32_t)) && Upload(rowPairBuf, rowPair) &&
+                    ex.Alloc(static_cast<size_t>(total) * H * sizeof(__hip_bfloat16)) &&
+                    ew.Alloc(static_cast<size_t>(total) * sizeof(float)) &&
+                    y.Alloc(static_cast<size_t>(total) * H * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(total, ep_expand_build(handle_, d.outTopk.u(), n, kAlignment, counts.u(), offsets.u(), psum.u(),
+                                         hist.u(), rowMap.u(), s));
+    std::vector<int32_t> gotMap;
+    ASSERT_MPI_TRUE(Download(rowMap, static_cast<size_t>(n) * K, gotMap) && gotMap == wantMap);
+    ASSERT_MPI_EQ(0, ep_expand_scatter(handle_, 0, d.outX.u(), 0, d.outTw.u(), rowMap.u(), n, ex.u(), 0, 0, 0, ew.u(),
+                                       /*zero_pad=*/1, kAlignment, counts.u(), offsets.u(), kNumSms, s));
+    // The expert ignores the scattered rows (ExpandedLayoutGroupsByExpert checks them): its row for
+    // pair (i, k) is ExpertValue of token i's source and slot k, so a token's K rows all differ and the
+    // order the origin adds them in shows. The weights are the scatter's, one per row.
+    if (total > 0) {
+        FillExpandedExpertRows<<<GridFor(static_cast<size_t>(total) * H), 256, 0, stream>>>(
+            static_cast<const int32_t*>(rowPairBuf.p), static_cast<const int32_t*>(d.outSrc.p), total, K, T, H,
+            static_cast<__hip_bfloat16*>(y.p));
+    }
+    ASSERT_MPI_EQ(hipSuccess, hipGetLastError());
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(out.p, 0xFF, tokBytes, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(outW.p, 0xFF, wBytes, stream));
+    ASSERT_EP_STEP(Bind(d));
+    ASSERT_MPI_EQ(0, ep_combine(handle_, y.u(), ew.u(), rowMap.u(), d.outTopk.u(), d.outSrc.u(), n, d.topkIdx.u(), T,
+                                0, 0, /*grouped=*/0, out.u(), outW.u(), kNumSms, s));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    ASSERT_MPI_TRUE(Download(out, static_cast<size_t>(T) * H, got) &&
+                    Download(outW, static_cast<size_t>(T) * K, gotW));
+    {
+        int bad = 0;
+        for (int t = 0; t < T && bad < 8; ++t) {
+            for (int c = 0; c < H; ++c) {
+                float acc = 0.0f;
+                for (int k = 0; k < K; ++k) {
+                    if (ValidExpert(d.topk[static_cast<size_t>(t) * K + k], numExperts_)) {
+                        acc += ExpertValue(rank_, t, k, c);
+                    }
+                }
+                const float want = Bf16Round(acc);
+                const float g    = Bf16Bits(got[static_cast<size_t>(t) * H + c]);
+                if (!(g == want)) {
+                    ADD_FAILURE() << "rank " << rank_ << " expanded token " << t << " element " << c << ": got " << g
+                                  << ", the ascending-k sum is " << want;
+                    ++bad;
+                    break;
+                }
+            }
+        }
+        ASSERT_MPI_EQ(0, bad);
+    }
+    ASSERT_MPI_EQ(0, WeightMismatches(gotW, d.topk, rank_, T, K, numExperts_));
+
+    // Only the even ranks receive. The odd ranks, with no rows, have no weights to pass and pass none.
+    // Ranks 0, 1, 4 and 5 ask for the weights back: on each node, of the ranks that pass weights and
+    // of those that pass none, one asks and one does not.
+    Dispatch even;
+    ASSERT_EP_STEP(MakeInputs(even, EvenRankExpert));
+    ASSERT_EP_STEP(DispatchInternode(even, stream));
+    ASSERT_MPI_TRUE((even.nRecv == 0) == (rank_ % 2 == 1));
+    ASSERT_EP_STEP(CheckReceivedRows(even, EvenRankExpert));
+    const bool passW = even.nRecv > 0;
+    const bool askW  = rank_ % kNodeSize < 2;
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(out.p, 0xFF, tokBytes, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(outW.p, 0xFF, wBytes, stream));
+    ASSERT_EP_STEP(Bind(even));
+    ASSERT_MPI_EQ(0, ep_combine(handle_, even.outX.u(), passW ? even.outTw.u() : 0, 0, even.outTopk.u(),
+                                even.outSrc.u(), even.nRecv, even.topkIdx.u(), T, 0, 0, /*grouped=*/1, out.u(),
+                                askW ? outW.u() : 0, kNumSms, s));
+    ASSERT_EP_STEP(CheckScaledByDestinations(even, out, stream));
+    ASSERT_MPI_TRUE(Download(outW, static_cast<size_t>(T) * K, gotW));
+    ASSERT_MPI_EQ(0, askW ? WeightMismatches(gotW, even.topk, rank_, T, K, numExperts_) : 0);
+}
+
+// An internode handle moves rows at the counts ep_inter_bind recorded, so until a bind has succeeded
+// ep_dispatch and ep_combine refuse, on every rank alike and before any transfer. The bind refuses a
+// missing argument, a send count past the num_tokens it is given (a plan sends a token to a
+// destination at most once, and the combine reads that destination's send list that far) and a
+// receive count past num_max_tokens_per_rank (one source's region of the window); ep_inter_counts
+// refuses a missing sendc. A refused bind binds nothing, a bind at both bounds is accepted, and the
+// round trip at the end binds its own counts on the same handle.
+TEST_F(RcclEpDispatchCombineTest, InternodeBindIsRequiredAndBounded)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+    ASSERT_EP_STEP(CreateEpNodes(nRanks_ * kExpertsPerRank, kTopk, kNodeSize, kSmallTokens, kSmallHidden));
+    hipStream_t stream = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream));
+    SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
+    const uintptr_t s    = reinterpret_cast<uintptr_t>(stream);
+    const int       R    = nRanks_, T = tokens_;
+    const int       half = T / 2;                    // the num_tokens of the bounded binds
+    const int       peer = (rank_ + kNodeSize) % R;  // this rank's counterpart on the other node
+    const size_t    cap  = static_cast<size_t>(R) * T;
+
+    Dispatch d;
+    DevBuf   out;
+    ASSERT_EP_STEP(MakeInputs(d, ExpertFor));
+    ASSERT_EP_STEP(AllocOutputs(d, static_cast<int>(cap)));
+    ASSERT_MPI_TRUE(d.slot.Alloc(cap * sizeof(int32_t)) && d.sendList.Alloc(cap * sizeof(int32_t)) &&
+                    d.sendc.Alloc(R * sizeof(int32_t)) &&
+                    out.Alloc(static_cast<size_t>(T) * hidden_ * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(0, ep_plan(handle_, d.topkIdx.u(), T, d.slot.u(), d.sendList.u(), d.sendc.u(), s));
+
+    struct Rejected
+    {
+        const char* what;
+        int         rc;
+    };
+    std::vector<Rejected> rejected;
+    auto rejects = [&](const char* what, int rc) { rejected.push_back({what, rc}); };
+    // Valid calls but for the missing bind.
+    auto dispatch = [&]() {
+        return ep_dispatch(handle_, d.x.u(), 0, d.topkIdx.u(), d.topkW.u(), T, d.sendList.u(), d.sendc.u(), 0, kNumSms,
+                           d.outX.u(), 0, d.outTopk.u(), d.outTw.u(), d.outSrc.u(), s);
+    };
+    auto combine = [&]() {
+        return ep_combine(handle_, d.outX.u(), 0, 0, d.outTopk.u(), d.outSrc.u(), 0, d.topkIdx.u(), T, 0, 0,
+                          /*grouped=*/1, out.u(), 0, kNumSms, s);
+    };
+    std::vector<int32_t> host(static_cast<size_t>(2 * R), 0);
+    int32_t* const       sendc = host.data();
+    int32_t* const       recvc = host.data() + R;
+    rejects("ep_dispatch before any ep_inter_bind", dispatch());
+    rejects("ep_combine before any ep_inter_bind", combine());
+    rejects("ep_inter_counts with a null sendc", ep_inter_counts(handle_, 0, host.data(), s));
+    rejects("ep_inter_bind with a null sendc", ep_inter_bind(handle_, nullptr, recvc, 0, 0));
+    sendc[peer] = half + 1;
+    rejects("ep_inter_bind with a send count past its num_tokens",
+            ep_inter_bind(handle_, sendc, recvc, d.sendList.u(), half));
+    sendc[peer] = half;
+    recvc[peer] = T + 1;
+    rejects("ep_inter_bind with a receive count past num_max_tokens_per_rank",
+            ep_inter_bind(handle_, sendc, recvc, d.sendList.u(), half));
+    for (const Rejected& r : rejected) {
+        SCOPED_TRACE(r.what);
+        ASSERT_MPI_EQ(-1, r.rc);
+    }
+    // Only once every bind above is known to be refused: had one been accepted, this dispatch would
+    // post transfers at its counts, which no peer matches, and hang instead of failing.
+    ASSERT_MPI_EQ(-1, dispatch());
+
+    // Both counts at their bounds. They describe no dispatch, so nothing runs on them.
+    recvc[peer] = T;
+    ASSERT_MPI_EQ(0, ep_inter_bind(handle_, sendc, recvc, d.sendList.u(), half));
+    ASSERT_EP_STEP(InternodeRoundTrip());
 }
 
 // FP8 dispatch, exactly: every received row's payload bytes and fp32 per-128 scales, its top-k ids
