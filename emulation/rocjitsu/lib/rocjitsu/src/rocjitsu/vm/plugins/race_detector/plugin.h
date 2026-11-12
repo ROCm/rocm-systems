@@ -82,10 +82,11 @@ inline constexpr size_t kOtherWaveTraceContext = 16;
 /// The callback must not throw.
 /// @pre A same-wave conflict must not follow the current access in the trace.
 /// @pre context_instructions is between 2 and kTraceHistorySize, inclusive.
-util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
-                        const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
-                        std::optional<MarkedInstruction> conflict, MarkedInstruction access,
-                        size_t context_instructions = kDefaultTraceContext);
+util::FailureOr<std::string> formatTrace(
+    const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
+    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
+    std::optional<MarkedInstruction> conflict, MarkedInstruction access,
+    size_t context_instructions = kDefaultTraceContext);
 
 /// @brief Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and

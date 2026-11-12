@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
+#include "util/result.h"
 
 #include <gtest/gtest.h>
 
@@ -77,7 +78,7 @@ TEST(RaceReportTraceTest, PreservesExecutionOrderAcrossBranchesAndRepeatedPcs) {
   Trace trace;
   for (uint32_t i = 0; uint64_t pc : {0x100u, 0x120u, 0x108u, 0x108u})
     trace.push(snapshot(pc, i++, 1));
-  EXPECT_EQ(formatTrace(trace, text, mark(trace, 0), mark(trace, 3)),
+  EXPECT_EQ(formatTrace(trace, text, mark(trace, 0), mark(trace, 3)).value(),
             "       PC     Instruction\n"
             "  ==>  0x100  instruction 0  ; <-- wave 0 lane 0\n"
             "       0x120  instruction 1\n"
@@ -90,7 +91,8 @@ TEST(RaceReportTraceTest, PadsPcsSoInstructionsShareAColumn) {
   trace.push(snapshot(0xfc, 0, 1));
   trace.push(snapshot(0x100, 1, 1));
   EXPECT_EQ(
-      formatTrace(trace, text, MarkedInstruction{snapshot(0x2000, 9, 1), 1, 0}, mark(trace, 1)),
+      formatTrace(trace, text, MarkedInstruction{snapshot(0x2000, 9, 1), 1, 0}, mark(trace, 1))
+          .value(),
       "       PC      Instruction\n"
       "  ==>  0x2000  instruction 9  ; <-- wave 1 lane 0\n"
       "       Execution trace below is for wave 0.\n"
@@ -104,8 +106,10 @@ TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryG
     Trace trace;
     for (uint32_t i = 0; i < length; ++i)
       trace.push(snapshot(0x100 + i * 4, i, 1));
-    const std::string report =
+    const util::FailureOr<std::string> report_result =
         formatTrace(trace, text, mark(trace, 0), mark(trace, trace.size() - 1));
+    ASSERT_TRUE(report_result.succeeded());
+    const std::string &report = report_result.value();
     const std::vector<PrintedRow> printed = rows(report);
     // A one-instruction gap is printed rather than elided.
     ASSERT_EQ(printed.size(),
@@ -124,7 +128,10 @@ TEST(RaceReportTraceTest, ElisionPreservesProtectedRowsAcrossPcDiscontinuities) 
     trace.push(snapshot((i < 100 ? 0x1000u : 0x800u) + i * 4, i, 1, i == 80 || i == 120));
   for (size_t context : {size_t{2}, kDefaultTraceContext}) {
     SCOPED_TRACE(context);
-    const std::string report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199), context);
+    const util::FailureOr<std::string> report_result =
+        formatTrace(trace, text, mark(trace, 0), mark(trace, 199), context);
+    ASSERT_TRUE(report_result.succeeded());
+    const std::string &report = report_result.value();
     const std::vector<PrintedRow> printed = rows(report);
     ASSERT_GT(elided_count(report), 0u);
     for (size_t required : {0u, 80u, 120u, 199u})
@@ -141,7 +148,10 @@ TEST(RaceReportTraceTest, ElisionNeverHidesASingleInstruction) {
   Trace trace;
   for (uint32_t i = 0; i < 200; ++i)
     trace.push(snapshot(0x1000 + i * 4, i, 1, i == 80 || i == 82));
-  const std::string report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
+  const util::FailureOr<std::string> report_result =
+      formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   const std::vector<PrintedRow> printed = rows(report);
   EXPECT_TRUE(
       std::ranges::any_of(printed, [](const PrintedRow &row) { return row.sequence == 81; }));
@@ -154,8 +164,8 @@ TEST(RaceReportTraceTest, CompactsNopsWithoutAbsorbingMarkedInstructions) {
   const std::array<uint32_t, 1> nop = cdna4::build_sopp(cdna4::kSNopSopp);
   for (uint64_t pc = 0x100; pc <= 0x114; pc += 4)
     trace.push(InstructionSnapshot{pc, nop, /*preserve_in_trace=*/false, /*is_nop=*/true});
-  const auto disassemble = [](const InstructionSnapshot &) { return "s_nop 0"; };
-  EXPECT_EQ(formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 5)),
+  const auto disassemble = [](const InstructionSnapshot &) { return std::string("s_nop 0"); };
+  EXPECT_EQ(formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 5)).value(),
             "       PC     Instruction\n"
             "  ==>  0x100  s_nop 0  ; <-- wave 0 lane 0\n"
             "       0x104  s_nop 0  ; 4 executions, through PC 0x110\n"
@@ -171,7 +181,10 @@ TEST(RaceReportTraceTest, NopRunsRespectEncodingAndPcContinuity) {
     trace.push(InstructionSnapshot{pc, pc < 0x10c ? nop : longer_nop,
                                    /*preserve_in_trace=*/false, /*is_nop=*/true});
   trace.push(snapshot(0x208, 1));
-  const std::string report = formatTrace(trace, text, mark(trace, 0), mark(trace, 7));
+  const util::FailureOr<std::string> report_result =
+      formatTrace(trace, text, mark(trace, 0), mark(trace, 7));
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   EXPECT_NE(report.find("2 executions, through PC 0x108\n"), std::string::npos);
   EXPECT_NE(report.find("2 executions, through PC 0x110\n"), std::string::npos);
   EXPECT_NE(report.find("2 executions, through PC 0x204\n"), std::string::npos);
@@ -183,20 +196,27 @@ TEST(RaceReportTraceTest, ContextCountsExecutionsBeforeCompactionAndKeepsGapsSep
   const std::array<uint32_t, 1> nop = cdna4::build_sopp(cdna4::kSNopSopp);
   for (uint64_t pc = 0x100; pc <= 0x11c; pc += 4)
     trace.push(InstructionSnapshot{pc, nop, /*preserve_in_trace=*/false, /*is_nop=*/true});
-  const auto disassemble = [](const InstructionSnapshot &) { return "s_nop 0"; };
-  const std::string short_report =
+  const auto disassemble = [](const InstructionSnapshot &) { return std::string("s_nop 0"); };
+  const util::FailureOr<std::string> short_report_result =
       formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 4);
+  ASSERT_TRUE(short_report_result.succeeded());
+  const std::string &short_report = short_report_result.value();
   EXPECT_EQ(short_report, "       PC     Instruction\n"
                           "  ==>  0x100  s_nop 0  ; <-- wave 0 lane 0\n"
                           "       0x104  s_nop 0\n"
                           "       ... 4 instructions elided ...\n"
                           "       0x118  s_nop 0\n"
                           "  ==>  0x11c  s_nop 0  ; <-- wave 0 lane 0\n");
-  const std::string full_report =
+  const util::FailureOr<std::string> full_report_result =
       formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 256);
+  ASSERT_TRUE(full_report_result.succeeded());
+  const std::string &full_report = full_report_result.value();
   EXPECT_NE(full_report.find("6 executions, through PC 0x118\n"), std::string::npos);
   EXPECT_EQ(elided_count(full_report), 0u);
-  const std::string odd_report = formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 5);
+  const util::FailureOr<std::string> odd_report_result =
+      formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 5);
+  ASSERT_TRUE(odd_report_result.succeeded());
+  const std::string &odd_report = odd_report_result.value();
   EXPECT_EQ(elided_count(odd_report), 3u);
   EXPECT_NE(odd_report.find("2 executions, through PC 0x118\n"), std::string::npos);
 }
@@ -220,7 +240,10 @@ TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding
   Trace trace;
   for (uint32_t i = 0; i < 6; ++i)
     trace.push(snapshot(0x100 + (i % 2) * 4, i, 1));
-  const std::string report = formatTrace(trace, text, mark(trace, 2), mark(trace, 5));
+  const util::FailureOr<std::string> report_result =
+      formatTrace(trace, text, mark(trace, 2), mark(trace, 5));
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   const std::vector<PrintedRow> printed = rows(report);
   ASSERT_EQ(printed.size(), 4u);
   EXPECT_EQ(printed[0].sequence, 2u);
@@ -231,7 +254,10 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndEncodingsMatc
   Trace trace;
   trace.push(snapshot(0x100, 0, 1));
   trace.push(snapshot(0x104, 1, 1));
-  const std::string report = formatTrace(trace, text, mark(trace, 0, 1), mark(trace, 1));
+  const util::FailureOr<std::string> report_result =
+      formatTrace(trace, text, mark(trace, 0, 1), mark(trace, 1));
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   const std::vector<PrintedRow> printed = rows(report);
   ASSERT_EQ(printed.size(), 3u);
   EXPECT_NE(report.find("Execution trace below is for wave 0."), std::string::npos);
@@ -242,7 +268,8 @@ TEST(RaceReportTraceTest, OtherWaveConflictStartsAtThisWavesLatestRunOfThatInstr
   for (uint32_t i = 0; i < 40; ++i)
     trace.push(snapshot(0x100 + (i % 20) * 4, i % 20, 1));
   const MarkedInstruction producer{snapshot(0x104, 1, 1), 1, 0};
-  const std::vector<PrintedRow> printed = rows(formatTrace(trace, text, producer, mark(trace, 39)));
+  const std::vector<PrintedRow> printed =
+      rows(formatTrace(trace, text, producer, mark(trace, 39)).value());
   ASSERT_EQ(printed.size(), 20u);
   EXPECT_TRUE(printed[0].marked);
   EXPECT_EQ(printed[1].pc, 0x104u);
@@ -257,7 +284,10 @@ TEST(RaceReportTraceTest, OtherWaveConflictNeverRunHereShowsOnlyRecentRows) {
   const MarkedInstruction producer{snapshot(0x2000, 99, 1), 1, 0};
   for (size_t context : {size_t{2}, size_t{3}, kDefaultTraceContext, kTraceHistorySize}) {
     SCOPED_TRACE(context);
-    const std::string report = formatTrace(trace, text, producer, mark(trace, 39), context);
+    const util::FailureOr<std::string> report_result =
+        formatTrace(trace, text, producer, mark(trace, 39), context);
+    ASSERT_TRUE(report_result.succeeded());
+    const std::string &report = report_result.value();
     const std::vector<PrintedRow> printed = rows(report);
     const size_t expected_context = std::min(context, kOtherWaveTraceContext);
     ASSERT_EQ(printed.size(), 1 + expected_context);
@@ -273,8 +303,10 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistory) {
   trace.push(producer);
   for (uint32_t i = 1; i < 300; ++i)
     trace.push(snapshot(0x100 + i * 4, i, 1));
-  const std::string report =
+  const util::FailureOr<std::string> report_result =
       formatTrace(trace, text, MarkedInstruction{producer, 0, 0}, mark(trace, 255));
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   const std::vector<PrintedRow> printed = rows(report);
   ASSERT_GE(printed.size(), 2u);
   EXPECT_EQ(printed[0].sequence, 0u);
@@ -287,7 +319,9 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistory) {
 
 TEST(RaceReportTraceTest, EmptyTraceMarksCurrentAccessAsOutsideRecordedTrace) {
   const MarkedInstruction current{snapshot(0x104, 1, 1), 0, 0};
-  const std::string report = formatTrace({}, text, std::nullopt, current);
+  const util::FailureOr<std::string> report_result = formatTrace({}, text, std::nullopt, current);
+  ASSERT_TRUE(report_result.succeeded());
+  const std::string &report = report_result.value();
   ASSERT_EQ(rows(report).size(), 1u);
   EXPECT_NE(report.find("outside recorded trace"), std::string::npos);
 }
