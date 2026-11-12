@@ -69,17 +69,17 @@ only `Total Requests`; there is no GL1 utilization, stall, bandwidth, or
 GL1-GL2 data, so do not invent a hit rate when the report prints `N/A`. There
 is no GL2 bandwidth row or table, no CPC panel, and no Efficiency Arbiter
 panel. The Memory Chart `DRAM Read Bandwidth` and `DRAM Write Bandwidth`
-include traffic served or absorbed by the Infinity Cache, so they do not measure physical GDDR6 bytes
-and have no GDDR6 peak. `Infinity Cache Hit Rate` and GDDR6 bandwidth are
+include traffic served or absorbed by the Infinity Cache, so they do not measure physical VRAM bytes
+and have no VRAM peak. `Infinity Cache Hit Rate` and VRAM bandwidth are
 `N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
 is provisional.
 
-On the roofline, the device-memory roof is `GDDR6` and the `MALL` roof is the
-64 MB Infinity Cache. The `AI GDDR6` point counts GL2C requests destined for
+On the roofline, the device-memory roof is `VRAM` and the `MALL` roof is the
+64 MB Infinity Cache. The `AI VRAM` point counts GL2C requests destined for
 memory, which the Infinity Cache can also serve, so the plot marks it once, at
-`GDDR6`. Compare it with both roofs yourself, because "Limited by" and the hover
-text never name `MALL`. A point above `GDDR6` and below `MALL` means the
-Infinity Cache is absorbing the traffic; never call that kernel GDDR6-limited.
+`VRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
+text never name `MALL`. A point above `VRAM` and below `MALL` means the
+Infinity Cache is absorbing the traffic; never call that kernel VRAM-limited.
 The `L2` and `L1` roofs have no kernel point, because there is no `AI L2` or
 `AI L1` row.
 Under `STABLE_STD` the measured roofs sit well below the interface peak. The
