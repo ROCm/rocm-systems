@@ -716,7 +716,7 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
         cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
-            records: vec![cache(7)],
+            records: vec![cache(rocddi::topology::host::CpuId::linux(7))],
             complete: true,
         },
         domains: Vec::new(),
@@ -724,7 +724,7 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
     };
     assert_eq!(
         host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
-        7
+        rocddi::topology::host::CpuId::linux(7)
     );
     assert!(host_caches_for_cpu(&topology, None, 2).is_none());
 }
@@ -740,7 +740,7 @@ fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
     };
 
     let host = CpuInfo {
-        name: "test CPU".into(),
+        name: Some("test CPU".into()),
         compute_units: 12,
     };
     let topology = TopologyGraphSnapshot {

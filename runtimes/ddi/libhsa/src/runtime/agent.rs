@@ -106,7 +106,7 @@ pub(super) fn cpu_agents(
             Some(Cpu {
                 node: Some(node.id),
                 native_node,
-                name: host.name.clone().into_boxed_str(),
+                name: host.name.as_deref().unwrap_or("CPU").into(),
                 compute_units: cpu.core_count,
                 maximum_clock_mhz: cpu.maximum_clock_mhz.unwrap_or(0),
                 memory_bytes,
@@ -118,7 +118,7 @@ pub(super) fn cpu_agents(
         cpus.push(Cpu {
             node: None,
             native_node: 0,
-            name: host.name.clone().into_boxed_str(),
+            name: host.name.as_deref().unwrap_or("CPU").into(),
             compute_units: host.compute_units,
             maximum_clock_mhz: 0,
             memory_bytes: host_memory_bytes,
