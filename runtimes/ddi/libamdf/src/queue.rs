@@ -234,7 +234,10 @@ fn descriptor(
         if family.minimum_ring_byte_length == family.maximum_ring_byte_length {
             family.minimum_ring_byte_length
         } else {
-            DEFAULT_RING_BYTES
+            DEFAULT_RING_BYTES.clamp(
+                family.minimum_ring_byte_length,
+                family.maximum_ring_byte_length,
+            )
         }
     } else {
         info.ring_byte_length

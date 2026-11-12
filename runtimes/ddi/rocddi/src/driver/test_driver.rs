@@ -549,6 +549,42 @@ impl Driver for TestDriver {
 impl AllocationOperations for TestDriver {
     type Allocation = TestAllocation;
 
+    fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        use crate::memory::device::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
+        if endpoint.id != self.id || endpoint.driver_instance != self.instance {
+            return Err(super::instance::unsupported_test_gpu());
+        }
+        let registered = match request {
+            MemoryCapabilityRequest::Allocation(MemoryKind::System) if self.owned_allocation => {
+                false
+            }
+            MemoryCapabilityRequest::Registration(_) if self.host_registration => true,
+            _ => return Err(super::instance::unsupported_test_gpu()),
+        };
+        let page = crate::memory::host::host_page_size()?;
+        Ok(DeviceMemoryCapabilities {
+            native: crate::memory::constraints::AllocationLimits {
+                alignment: page,
+                granularity: page,
+                maximum_size: 1 << 30,
+            },
+            maximum_alignment: 1 << 20,
+            logical_alignment: if registered { 1 } else { page },
+            logical_size_granularity: 1,
+            required_access: DeviceAccess::READ,
+            supported_access: DeviceAccess::READ | DeviceAccess::WRITE,
+            host_visible: true,
+            host_cacheability: Some(crate::memory::HostCacheability::WriteBack),
+            host_writable: true,
+            host_coherent: false,
+            queue_storage: false,
+        })
+    }
+
     fn supports_host_registration(&self, _: &Endpoint) -> bool {
         self.host_registration
     }

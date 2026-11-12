@@ -6,6 +6,7 @@
 // Capability implementations share the concrete driver's types and helpers.
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crate::memory::HostCacheability;
 use crate::memory::storage::TryPush;
 
 /// Reads DRM facts only when they describe the endpoint's PCI device.
@@ -130,7 +131,8 @@ impl GpuUserQueueOperations for LinuxKfdDriver {
         self.ensure_open()?;
         device.vm.check()?;
         let version = device.vm.version;
-        Ok((version.major, version.minor) >= (1, 20))
+        Ok(device.native.queues.gfx_target / 10_000 >= 12
+            && (version.major, version.minor) >= (1, 20))
     }
 
     #[allow(unsafe_code)]
@@ -515,6 +517,130 @@ impl AllocationOperations for LinuxKfdDriver {
     }
     fn backing_offset(allocation: &LinuxAllocation) -> Option<u64> {
         allocation.host_alias_source_offset()
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one provider query keeps complete construction guarantees together"
+    )]
+    fn memory_capabilities(
+        &self,
+        endpoint: &Endpoint,
+        request: crate::memory::device::MemoryCapabilityRequest<'_>,
+    ) -> Result<crate::memory::device::DeviceMemoryCapabilities, Error> {
+        use crate::memory::device::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
+        self.ensure_open()?;
+        if !self.supports_host_registration(endpoint) {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "foreign or non-GPU memory endpoint",
+            ));
+        }
+        let page = os_memory::page_size()
+            .map_err(|source| native_error("native page size", source))? as u64;
+        let (registered, kind) = match request {
+            MemoryCapabilityRequest::Allocation(kind) => (false, kind),
+            MemoryCapabilityRequest::Registration(policy) => {
+                (true, MemoryKind::OwnedHost { policy })
+            }
+            MemoryCapabilityRequest::Access { owner, kind } => {
+                if matches!(kind, MemoryKind::DeviceLocal { .. })
+                    && !self.can_access_local_memory(endpoint, owner)
+                {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "peer backing is not accessible",
+                    ));
+                }
+                let mut capabilities =
+                    self.memory_capabilities(owner, MemoryCapabilityRequest::Allocation(kind))?;
+                capabilities.supported_access = DeviceAccess::from_bits(
+                    capabilities.supported_access.bits() & endpoint.supported_permissions.bits(),
+                )
+                .ok_or_else(|| error(ErrorKind::InvalidData, "invalid peer permissions"))?;
+                return Ok(capabilities);
+            }
+        };
+        if let MemoryKind::OwnedHost { policy } = kind {
+            if self.lifetime == DriverContextLifetime::Session
+                && (!registered
+                    || (policy == HostMappingPolicy::Extended
+                        && endpoint.gpu().is_none_or(|info| {
+                            info.target_profile != crate::topology::GpuTargetProfile::Gfx1201
+                        })))
+            {
+                return Err(error(
+                    ErrorKind::Unsupported,
+                    "host mapping policy unavailable for this context",
+                ));
+            }
+        }
+        let (maximum, cacheability, coherent, host_visible) = match kind {
+            MemoryKind::System => (
+                isize::MAX as u64,
+                Some(HostCacheability::WriteBack),
+                true,
+                true,
+            ),
+            MemoryKind::OwnedHost { policy } => (
+                isize::MAX as u64,
+                Some(HostCacheability::WriteBack),
+                policy != HostMappingPolicy::Coarse,
+                true,
+            ),
+            MemoryKind::DeviceLocal {
+                host_visible,
+                coherent,
+                extended_coherent,
+                uncached,
+                ..
+            } => {
+                if extended_coherent && (!coherent || uncached) {
+                    return Err(error(
+                        ErrorKind::InvalidArgument,
+                        "invalid extended local coherence",
+                    ));
+                }
+                let maximum = if host_visible {
+                    endpoint.host_visible_local_memory_bytes
+                } else {
+                    endpoint.local_memory_bytes
+                };
+                if maximum == 0 {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "local memory projection unavailable",
+                    ));
+                }
+                (
+                    maximum,
+                    if host_visible {
+                        endpoint.host_local_cacheability
+                    } else {
+                        None
+                    },
+                    false,
+                    host_visible,
+                )
+            }
+        };
+        Ok(DeviceMemoryCapabilities {
+            native: AllocationLimits {
+                alignment: page,
+                granularity: page,
+                maximum_size: maximum.min(isize::MAX as u64),
+            },
+            maximum_alignment: 1 << 63,
+            logical_alignment: if registered { 1 } else { page },
+            logical_size_granularity: 1,
+            required_access: DeviceAccess::READ,
+            supported_access: endpoint.supported_permissions,
+            host_visible,
+            host_cacheability: cacheability,
+            host_writable: host_visible,
+            host_coherent: coherent,
+            queue_storage: true,
+        })
     }
 
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
