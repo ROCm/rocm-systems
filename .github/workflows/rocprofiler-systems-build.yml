@@ -232,6 +232,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems
+            profilers/profiler-hub/
             .gitmodules
           submodules: recursive
 
@@ -294,6 +295,7 @@ jobs:
           cmake --version
           cmake -B build . \
             -DCMAKE_C_COMPILER=${CC} \
+            -DPROFILER_HUB_FETCH_DEPENDENCIES=ON \
             -DCMAKE_CXX_COMPILER=${CXX} \
             -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
