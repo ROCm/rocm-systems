@@ -3419,7 +3419,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250: above the 16 MiB LL128 cap (VMM off), AlltoAll falls to Direct p2p.
+// gfx1250: above the 16 MiB LL128 cap AlltoAll takes DDA VMM up to its 256 MiB cap, then Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3427,18 +3427,22 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
-    ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
-        << "gfx1250 VMM must be disabled for AlltoAll";
     const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+    const size_t vmmMax   = tbl->ddaVmmMax[ncclFuncAlltoAll];
     ASSERT_GT(ll128Max, 0ul) << "gfx1250 must have a non-zero LL128 cap for AlltoAll";
+    ASSERT_GT(vmmMax, ll128Max) << "gfx1250 VMM must cover AlltoAll above the LL128 cap";
 
-    // One alignment step above the LL128 ceiling; VMM disabled, so this falls to Direct.
-    const size_t align      = 16u * (size_t)comm->nRanks;
-    const size_t totalBytes = ((ll128Max + align) / align) * align;
-
-    rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
-    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+    // One alignment step above each cap, and the VMM cap itself.
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{((ll128Max + align) / align) * align, RCCL_DDA_FABRIC_VMM},
+                                            {vmmMax, RCCL_DDA_FABRIC_VMM},
+                                            {((vmmMax + align) / align) * align, RCCL_DIRECT_ALLTOALL}};
+    for (const auto& c : cases)
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
+        EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
 }
 
 // gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
