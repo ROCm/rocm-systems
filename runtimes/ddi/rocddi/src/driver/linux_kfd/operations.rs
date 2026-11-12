@@ -6,6 +6,7 @@
 // Capability implementations share the concrete driver's types and helpers.
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crate::device::gpu::profiling::PcSamplingIntervalRestriction;
 use crate::memory::HostCacheability;
 use crate::memory::storage::TryPush;
 
@@ -367,12 +368,15 @@ impl GpuPcSamplingOperations for LinuxKfdDriver {
                     } else {
                         (item.interval_min, item.interval_max)
                     };
+                let Some(restriction) = sampling_interval_restriction(item.flags) else {
+                    continue;
+                };
                 configurations.push(PcSamplingConfiguration {
                     method,
                     unit,
                     minimum_interval,
                     maximum_interval,
-                    flags: item.flags,
+                    restriction,
                 });
             }
             return Ok(configurations);
@@ -387,8 +391,26 @@ impl GpuPcSamplingOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         request: PcSamplingRequest,
-        existing_trace_id: Option<std::num::NonZeroU32>,
     ) -> Result<Owned<KfdPcSampling>, Error> {
+        self.validate_pc_sampling_request(device, request)?;
+        KfdPcSampling::create(device.vm.clone(), device.native.gpu_id, request)
+    }
+}
+
+fn sampling_interval_restriction(flags: u64) -> Option<PcSamplingIntervalRestriction> {
+    match flags {
+        0 => Some(PcSamplingIntervalRestriction::Any),
+        uapi::PC_SAMPLE_FLAG_POWER_OF_TWO => Some(PcSamplingIntervalRestriction::PowerOfTwo),
+        _ => None,
+    }
+}
+
+impl LinuxKfdDriver {
+    fn validate_pc_sampling_request(
+        &self,
+        device: &DeviceState,
+        request: PcSamplingRequest,
+    ) -> Result<(), Error> {
         self.ensure_open()?;
         device.vm.check()?;
         let supported = self
@@ -399,8 +421,7 @@ impl GpuPcSamplingOperations for LinuxKfdDriver {
                     && config.unit == request.unit
                     && request.interval >= config.minimum_interval
                     && request.interval <= config.maximum_interval
-                    && (config.flags & uapi::PC_SAMPLE_FLAG_POWER_OF_TWO == 0
-                        || request.interval.is_power_of_two())
+                    && config.restriction.permits(request.interval)
             });
         if !supported {
             return Err(error(
@@ -408,12 +429,17 @@ impl GpuPcSamplingOperations for LinuxKfdDriver {
                 "PC sampling method or interval is unavailable",
             ));
         }
-        match existing_trace_id {
-            Some(trace_id) => {
-                KfdPcSampling::adopt(device.vm.clone(), device.native.gpu_id, trace_id)
-            }
-            None => KfdPcSampling::create(device.vm.clone(), device.native.gpu_id, request),
-        }
+        Ok(())
+    }
+
+    pub(crate) fn adopt_pc_sampling(
+        &self,
+        device: &DeviceState,
+        request: PcSamplingRequest,
+        trace_id: std::num::NonZeroU32,
+    ) -> Result<Owned<KfdPcSampling>, Error> {
+        self.validate_pc_sampling_request(device, request)?;
+        KfdPcSampling::adopt(device.vm.clone(), device.native.gpu_id, trace_id)
     }
 }
 
@@ -480,8 +506,8 @@ impl GpuSpmOperations for LinuxKfdDriver {
         };
         let result = device.vm.kfd().spm(&mut args);
         let report = SpmDestinationReport {
-            timeout: args.timeout,
-            bytes_copied: args.bytes_copied,
+            remaining_timeout_milliseconds: args.timeout,
+            previous_destination_bytes_copied: args.bytes_copied,
             data_loss: args.has_data_loss != 0,
         };
         result.map_or_else(
@@ -1021,5 +1047,29 @@ mod registration_extent_tests {
         assert!(checked_host_registration_desc(1, page).is_ok());
         assert!(checked_allocation_desc(1, page).is_err());
         assert!(checked_host_registration_desc(0, page).is_err());
+    }
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    #[test]
+    fn unknown_native_interval_restrictions_do_not_advertise_unrestricted_support() {
+        assert_eq!(
+            sampling_interval_restriction(0),
+            Some(PcSamplingIntervalRestriction::Any)
+        );
+        assert_eq!(
+            sampling_interval_restriction(uapi::PC_SAMPLE_FLAG_POWER_OF_TWO),
+            Some(PcSamplingIntervalRestriction::PowerOfTwo)
+        );
+        assert_eq!(sampling_interval_restriction(2), None);
+        assert_eq!(
+            sampling_interval_restriction(uapi::PC_SAMPLE_FLAG_POWER_OF_TWO | 2),
+            None
+        );
+        assert!(!PcSamplingIntervalRestriction::Any.permits(0));
+        assert!(!PcSamplingIntervalRestriction::PowerOfTwo.permits(3));
+        assert!(PcSamplingIntervalRestriction::PowerOfTwo.permits(8));
     }
 }
