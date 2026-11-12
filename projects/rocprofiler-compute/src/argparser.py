@@ -79,15 +79,14 @@ def add_general_group(
     general_group.add_argument(
         "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
-    arch_values = ", ".join(supported_archs)
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="id",
+        metavar="ids",
         nargs="*",
         help=(
             "List the blocks of the current GPU.\n"
-            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            "Add block or metric [ids] or aliases to list their metrics with units\n"
             'and descriptions, or "all" to list every metric. Each id or alias adds\n'
             "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
             "table 12.1.\n"
@@ -101,8 +100,8 @@ def add_general_group(
         choices=supported_archs.keys(),
         help=(
             "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [id]... to list their metrics.\n"
-            f"Values: {arch_values}"
+            "Add --list-metrics [ids]... to list their metrics.\n"
+            "Values: %(choices)s"
         ),
     )
     general_group.add_argument(
@@ -113,7 +112,7 @@ def add_general_group(
         help=(
             "DEPRECATED: use --list-metrics instead.\n"
             "List available blocks and their aliases for specified GPU <arch>.\n"
-            f"Values: {arch_values}"
+            "Values: %(choices)s"
         ),
     )
     general_group.add_argument(
@@ -347,8 +346,8 @@ Examples:
             "unique kernel names.)\n"
             "   kernel_launch_params (i.e. Round robin counters over "
             "kernel calls with unique kernel and launch parameters)\n"
-            "(Default when given without a value: kernel_launch_params)\n"
-            "Values: kernel, kernel_launch_params"
+            "With no value, uses kernel_launch_params.\n"
+            "Values: %(choices)s"
         ),
     )
 
@@ -378,7 +377,6 @@ Examples:
             "Alternatively, specify block alias(es) for filtering.\n"
             "Aliases are arch-specific; run --list-metrics to see\n"
             "all valid block ids and aliases.\n"
-            "Give all ids after one -b; a repeated -b keeps only the last list.\n"
             "Cannot be used with --set, --roof-only or --bench-only."
         ),
     )
@@ -413,17 +411,18 @@ Examples:
         nargs=argparse.REMAINDER,
         help="Provide command for profiling after double dash.",
     )
-    default_sdk_tool_path = (
-        Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-        / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-    )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
         type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
         metavar="<path>",
         required=False,
-        default=resolve_rocm_library_path(str(default_sdk_tool_path)),
+        default=resolve_rocm_library_path(
+            str(
+                Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+                / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+            )
+        ),
         help=(
             "Set the path to rocprofiler-sdk tool.\n"
             "(Default: $ROCM_PATH/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so)"
@@ -502,7 +501,7 @@ Examples:
         default=None,
         nargs="*",
         choices=KNOWN_ML_API_BACKENDS,
-        metavar="framework",
+        metavar="frameworks",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -510,7 +509,7 @@ Examples:
         help=(
             "Trace ML APIs. User ROCTx regions are always included.\n"
             f"With no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
-            f"Values: {', '.join(KNOWN_ML_API_BACKENDS)}"
+            "Values: %(choices)s"
         ),
     )
     profile_group.add_argument(
@@ -552,9 +551,9 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
         help=(
-            "Set the method of pc sampling. stochastic requires MI300 or newer "
+            "Set the PC sampling method. The stochastic method needs MI300 or newer "
             "(Default: stochastic).\n"
-            "Values: stochastic, host_trap"
+            "Values: %(choices)s"
         ),
     )
     profile_group.add_argument(
@@ -650,7 +649,7 @@ Examples:
         default=None,
         nargs="*",
         choices=OPERATOR_BACKENDS,
-        metavar="framework",
+        metavar="frameworks",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
@@ -659,12 +658,12 @@ Examples:
             "List collected operators as a call tree.\n"
             "With no arguments, lists every collected operator.\n"
             "Ignores --operator.\n"
-            f"Values: {', '.join(OPERATOR_BACKENDS)}"
+            "Values: %(choices)s"
         ),
     )
     analyze_group.add_argument(
         "--operator",
-        metavar="pattern",
+        metavar="patterns",
         type=str,
         dest="operator",
         nargs="*",
@@ -715,9 +714,7 @@ Examples:
         nargs="+",
         type=block_token_or_alias,
         help=(
-            "Specify metric id(s) or block alias(es) from --list-metrics "
-            "for filtering.\n"
-            "Give all ids after one -b; a repeated -b keeps only the last list."
+            "Specify metric id(s) or block alias(es) from --list-metrics for filtering."
         ),
     )
     analyze_group.add_argument(
@@ -734,7 +731,7 @@ Examples:
         choices=["stdout", "txt", "csv", "db"],
         default="stdout",
         help=(
-            "Format of the analysis output:\n"
+            "Format of the analysis output (Default: stdout):\n"
             "   stdout - print report to the terminal (no file/folder created).\n"
             "            Required by --list-operators and --operator.\n"
             "   txt    - write report to <name>.txt; disables terminal output.\n"
@@ -745,9 +742,8 @@ Examples:
             "            database schema in the docs). Requires profiles\n"
             "            collected in rocpd format.\n"
             "            Disables terminal output.\n"
-            "<name> is rocprof_compute_<uuid> unless --output-name is given "
-            "(Default: stdout).\n"
-            "Values: stdout, txt, csv, db"
+            "<name> is rocprof_compute_<uuid> unless --output-name is given.\n"
+            "Values: %(choices)s"
         ),
     )
     analyze_group.add_argument(
@@ -788,7 +784,7 @@ Examples:
         default="per_kernel",
         choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
         help="Specify the normalization unit (Default: per_kernel).\n"
-        "Values: per_wave, per_cycle, per_second, per_kernel",
+        "Values: %(choices)s",
     )
     analyze_advanced_group.add_argument(
         "-t",
@@ -797,7 +793,7 @@ Examples:
         metavar="<unit>",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="Specify display time unit (Default: ns).\nValues: s, ms, us, ns",
+        help="Specify display time unit (Default: ns).\nValues: %(choices)s",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
@@ -816,12 +812,9 @@ Examples:
         choices=["table"],  # future: e.g. "bar" for additional TTY views
         default=None,
         help=(
-            "TTY output view. "
-            "table: force plain tables and ignore cli_style from YAML\n"
-            "(e.g. mem_chart, per-kernel Roofline layout as tables). "
-            "Additional views may be added in future releases\n"
-            "(Default: use cli_style from the analysis config).\n"
-            "Values: table"
+            "Show the terminal output as plain tables, including the memory chart\n"
+            "and roofline (Default: each panel's own layout).\n"
+            "Values: %(choices)s"
         ),
     )
     analyze_advanced_group.add_argument(
@@ -938,7 +931,7 @@ class CliHelpFormatter(argparse.RawTextHelpFormatter):
         super().__init__(prog, max_help_position=max_help_position)
 
     def _format_args(self, action: argparse.Action, default_metavar: str) -> str:
-        metavar = self._metavar_formatter(action, default_metavar)(1)[0]
+        metavar = action.metavar or default_metavar
         if action.nargs == argparse.ONE_OR_MORE:
             return f"{metavar}..."
         if action.nargs == argparse.ZERO_OR_MORE:
