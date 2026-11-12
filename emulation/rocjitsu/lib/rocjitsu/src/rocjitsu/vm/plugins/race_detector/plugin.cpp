@@ -311,34 +311,31 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, k
 
 namespace {
 
-struct Transfer {
-  std::string_view source;
-  std::string_view destination;
-};
-
-// Name only where the data moves; one event type covers several operations,
-// such as loads and returning atomics.
-Transfer event_transfer(MemoryEventType type) {
+// Load events do not retain a reliable source memory space: FLAT lanes can
+// resolve differently, and scalar and direct-to-LDS loads can read scratch.
+std::string_view event_description(MemoryEventType type, RaceViolation::Space space) {
   using enum MemoryEventType;
   switch (type) {
   case GLOBAL_TO_VGPR:
-    return {"global memory", "VGPRs"};
+    return "load into VGPRs";
   case VGPR_TO_GLOBAL:
-    return {"VGPRs", "global memory"};
+    return "transfer from VGPRs into global memory";
   case LDS_TO_VGPR:
-    return {"LDS", "VGPRs"};
+    return space == RaceViolation::Space::LDS ? "transfer from LDS into VGPRs" : "load into VGPRs";
   case VGPR_TO_LDS:
-    return {"VGPRs", "LDS"};
+    return "transfer from VGPRs into LDS";
   case GLOBAL_TO_LDS:
-    return {"global memory", "LDS"};
+    return "load into LDS";
   case GLOBAL_TO_SGPR:
-    return {"global memory", "SGPRs"};
+    return "load into SGPRs";
   case GLOBAL_TO_TTMP:
-    return {"global memory", "TTMPs"};
+    return "load into TTMPs";
   case SCALAR_TO_GLOBAL:
-    return {"scalar registers", "global memory"};
+    return "transfer from scalar registers into global memory";
   case LDS_TO_GLOBAL:
-    return {"LDS", "global memory"};
+    return "transfer from LDS into global memory";
+  case LDS_OPERAND_READ:
+    return "read from LDS";
   }
   throw std::logic_error("race event has an unknown memory operation");
 }
@@ -382,15 +379,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   oss << "]: " << hazard << ".\n";
   oss << "  Current access: " << (v.isWrite ? "write" : "read") << " at PC 0x" << std::hex
       << access_pc << std::dec << ".\n";
-  oss << "  Conflict: ";
-  const Transfer transfer = event_transfer(type);
-  if (v.space != RaceViolation::Space::LDS) {
-    // Register-load events identify the destination, but not the source memory
-    // space: FLAT can combine lanes from different spaces and SMEM includes scratch.
-    oss << "load into " << transfer.destination;
-  } else {
-    oss << "transfer from " << transfer.source << " into " << transfer.destination;
-  }
+  oss << "  Conflict: " << event_description(type, v.space);
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   if (events.status(event) == EventStatus::ACTIVE) {

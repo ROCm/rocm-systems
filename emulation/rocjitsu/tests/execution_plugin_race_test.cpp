@@ -3498,6 +3498,71 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
       << sink.str();
 }
 
+TEST(RaceDetectorPluginTest, DirectToLdsLoadsDoNotInferTheirSourceMemorySpace) {
+  for (bool scratch : {false, true}) {
+    for (bool wait : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "scratch=" << scratch << " wait=" << wait);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(1));
+      PluginSinkConfig sink_config;
+      StringSink &sink = sink_config.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      ComputeUnitCore *cu = fixture.cu();
+      Wavefront *wave = cu->dispatch_wf(0, 0x100, 104, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_base(cu->allocate_lds(256));
+      wave->set_lds_size(256);
+      wave->set_m0(16);
+      wave->set_scratch_base(0x8000);
+      wave->set_scratch_lane_size(256);
+      std::array waves{wave};
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+      const uint32_t input = 0x12345678;
+      fixture.mem->load_image(reinterpret_cast<const uint8_t *>(&input), sizeof(input),
+                              scratch ? 0x8000 : 0x4000);
+      cu->write_vgpr(wave->vgpr_alloc().base, 0, scratch ? 0 : 0x4000);
+      cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+      cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 16);
+      std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      const std::array<uint32_t, 2> words = cdna4::build_flat(
+          scratch ? cdna4::kScratchLoadLdsDwordFlat : cdna4::kGlobalLoadLdsDwordFlat,
+          {.seg = uint8_t(scratch ? 1 : 2), .addr = 0, .saddr = 0x7f});
+      DecodeResult load = decoder->decode_window(words);
+      ASSERT_TRUE(load.succeeded());
+      EXPECT_EQ(load.value()->mnemonic(),
+                scratch ? "scratch_load_lds_dword" : "global_load_lds_dword");
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *load.value(), *wave);
+      ASSERT_TRUE(cu->execute_instruction(load.value().get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, load.value().release(), *wave);
+      EXPECT_EQ(cu->lds().read32(wave->lds_base() + 16), input);
+      if (wait)
+        execute_wait(*fixture.plugin_group_, *wave, legacy_wait_word(cu->arch(), 0, 15));
+
+      wave->pc = 0x200;
+      DecodeResult read =
+          decoder->decode_window(cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 2, .vdst = 8}));
+      ASSERT_TRUE(read.succeeded());
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *read.value(), *wave);
+      ASSERT_TRUE(cu->execute_instruction(read.value().get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, read.value().release(), *wave);
+      if (wait) {
+        EXPECT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
+      } else {
+        EXPECT_NE(sink.str().find("type=LDS"), std::string::npos) << sink.str();
+        EXPECT_NE(sink.str().find("  Conflict: load into LDS at PC 0x100, wave 0.\n"),
+                  std::string::npos)
+            << sink.str();
+        EXPECT_NE(sink.str().find("pending counters: vmcnt."), std::string::npos) << sink.str();
+      }
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, ScalarLoadsDoNotInferTheirSourceMemorySpace) {
   for (uint16_t opcode : {cdna4::kSLoadDwordSmem, cdna4::kSScratchLoadDwordSmem}) {
     SCOPED_TRACE(opcode);
@@ -4248,6 +4313,11 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
         const auto write_report = sink.str().substr(output);
         EXPECT_EQ(write_report.find("type=LDS access=write") != std::string::npos, hazard)
             << write_report;
+        if (hazard && read != Read::Ds) {
+          EXPECT_NE(write_report.find("  Conflict: read from LDS at PC "), std::string::npos)
+              << write_report;
+          EXPECT_EQ(write_report.find("pending counters"), std::string::npos) << write_report;
+        }
       }
       for (auto *wave : waves)
         wave->halt();
@@ -5304,13 +5374,18 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
     f.soc->set_plugin_group(f.plugin_group_);
     f.plugin_group_->onInit();
     Wavefront *reader = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
-    Wavefront *writer = f.cu()->dispatch_wf(1, 0x1000, 104, 256);
+    Wavefront *writer = f.cu()->dispatch_wf(0, 0x1000, 104, 256);
     ASSERT_NE(reader, nullptr);
     ASSERT_NE(writer, nullptr);
     reader->set_exec(1);
     writer->set_exec(1);
     std::array waves{reader, writer};
-    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+    const uint32_t lds_base = f.cu()->allocate_lds(256);
+    for (Wavefront *wave : waves) {
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
     auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     const auto read_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
     auto read = decoder->decode_window(read_words);
