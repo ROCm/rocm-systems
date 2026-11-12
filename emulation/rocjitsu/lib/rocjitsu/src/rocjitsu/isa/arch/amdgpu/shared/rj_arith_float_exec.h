@@ -84,6 +84,67 @@ inline void execute_fp8_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function 
   }
 }
 
+// Convert the already selected SDWA source, then apply floating output modifiers
+// and byte placement exactly once. Validate arithmetic before any destination write.
+template <typename Inst>
+inline void execute_byte_conversion_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                         Unary64Function wave64, uint64_t flags,
+                                         const Operand &destination, const Operand &source) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::F32>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
+// Widen the staged BF16 source, then retain SDWA's FP32 scaling and destination
+// placement. Source capture precedes writes to any overlapping destination.
+template <typename Inst>
+inline void execute_bf16_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                    Unary64Function wave64, const Operand &destination,
+                                    const Operand &source) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec(), 3);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint64_t flags = wave.cu().arithmetic_flags();
+  int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                   : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::F32>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
 // Translate guest FP32 rounding, denormal, IEEE and architecture-specific clamp controls.
 inline uint64_t float32_flags(const Wavefront &wave, uint64_t flags, bool rdna3) {
   flags |= uint64_t(wave.fp_round_mode_f32()) << 24;
@@ -124,6 +185,116 @@ using FloatUnary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *con
                                      const uint32_t *const *, uint32_t *);
 using FloatUnary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
                                      const uint32_t *const *, uint32_t *);
+
+// Convert a staged SDWA source, retaining the legacy F16 prescaling order.
+// SDWA owns destination placement and clamp; errors commit neither results nor FP status.
+template <sdwa::ResultFormat Format, typename Inst>
+inline void execute_conversion16_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
+                                      FloatUnary64Function wave64, uint64_t flags,
+                                      const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint64_t mode = 0;
+  if constexpr (Format == sdwa::ResultFormat::F16) {
+    mode = RJ_ARITH_CVT_SDWA |
+           (uint64_t(sdwa::output_modifier<Format>(inst, wave)) << RJ_ARITH_ALU_OMOD_SHIFT);
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint32_t causes = 0;
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  const int error = wave.wf_size() == 32
+                        ? wave32(flags, uint32_t(exec_mask), mode, &d, &a.data, &causes)
+                        : wave64(flags, exec_mask, mode, &d, &a.data, &causes);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<Format>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+  wave.set_trapsts(wave.trapsts() | causes);
+  wave.raise_alu_causes(causes);
+}
+
+// Convert an already staged SDWA word, then apply destination scaling and placement.
+// All inputs are read before writes; an error commits neither destinations nor FP status.
+template <sdwa::ResultFormat Format, typename Inst, typename Wave32, typename Wave64>
+inline void execute_conversion32_sdwa(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
+                                      uint64_t flags, const Operand &destination,
+                                      const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint32_t causes = 0;
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  // Some conversions have no architectural FP-status output parameter.
+  const auto invoke = [&](auto call, auto mask) {
+    if constexpr (requires { call(flags, mask, 0, &d, &a.data, &causes); }) {
+      return call(flags, mask, 0, &d, &a.data, &causes);
+    } else {
+      return call(flags, mask, 0, &d, &a.data);
+    }
+  };
+  const int error =
+      wave.wf_size() == 32 ? invoke(wave32, uint32_t(exec_mask)) : invoke(wave64, exec_mask);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<Format>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+  wave.set_trapsts(wave.trapsts() | causes);
+  wave.raise_alu_causes(causes);
+}
+
+// Convert staged normalized inputs before SDWA destination byte placement.
+// Arithmetic modifiers are already staged; integer outputs ignore OMOD and clamp.
+template <typename Inst>
+inline void execute_normalized_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                    Unary64Function wave64, uint64_t flags,
+                                    const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
 
 // Convert selected FP16/integer halves, FP32/integer words and FP64 pairs.
 // Pair selectors and byte masks describe layouts; flags describe FP formats.
