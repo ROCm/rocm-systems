@@ -25,8 +25,8 @@
 /// once, so the lock excludes other threads while allowing the serving thread to
 /// re-enter.
 ///
-/// A device can only reach guest memory the client shared mmap-ably. A window
-/// that must instead be fetched by sending the client a command is refused,
+/// Ordinary guest RAM is reachable only when the client shared it mmap-ably. A
+/// window that must instead be fetched by sending the client a command is refused,
 /// because unless the client negotiated a second socket for those, the command
 /// travels on the same connection it may itself be sending on, which the library
 /// documents as known to break; whether that socket was negotiated is not
@@ -34,8 +34,11 @@
 /// to any one thread or moment. A window the client shared as a descriptor to be
 /// read with file I/O would in fact be safe, but the public API gives no way to
 /// tell it apart from one needing protocol traffic, so it is declined too. In
-/// practice a VMM shares guest RAM mmap-ably and the supported case is the
-/// ordinary one.
+/// practice a VMM shares guest RAM mmap-ably. A descriptorless DMA map whose
+/// IOVA resolves uniquely to another live function's PCI BAR is served from
+/// that owner's sealed backing through the node-local fabric. This uses the
+/// standard VFIO-user map and never sends a DMA request back over the client's
+/// socket.
 ///
 /// A device that shares a BAR by descriptor is served to one client only. The
 /// mapping outlives the connection and cannot be taken back, so a later client
@@ -51,7 +54,9 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/pci/physical_memory_access.h"
 #include "rocjitsu/vmm/vfu/guest_region_map.h"
+#include "simdojo/components/pci_bar_address_decoder.h"
 #include "simdojo/components/pci_device.h"
 
 #include <cstddef>
@@ -66,11 +71,18 @@
 
 struct vfu_ctx;
 struct dma_sg;
+struct vfu_dma_info;
 
 namespace rocjitsu {
 
+class VfioTargetGrants;
+class VfioQuiesceWake;
+class FabricEndpoint;
+
 /// @brief Serves one @ref simdojo::PciDevice to a VMM over a vfio-user socket.
-class VfioDeviceHost final : public simdojo::IrqSink, public simdojo::DmaEngine {
+class VfioDeviceHost final : public simdojo::IrqSink,
+                             public simdojo::DmaEngine,
+                             public PciPeerDataProvider {
 public:
   /// @brief Construct a host for @p device listening on @p socket_path.
   /// @param[in] socket_path Filesystem path of the AF_UNIX socket to serve.
@@ -119,6 +131,40 @@ public:
   /// progress flag distinguishes that interval from a completed departure.
   /// Requested serving stop and host detach do not count as disconnects.
   [[nodiscard]] ClientSnapshot client_snapshot() const;
+
+  /// Bind this function to the server-local peer BAR address domain before
+  /// build. A standalone host has no peer BAR mappings.
+  [[nodiscard]] bool enable_target_grants(VfioTargetGrants &grants, uint32_t ordinal,
+                                          uint32_t gpu_id = 0, FabricEndpoint *fabric = nullptr);
+
+  /// Check the installed fabric route before admitting a descriptorless peer map.
+  [[nodiscard]] bool can_route_peer(uint32_t owner_gpu_id) const;
+
+  [[nodiscard]] std::optional<amdgpu::VmTransferToken>
+  prepare_peer_read(uint64_t requester_generation, uint64_t iova, std::size_t length,
+                    const std::shared_ptr<amdgpu::VmTransferEffectGate> &gate,
+                    const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
+                    const amdgpu::VmTranslation *selected_translation,
+                    const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) override;
+  [[nodiscard]] std::optional<amdgpu::VmTransferToken>
+  prepare_peer_write(uint64_t requester_generation, uint64_t iova, std::span<const std::byte> bytes,
+                     const std::shared_ptr<amdgpu::VmTransferEffectGate> &gate,
+                     const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
+                     const amdgpu::VmTranslation *selected_translation,
+                     const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) override;
+  [[nodiscard]] std::shared_ptr<VfioQuiesceWake> quiesce_wake() const noexcept {
+    return quiesce_wake_;
+  }
+  /// Called from libvfio-user under the library lock.
+  [[nodiscard]] int begin_target_quiesce();
+
+  /// Capture a live server-owned generation for cross-function validation.
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession> target_session_snapshot() const;
+
+  /// Classify the standard descriptorless DMA map through this node's PCI
+  /// address decoder. No client-specific extension supplies its owner.
+  [[nodiscard]] bool register_standard_peer_map(const simdojo::DmaRegion &region);
+  void unregister_standard_peer_map(const simdojo::DmaRegion &region);
 
   /// @brief Detach this host from the device.
   /// @details Clears the sinks the device holds, so a device that outlives its
@@ -212,11 +258,13 @@ public:
 private:
   simdojo::DmaAccessOutcome copy_guest_memory(uint64_t guest_phys, void *data, std::size_t length,
                                               bool to_guest);
-  bool transfer_one_sg(dma_sg *sg, void *data, uint64_t guest_phys, std::size_t length,
-                       bool to_guest);
+  [[nodiscard]] simdojo::DmaAccessOutcome atomic_destination(uint64_t guest_phys, uint32_t width,
+                                                             bool to_guest) const;
   [[nodiscard]] bool
   finish_session_reset(simdojo::ResetKind kind,
                        std::shared_ptr<simdojo::PciTransportSession> closing_session) noexcept;
+  [[nodiscard]] bool target_quiesce_drained() const noexcept;
+  void end_target_quiesce() noexcept;
 
   const std::string socket_path_;
   simdojo::PciDevice &device_;
@@ -253,6 +301,14 @@ private:
   /// pointer to it for as long as it is attached.
   simdojo::PciDevice::Transport transport_;
   std::shared_ptr<simdojo::PciTransportSession> client_session_;
+  VfioTargetGrants *target_grants_ = nullptr;
+  uint32_t target_ordinal_ = 0;
+  uint32_t target_gpu_id_ = 0;
+  FabricEndpoint *fabric_ = nullptr;
+  std::shared_ptr<VfioQuiesceWake> quiesce_wake_;
+  bool quiescing_ = false;
+  bool quiesce_pending_ = false;
+  std::vector<std::shared_ptr<amdgpu::VmTransferEffectGate>> quiesce_gates_;
   /// @brief Whether this host is the transport the device is attached to.
   ///
   /// @details Distinct from @ref attached_, which is about the client on the
@@ -271,6 +327,9 @@ private:
   bool warned_unreachable_region_ = false;
   uint64_t declined_regions_ = 0;
   uint64_t declined_bytes_ = 0;
+  /// Read and publish only from the serving thread while holding vfu_mutex_.
+  void refresh_peer_bar_window();
+  std::optional<simdojo::PciBarAddressDecoder::Window> last_published_peer_bar_;
 };
 
 } // namespace rocjitsu

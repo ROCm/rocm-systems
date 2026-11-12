@@ -11,6 +11,9 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "net_ib_cast_inspect.h"
+#include "archinfo.h"
+
+#include <hip/hip_runtime.h>
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -18,6 +21,7 @@ extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
+RCCL_PARAM(IbCastMaxMsgSize, "IB_MAX_MSG_SIZE", -1);
 
 bool IbCastAinicRoce = 0;
 bool IbCastMultiplaneEnable = false;
@@ -165,19 +169,26 @@ static int IbCastRelaxedOrderingCapable(void) {
 
 static bool ncclMlx5dvDmaBufCapable(ibv_context* context) {
   ncclResult_t res;
-  int dev_fail = 0;
+  int ibvErrno = 0;
+  int mlxErrno = 0;
 
   struct ibv_pd* pd;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, context), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  // Sample the ibv probe before the mlx5 call overwrites errno. A missing
+  // mlx5dv_reg_dmabuf_mr is ENOSYS and means not data-direct. Kernel DMA-BUF
+  // support is ibvErrno. On libibverbs 39 the ibv dummy call sets EBADF itself,
+  // so this mlx errno does not reach IbCastDmaBufSupport().
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  ibvErrno = errno;
   (void)wrap_direct_mlx5dv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/,
                                          0 /* mlx5 flags*/);
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  mlxErrno = errno;
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
-  // stop the search and goto failure
-  if (dev_fail) goto failure;
+  errno = ibvErrno;
+  if (ibvErrno == EOPNOTSUPP || ibvErrno == EPROTONOSUPPORT) return false;
+  // Symbol absent: not a data-direct device. Kernel DMA-BUF support is ibvErrno.
+  if (mlxErrno == ENOSYS) return false;
+  if (mlxErrno == EOPNOTSUPP || mlxErrno == EPROTONOSUPPORT) return false;
   return true;
 failure:
   return false;
@@ -382,6 +393,48 @@ ncclResult_t IbCastFinalizeDevices(void) {
 }
 
 extern int64_t IbCastArThreshold;
+
+static bool IbCastGpuIsGfx1250() {
+  int dev = 0;
+  hipDeviceProp_t prop{};
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  return IsArchMatch(prop.gcnArchName, "gfx1250");
+}
+
+// A positive RCCL_IB_MAX_MSG_SIZE explicitly sets the cap, overriding the
+// automatic gfx1250 and port limits. When unset or 0, the cap is the smallest
+// of the gfx1250 256 MiB limit and the non-zero port max_msg_sz values. The
+// result is raised to at least 1 MiB and rounded down to
+// IB_WRITE_CHUNK_ALIGNMENT.
+static void IbCastInitMaxPostSendBytes() {
+  constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
+  constexpr uint32_t kMinCap = 1024u * 1024u;
+  const int64_t requested = rcclParamIbCastMaxMsgSize();
+  IbCastMaxPostSendBytes = UINT32_MAX;
+
+  if (requested > 0) {
+    INFO(NCCL_ENV, "NET/IB: RCCL_IB_MAX_MSG_SIZE set by environment to %lld", (long long)requested);
+    IbCastMaxPostSendBytes = (uint32_t)std::min(requested, (int64_t)UINT32_MAX);
+  } else {
+    if (IbCastGpuIsGfx1250()) {
+      IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
+    }
+    for (int i = 0; i < IbCastNDevs; i++) {
+      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+    }
+  }
+  // The floor covers every source, so no data post splits below 1 MiB.
+  IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);
+  // Round down to the IB_WRITE_CHUNK_ALIGNMENT
+  IbCastMaxPostSendBytes -= IbCastMaxPostSendBytes % IB_WRITE_CHUNK_ALIGNMENT;
+  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes",
+    IbCastMaxPostSendBytes);
+}
+
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
@@ -738,6 +791,7 @@ exit:
     }
     IbCastReportMatchingScheme();
   }
+  if (ret == ncclSuccess) IbCastInitMaxPostSendBytes();
   return ret;
 fail:
   if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {

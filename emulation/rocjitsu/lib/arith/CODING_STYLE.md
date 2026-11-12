@@ -20,6 +20,18 @@ returns, C headers such as `<stdint.h>`, and traditional include guards.
 Public integer constants use typed `constexpr` declarations.
 Internal C++ code lives in `rocjitsu::arith`, not a top-level `arith` namespace.
 
+Implementation and test files include the instruction-family headers they use,
+not the public umbrella header. Shared numeric helpers include
+`common/validation.h` or `common/float_encoding.h`; matrix-specific controls
+stay out of these common headers. This keeps unrelated instruction changes
+from invalidating cached compilations.
+
+External consumers include `rj_arith/rj_arith.h`. The detail headers’
+`IWYU pragma: private` mappings direct consumers to that public umbrella;
+library implementations and tests deliberately include the detail headers
+directly. These internal includes do not make the detail headers a supported
+external interface. Dedicated umbrella-header tests still include the umbrella.
+
 Short arithmetic names such as `a`, `b`, `c`, and `d` are appropriate when they
 match instruction operands or a nearby mathematical expression.
 

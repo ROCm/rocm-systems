@@ -113,10 +113,15 @@ AqlPacketProcessor::process_barrier(const Request &request,
   if (!dependencies_satisfied)
     return blocked(AqlBlockedReason::DependencyUnsatisfied);
 
-  return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
-                         .completion_signal = barrier.completion_signal.handle,
-                         .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                         .blocks_following = true});
+  return admit(
+      request,
+      {.kind = AqlPreparedPacketKind::NonKernel,
+       .completion_signal = barrier.completion_signal.handle,
+       .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+       .blocks_following = true,
+       .no_fence_aql_barrier =
+           ((packet.header >> HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) & 3) == HSA_FENCE_SCOPE_NONE &&
+           ((packet.header >> HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE) & 3) == HSA_FENCE_SCOPE_NONE});
 }
 
 AqlPacketProcessResult

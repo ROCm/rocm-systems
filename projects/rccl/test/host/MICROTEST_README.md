@@ -283,9 +283,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
   `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
   See `test_categories_micro_mgmt_task_enq.yaml`.
-- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
-  `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
-  `ce-coll-test.cc`. Its own binary because every other target links
+- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
+  `CeCollMicrotest.*`, `CeInitMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`,
+  all in `ce-coll-test.cc`. Its own binary because every other target links
   `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
@@ -306,6 +306,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
   `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
   See `test_categories_micro_argcheck.yaml`.
+- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
+  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
+  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
+  symbols `os/linux.cc` defines. The units run on real sockets and files through
+  `fakes/libc_seam.h` with `UseRealLibc()`. See `test_categories_micro_linux.yaml`.
+
 - **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
   suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
   `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
@@ -533,11 +541,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   defines the `amd_smi_*` wrappers this file compiles. See
   `test_categories_micro_amdsmi_wrap.yaml`.
 
-- **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
-  test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
-  `search.cc` (`Search*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
+- **`rccl-UnitTestsMicroSearch`** — `src/graph/search.cc` (via `SEARCH_CC_PATH`, from
+  `search-test.cc`); suites `Search*`. Its own binary so search.cc is the only unit under
+  test in it: the rest of `src/graph` it searches over (`xml.cc`, `topo.cc`, `paths.cc`,
+  `rome_models.cc`) is linked real as a collaborator, and `topo.cc` comes in through
+  `topo_include.cc` rather than as a source file because `TopoSetNetDevsPolicy` can only
+  be defined from inside that TU. Shares `TopoScene.h` and `fakes/graph_fakes.cc` with
+  `rccl-UnitTestsMicroTopo`. See `test_categories_micro_search.yaml`.
+
+- **`rccl-UnitTestsMicroTopo`** — the rest of the real `src/graph` files, each `#include`d
+  from its own test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`),
+  `paths.cc` (`Paths*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
   `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
-  (`Trees*`). Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
+  (`Trees*`). `search.cc` is linked real here too, but only as a collaborator -- `paths.cc`
+  calls `ncclTopoGetNetDev` and `ncclTopoGetLinkType` -- and its tests live in
+  `rccl-UnitTestsMicroSearch`. Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
   defines `connect.cc`'s params, and `os_fakes.cc`, whose CPU and sysfs seams these tests
   cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
   `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
@@ -847,6 +865,13 @@ target instead produces the same symbol faked three times in three files, each
 slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
+`src/graph/search.cc` has two rows for the same reason as `src/rccl_wrap.cc` below:
+the targets that compile it (`rccl-UnitTestsMicroSearch`, which tests it, and
+`rccl-UnitTestsMicroTopo` / `rccl-UnitTestsMicroGraph`, which only need it to collaborate
+with `paths.cc`) take its dependencies from `topo_stubs.cc` or `graph_fakes.cc`, while
+every other target fakes its own entry points (`search_fakes.cc`). The two never define
+the same symbol, so no target needs an `RCCL_STUBS_OMIT_` macro for them.
+
 `src/rccl_wrap.cc` has two rows because it is both a unit under test
 (`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
 dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
@@ -868,9 +893,10 @@ symbol.
 | externals `src/dev_runtime.cc` reaches (`rccl-UnitTestsMicro`, which compiles it) | `fakes/dev_runtime_micro_fakes.cc` |
 | externals the devcomm compat shims reach | `fakes/devcomm_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
-| `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
+| `src/graph/*.cc` (topo, paths, connect, rome consensus) and `search.cc`'s *dependencies* | `fakes/topo_stubs.cc` |
+| `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but `rccl-UnitTestsMicroSearch`, `rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroGraph`) | `fakes/search_fakes.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
-| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` only, which compiles the real graph files) | `fakes/graph_fakes.cc` |
+| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroSearch`, which compile the real graph files) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
@@ -937,8 +963,9 @@ symbol.
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`) | `fakes/libc_fakes.cc` |
-| libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders) | `fakes/dl_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`; the OS surface of `os/linux*.cc` and `misc/{socket,signals}.cc`) | `fakes/libc_fakes.cc` |
+| libdl macro-renamed in one unit via `fakes/dl_seam.h` (the `misc/*symbols.cc` builders and `os/linux.cc`) | `fakes/dl_fakes.cc` |
+| `src/init.cc`'s `SetCpuStackSize` param (`rccl-UnitTestsMicroLinux`, which cannot link `init_fakes.cc`) | `fakes/linux_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
@@ -1184,7 +1211,8 @@ triage it into the right bucket:
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself.
 - **It's a logging or env-param helper** → already covered by
-  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (parses the value
+  `ncclDebugLog` (prints to stderr; a test that asserts on what was logged
+  hooks `g_ncclDebugLog`) / `ncclLoadParam` (parses the value
   `SetMicroEnv` scripted for that name, and the param's compile-time default
   when the name is unmapped). If a new logging primitive
   appears, follow the same pattern.
@@ -1487,6 +1515,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroGinHostProxy       # src/gin/gin_host_proxy.cc + proxy_gpucontext/
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, misc/{socket,shmutils,signals}.cc
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
@@ -1494,7 +1523,8 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
 ./build/rccl-UnitTestsMicroMnnvl              # src/mnnvl.cc tests
 ./build/rccl-UnitTestsMicroAlloc              # src/include/alloc.h tests
-./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
+./build/rccl-UnitTestsMicroSearch             # src/graph/search.cc tests
+./build/rccl-UnitTestsMicroTopo               # the rest of src/graph/*.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
