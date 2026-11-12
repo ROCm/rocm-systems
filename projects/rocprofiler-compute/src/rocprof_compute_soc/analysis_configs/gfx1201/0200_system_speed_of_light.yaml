@@ -117,10 +117,9 @@ Panel Config:
     GL0 Cache Hit Rate (TCP Cache): >-
       Percentage of vector L0 cache line accesses that hit.
     GL0 Cache BW (TCP Cache): >-
-      Not available on gfx1201. The L0 counters give no access size.
+      Not available
     GL1 Cache Hit Rate: >-
-      Not available in this gfx1201 configuration. No qualified GL1 data hit/miss
-      measurement is collected for the Navi48 write-combining stage.
+      Not available
     Scalar Data Cache Hit Rate: >-
       Percentage of scalar data cache requests that hit.
     Scalar Data Cache BW: >-
@@ -128,4 +127,4 @@ Panel Config:
     Instruction Cache Hit Rate: >-
       Percentage of instruction cache requests that hit.
     Instruction Cache BW: >-
-      Not available on gfx1201. The instruction cache counters give no request size.
+      Not available

@@ -40,10 +40,8 @@ Panel Config:
           unit: (Count + $normUnit)
   metrics_description:
     Hit Rate: >-
-      Not available on gfx1201. The write-combining GL1 stage has no hit-rate
-      measurement in this configuration.
+      Not available
     Miss Requests: >-
-      Not available on gfx1201. This configuration does not collect GL1
-      miss-request counters.
+      Not available
     Total Requests: >-
       Total GL1 requests, normalized by the chosen unit.

@@ -380,20 +380,16 @@ Panel Config:
       from dispatch metadata. Allocation granularity can increase the
       reported value above the compiler's request.
     WAVE32 LDS Parameter Load Instructions: >-
-      Not available on gfx1201. This configuration does not collect the
-      WAVE32 LDS parameter-load instruction counter.
+      Not available
     WGP Utilization: >-
       Average SQ busy-cycle count relative to GPU-active cycles, expressed
       as a percentage. Navi48 counter-instance reduction requires validation.
     Wait for Barrier: >-
-      Not available on gfx1201 while wait-counter units and instance
-      reduction are being validated.
+      Not available
     Wait for Counter: >-
-      Not available on gfx1201 while wait-counter units and instance
-      reduction are being validated.
+      Not available
     Wait for Instruction Fetch: >-
-      Not available on gfx1201 while wait-counter units and instance
-      reduction are being validated.
+      Not available
     Wave Life: >-
       Estimated average wave lifetime from accumulated living-wave cycles
       divided by measured dispatched waves. Navi48 counter units, instance
@@ -401,6 +397,4 @@ Panel Config:
     Workgroup Size: >-
       Number of work-items per workgroup, from dispatch metadata.
     Wait for Any: >-
-      Not available on gfx1201 while wait-counter normalization is being
-      validated. Average, minimum and maximum wait percentages cannot yet be
-      determined reliably.
+      Not available

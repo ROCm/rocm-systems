@@ -32,12 +32,12 @@ System Speed-of-Light:
     rst: Percentage of vector L0 cache line accesses that hit.
     unit: Percent
   GL0 Cache BW (TCP Cache):
-    plain: Not available on gfx1201. The L0 counters give no access size.
-    rst: Not available on gfx1201. The L0 counters give no access size.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
   GL1 Cache Hit Rate:
-    plain: Not available in this gfx1201 configuration. No qualified GL1 data hit/miss measurement is collected for the Navi48 write-combining stage.
-    rst: Not available in this gfx1201 configuration. No qualified GL1 data hit/miss measurement is collected for the Navi48 write-combining stage.
+    plain: Not available
+    rst: Not available
     unit: Percent
   Scalar Data Cache Hit Rate:
     plain: Percentage of scalar data cache requests that hit.
@@ -52,8 +52,8 @@ System Speed-of-Light:
     rst: Percentage of instruction cache requests that hit.
     unit: Percent
   Instruction Cache BW:
-    plain: Not available on gfx1201. The instruction cache counters give no request size.
-    rst: Not available on gfx1201. The instruction cache counters give no request size.
+    plain: Not available
+    rst: Not available
     unit: Bytes/s
 Memory chart - Instruction Cache:
   ICache Requests:
@@ -284,8 +284,8 @@ WGP LDS Instruction Mix:
     rst: Issued LDS parameter-load instructions reported by the counter, normalized by the chosen unit.
     unit: Count per Normalization Unit
   WAVE32 LDS Parameter Load Instructions:
-    plain: Not available on gfx1201. This configuration does not collect the WAVE32 LDS parameter-load instruction counter.
-    rst: Not available on gfx1201. This configuration does not collect the WAVE32 LDS parameter-load instruction counter.
+    plain: Not available
+    rst: Not available
     unit: Count per Normalization Unit
 WGP VALU Instruction Mix:
   SQ_INSTS_VALU:
@@ -312,20 +312,20 @@ WGP Utilization:
     unit: Percent
 WGP Instruction Issue Stalls:
   Wait for Barrier:
-    plain: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
-    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    plain: Not available
+    rst: Not available
     unit: Percent
   Wait for Counter:
-    plain: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
-    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    plain: Not available
+    rst: Not available
     unit: Percent
   Wait for Instruction Fetch:
-    plain: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
-    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    plain: Not available
+    rst: Not available
     unit: Percent
   Wait for Any:
-    plain: Not available on gfx1201 while wait-counter normalization is being validated. Average, minimum and maximum wait percentages cannot yet be determined reliably.
-    rst: Not available on gfx1201 while wait-counter normalization is being validated. Average, minimum and maximum wait percentages cannot yet be determined reliably.
+    plain: Not available
+    rst: Not available
     unit: Percent
 WGP Wavefront Life:
   Wave Life:
@@ -353,13 +353,13 @@ GL0 Stalls:
     unit: Cycles per Normalization Unit
 GL1A Processing:
   Hit Rate:
-    plain: Not available on gfx1201. The write-combining GL1 stage has no hit-rate measurement in this configuration.
-    rst: Not available on gfx1201. The write-combining GL1 stage has no hit-rate measurement in this configuration.
+    plain: Not available
+    rst: Not available
     unit: Percent
 GL1 Cache Request Statistics:
   Miss Requests:
-    plain: Not available on gfx1201. This configuration does not collect GL1 miss-request counters.
-    rst: Not available on gfx1201. This configuration does not collect GL1 miss-request counters.
+    plain: Not available
+    rst: Not available
     unit: Count per Normalization Unit
   Total Requests:
     plain: Total GL1 requests, normalized by the chosen unit.
