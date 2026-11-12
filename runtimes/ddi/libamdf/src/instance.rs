@@ -658,9 +658,9 @@ fn summary(endpoint: &topology::Endpoint) -> amdf_endpoint_summary_t {
 }
 
 pub(crate) fn family_count(endpoint: &topology::Endpoint) -> u32 {
-    endpoint.gpu().map_or(0, |gpu| {
-        u32::from(gpu.queues.aql) + u32::from(gpu.queues.sdma) + u32::from(gpu.queues.pm4)
-    })
+    endpoint
+        .gpu()
+        .map_or(0, |gpu| queue_families(gpu).map(|_| 1_u32).sum())
 }
 
 fn pm4_atomic_capabilities() -> amdf_atomic_capabilities_t {
@@ -714,27 +714,35 @@ pub(crate) fn family(
     endpoint: &topology::Endpoint,
     ordinal: u32,
 ) -> Result<amdf_queue_family_info_t, u64> {
-    let gpu = endpoint.gpu().ok_or(UNSUPPORTED)?;
+    gpu_family(endpoint.gpu().ok_or(UNSUPPORTED)?, ordinal)
+}
+
+fn queue_families(gpu: &topology::GpuInfo) -> impl Iterator<Item = (u32, bool, bool)> {
     let queues = gpu.queues;
-    if ordinal >= family_count(endpoint) {
-        return Err(RANGE);
-    }
-    let mut next = 0;
-    let command_type = if queues.aql && ordinal == next {
-        AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
-    } else {
-        next += u32::from(queues.aql);
-        if queues.sdma && ordinal == next {
-            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
-        } else {
-            next += u32::from(queues.sdma);
-            if queues.pm4 && ordinal == next {
-                AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
-            } else {
-                return Err(RANGE);
-            }
-        }
-    };
+    [
+        (AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, queues.aql, false),
+        (
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            queues.sdma,
+            queues.kernel_sdma,
+        ),
+        (
+            AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+            queues.pm4,
+            queues.kernel_pm4,
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, direct, kernel)| *direct || *kernel)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one complete queue-family ABI projection"
+)]
+fn gpu_family(gpu: &topology::GpuInfo, ordinal: u32) -> Result<amdf_queue_family_info_t, u64> {
+    let queues = gpu.queues;
+    let (command_type, direct, kernel) = queue_families(gpu).nth(ordinal as usize).ok_or(RANGE)?;
     let aql = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
     let sdma = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA;
     let pm4 = command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
@@ -748,12 +756,15 @@ pub(crate) fn family(
     Ok(amdf_queue_family_info_t {
         ordinal,
         command_type,
-        publication_modes: AMDF_QUEUE_PUBLICATION_MODE_USER
-            | if (pm4 && queues.kernel_pm4) || (sdma && queues.kernel_sdma) {
-                AMDF_QUEUE_PUBLICATION_MODE_KERNEL
-            } else {
-                0
-            },
+        publication_modes: if direct {
+            AMDF_QUEUE_PUBLICATION_MODE_USER
+        } else {
+            0
+        } | if kernel {
+            AMDF_QUEUE_PUBLICATION_MODE_KERNEL
+        } else {
+            0
+        },
         format_version: if pm4 {
             AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1
         } else if sdma {
@@ -803,27 +814,53 @@ pub(crate) fn family(
         } else {
             amdf_atomic_capabilities_t::default()
         },
-        user_queue_capabilities: AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
-            | if pm4 {
-                0
-            } else {
-                AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
-            },
-        producer_modes: AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE
-            | if aql {
-                AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI
-            } else {
-                0
-            },
+        user_queue_capabilities: if direct {
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
+                | if pm4 {
+                    0
+                } else {
+                    AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
+                }
+        } else {
+            0
+        },
+        producer_modes: if direct {
+            AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE
+                | if aql {
+                    AMDF_QUEUE_PRODUCER_MODE_BIT_MULTI
+                } else {
+                    0
+                }
+        } else {
+            0
+        },
         priority_capabilities: AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL
             | if aql {
                 AMDF_QUEUE_PRIORITY_CAPABILITY_LOW | AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH
             } else {
                 0
             },
-        minimum_ring_byte_length: if pm4 { 4096 } else { 1024 },
-        maximum_ring_byte_length: if pm4 { 4096 } else { 1 << 31 },
-        ring_byte_length_alignment: if pm4 { 4096 } else { 1024 },
+        minimum_ring_byte_length: if !direct {
+            0
+        } else if pm4 {
+            4096
+        } else {
+            1024
+        },
+        maximum_ring_byte_length: if !direct {
+            0
+        } else if pm4 {
+            4096
+        } else {
+            1 << 31
+        },
+        ring_byte_length_alignment: if !direct {
+            0
+        } else if pm4 {
+            4096
+        } else {
+            1024
+        },
         ..Default::default()
     })
 }
@@ -1531,5 +1568,52 @@ mod observer_tests {
         observer.record_event(reset(endpoint_id, false)).unwrap();
         observer.record_operation_loss(&epoch, None);
         assert_eq!(epoch.load(Ordering::Acquire), 3);
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn kernel_only_families_have_dense_ordinals_without_direct_mapping_promises() {
+        let mut gpu = topology::GpuInfo::default();
+        gpu.queues.kernel_sdma = true;
+        gpu.queues.kernel_pm4 = true;
+        for (ordinal, command) in [
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let family = gpu_family(&gpu, u32::try_from(ordinal).unwrap()).unwrap();
+            assert_eq!(family.ordinal, u32::try_from(ordinal).unwrap());
+            assert_eq!(family.command_type, command);
+            assert_eq!(family.publication_modes, AMDF_QUEUE_PUBLICATION_MODE_KERNEL);
+            assert_eq!(family.user_queue_capabilities, 0);
+            assert_eq!(family.producer_modes, 0);
+            assert_eq!(family.minimum_ring_byte_length, 0);
+            assert_eq!(family.maximum_ring_byte_length, 0);
+            assert_eq!(family.ring_byte_length_alignment, 0);
+        }
+        assert_eq!(gpu_family(&gpu, 2).err(), Some(RANGE));
+        gpu.queues.sdma = true;
+        let family = gpu_family(&gpu, 0).unwrap();
+        assert_eq!(
+            family.publication_modes,
+            AMDF_QUEUE_PUBLICATION_MODE_USER | AMDF_QUEUE_PUBLICATION_MODE_KERNEL
+        );
+        assert_ne!(family.minimum_ring_byte_length, 0);
+        gpu.queues.aql = true;
+        assert_eq!(
+            gpu_family(&gpu, 0).unwrap().command_type,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+        );
+        assert_eq!(
+            gpu_family(&gpu, 1).unwrap().command_type,
+            AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+        );
     }
 }
