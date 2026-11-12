@@ -37,7 +37,8 @@ constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncc
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_HierLsaST;
+                                   1 << ncclSymkKernelId_AllGather_HierLsaST |
+                                   1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -64,13 +65,15 @@ constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
+                                    1 << ncclSymkKernelId_AllGather_HierLsaTmaST |
                                     1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
                                     1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
 
 // Needs the LSA team to factor into equal-size packages
-constexpr uint32_t kernelMask_HierLsaST = 1 << ncclSymkKernelId_AllGather_HierLsaST;
+constexpr uint32_t kernelMask_Hier =
+  1 << ncclSymkKernelId_AllGather_HierLsaST | 1 << ncclSymkKernelId_AllGather_HierLsaTmaST;
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;
@@ -119,6 +122,12 @@ bool ncclSymkTmaDeepEligible(struct ncclComm* comm, ncclSymkKernelId k, size_t n
     break;
   case ncclSymkKernelId_AllGather_TmaSTMC:
     bytePerChunk = ncclSymkMultimemDeepBytePerChunk;
+    chunkMod = 1;
+    break;
+  case ncclSymkKernelId_AllGather_HierLsaTmaST:
+    // Each chunk goes through its own single-block bcast<Deep=true>(), so the first one reaches the 16 B deep
+    // tier whatever the block count; the 256 B tier may still be skipped. Deep unrolls that tier 4x.
+    bytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, 4 * ncclSymkUnrollPacks);
     chunkMod = 1;
     break;
   default:
@@ -487,7 +496,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
 
-  if (ncclSymkAgHierGroups(comm) == 0) kmask &= ~kernelMask_HierLsaST;
+  if (ncclSymkAgHierGroups(comm) == 0) kmask &= ~kernelMask_Hier;
   return kmask;
 }
 

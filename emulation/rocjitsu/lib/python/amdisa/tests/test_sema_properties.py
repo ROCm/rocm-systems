@@ -147,7 +147,7 @@ class TestDeriveWritesVcc:
 
 
 class TestDeriveWritesExec:
-    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW', 'EXEC_LO'])
     def test_direct_write_only(self, exec_id):
         body = _assign(_id(exec_id, SemaType.U64), _lit('0', SemaType.U64))
         block = SemaBlock('S_WREXEC', ExecModel.SCALAR, body)
@@ -156,7 +156,7 @@ class TestDeriveWritesExec:
         assert InstructionProperty.WRITES_EXEC in props
         assert InstructionProperty.READS_EXEC not in props
 
-    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW', 'EXEC_LO'])
     def test_direct_read_only(self, exec_id):
         body = _assign(_id('tmp'), _id(exec_id, SemaType.U64))
         block = SemaBlock('S_GETEXEC', ExecModel.SCALAR, body)
@@ -165,7 +165,7 @@ class TestDeriveWritesExec:
         assert InstructionProperty.READS_EXEC in props
         assert InstructionProperty.WRITES_EXEC not in props
 
-    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW', 'EXEC_LO'])
     def test_array_write_is_read_modify_write(self, exec_id):
         body = _assign(
             SemaNode(
@@ -184,7 +184,7 @@ class TestDeriveWritesExec:
         assert InstructionProperty.WRITES_EXEC in props
         assert InstructionProperty.READS_EXEC in props
 
-    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW'])
+    @pytest.mark.parametrize('exec_id', ['EXEC', 'EXEC_RAW', 'EXEC_LO'])
     def test_array_read_only(self, exec_id):
         body = _assign(
             _id('tmp'),

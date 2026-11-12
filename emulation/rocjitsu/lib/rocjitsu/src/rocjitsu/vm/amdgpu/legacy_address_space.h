@@ -158,6 +158,7 @@ public:
   util::IntrusiveSharedPtr<const VmMutationEpoch> mutation_epoch{};
   /// Requires request_mutex so all users serialize policy-cache invalidations.
   std::shared_ptr<LegacyPageTableCacheState> page_table_cache_state{};
+  std::shared_ptr<const PrtResidency> prt_residency{};
   pid_t client_pid = 0;
   int client_mem_fd = -1;
   bool passthrough = false;

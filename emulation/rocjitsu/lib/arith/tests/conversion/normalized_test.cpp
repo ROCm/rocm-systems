@@ -6,7 +6,7 @@
 #include "common/floating_point.h"
 #include "conversion/helpers.h"
 #include "conversion/normalized_reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
 
 #include <bit>
 #include <gtest/gtest.h>

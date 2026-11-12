@@ -29,7 +29,7 @@ pub use gpu::{
 pub use graph::{
     AttachmentKind, CpuNodeInfo, EndpointAttachment, MemoryBank, MemoryBankKind, MemoryLocation,
     MemoryLocationKind, NativeNodeId, NodeId, NodeKind, ReportedRoute, SourceId, SourceKind,
-    TopologyCache, TopologyNode, TopologySnapshot, TopologySource,
+    TopologyCache, TopologyGraphSnapshot, TopologyNode, TopologySource,
 };
 
 /// Exact PCI function and configuration identity reported by the OS.
