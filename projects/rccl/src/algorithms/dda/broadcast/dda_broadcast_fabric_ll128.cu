@@ -54,9 +54,8 @@ unsigned ddaLL128BcBlocksPerPeer(size_t chunkSlices, size_t warps, int nPeers, s
 
 static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, size_t totalBytes) {
   // Two-shot uses the arch table thread count if set, else falls back to the env var / default.
-  const rcclArchThresholds* table = comm->archThresholds;
-  const unsigned archThreads = (table && table->ddaLL128BcTwoShotThreads > 0)
-                             ? table->ddaLL128BcTwoShotThreads : 0;
+  const int archThreadsRaw = rcclDdaFabricBcLL128Threads(comm);
+  const unsigned archThreads = archThreadsRaw > 0 ? (unsigned)archThreadsRaw : 0;
   // Env var overrides arch table; arch table overrides default.
   const bool envSet = (getenv("RCCL_DDA_LL128_BC_THREADS") != nullptr);
   const unsigned threads = envSet ? ddaLL128BcThreads()
