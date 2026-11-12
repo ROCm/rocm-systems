@@ -6,12 +6,11 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
-#include "rocjitsu/vm/amdgpu/wait_counters.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
