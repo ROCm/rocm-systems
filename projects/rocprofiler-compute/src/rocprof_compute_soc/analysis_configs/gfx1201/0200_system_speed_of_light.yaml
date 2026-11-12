@@ -98,6 +98,8 @@ Panel Config:
       Counted wave population, other shapes/types, wave64 interpretation, and
       the applicable peak still require validation.
       Treat the FLOP conversion and percentage of peak as approximations.
+      If this shows N/A, check SDK support for gfx1201 SQ event 233 and the
+      configured SqcCounterBlockMaxEvent limit.
     FP64 VALU Issue Rate: >-
       Billions of double-precision VALU instruction issues per second. This is
       an instruction rate, without accounting for FLOPs per instruction or

@@ -139,9 +139,6 @@ class AnalysisConfigMetric(NamedTuple):
 
 
 class OmniSoC_Base:
-    # Arch-specific text for counters that can be requested but not collected.
-    counter_collection_hints: Dict[str, str] = {}  # noqa: UP006
-
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         # new info field will contain rocminfo or sysinfo to populate properties
         console_debug("[omnisoc init]")

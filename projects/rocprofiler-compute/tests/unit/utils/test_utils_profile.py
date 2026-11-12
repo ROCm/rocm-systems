@@ -224,13 +224,12 @@ def test_run_prof_zero_kernels_writes_no_results_csv(
     warnings: list[str] = []
     stub_run_prof_deps(monkeypatch, counter_csv_body, warnings)
 
-    collected_counters = utils_profile.run_prof(
+    utils_profile.run_prof(
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
     )
 
-    assert collected_counters == set()
     assert any("No GPU kernel data collected" in m for m in warnings)
     assert sorted(workload_dir.glob("results_*.csv.gz")) == []
     assert not (workload_dir / "out").exists()
@@ -254,13 +253,12 @@ def test_run_prof_relabels_dispatch_and_kernel_ids(tmp_path, monkeypatch):
     warnings: list[str] = []
     stub_run_prof_deps(monkeypatch, body, warnings)
 
-    collected_counters = utils_profile.run_prof(
+    utils_profile.run_prof(
         str(fname),
         {"APP_CMD": ["./test_app"], "ROCPROF_COUNTER_COLLECTION": "1"},
         str(workload_dir),
     )
 
-    assert collected_counters == {"SQ_WAVES", "SQ_BUSY_CYCLES"}
     results_csv = workload_dir / "results_pmc_perf_test.csv.gz"
     results = pd.read_csv(results_csv)
     assert "PID" not in results.columns

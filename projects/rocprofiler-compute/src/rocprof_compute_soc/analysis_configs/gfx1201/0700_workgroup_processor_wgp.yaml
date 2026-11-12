@@ -369,7 +369,8 @@ Panel Config:
     SQ_WMMA_VALU_INSTS: >-
       Raw WMMA vector instruction count. The aggregate counter does not
       distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation
-      requires validation.
+      requires validation. If this shows N/A, check SDK support for gfx1201 SQ
+      event 233 and the configured SqcCounterBlockMaxEvent limit.
     Scratch Allocation: >-
       Bytes of scratch memory allocated per work-item, from dispatch metadata.
     Total Instructions: >-
