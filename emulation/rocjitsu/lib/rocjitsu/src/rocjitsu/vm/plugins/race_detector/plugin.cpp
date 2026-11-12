@@ -242,28 +242,6 @@ void register_unused_flat_domains(WaveRaceState &race, const InstructionSnapshot
   }
 }
 
-std::optional<amdgpu::MemoryIssueInfo>
-routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
-                       const amdgpu::MemoryIssueInfo &decoded) {
-  if (access.decoded_space != amdgpu::DecodedMemorySpace::FLAT ||
-      (access.route != amdgpu::MemoryRoute::GLOBAL && access.route != amdgpu::MemoryRoute::LOCAL))
-    return std::nullopt;
-
-  if (access.request_lane_mask == 0)
-    return decoded.for_flat_memory_domains(false, false);
-
-  const uint64_t shared_lanes =
-      (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Functional execution splits mixed requests by address space. The plugin's
-  // single mixed event retains both obligations until both domains are ready.
-  if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
-    return decoded;
-  if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
-    return std::nullopt;
-
-  return decoded.for_flat_memory_domains(shared_lanes == 0, shared_lanes != 0);
-}
-
 } // namespace
 
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDetector &detector) {
@@ -622,25 +600,25 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       data && (data->tag() == amdgpu::LOCAL_MEM || data->tag() == amdgpu::GLOBAL_MEM) &&
       inst.data_as<amdgpu::VectorMemState>()->rejects_routed_access())
     return;
-  const auto *decoded = inst.amdgpu_memory_issue_info();
-  assert(decoded && "memory instruction reached the race detector without issue metadata");
-  if (!decoded)
+  const auto *issue = amdgpu::resolved_memory_issue_info(inst);
+  assert(issue && "memory instruction reached the race detector without issue metadata");
+  if (!issue)
     return;
-  const auto routed = routed_flat_issue_info(access, *decoded);
-  const auto &issue = routed ? *routed : *decoded;
-  const auto obligations = issue.counter_obligations();
+  const auto obligations = issue->counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  // On the pre-GFX12 capacity targets, FLAT is admitted here, on the domains
-  // its addresses used. On gfx1250 it counts on both domains and was admitted
-  // at issue.
-  const bool flatOnBothDomains = routed && flat_counts_on_both_domains(wf.cu().arch());
-  if (routed && !flatOnBothDomains && access.request_lane_mask != 0 &&
-      supports_counter_capacity(wf.cu().arch()) && rs->prepareForMemoryIssue(issue).failed()) {
+  // gfx1250 FLAT counts on both domains and was admitted before execution.
+  // Earlier targets apply capacity only after routing selects a domain.
+  const bool flat = access.decoded_space == amdgpu::DecodedMemorySpace::FLAT &&
+                    (access.route == amdgpu::MemoryRoute::GLOBAL ||
+                     access.route == amdgpu::MemoryRoute::LOCAL);
+  const bool flatOnBothDomains = flat && flat_counts_on_both_domains(wf.cu().arch());
+  if (flat && !flatOnBothDomains && access.request_lane_mask != 0 &&
+      supports_counter_capacity(wf.cu().arch()) && rs->prepareForMemoryIssue(*issue).failed()) {
     report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
     return;
   }
   if (flatOnBothDomains)
-    register_unused_flat_domains(*rs, instruction, *decoded, *routed);
+    register_unused_flat_domains(*rs, instruction, *inst.amdgpu_memory_issue_info(), *issue);
 
   // A gfx1250 instruction issued with wave EXEC zero holds its counter slot. An
   // access whose lanes are all cleared while EXEC is active records none, and
@@ -649,7 +627,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (!exec_zero_memory_issue_counts(wf.cu().arch()) || wf.exec() != 0 ||
         ignored_memory_issue(inst, wf))
       return;
-    const auto counted = exec_zero_counted_obligations(issue, inst.mnemonic());
+    const auto counted = exec_zero_counted_obligations(*issue, inst.mnemonic());
     rs->registerCounterEvent(instruction, counted.counter_obligations());
   };
 
@@ -666,9 +644,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       record_exec_zero_slot();
       return;
     }
-    const bool readModifyWrite =
-        (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
-        d.atomic_op != amdgpu::AtomicOp::NONE;
+    const bool readModifyWrite = (access.decoded_space == amdgpu::DecodedMemorySpace::FLAT ||
+                                  access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
+                                 d.atomic_op != amdgpu::AtomicOp::NONE;
     const auto ldsAccess = readModifyWrite ? LdsAccess::ReadWrite
                            : d.is_load     ? LdsAccess::Read
                                            : LdsAccess::Write;
