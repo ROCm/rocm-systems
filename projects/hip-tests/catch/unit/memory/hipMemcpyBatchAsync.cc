@@ -1603,37 +1603,22 @@ void HoldUntilGateOpens(void* arg) {
   }
   __atomic_store_n(&gate->passed, 1, __ATOMIC_RELEASE);
 }
-}  // namespace
+__global__ void NopKernel() {}
 
-/**
- * Test Description
- * ------------------------
- * - Verifies a batch whose shader copy waits on the stream's prior work behind another stream's
- * kernel on the shared hardware queue. Each batch copies pinned host memory to the device on the
- * copy engines and copies within the device as a shader copy, and both wait on the stream's prior
- * work, here a host function that holds it until the batch is enqueued. Kernels spinning on a host
- * flag on many other streams are launched between them, so one lands on the stream's hardware
- * queue ahead of the shader copy's wait and holds that wait queued. The copy engine copy then
- * finishes while the wait is still queued, and about two hundred more batches and another host
- * function follow before the host releases the kernels, so the stream's completion signals are
- * reused several times over meanwhile. The sources alternate between two patterns from batch to
- * batch, so the final contents show that the last batch landed after all the others.
- * Test source
- * ------------------------
- * - catch/unit/memory/hipMemcpyBatchAsync.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 7.1
- */
-HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+// Runs batches whose shader copy waits on the stream's prior work behind other streams' spin
+// kernels on the shared hardware queue (see the test cases below). launch_barriers also queues two
+// kernels on every other stream before each batch.
+void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
   // More streams than hardware queues, so some stream shares the tested stream's queue
   constexpr size_t kNumSpinStreams = 16;
   constexpr size_t kHeldIteration = 2;
   // Once the stream's signals wrapped around, so the second host function reuses the interrupt
   // signals the first one returned
   constexpr size_t kSecondHostFuncIteration = kHeldIteration + 100;
-  // Few enough that the queued batches do not exhaust the stream's signals while held
-  constexpr size_t kIterations = 200;
+  // Few enough that the queued batches do not exhaust the stream's signals while held. The
+  // barrier variant queues two kernels on every spin stream per batch, which needs fewer still, and
+  // more batches than the tracker lets pins wait for a fence (64)
+  const size_t kIterations = launch_barriers ? 100 : 200;
   constexpr int kWatchdogSeconds = 30;
   constexpr size_t kNumPatterns = 2;
   const auto pattern = [](size_t copy_idx, size_t pattern_idx) {
@@ -1641,8 +1626,11 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
         kBackToBackCopySize, static_cast<unsigned char>(1 + copy_idx * kNumPatterns + pattern_idx));
   };
   // The host-to-device copy runs on the copy engines and the device-to-device copy as a shader copy
+  // The barrier variant has shader copies only: the consecutive barrier packets of a copy engine
+  // copy keep their barrier bit, which retires the waits of the earlier batches
   const std::array<std::pair<LinearAllocs, LinearAllocs>, 2> copies{
-      {{LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc},
+      {{launch_barriers ? LinearAllocs::hipMalloc : LinearAllocs::hipHostMalloc,
+        LinearAllocs::hipMalloc},
        {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc}}};
 
   StreamGuard stream_guard(Streams::created);
@@ -1683,6 +1671,16 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
     if (iteration == kSecondHostFuncIteration) {
       HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), [](void*) {}, nullptr));
     }
+    if (launch_barriers && iteration > kHeldIteration) {
+      // The first kernel of a stream after the tested stream's last packet has no barrier bit,
+      // since that packet already orders it, and the second keeps it. That barrier packet follows
+      // the tested stream's last packet on a shared hardware queue, so the barrier-bit
+      // optimization drops the barrier bit of the tested stream's next packet
+      for (StreamGuard& spin_stream : spin_streams) {
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+      }
+    }
     const hipError_t batch_status = hipMemcpyBatchAsync(
         dst_ptrs.data(), batch_srcs[iteration % kNumPatterns].data(), sizes.data(), sizes.size(),
         &attr, &attrs_idx, 1, nullptr, stream_guard.stream());
@@ -1706,6 +1704,52 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
     requireBufferEquals(dst_ptrs[copy_idx], pattern(copy_idx, last_pattern_idx),
                         copies[copy_idx].second);
   }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch whose shader copy waits on the stream's prior work behind another stream's
+ * kernel on the shared hardware queue. Each batch copies pinned host memory to the device on the
+ * copy engines and copies within the device as a shader copy, and both wait on the stream's prior
+ * work, here a host function that holds it until the batch is enqueued. Kernels spinning on a host
+ * flag on many other streams are launched between them, so one lands on the stream's hardware
+ * queue ahead of the shader copy's wait and holds that wait queued. The copy engine copy then
+ * finishes while the wait is still queued, and about two hundred more batches and another host
+ * function follow before the host releases the kernels, so the stream's completion signals are
+ * reused several times over meanwhile. The sources alternate between two patterns from batch to
+ * batch, so the final contents show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+  RunQueuedShaderWaitBackToBack(false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Same as Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack with shader copies only,
+ * a hundred batches, and two kernels queued on every other stream before each batch. The second
+ * kernel keeps its barrier bit and lands on the stream's hardware queue after its last packet, so
+ * the barrier-bit optimization clears the barrier bit of the stream's next packet. No packet of
+ * the stream then retires the waits of its earlier shader copies, and more of them pile up than
+ * the runtime keeps before it forces a barrier bit. The batches must neither hang the stream nor
+ * change the copies' results.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers) {
+  RunQueuedShaderWaitBackToBack(true);
 }
 #endif
 
