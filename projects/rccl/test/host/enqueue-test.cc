@@ -5646,12 +5646,15 @@ TEST_F(EnqueueMicrotest, RawTaskAppend_Collective_CopiesItsArgumentsIntoTheGener
   RawTaskScene sc;
   float send = 0;
   float recv = 0;
+  float bias = 0;
   ncclInfo info = sc.Info(ncclFuncAllReduce);
   info.sendbuff = &send;
   info.recvbuff = &recv;
+  info.acc = &bias;
   info.count = 12;
   info.root = 2;
   info.op = ncclProd;
+  sc.cc.get()->opCount = 7;
   ASSERT_EQ(ncclSuccess, sc.Append(info));
   ncclRawTask* t = sc.Generic();
   ASSERT_NE(nullptr, t);
@@ -5665,6 +5668,8 @@ TEST_F(EnqueueMicrotest, RawTaskAppend_Collective_CopiesItsArgumentsIntoTheGener
   EXPECT_EQ(ncclProd, t->coll.opHost);
   EXPECT_EQ(ncclDevProd, t->coll.opDev.op);
   EXPECT_EQ(kRawStream, t->coll.stream);
+  EXPECT_EQ(&bias, t->coll.acc);
+  EXPECT_EQ(7u, t->coll.opCount);
   EXPECT_TRUE(sc.JoinedRawTaskGroup());
 }
 
@@ -5690,17 +5695,20 @@ TEST_F(EnqueueMicrotest, RawTaskAppend_SingleRankCollective_LaunchesInPlaceOfQue
   sc.cc.get()->nRanks = 1;
   float send = 0;
   float recv = 0;
+  float bias = 0;
   ncclInfo info = sc.Info(ncclFuncAllReduce);
   info.sendbuff = &send;
   info.recvbuff = &recv;
+  info.acc = &bias;
   info.count = 5;
   ScopedHook launch(g_ncclLaunchOneRank, [&](void* dst, void const* src, size_t n, ncclDevRedOpFull op,
-                                             ncclDataType_t, hipStream_t stream, hipEvent_t, void const*) {
+                                             ncclDataType_t, hipStream_t stream, hipEvent_t, void const* acc) {
     EXPECT_EQ(&recv, dst);
     EXPECT_EQ(&send, src);
     EXPECT_EQ(5u, n);
     EXPECT_EQ(ncclDevSum, op.op);
     EXPECT_EQ(kRawStream, stream);
+    EXPECT_EQ(&bias, acc);
     return ncclSuccess;
   });
   ASSERT_EQ(ncclSuccess, sc.Append(info));

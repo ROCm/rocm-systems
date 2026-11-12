@@ -21,14 +21,16 @@ namespace rocjitsu::amdgpu::arith {
 // Unlike RDNA matrix sources, CDNA tuples are not redirected to v0 here.
 template <uint32_t FactorRegisters, uint32_t ResultRegisters, uint32_t Lanes,
           uint32_t AccumulatorRegisters = ResultRegisters, bool PackedAccumulator = false,
-          bool WideAccumulator = false>
-inline void exec_dense_fp_matrix(Wavefront &wave, WmmaFunction function, uint64_t flags,
+          bool WideAccumulator = false, typename Function = WmmaFunction>
+inline void exec_dense_fp_matrix(Wavefront &wave, Function function, uint64_t flags,
                                  uint64_t controls, uint32_t destination, uint32_t source_a,
                                  uint32_t source_b, uint32_t source_c,
                                  std::optional<uint64_t> constant_c,
                                  uint64_t a_lanes = ~uint64_t{0} >> (64 - Lanes),
-                                 uint64_t b_lanes = ~uint64_t{0} >> (64 - Lanes)) {
-  static_assert(FactorRegisters <= 8 && ResultRegisters <= 32 && AccumulatorRegisters <= 32);
+                                 uint64_t b_lanes = ~uint64_t{0} >> (64 - Lanes),
+                                 uint32_t a_registers = FactorRegisters,
+                                 uint32_t b_registers = FactorRegisters) {
+  static_assert(FactorRegisters <= 16 && ResultRegisters <= 32 && AccumulatorRegisters <= 32);
   static_assert(Lanes == 32 || Lanes == 64);
   if (wave.instruction_execution_failed()) {
     return;
@@ -37,10 +39,14 @@ inline void exec_dense_fp_matrix(Wavefront &wave, WmmaFunction function, uint64_
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
+  if (a_registers > FactorRegisters || b_registers > FactorRegisters) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   RegisterAccess registers(wave);
   constexpr uint64_t all_lanes = ~uint64_t{0} >> (64 - Lanes);
-  auto a_region = registers.read_vgpr_region(source_a, FactorRegisters, a_lanes);
-  auto b_region = registers.read_vgpr_region(source_b, FactorRegisters, b_lanes);
+  auto a_region = registers.read_vgpr_region(source_a, a_registers, a_lanes);
+  auto b_region = registers.read_vgpr_region(source_b, b_registers, b_lanes);
   std::array<const uint32_t *, FactorRegisters> a{}, b{};
   std::array<const uint32_t *, AccumulatorRegisters> c{};
   if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data())) {

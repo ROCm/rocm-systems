@@ -4,6 +4,7 @@
 // Tests for reciprocal-with-flags numeric results and FP-status behavior.
 
 #include "math/unary_test.h"
+#include "rj_arith/detail/rj_arith_math.h"
 
 // Check unary math results and semantics/status support across CPU levels.
 TEST(MathRcpIflagF32W32Gfx11, Arithmetic) {

@@ -49,8 +49,10 @@ unavailable.
 These checks do not make an arbitrary library call from a multithreaded fork
 child a substitute for `exec`.
 
-`topology::host::snapshot` reads CPU identity, online CPUs, NUMA domains,
-memory capacity, and cache records as passive OS facts. The reads are
+`topology::host::graph_snapshot` returns a `HostTopologyGraphSnapshot` with
+CPU identity, online CPUs, NUMA domains, memory capacity, and cache records as
+passive OS facts. `Session::topology_graph_snapshot` combines these observations
+with driver contributions in a `TopologyGraphSnapshot`. The OS reads are
 best-effort and are not one atomic topology generation. A host domain is not
 an endpoint or activated `Device`; frontends decide how to expose it.
 `host::clock` reads the live profiling timebase. `host::cache` qualifies a
