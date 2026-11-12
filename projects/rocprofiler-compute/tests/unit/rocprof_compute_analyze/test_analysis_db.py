@@ -4039,9 +4039,15 @@ def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
     workload_path = "/mock/workload/path"
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
     values = {"expr_performance": 5.0, "expr_device_memory": 7.0}
+
+    def evaluate_roofline_metric(
+        name, value, kernel_pmc_df, sys_info, parse=False, **_kwargs
+    ):
+        return 1.0 if parse else values[value]
+
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
-        lambda name, value, kernel_pmc_df, sys_info: values[value],
+        evaluate_roofline_metric,
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
