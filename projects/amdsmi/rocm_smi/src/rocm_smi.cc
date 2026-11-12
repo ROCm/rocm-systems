@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -491,28 +490,6 @@ rsmi_status_t rsmi_shut_down(void) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
-  }
-
   (void)smi.ref_count_dec();
 
   if (smi.ref_count() == 0) {
@@ -554,32 +531,6 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = static_cast<uint32_t>(smi.devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -823,40 +774,6 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
      << " returning pci_id = " << std::to_string(pci_id) << " ("
      << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";

@@ -839,7 +839,7 @@ class _ScalarSaveexec(_ScalarDeriver):
         stmts: list[SemaNode] = []
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
 
         # Cache source and EXEC before any writes (prevents aliasing).
         src0 = _cast(_src(0), src_ty)
@@ -1052,6 +1052,17 @@ def _vec_binop_expr(
     ty: SemaType,
 ) -> SemaNode:
     if op is None:
+        return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
+    if op in ('sub', 'subrev', 'rsub') and ty.base == 'F':
+        # ISA discrepancy: the ISA expects S0 - S1 (S1 - S0 for SUBREV), but
+        # gfx1201 and gfx1100 add the negated subtrahend with the sources kept in
+        # operand order. A NaN subtrahend therefore returns with its sign flipped,
+        # and when both sources are NaN, S0's NaN wins, as for ADD. Other targets
+        # sharing this lowering inherit the rule without hardware measurement.
+        if op == 'sub':
+            src1 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src1,))
+        else:
+            src0 = SemaNode(SemaNodeKind.UMINUS, ty=ty, children=(src0,))
         return SemaNode(SemaNodeKind.ADD, ty=ty, children=(src0, src1))
     if op in ('subrev', 'rsub'):
         return SemaNode(SemaNodeKind.SUB, ty=ty, children=(src1, src0))
@@ -2109,6 +2120,7 @@ class _DsAtomic(_ScalarDeriver):
         addr = _addr_call(
             'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET', SemaType.U32)
         )
+        operand = _cast(_src(1), elem_ty)
         stmts = [
             _assign(_id('addr', SemaType.U32), addr),
             SemaNode(
@@ -2118,7 +2130,7 @@ class _DsAtomic(_ScalarDeriver):
                 children=(
                     _id(f'atomic_{op}'),
                     _id('addr', SemaType.U32),
-                    _cast(_src(1), elem_ty),
+                    operand,
                 ),
             ),
         ]
@@ -2784,7 +2796,7 @@ class _ScalarWrexec(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
         stmts = [
             _assign(_id('src', SemaType.U64), _cast(_src(0), src_ty)),
             _assign(_id('old_exec', SemaType.U64), _id(exec_id, SemaType.U64)),
@@ -2910,6 +2922,68 @@ class _Cbranch(_ScalarDeriver):
                 ),
             ),
         )
+        return SemaBlock(sem.name, ExecModel.BRANCH, body)
+
+
+# The fork/join blocks below only feed property derivation; branch classes are
+# never lowered to C++. Their `cbranch_fork`/`cbranch_join` calls are
+# placeholders, distinct from the C++ helpers of the same names in
+# shared/branch_stack.h, which take a fall-through PC, return the next PC and
+# update EXEC as a side effect. ExecModel.BRANCH supplies IS_BRANCH and
+# IGNORES_EXEC, and the synthetic EXEC_RAW assignment supplies WRITES_EXEC.
+
+
+@_register('cbranch_fork')
+class _CbranchFork(_ScalarDeriver):
+    """S_CBRANCH_{G,I}_FORK: split EXEC on a lane mask.
+
+    If every active lane agrees, branch to the target or fall through like an
+    ordinary branch. Otherwise run the side with fewer active lanes (the taken
+    side on a tie) and push the other side's EXEC mask and resume PC onto the
+    MODE.CSP branch stack.
+    """
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U64,
+            call_name='cbranch_fork',
+            children=(
+                _id('cbranch_fork'),
+                _cast(_src(0), SemaType.U64),
+                _cast(_src(1), SemaType.U64),
+                _id('EXEC_RAW', SemaType.U64),
+            ),
+        )
+        # Synthetic: makes the block report WRITES_EXEC.
+        body = _assign(_id('EXEC_RAW', SemaType.U64), result)
+        return SemaBlock(sem.name, ExecModel.BRANCH, body)
+
+
+@_register('cbranch_join')
+class _CbranchJoin(_ScalarDeriver):
+    """S_CBRANCH_JOIN: resume the path its fork left waiting.
+
+    If MODE.CSP still differs from the value saved before the matching fork,
+    pop the waiting path's EXEC mask and resume PC and jump there. Otherwise
+    both paths have run and execution falls through.
+    """
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.U64,
+            call_name='cbranch_join',
+            children=(
+                _id('cbranch_join'),
+                _cast(_src(0), SemaType.U32),
+                _id('EXEC_RAW', SemaType.U64),
+            ),
+        )
+        # Synthetic: makes the block report WRITES_EXEC.
+        body = _assign(_id('EXEC_RAW', SemaType.U64), result)
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
 
 

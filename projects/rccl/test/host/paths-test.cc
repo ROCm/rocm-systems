@@ -548,6 +548,15 @@ TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerOnAnotherHostIsP2p) {
   EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
 }
 
+TEST_F(PathsMnnvlMicrotest, CheckP2p_CliquePeerBypassesTheUserDisable) {
+  RcclUnitTesting::ScopedEnv p2pDisable("NCCL_P2P_DISABLE", "1");
+  ncclTopoUserP2pLevel = -1;
+
+  EXPECT_EQ(1, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
+  peers_[1].hostHash = 1;
+  EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));  // same-host peers still honor it
+}
+
 TEST_F(PathsMnnvlMicrotest, CheckP2p_CrossCliqueUsesTheFabricUnlessTheUserLevelIsBelowNvl) {
   peers_[1].fabricInfo.cliqueId = 4;
   comm_->p2pCrossClique = true;

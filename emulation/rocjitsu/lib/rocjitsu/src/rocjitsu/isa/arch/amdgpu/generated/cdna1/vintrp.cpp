@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vintrp.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include <memory>
 

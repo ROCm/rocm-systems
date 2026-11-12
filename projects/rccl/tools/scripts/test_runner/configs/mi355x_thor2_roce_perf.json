@@ -824,6 +824,34 @@
           "command_args": "-d fp8_e5m2"
         }
       ]
+    },
+    "max_msg_size": {
+      "extends": "perf_base",
+      "description": "Float sweeps past 256 MiB with RCCL_IB_MAX_MSG_SIZE set, so the IB post path splits those messages.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_MAX_MSG_SIZE": "268435456"
+      },
+      "tests": [
+        {
+          "name": "AllReduce_float_max_msg",
+          "description": "AllReduce float, 1B-4G, with a 256 MiB IB post cap",
+          "binary": "all_reduce_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "SendRecv_float_max_msg",
+          "description": "SendRecv float, 1B-4G, with a 256 MiB IB post cap",
+          "binary": "sendrecv_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "AlltoAll_float_max_msg",
+          "description": "AlltoAll float, 1B-4G, with a 256 MiB IB post cap",
+          "binary": "alltoall_perf",
+          "command_args": "-d float"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -891,6 +919,12 @@
       "name": "Perf - SendRecv (datatype sweep)",
       "description": "rccl-tests SendRecv perf sweep across 12 datatypes (1B-4G)",
       "config": "sendrecv_perf",
+      "enabled": true
+    },
+    {
+      "name": "Perf - 256 MiB post cap (float)",
+      "description": "AllReduce, SendRecv, and AlltoAll float sweeps (1B-4G) with RCCL_IB_MAX_MSG_SIZE=256 MiB",
+      "config": "max_msg_size",
       "enabled": true
     }
   ]

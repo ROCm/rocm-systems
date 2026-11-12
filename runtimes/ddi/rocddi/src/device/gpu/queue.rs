@@ -7,9 +7,15 @@
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
 
+mod exception;
+mod layout;
 mod scratch;
 mod types;
 pub use super::kernel_queue::*;
+pub use exception::{
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+};
+pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
 pub use scratch::{MAX_PRIVATE_SEGMENT_BYTES, ScratchPlan, plan_scratch};
 pub use types::*;
 
@@ -53,16 +59,42 @@ pub(crate) struct DriverQueue<D: Driver, Q: UserQueueResource<DeviceState = D::D
     driver: Shared<D>,
     /// Transport addresses cached at queue creation.
     info: QueueTransport,
+    /// Format and publication geometry the backend promised at creation.
+    expectation: QueueTransportExpectation,
+    /// Native teardown completed and cannot still depend on this driver.
+    released: bool,
 }
 
 impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<D, Q> {
-    pub(crate) fn new(driver: Shared<D>, inner: Owned<Q>) -> Self {
+    #[allow(unsafe_code)]
+    pub(crate) fn new(
+        driver: Shared<D>,
+        inner: Owned<Q>,
+        request: QueueRequest,
+    ) -> Result<Self, Error> {
         let info = inner.cached_info();
-        Self {
+        let expectation = QueueTransportExpectation::new(request);
+        let mut queue = Self {
             inner,
             driver,
             info,
+            expectation,
+            released: false,
+        };
+        if !info.valid_for(expectation) {
+            // SAFETY: No transport was published, so there are no producers.
+            if unsafe { queue.destroy() }.is_err() {
+                return Err(Error::QueueBackingMayBeLive {
+                    operation: "invalid queue transport could not be retired",
+                    source: None,
+                });
+            }
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "native queue transport violates the requested geometry",
+            });
         }
+        Ok(queue)
     }
 
     pub(crate) fn info(&self) -> QueueTransport {
@@ -80,7 +112,14 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
                 detail: "queue producer must belong to one session",
             });
         }
-        self.inner.map_device(state)
+        let mapped = self.inner.map_device(state)?;
+        if !mapped.valid_for(self.expectation.for_device_mapping()) {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "mapped queue transport violates the requested geometry",
+            });
+        }
+        Ok(mapped)
     }
 
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
@@ -119,7 +158,9 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     #[allow(unsafe_code)]
     pub(crate) unsafe fn destroy(&mut self) -> Result<(), Error> {
         // SAFETY: The caller retired every producer and transport mapping.
-        unsafe { self.inner.destroy() }
+        unsafe { self.inner.destroy()? };
+        self.released = true;
+        Ok(())
     }
 
     /// # Safety
@@ -132,7 +173,19 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
     ) -> Result<(), Error> {
         // SAFETY: The caller retired producers and retained dependencies until
         // the native queue is conclusively removed.
-        unsafe { self.inner.destroy_with_retained_transport(callback) }
+        unsafe { self.inner.destroy_with_retained_transport(callback)? };
+        self.released = true;
+        Ok(())
+    }
+}
+
+impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> Drop for DriverQueue<D, Q> {
+    fn drop(&mut self) {
+        if !self.released {
+            // The native queue may still hold this session after its own Drop
+            // quarantines backing. Keep the creating driver alive as well.
+            std::mem::forget(self.driver.clone());
+        }
     }
 }
 
@@ -624,6 +677,7 @@ mod queue_resource_tests {
             ring_host_address: 0x1000,
             ring_device_address: 0x2000,
             ring_size_bytes: 4096,
+            aql_control: None,
             sdma_engine_id: None,
             read_index_host_address: 0x3000,
             read_index_device_address: 0x4000,
@@ -631,11 +685,20 @@ mod queue_resource_tests {
             write_index_device_address: 0x6000,
             read_index_width: QueueAccessWidth::Bits64,
             write_index_width: QueueAccessWidth::Bits64,
-            index_unit_bytes: 4,
+            index_unit_bytes: 1,
             read_index_wraps: false,
             doorbell_host_address: 0x7000,
             doorbell_device_address: None,
-            doorbell_width: QueueAccessWidth::Bits32,
+            doorbell_width: QueueAccessWidth::Bits64,
+        }
+    }
+
+    fn request() -> QueueRequest {
+        QueueRequest {
+            ring_size_bytes: 4096,
+            parameters: QueueParameters::Sdma,
+            priority: QueuePriority::Normal,
+            device_producer: false,
         }
     }
 
@@ -749,7 +812,10 @@ mod queue_resource_tests {
 
         fn map_device(&self, _: &FakeDevice) -> Result<QueueTransport, Error> {
             self.check()?;
-            Ok(self.info)
+            Ok(QueueTransport {
+                doorbell_device_address: Some(0x8000),
+                ..self.info
+            })
         }
     }
 
@@ -769,7 +835,7 @@ mod queue_resource_tests {
             fail_destroy: true,
             released: false,
         })?;
-        let mut queue = DriverQueue::new(driver.clone(), driver_queue);
+        let mut queue = DriverQueue::new(driver.clone(), driver_queue, request())?;
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(FakeDriver {
             dropped: Arc::new(AtomicBool::new(false)),
@@ -779,7 +845,13 @@ mod queue_resource_tests {
             queue.map_device(&foreign, &state),
             Err(error) if error.kind() == ErrorKind::InvalidArgument
         ));
-        assert_eq!(queue.map_device(&driver, &state)?, transport());
+        assert_eq!(
+            queue.map_device(&driver, &state)?,
+            QueueTransport {
+                doorbell_device_address: Some(0x8000),
+                ..transport()
+            }
+        );
         assert_eq!(queue.progress()?, (0, 0));
         queue.inactivate()?;
         drop(driver);
@@ -793,6 +865,65 @@ mod queue_resource_tests {
         drop(queue);
         assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
         assert!(driver_dropped.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    #[test]
+    fn failed_queue_drop_keeps_its_creating_driver_live() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
+        let queue_drops = Arc::new(AtomicUsize::new(0));
+        let driver = Shared::new(FakeDriver {
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
+        let inner = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+            fail_destroy: true,
+            released: false,
+        })?;
+        let mut queue = DriverQueue::new(driver.clone(), inner, request())?;
+        drop(driver);
+        // SAFETY: This fake never published transport to a producer.
+        assert!(unsafe { queue.destroy() }.is_err());
+        drop(queue);
+        assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+        assert!(!driver_dropped.load(Ordering::Relaxed));
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_transport_is_retired_before_publication_or_retains_its_owner() -> Result<(), Error> {
+        for fail_destroy in [false, true] {
+            let driver_dropped = Arc::new(AtomicBool::new(false));
+            let queue_drops = Arc::new(AtomicUsize::new(0));
+            let driver = Shared::new(FakeDriver {
+                dropped: driver_dropped.clone(),
+                queue_drops: queue_drops.clone(),
+            })?;
+            let inner = Owned::new(FakeQueue {
+                info: QueueTransport {
+                    index_unit_bytes: 4,
+                    ..transport()
+                },
+                driver_dropped: driver_dropped.clone(),
+                queue_drops: queue_drops.clone(),
+                fail_destroy,
+                released: false,
+            })?;
+            let error = DriverQueue::new(driver.clone(), inner, request())
+                .err()
+                .ok_or_else(|| failure("malformed transport was published"))?;
+            assert_eq!(error.kind(), ErrorKind::DriverContract);
+            assert_eq!(
+                matches!(error, Error::QueueBackingMayBeLive { .. }),
+                fail_destroy
+            );
+            assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+            drop(driver);
+            assert_eq!(driver_dropped.load(Ordering::Relaxed), !fail_destroy);
+        }
         Ok(())
     }
 }

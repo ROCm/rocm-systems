@@ -12,8 +12,11 @@
 #define RCCL_TEST_HOST_LIBC_INTERPOSERS_H_
 
 #include <cstddef>
+#include <functional>
 
 void SetGethostnameFail(bool fail);
+// When set, gethostname returns this instead of calling the real one. Cleared by ResetLibcInterposers.
+extern std::function<int(char*, size_t)> g_gethostnameInterposer;
 void SetDladdrFail(bool fail);
 size_t LastGethostnameLen();
 

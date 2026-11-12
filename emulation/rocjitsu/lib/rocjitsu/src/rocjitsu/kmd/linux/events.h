@@ -47,7 +47,7 @@ struct MemoryFault {
 ///
 /// @details Owns all event-related state for the simulated driver: the event
 /// table, event page, and synchronization primitives. The SimulatedKfd
-/// delegates event ioctls to this class and accesses the event page and memfd
+/// delegates event ioctls to this class and accesses the event page and backing descriptor
 /// for mmap/munmap operations.
 class EventState {
 public:
@@ -167,7 +167,7 @@ public:
   [[nodiscard]] bool overlaps_page(const void *addr, size_t length) const;
 
 private:
-  int memfd_ = -1;       ///< memfd backing the KFD signal event page.
+  int backing_fd_ = -1;  ///< Backing descriptor for the KFD signal event page.
   void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
   size_t page_size_ = 0; ///< Size of the mapped event page in bytes.
 

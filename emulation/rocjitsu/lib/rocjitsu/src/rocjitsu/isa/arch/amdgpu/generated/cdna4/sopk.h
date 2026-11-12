@@ -160,6 +160,8 @@ class SCbranchIForkSopk : public Sopk {
 public:
   SCbranchIForkSopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
+  void implicit_defs(RegisterSet &defs) const override;
   Operand sdst;
   Operand simm16;
 };

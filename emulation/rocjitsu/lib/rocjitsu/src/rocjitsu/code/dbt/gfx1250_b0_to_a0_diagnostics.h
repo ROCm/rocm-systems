@@ -13,6 +13,17 @@
 
 namespace rocjitsu {
 
+/// @brief Map completed translation diagnostics to the fixed-profile C API status.
+inline rj_status_t
+gfx1250_b0_to_a0_translation_status(const std::vector<TranslationDiagnostic> &diagnostics,
+                                    bool has_output, bool dispatchable) {
+  if (has_diagnostic_kind(diagnostics, DiagnosticKind::InternalError))
+    return ROCJITSU_STATUS_ERROR;
+  if (!has_output || !dispatchable)
+    return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
 /// @details Given default visibility rather than left hidden because the
 /// translator is now a shared library whose other symbols are all hidden -- that
 /// is what makes its build id a meaningful cache identity. The in-tree library

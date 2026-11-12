@@ -2376,6 +2376,39 @@ HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_WaitDoesNotJoinInvalidatedCapt
 /**
  * Test Description
  * ------------------------
+ *    - The legacy stream cannot record into a graph, so waiting on a captured event must not
+ *      enrol it in the capture. The wait is rejected and the capture is invalidated.
+ * Test source
+ * ------------------------
+ *    - catch\unit\graph\hipStreamBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+HIP_TEST_CASE(Unit_hipStreamBeginCapture_Negative_LegacyStreamWaitIsRejected) {
+  const unsigned int captureStreamFlags = GENERATE(hipStreamDefault, hipStreamNonBlocking);
+  CAPTURE(captureStreamFlags);
+
+  StreamGuard stream_guard(Streams::withFlags, captureStreamFlags);
+  EventsGuard event(1);
+  hipStream_t captureStream = stream_guard.stream();
+
+  HIP_CHECK(hipStreamBeginCapture(captureStream, hipStreamCaptureModeThreadLocal));
+  dummyKernel<<<1, 1, 0, captureStream>>>();
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipEventRecord(event, captureStream));
+
+  HIP_CHECK_ERROR(hipStreamWaitEvent(nullptr, event, 0), hipErrorStreamCaptureImplicit);
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(captureStream, &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
+  (void)hipGetLastError();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Test to verify hipStreamSynchronize on a stream works when stream capture
  * on another stream is ongoing.
  * Test source

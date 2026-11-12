@@ -48,6 +48,16 @@ Environment Variables:
         default=5,
         help="Base delay in seconds between retries (default: 5).",
     )
+    parser.add_argument(
+        "--gpu-tests",
+        action="store_true",
+        help="Run only GPU-based integration tests; requires the integration test binary.",
+    )
+    parser.add_argument(
+        "--cpu-tests",
+        action="store_true",
+        help="Run only CPU-based unit tests; requires the unit test binary. Combine with --gpu-tests to run both.",
+    )
 
     return parser.parse_args()
 
@@ -136,34 +146,54 @@ def get_rocm_tree_root(try_rocm_path: bool = False) -> Path:
     return rocm_root
 
 
-def get_default_paths(rocm_root: Path) -> Tuple[Path, Path]:
+def get_default_paths(
+    rocm_root: Path, need_integration: bool = True, need_unit: bool = False
+) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
     """
-    Get default paths for test binary and script.
+    Get default paths for test binary, script, and unit test binary.
+
+    Only the paths for the selected test tiers are required, so e.g. the
+    unit tests can be run without the GPU integration test artifacts.
 
     Args:
         rocm_root: ROCm tree root directory.
+        need_integration: Integration test binary and script are required.
+        need_unit: Unit test binary is required. When False, a missing
+            unit test binary is non-fatal.
 
     Returns:
-        Tuple of (test_bin, test_script) paths.
+        Tuple of (test_bin, test_script, unit_test_bin) paths.
+        test_bin and test_script are None if integration tests are not
+        needed. unit_test_bin is None if not found.
 
     Raises:
-        SystemExit: If paths cannot be resolved or don't exist.
+        SystemExit: If a required path doesn't exist.
     """
-    # Both test binary and script are in <root>/tests/rocm-debug-agent/
+    # Test binaries and script are in <root>/tests/rocm-debug-agent/
     test_dir = rocm_root / "tests" / "rocm-debug-agent"
     test_bin = test_dir / "rocm-debug-agent-test"
     test_script = test_dir / "run-test.py"
+    unit_test_bin = test_dir / "rocm-debug-agent-unit-tests"
 
-    # Validate that the paths exist.
-    if not test_bin.exists():
-        logger.error(f"[X] Error: Test binary not found: {test_bin}")
-        sys.exit(1)
+    if need_integration:
+        if not test_bin.exists():
+            logger.error(f"[X] Error: Test binary not found: {test_bin}")
+            sys.exit(1)
 
-    if not test_script.exists():
-        logger.error(f"[X] Error: Test script not found: {test_script}")
-        sys.exit(1)
+        if not test_script.exists():
+            logger.error(f"[X] Error: Test script not found: {test_script}")
+            sys.exit(1)
+    else:
+        test_bin = None
+        test_script = None
 
-    return test_bin, test_script
+    if not unit_test_bin.exists():
+        if need_unit:
+            logger.error(f"[X] Error: Unit test binary not found: {unit_test_bin}")
+            sys.exit(1)
+        unit_test_bin = None
+
+    return test_bin, test_script, unit_test_bin
 
 
 def print_section(
@@ -290,6 +320,37 @@ def setup_environment(rocm_root: Path, try_rocm_path: bool) -> Dict[str, str]:
     return env_vars
 
 
+def _run_once(
+    cmd: List[str], cwd: Path, env_vars: Dict[str, str], label: str
+) -> Tuple[int, float]:
+    """
+    Runs a command once and times it.
+
+    Args:
+        cmd: Command line to execute.
+        cwd: Working directory for the command.
+        env_vars: Environment variables for the command.
+        label: Human-readable name of what is being run (for error messages).
+
+    Returns:
+        Tuple of (exit code, duration in seconds).
+
+    Raises:
+        SystemExit: If the command cannot be launched at all (e.g. missing
+            or non-executable file); retrying cannot help in that case.
+    """
+    logger.info(f"Exec [{cwd}]$ {shlex.join(cmd)}")
+
+    start_time = time.perf_counter()
+    try:
+        result = subprocess.run(cmd, cwd=str(cwd), env=env_vars)
+    except OSError as e:
+        logger.error(f"[X] Failed to launch {label}: {e}")
+        sys.exit(1)
+
+    return result.returncode, time.perf_counter() - start_time
+
+
 def run_tests(
     test_script: Path,
     test_bin_dir: Path,
@@ -315,35 +376,56 @@ def run_tests(
     for attempt in range(1, max_retries + 1):
         print_section(f"Running tests (Attempt {attempt}/{max_retries})")
 
-        logger.info(f"Exec [{test_bin_dir}]$ {shlex.join(cmd)}")
+        returncode, duration = _run_once(cmd, test_bin_dir, env_vars, "tests")
 
-        start_time = time.perf_counter()
-        try:
-            subprocess.run(cmd, cwd=str(test_bin_dir), env=env_vars, check=True)
-
-            duration = time.perf_counter() - start_time
-
+        if returncode == 0:
             print_section(
                 f"[✓] Tests succeeded on attempt {attempt}. Duration: {duration:.2f}s"
             )
             return
 
-        except subprocess.CalledProcessError as e:
-            duration = time.perf_counter() - start_time
-            logger.error(
-                f"[X] Attempt {attempt}/{max_retries} failed with exit code {e.returncode} "
-                f"after {duration:.2f}s"
-            )
+        logger.error(
+            f"[X] Attempt {attempt}/{max_retries} failed with exit code {returncode} "
+            f"after {duration:.2f}s"
+        )
 
-            if attempt < max_retries:
-                # Exponential-ish backoff: multiply base delay by attempt number
-                wait_time = attempt * retry_delay
-                logger.info(f"Retrying in {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                # We failed all the attempts.
-                print_section(f"[X] All {max_retries} attempts failed.")
-                sys.exit(1)
+        if attempt < max_retries:
+            # Exponential-ish backoff: multiply base delay by attempt number
+            wait_time = attempt * retry_delay
+            logger.info(f"Retrying in {wait_time}s...")
+            time.sleep(wait_time)
+        else:
+            # We failed all the attempts.
+            print_section(f"[X] All {max_retries} attempts failed.")
+            sys.exit(1)
+
+
+def run_unit_tests(unit_test_bin: Path, env_vars: Dict[str, str]) -> None:
+    """
+    Runs the unit tests once.
+
+    Unit tests are deterministic CPU-only tests, so they are not retried.
+
+    Args:
+        unit_test_bin: Path to unit test binary.
+        env_vars: Environment variables for test execution.
+
+    Raises:
+        SystemExit: If the unit tests fail.
+    """
+    print_section("Running unit tests")
+
+    returncode, duration = _run_once(
+        [str(unit_test_bin)], unit_test_bin.parent, env_vars, "unit tests"
+    )
+
+    if returncode != 0:
+        print_section(
+            f"[X] Unit tests failed with exit code {returncode} after {duration:.2f}s"
+        )
+        sys.exit(1)
+
+    print_section(f"[✓] Unit tests succeeded. Duration: {duration:.2f}s")
 
 
 def main() -> None:
@@ -353,14 +435,35 @@ def main() -> None:
     # Parse command-line arguments.
     args = parse_arguments()
 
+    # Determine which tests to run based on flags.
+    # Default (neither flag): run integration tests (required) and the unit
+    #   tests if their binary is available (optional, for compatibility
+    #   with builds that don't ship it).
+    # --gpu-tests only: run integration tests (required)
+    # --cpu-tests only: run unit tests (required)
+    # Both flags: run both (both required)
+    default_mode = not args.gpu_tests and not args.cpu_tests
+    run_gpu = args.gpu_tests or default_mode
+    run_unit = args.cpu_tests or default_mode
+
     print_section("Path discovery")
     rocm_root = get_rocm_tree_root(try_rocm_path=args.try_rocm_path)
-    test_bin, test_script = get_default_paths(rocm_root)
-    test_bin_dir = test_bin.parent
+    test_bin, test_script, unit_test_bin = get_default_paths(
+        rocm_root,
+        need_integration=run_gpu,
+        need_unit=args.cpu_tests,
+    )
+    test_bin_dir = test_bin.parent if test_bin else None
 
-    logger.info(f"Test Binary: {test_bin}")
-    logger.info(f"Test Script: {test_script}")
-    logger.info(f"Test Bin Dir: {test_bin_dir}")
+    if run_gpu:
+        logger.info(f"Integration Test Binary: {test_bin}")
+        logger.info(f"Integration Test Script: {test_script}")
+        logger.info(f"Test Bin Dir: {test_bin_dir}")
+    if run_unit:
+        if unit_test_bin:
+            logger.info(f"Unit Test Binary: {unit_test_bin}")
+        else:
+            logger.info("Unit Test Binary: Not found")
 
     env_vars = setup_environment(rocm_root, try_rocm_path=args.try_rocm_path)
 
@@ -369,14 +472,26 @@ def main() -> None:
     # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run tests.
-    run_tests(
-        test_script=test_script,
-        test_bin_dir=test_bin_dir,
-        env_vars=env_vars,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-    )
+    # Run integration tests if requested.
+    if run_gpu:
+        run_tests(
+            test_script=test_script,
+            test_bin_dir=test_bin_dir,
+            env_vars=env_vars,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping GPU-based integration tests (--cpu-tests only)")
+
+    # Run unit tests if requested.
+    if not run_unit:
+        logger.info("Skipping unit tests (--gpu-tests only)")
+    elif unit_test_bin is None:
+        # Only reachable in default mode; --cpu-tests fails path discovery.
+        logger.warning("[!] Warning: Unit test binary not found, skipping unit tests.")
+    else:
+        run_unit_tests(unit_test_bin=unit_test_bin, env_vars=env_vars)
 
 
 if __name__ == "__main__":

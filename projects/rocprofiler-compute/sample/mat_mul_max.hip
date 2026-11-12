@@ -1,6 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-roofline/evals/samples/mat_mul_max.hip
+
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <cstdlib>

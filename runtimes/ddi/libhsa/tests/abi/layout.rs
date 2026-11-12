@@ -58,6 +58,12 @@ fn main() {
     member!(HsaQueue, size);
     member!(HsaQueue, reserved);
     member!(HsaQueue, id);
+    record!(HsaKernelDispatchPacket);
+    member!(HsaKernelDispatchPacket, header);
+    member!(HsaKernelDispatchPacket, setup);
+    member!(HsaKernelDispatchPacket, private_segment_size);
+    member!(HsaKernelDispatchPacket, kernarg_address);
+    member!(HsaKernelDispatchPacket, completion_signal);
     record!(HsaExtControlDirectives);
     member!(HsaExtControlDirectives, control_directives_mask);
     member!(HsaExtControlDirectives, break_exceptions_mask);

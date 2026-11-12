@@ -83,9 +83,6 @@ class IQueueSemaphore;
 class IShaderLibrary;
 class IStateBlock;
 class ISwapChain;
-#if PAL_WORK_LISTS_SUPPORT
-class IWorkList;
-#endif
 struct BorderColorPaletteCreateInfo;
 struct CmdAllocatorCreateInfo;
 struct CmdBufferCreateInfo;
@@ -124,10 +121,6 @@ struct SwapChainCreateInfo;
 struct SwapChainProperties;
 struct SvmGpuMemoryCreateInfo;
 struct GraphicPipelineViewInstancingInfo;
-#if PAL_WORK_LISTS_SUPPORT
-struct WorkListCreateInfo;
-enum class WorkListsFeatureLevel : uint32;
-#endif
 enum class WsiPlatform : uint32;
 enum class PipelineBindPoint : uint32;
 enum class VaRange : uint32;
@@ -160,7 +153,7 @@ constexpr uint32 MaxPixelPackerPerSe = 4;
 /// Defines host flags for Semaphore/Fence Array wait
 enum HostWaitFlags : uint32
 {
-    HostWaitAny = 0x1,  ///< If set this bit, return after any single semaphore/fence in the array has
+    HostWaitAny = 0x1,  ///< If set this bit, return after any semaphore/fence in the array has
                         ///  completed. if not set, wait for completion of all semaphores/fences in the
                         ///  array before returning.
 };
@@ -1173,9 +1166,8 @@ struct DeviceProperties
                 /// distributedCompression field in @ref GpuMemoryCreateInfo.
                 uint32 supportDistributedCompression    : 1;
 
-                /// All GPU memory allocations in all heaps are always initialized to zero on creation.
-                /// The @ref initializeToZero flag is not needed when this is true.
-                uint32 alwaysInitializedToZero : 1;
+                /// Indicates support for allocating memory that is zero initialized
+                uint32 supportZeroInitializeMemory      : 1;
 
                 /// Reserved for future use.
                 uint32 reserved : 17;
@@ -1326,10 +1318,6 @@ struct DeviceProperties
         uint32                  cpUcodeVersion;   ///< Command processor feature version.
         uint32                  pfpUcodeVersion;  ///< Command processor, graphics prefetch firmware version.
 
-#if PAL_WORK_LISTS_SUPPORT
-        WorkListsFeatureLevel  workListsLevel; ///< Supported Work Lists feature level.
-#endif
-
         union
         {
             struct
@@ -1425,7 +1413,9 @@ struct DeviceProperties
                 uint64 supportCooperativeMatrix2          :  1; ///< HW supports Gfx12 extension cooperative matrix.
                 uint64 placeholder14                      :  3;
                 uint64 supportEiIncConst                  :  1;
-                uint64 reserved                           :  60; ///< Reserved for future use.
+                uint64 supportLiveDebugging               :  1; ///< PAL will install the 2nd-level debugger
+                                                                ///  trap handler; shader live debugging is supported.
+                uint64 reserved                           :  59; ///< Reserved for future use.
             };
             uint64 u64All[2];           ///< Flags packed as 32-bit uint.
         } flags;                     ///< Device IP property flags.
@@ -1572,7 +1562,13 @@ struct DeviceProperties
                 uint32 forceAlignmentSupported    :  1; ///< If PalPublicSettings::hardwareBufferAlignmentMode
                                                         ///  has any effect.
                 uint32 haltOnAccessSupported      :  1; ///< KMD supports per-page halt-on-access memory tracking.
-                uint32 reserved                   : 18; ///< Reserved for future use.
+                uint32 omniCacheSupported         :  1; ///< KMD has OmniCache enabled system-wide, meaning that the
+                                                        ///  PlatformCreateInfo::flags::optInForOmniCache request
+                                                        ///  given at platform creation is honored on this device.
+                                                        ///  If clear, that request is ignored. This is informational
+                                                        ///  only; the opt-in must already have been made when the
+                                                        ///  platform was created.
+                uint32 reserved                   : 17; ///< Reserved for future use.
             };
             uint32 u32All;                              ///< Flags packed as 32-bit uint.
         } flags;                                        ///< OS-specific property flags.
@@ -4793,32 +4789,6 @@ public:
         const StateBlockCreateInfo& createInfo,
         void*                       pPlacementAddr,
         IStateBlock**               ppStateBlock) = 0;
-
-#if PAL_WORK_LISTS_SUPPORT
-    /// Determines the amount of system memory required for an @ref IWorkList object.  An allocation of this amount of
-    /// memory must be provided in the pPlacementAddr parameter of CreateWorkList().
-    ///
-    /// @returns  Size, in bytes, of system memory required for an IWorkList object with the specified properties.
-    ///           A return value of 0 indicates the createInfo was invalid.
-    virtual size_t GetWorkListSize() const = 0;
-
-    /// Creates an @ref IWorkList object with the requested properties.
-    ///
-    /// @param [in]  createInfo      Work list properties.
-    /// @param [in]  pPlacementAddr  Pointer to the location where PAL should construct this object.  There must be
-    ///                              as much size available here as reported by calling @ref GetWorkListSize().
-    /// @param [out] ppWorkList      Constructed work list object.  When successful, the returned address will be the
-    ///                              same as specified in pPlacementAddr.
-    ///
-    /// @returns  Success if the object was successfully created.  Otherwise, one of the following errors may be
-    ///           returned:
-    ///          + ErrorInvalidPointer if:
-    ///              - pPlacementAddr or ppWorkList is null.
-    virtual Result CreateWorkList(
-        const WorkListCreateInfo& createInfo,
-        void*                     pPlacementAddr,
-        IWorkList**               ppWorkList) = 0;
-#endif
 
     /// Determines the amount of system memory required for a MSAA state object.  An allocation of this amount of memory
     /// must be provided in the pPlacementAddr parameter of CreateMsaaState().

@@ -96,11 +96,18 @@ case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
         test_with_two_pes+=":SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*"
+        # TDM tests drive PE 0/PE 1 roles directly and require exactly 2 ranks
+        tdm_tests="TdmRawPut/*:TdmRawGet/*:TdmWavePut/*:TdmWaveGet/*:TdmStructPut/*"
+        test_with_two_pes+=":$tdm_tests"
         if [ $NUM_GPUS -ge 4 ]
         then
           run_mpirun 4 "-$test_with_two_pes"
         fi
         #run_mpirun 2 "$test_with_two_pes"
+        if [ $NUM_GPUS -ge 2 ]
+        then
+          run_mpirun 2 "$tdm_tests"
+        fi
         ;;
     custom)
         # Check if ranks is a positive integer

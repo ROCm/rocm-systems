@@ -56,6 +56,7 @@ fn shutdown_waits_for_inflight_calls() {
     let (done_send, done_recv) = std::sync::mpsc::channel();
     let worker_inflight = inflight.clone();
     let worker = thread::spawn(move || {
+        worker_inflight.close();
         started_send.send(()).unwrap();
         worker_inflight.wait_idle();
         done_send.send(()).unwrap();
@@ -77,18 +78,49 @@ fn callback_scope_restricts_queue_and_sampling_teardown() {
         // non-null pointer while a callback is active.
         assert_eq!(
             unsafe {
-                crate::queue::hsa_queue_destroy(std::ptr::NonNull::<HsaQueue>::dangling().as_ptr())
+                crate::api::queue::core::hsa_queue_destroy(
+                    std::ptr::NonNull::<HsaQueue>::dangling().as_ptr(),
+                )
             },
             INVALID_RUNTIME_STATE
         );
         assert_eq!(
-            crate::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
+            crate::api::pc_sampling::hsa_ven_amd_pcs_stop(HsaPcSampling { handle: 1 }),
             INVALID_RUNTIME_STATE
         );
         let _nested = CallbackScope::enter();
         assert!(CallbackScope::active());
     }
     assert!(!CallbackScope::active());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn parked_shutdown_helper_exits_if_commit_is_aborted() {
+    let mut lifecycle = HsaLifecycle::new();
+    let generation = lifecycle.begin_init().unwrap().unwrap();
+    let (commit, instruction) = std::sync::mpsc::channel::<u64>();
+    let (finished, completion) = std::sync::mpsc::channel();
+    let cleanup_called = Arc::new(AtomicBool::new(false));
+    let observed = cleanup_called.clone();
+    defer_cleanup(instruction, move |instruction| {
+        if instruction.recv().is_ok() {
+            observed.store(true, Ordering::Release);
+        }
+        finished.send(()).unwrap();
+    })
+    .unwrap();
+    // A failed commit drops its instruction sender without advancing the
+    // generation or asking the parked helper to retire it.
+    assert_eq!(
+        lifecycle.begin_shutdown().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(commit);
+    completion.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(!cleanup_called.load(Ordering::Acquire));
+    assert_eq!(lifecycle.begin_init().err(), Some(INVALID_RUNTIME_STATE));
+    lifecycle.cancel_init(generation, false).unwrap();
 }
 
 #[test]
@@ -146,12 +178,88 @@ fn initialization_gate_rejects_overlapping_generations() {
 }
 
 #[test]
+fn concurrent_init_waits_for_the_first_generation_to_finish() {
+    let lifecycle = Arc::new(Mutex::new(HsaLifecycle::new()));
+    let changed = Arc::new(Condvar::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    let ready = Arc::new(std::sync::Barrier::new(2));
+    let worker_lifecycle = lifecycle.clone();
+    let worker_changed = changed.clone();
+    let worker_ready = ready.clone();
+    let worker = std::thread::spawn(move || {
+        let guard = worker_lifecycle.lock().unwrap();
+        worker_ready.wait();
+        begin_init_waiting(guard, &worker_changed)
+    });
+    ready.wait();
+    lifecycle
+        .lock()
+        .unwrap()
+        .cancel_init_with_notification(generation, false, &changed)
+        .unwrap();
+    let next = worker.join().unwrap().unwrap().unwrap();
+    assert_ne!(next, generation);
+    lifecycle.lock().unwrap().cancel_init(next, false).unwrap();
+}
+
+#[test]
+fn callback_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let _scope = CallbackScope::enter();
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
+fn admitted_call_init_does_not_wait_for_preparing_shutdown() {
+    let lifecycle = Mutex::new(HsaLifecycle::new());
+    let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+    lifecycle
+        .lock()
+        .unwrap()
+        .prepare_without_runtime_for_test(generation);
+    let gate = Arc::new(InFlightTracker::new());
+    gate.close();
+    gate.open(generation);
+    let _scope = ApiLeaseScope::enter(gate.enter().unwrap());
+    assert_eq!(
+        begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+}
+
+#[test]
+fn same_thread_lifecycle_reentry_is_rejected() {
+    let entry = LifecycleCallScope::enter().unwrap();
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    let helper = LifecycleCallScope::enter_helper();
+    drop(helper);
+    assert_eq!(
+        LifecycleCallScope::enter().err(),
+        Some(INVALID_RUNTIME_STATE)
+    );
+    drop(entry);
+    assert!(LifecycleCallScope::enter().is_ok());
+}
+
+#[test]
 /// Verifies that failed initialization cleanup quarantines the next generation.
 fn failed_initialization_cleanup_quarantines_the_next_generation() {
     let mut registry = HsaLifecycle::new();
     let generation = registry.begin_init().unwrap().unwrap();
     registry.cancel_init(generation, true).unwrap();
     assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
+    assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
 }
 
 #[test]
@@ -200,6 +308,49 @@ fn first_and_later_gpu_activation_failures_retire_the_session_join() {
         assert!(pending.cleanup());
         assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
         assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
+    }
+}
+
+#[test]
+fn failed_or_unwound_initialization_retains_the_native_session() {
+    /// Records whether failed native rollback releases its owner.
+    struct SessionProbe {
+        /// Drop count that must remain zero after an uncertain rollback.
+        drops: Arc<AtomicUsize>,
+        /// Injects an unwind instead of a returned native error.
+        panic_on_retire: bool,
+    }
+
+    impl RetireSession for SessionProbe {
+        fn retire(&mut self) -> bool {
+            assert!(!self.panic_on_retire, "injected native rollback unwind");
+            false
+        }
+    }
+
+    impl Drop for SessionProbe {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
+
+    for panic_on_retire in [false, true] {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut pending = PendingInit {
+            session: Some(SessionProbe {
+                drops: drops.clone(),
+                panic_on_retire,
+            }),
+            gpus: Vec::<()>::new(),
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.cleanup()));
+        if panic_on_retire {
+            assert!(result.is_err());
+        } else {
+            assert!(!result.unwrap());
+        }
+        drop(pending);
+        assert_eq!(drops.load(AtomicOrdering::Relaxed), 0);
     }
 }
 
@@ -392,6 +543,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
             agent,
             GpuHardwareException {
                 endpoint_id: Some([42; 16]),
+                origin_id: None,
                 scope: rocddi::device::event::GpuResetScope::WholeGpu,
                 memory_lost: false,
                 cause,
@@ -452,35 +604,26 @@ fn logging_flags_use_the_public_64_bit_mask_layout() {
 }
 
 #[test]
-/// Verifies that GPU pool handle encoding reserves coarse fine and group memory.
-fn gpu_pool_handle_encoding_reserves_coarse_fine_and_group_memory() {
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 1,
-            },
-            1,
-        ),
-        Some((0, 1))
-    );
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 2,
-            },
-            1,
-        ),
-        Some((0, 2))
-    );
-    assert_eq!(
-        decode_gpu_pool_handle(
-            HsaMemoryPool {
-                handle: GPU_POOL_BASE + 3,
-            },
-            1,
-        ),
-        Some((0, 3))
-    );
+/// Verifies that GPU pool handle encoding preserves every pool class.
+fn gpu_pool_handle_encoding_preserves_every_pool_class() {
+    // Explicit slots pin the existing public handle encoding.
+    for (slot, kind) in [
+        (1, GpuPoolKind::Coarse),
+        (2, GpuPoolKind::Fine),
+        (3, GpuPoolKind::Group),
+        (4, GpuPoolKind::ExtendedFine),
+    ] {
+        assert_eq!(
+            decode_gpu_pool_handle(
+                HsaMemoryPool {
+                    handle: GPU_POOL_BASE + slot,
+                },
+                1,
+            ),
+            Some((0, kind))
+        );
+        assert_eq!(HsaState::gpu_pool(0, kind).handle, GPU_POOL_BASE + slot);
+    }
     assert_eq!(
         decode_gpu_pool_handle(
             HsaMemoryPool {
@@ -537,47 +680,115 @@ fn cache_handles_and_names_are_stable_runtime_objects() {
 }
 
 #[test]
-/// Verifies that CPU cache source prefers numa zero and falls back to system
-/// scan.
-fn cpu_cache_source_prefers_numa_zero_and_falls_back_to_system_scan() {
-    use rocddi::topology::host::{CpuCache, HostDomain};
+/// Verifies that OS caches are not assigned to an unidentified CPU node.
+fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
+    use rocddi::topology::host::{CpuCache, HostCaches, HostTopologyGraphSnapshot};
 
     let cache = |cpu| CpuCache {
         cpu,
         shared_cpus: None,
         info: rocddi::topology::CacheInfo::new(1, 32 * 1024, None, CpuCacheKind::Data),
     };
-    let mut topology = HostTopologySnapshot {
+    let topology = HostTopologyGraphSnapshot {
         memory_bytes: None,
         cpu: None,
+        cpu_apic_ids: Vec::new(),
         online_cpus: None,
         caches: HostCaches {
             records: vec![cache(7)],
             complete: true,
         },
-        domains: vec![HostDomain {
-            numa_node: 2,
-            cpus: None,
-            caches: HostCaches {
-                records: vec![cache(2)],
-                complete: true,
-            },
-        }],
+        domains: Vec::new(),
         domains_complete: true,
     };
-    assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 7);
+    assert_eq!(
+        host_caches_for_cpu(&topology, None, 1).unwrap().records[0].cpu,
+        7
+    );
+    assert!(host_caches_for_cpu(&topology, None, 2).is_none());
+}
 
-    topology.domains.push(HostDomain {
-        numa_node: 0,
-        cpus: None,
-        caches: HostCaches {
-            records: vec![cache(0)],
-            complete: true,
+#[test]
+/// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
+fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
+    use rocddi::topology::host::{HostCaches, HostTopologyGraphSnapshot};
+    use rocddi::topology::{
+        CpuNodeInfo, MemoryBank, MemoryBankKind, NativeNodeId, NodeId, NodeKind, SourceId,
+        TopologyNode,
+    };
+
+    let host = CpuInfo {
+        name: "test CPU".into(),
+        compute_units: 12,
+    };
+    let topology = TopologyGraphSnapshot {
+        host: HostTopologyGraphSnapshot {
+            memory_bytes: Some(3 << 30),
+            cpu: Some(host.clone()),
+            cpu_apic_ids: Vec::new(),
+            online_cpus: None,
+            caches: HostCaches {
+                records: Vec::new(),
+                complete: true,
+            },
+            domains: Vec::new(),
+            domains_complete: true,
         },
-    });
-    assert_eq!(selected_cpu_caches(&topology).records[0].cpu, 0);
-    topology.domains[1].caches.records.clear();
-    assert!(selected_cpu_caches(&topology).records.is_empty());
+        endpoints: Vec::new(),
+        sources: Vec::new(),
+        nodes: [(2, NodeKind::Host, 8), (7, NodeKind::Gpu, 4)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (native, kind, count))| TopologyNode {
+                id: NodeId(id),
+                source: SourceId(0),
+                native_id: NativeNodeId::LinuxKfd(native),
+                kind,
+                cpu: Some(CpuNodeInfo {
+                    core_count: count,
+                    core_id_base: None,
+                    maximum_clock_mhz: None,
+                }),
+            })
+            .collect(),
+        attachments: Vec::new(),
+        routes: Vec::new(),
+        caches: Vec::new(),
+        memory_locations: Vec::new(),
+        memory_banks: [1_u64 << 30, 2_u64 << 30]
+            .into_iter()
+            .enumerate()
+            .map(|(node, capacity_bytes)| MemoryBank {
+                node: NodeId(node),
+                native_ordinal: 0,
+                kind: MemoryBankKind::System,
+                capacity_bytes,
+                native_flags: 0,
+                width_bits: None,
+                maximum_clock_mhz: None,
+            })
+            .collect(),
+    };
+    let cpus = cpu_agents(&topology, &host, 3 << 30);
+    assert_eq!(cpus.len(), 2);
+    assert_eq!(
+        (
+            cpus[0].native_node,
+            cpus[0].compute_units,
+            cpus[0].memory_bytes
+        ),
+        (2, 8, 1 << 30)
+    );
+    assert_eq!(
+        (
+            cpus[1].native_node,
+            cpus[1].compute_units,
+            cpus[1].memory_bytes
+        ),
+        (7, 4, 2 << 30)
+    );
+    assert!(!cpus[0].apu);
+    assert!(cpus[1].apu);
 }
 
 #[test]
@@ -626,6 +837,10 @@ fn legacy_gpu_cache_sizes_match_rocr_aggregation() {
         [32 * 1024, 512 * 1024, 8192 * 1024, 0]
     );
     assert_eq!(cache_sizes(&caches, other), [0, 0, 8192 * 1024, 0]);
+    assert_eq!(
+        cpu_cache_sizes(&caches, agent),
+        [32 * 1024, 256 * 1024, 8192 * 1024, 0]
+    );
 }
 
 #[test]

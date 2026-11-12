@@ -490,12 +490,13 @@ mod tests {
             .unwrap()
         };
         let mut page_offered = true;
-        let _scope = allocator.scope();
-        let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
-        assert!(!page_offered);
+        allocator.with_scope(|| {
+            let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
+            assert!(!page_offered);
+        });
     }
 
     #[test]

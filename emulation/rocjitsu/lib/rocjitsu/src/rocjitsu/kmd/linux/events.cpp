@@ -32,8 +32,8 @@ void write_event_slot(void *page, size_t page_size, uint32_t event_id, uint64_t 
 } // namespace
 
 EventState::~EventState() {
-  if (memfd_ >= 0)
-    libc_passthrough().close(memfd_);
+  if (backing_fd_ >= 0)
+    libc_passthrough().close(backing_fd_);
 }
 
 void EventState::adopt_page(void *ptr, size_t size) {
@@ -173,15 +173,15 @@ bool EventState::is_closing() const { return closing_.load(std::memory_order_acq
 
 int EventState::ensure_backing(size_t length, const std::function<int(size_t)> &create_backing) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (memfd_ >= 0)
-    return memfd_;
-  memfd_ = create_backing(length);
-  return memfd_;
+  if (backing_fd_ >= 0)
+    return backing_fd_;
+  backing_fd_ = create_backing(length);
+  return backing_fd_;
 }
 
 int EventState::backing_fd() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return memfd_;
+  return backing_fd_;
 }
 
 size_t EventState::waiter_count(uint32_t event_id) const {

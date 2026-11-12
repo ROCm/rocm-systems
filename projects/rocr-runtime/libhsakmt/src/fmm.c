@@ -56,7 +56,16 @@
 #define MPOL_F_STATIC_NODES     (1 << 15)
 #endif
 
+#ifndef MPOL_F_RELATIVE_NODES
+#define MPOL_F_RELATIVE_NODES   (1 << 14)
+#endif
+
 #define NON_VALID_GPU_ID 0
+
+static bool hsakmt_drm_supports_vm_timeline(uint32_t major, uint32_t minor)
+{
+	return major > 3 || (major == 3 && minor >= 64);
+}
 
 #define INIT_MANAGEABLE_APERTURE(base_value, limit_value) {	\
 	.base = (void *) base_value,				\
@@ -258,11 +267,13 @@ typedef struct {
 	/* specifies the alignment size as PAGE_SIZE * 2^alignment_order */
 	uint32_t alignment_order;
 
-	/* DEBUG/TEMPORARY: whether to perform the SVM host unregister. Off by
-	 * default, so deregistration stays the no-op it was until the path has
-	 * more mileage; HSA_SVM_HOST_UNREGISTER_DEBUG opts in. When it is on,
-	 * the NO_ACCESS revoke is queued on a worker thread instead of issued
-	 * on the deregistering thread.
+	/* Whether to perform the SVM host unregister. Decided once, while the
+	 * apertures are initialised: hsaKmtGetXNACKModeCtx() first, then
+	 * HSA_SVM_HOST_UNREGISTER_DEBUG if the user set it. Forced off when the
+	 * kernel's KFD ioctl version is older than 1.24, the first ABI that
+	 * unmaps an SVM range on NO_ACCESS. When it is on, the NO_ACCESS revoke
+	 * is queued on a worker thread instead of issued on the deregistering
+	 * thread.
 	 */
 	bool svm_host_unregister;
 } svm_t;
@@ -845,13 +856,13 @@ static void reserved_aperture_release(manageable_aperture_t *app,
 		mbind(address, MemorySizeInBytes, MPOL_DEFAULT, NULL, 0, 0);
 
 		/*
-		 * Drop the CPU mapping to release shmem pages for MAP_SHARED
-		 * allocations, then re-reserve the VA range as PROT_NONE.
-		 * Callers hold fmm_mutex (see contract above), which serializes
-		 * this against aperture allocations, so no allocation can claim
-		 * the VA in the window between munmap() and mmap().
+		 * Atomically replace the CPU mapping with a PROT_NONE
+		 * reservation. MAP_FIXED over the existing range drops the
+		 * shmem pages (for MAP_SHARED allocations) and re-reserves the
+		 * VA in a single syscall, leaving no unmapped window that a
+		 * concurrent glibc mmap on another thread could claim
+		 * (fmm_mutex does not serialize glibc's own mmaps).
 		 */
-		munmap(address, MemorySizeInBytes);
 		mmap_ret = mmap(address, MemorySizeInBytes, PROT_NONE,
 			MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
 			-1, 0);
@@ -1715,7 +1726,7 @@ static void svm_revoke_sync_locked(struct hsa_kfd_fmm_context *fmm_ctx,
 	struct svm_revoke_work *prev, *w, *next;
 	bool wait;
 
-	if (!fmm_ctx->svm.svm_host_unregister)
+	if (!fmm_ctx->svm_revoke_head && !fmm_ctx->svm_revoke_inflight)
 		return;
 
 	do {
@@ -2885,6 +2896,24 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	return mem;
 }
 
+/* Returns true if the calling thread has an explicit NUMA memory policy
+ * (e.g. via numactl -m / set_mempolicy). Linux mempolicy is per-thread;
+ * numactl sets it before exec so every thread inherits it, which covers the
+ * common case. When set, ROCr should not override it with a per-agent mbind;
+ * the policy governs host placement.
+ */
+static bool thread_has_explicit_mempolicy(void)
+{
+	int mode = MPOL_DEFAULT;
+
+	/* flags=0, addr=NULL => returns the calling thread's default policy. */
+	if (get_mempolicy(&mode, NULL, 0, NULL, 0) != 0)
+		return false;
+
+	mode &= ~(MPOL_F_STATIC_NODES | MPOL_F_RELATIVE_NODES);
+	return mode != MPOL_DEFAULT;
+}
+
 static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			    uint64_t SizeInBytes, HsaMemFlags mflags)
 {
@@ -2903,6 +2932,16 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 		else
 			return 0;
 	}
+
+	/* Honor an explicit memory policy (e.g. numactl -m) for substitutable
+	 * host allocations: leave placement to that policy instead of forcing the
+	 * per-agent node. Strict (NoSubstitute) allocations - e.g. the udmabuf APU
+	 * path - keep their hard per-agent bind and error handling below.
+	 * HSA_FORCE_MBIND=1 restores the legacy per-agent binding.
+	 */
+	if (!hsakmt_force_mbind && !mflags.ui32.NoSubstitute &&
+	    thread_has_explicit_mempolicy())
+		return 0;
 
 	num_node = numa_max_node() + 1;
 
@@ -3203,8 +3242,6 @@ static int __fmm_release_locked(HsaKFDContext *ctx,
 			pthread_mutex_unlock(&fmm_ctx->svm_api_mutex);
 			free(rr);
 		}
-
-		munmap(object->start, object->size);
 	}
 
 	aperture_release_area(aperture, object->start, object->size);
@@ -3800,6 +3837,20 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 	return false;
 }
 
+/* First KFD ioctl ABI that unmaps an SVM range when NO_ACCESS is applied.
+ * Older kernels leave the GPU mapping in place.
+ */
+#define KFD_IOCTL_MINOR_SVM_NO_ACCESS 24
+
+static bool kfd_supports_svm_no_access(void)
+{
+	const HsaVersionInfo *v = &hsakmt_kfd_version_info;
+
+	return v->KernelInterfaceMajorVersion > 1 ||
+	       (v->KernelInterfaceMajorVersion == 1 &&
+		v->KernelInterfaceMinorVersion >= KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+}
+
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 				unsigned int NumNodes)
 {
@@ -3815,6 +3866,7 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
 	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
+	HSAint32 xnack = 1;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* If HSA_DISABLE_CACHE is set to a non-0 value, disable caching */
@@ -3852,16 +3904,36 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	if (!guardPagesStr || sscanf(guardPagesStr, "%u", &guardPages) != 1)
 		guardPages = 1;
 
-	/*
-	 * DEBUG/TEMPORARY: the SVM host unregister is off unless
-	 * HSA_SVM_HOST_UNREGISTER_DEBUG is set to a non-0 value. Left off,
-	 * deregistering an SVM-API host range stays the no-op it has always
-	 * been and register only sets the coherency flags. When it is on, the
-	 * NO_ACCESS revoke is queued on a worker thread.
+	/* XNACK is already bound. With retry faults on, a revoked range is
+	 * faulted back in, so the teardown is overhead. With XNACK off there is
+	 * no fault to recover from, so a grant that is never revoked stays
+	 * mapped for the life of the process. An unreadable mode is treated as
+	 * XNACK on, which leaves the path off. The debug variable, checked
+	 * after the query, overrides that. Kernels older than KFD ioctl 1.24
+	 * cannot unmap on NO_ACCESS, so the path stays off there; that is
+	 * silent unless the user set HSA_SVM_HOST_UNREGISTER_DEBUG.
 	 */
+	xnack = 1;
+	if (hsaKmtGetXNACKModeCtx(ctx, &xnack) != HSAKMT_STATUS_SUCCESS)
+		xnack = 1;
+
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
-	fmm_ctx->svm.svm_host_unregister =
-		(svmHostUnregisterStr && strcmp(svmHostUnregisterStr, "0"));
+	if (!kfd_supports_svm_no_access()) {
+		fmm_ctx->svm.svm_host_unregister = false;
+		if (svmHostUnregisterStr)
+			pr_warn("HSA_SVM_HOST_UNREGISTER_DEBUG ignored: KFD ioctl %u.%u "
+				"is older than 1.%u\n",
+				hsakmt_kfd_version_info.KernelInterfaceMajorVersion,
+				hsakmt_kfd_version_info.KernelInterfaceMinorVersion,
+				KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+	} else if (svmHostUnregisterStr) {
+		fmm_ctx->svm.svm_host_unregister = !!strcmp(svmHostUnregisterStr, "0");
+	} else {
+		fmm_ctx->svm.svm_host_unregister = !xnack;
+	}
+	pr_debug("SVM host unregister %s (XNACK %s)\n",
+		 fmm_ctx->svm.svm_host_unregister ? "on" : "off",
+		 xnack ? "on" : "off");
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
@@ -3950,12 +4022,23 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 			gpu_mem[gpu_mem_count].gpuvm_aperture.ops = &reserved_aperture_ops;
 			pthread_mutex_init(&gpu_mem[gpu_mem_count].gpuvm_aperture.fmm_mutex, NULL);
 
-			/* Create timeline syncobj for this GPU device */
+			/* VM timeline output was added in amdgpu DRM 3.64. */
 			gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj = 0;
 			gpu_mem[gpu_mem_count].drm_vm_timeline_seqnum = 0;
-			if (drmSyncobjCreate(fd, 0, &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
-                pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
-                    props.KFDGpuID);
+			drmVersionPtr version = drmGetVersion(fd);
+			if (!version) {
+				pr_warn("Failed to get DRM version for GPU 0x%x\n",
+					props.KFDGpuID);
+			} else {
+				if (hsakmt_drm_supports_vm_timeline(
+					    version->version_major,
+					    version->version_minor) &&
+				    drmSyncobjCreate(fd, 0,
+					    &gpu_mem[gpu_mem_count].drm_vm_timeline_syncobj))
+					pr_warn("Failed to create VM timeline syncobj for GPU 0x%x\n",
+						props.KFDGpuID);
+				drmFreeVersion(version);
+			}
 
 			gpu_mem_count++;
 		}
@@ -4248,13 +4331,16 @@ HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
 
 	if (drm_render_fd)
 		*drm_render_fd = fmm_ctx->gpu_mem[index].drm_render_fd;
+
+	uint32_t syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
 	if (vm_timeline_syncobj)
-		*vm_timeline_syncobj = fmm_ctx->gpu_mem[index].drm_vm_timeline_syncobj;
-	
+		*vm_timeline_syncobj = syncobj;
+
 	if (vm_timeline_point)
-		*vm_timeline_point = __atomic_add_fetch(
-			&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
-			__ATOMIC_SEQ_CST);
+		*vm_timeline_point = syncobj ?
+			__atomic_add_fetch(
+				&fmm_ctx->gpu_mem[index].drm_vm_timeline_seqnum, 1,
+				__ATOMIC_SEQ_CST) : 0;
 
 	return HSAKMT_STATUS_SUCCESS;
 }

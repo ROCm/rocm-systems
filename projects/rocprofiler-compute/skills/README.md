@@ -45,7 +45,14 @@ folders, so install for one agent only if you use Cursor alongside them.
 <rocm-path>/share/rocprofiler-compute/skills/install-skills.sh --agent claude --uninstall
 ```
 
-## Structure
+## Developing skills
+
+The rest of this file is for people who edit these skills. The skills are also
+published in [amd/skills](https://github.com/amd/skills), the AMD skills
+catalog, so a change here must work in this repo and in that catalog. See
+[Publishing to amd/skills](#publishing-to-amdskills).
+
+### Structure
 
 Every skill directory holds:
 
@@ -53,7 +60,11 @@ Every skill directory holds:
 <skill-name>/
 ├── SKILL.md            # frontmatter (name, description) plus the instructions
 ├── skill-card.md       # human-facing card: description, owner, license
-└── evals/evals.json    # prompts that must and must not route to this skill
+└── evals/
+    ├── evals.json            # cases this repo and amd/skills run
+    ├── extended_evals.json   # optional; cases only this repo runs
+    ├── machine.yml           # hardware amd/skills runs evals.json on
+    └── samples/              # copies of the samples the cases use
 ```
 
 `SKILL.md` states the decision: which command to run, when, and where the
@@ -62,35 +73,81 @@ same fact is not maintained in two places. Link docs as `../../docs/...`:
 `install-skills.sh` rewrites those links to the docs installed next to the
 skills, so they keep working offline.
 
-## Tests
+Both dataset files use the
+[skillscope format](https://github.com/amd/skillscope/blob/main/docs/authoring-evals.md).
+A case that needs an application sets `workspace` to `evals/samples`, and its
+prompt names the application. The contents of that directory are copied to the
+workspace root when the case runs. Each copy in `evals/samples/` and its
+original under `sample/` name each other in a header comment; change them
+together.
 
-There is no CI for skills. `run_evals.py` is the gate, and it is meant to be
-run by hand before a release:
+### Tests
+
+CI runs the [skillscope](https://github.com/amd/skillscope) structural checks,
+the same checks amd/skills runs, on every pull request that changes the skills
+or `docs/`. They cover both dataset files. CI does not grade routing or
+behavior: routing needs a model API key, and behavior needs a supported GPU.
+
+`run_evals.py` grades both and is the release gate. It runs `evals.json` and
+`extended_evals.json` together. `evals.json` targets Strix Halo, except for
+pc-sampling, and most extended cases need an Instinct GPU, so pick the cases
+for your GPU with `--skill` or `--only`:
 
 ```bash
 ./skills/run_evals.py --list                         # validate the datasets
 ./skills/run_evals.py                                # does the right skill load?
 ./skills/run_evals.py --mode behavioral              # also grade the agent
 ./skills/run_evals.py --skill rocprof-compute-memory  # one skill
+./skills/run_evals.py --only mem-cache-hit-rates      # one case
 ```
 
 Routing mode denies the agent its tools and only checks which skill it chose,
 so it is quick and needs no GPU. Behavioral mode lets the agent work and grades
 `logs_contain`, `files_exist`, and the plain-language `expected_behavior` and
-`unexpected_behavior` claims, so it needs a supported GPU and real time.
+`unexpected_behavior` claims, so it needs a supported GPU and real time. It
+also fails a case when any `rocprof-compute` command the agent ran failed. The
+agent runs commands without asking for approval, so use a test machine.
 
 Both modes install the skills with `install-skills.sh`, so they also test the
 install script and its docs links. Both drive the `claude` CLI. The script
 exits 77 when that CLI is absent, so a caller can treat it as skipped rather
 than failed.
 
-Each dataset needs at least three cases that should trigger the skill, two that
-should not, and one triggering case with judged behavior. Negative cases carry
-only an id, a prompt, and an optional note.
+### Keeping skills correct
 
-## Keeping skills correct
+CI checks only structure and links, so keeping the content correct falls to
+each change. A PR that alters CLI options, output layout, supported
+architectures, or the experimental status of a feature updates the matching
+skill in the same PR, exactly as it updates docs and tests.
 
-There is no CI to catch drift, so it falls to each change. A PR that alters CLI
-options, output layout, supported architectures, or the experimental status of
-a feature updates the matching skill in the same PR, exactly as it updates docs
-and tests.
+Every skill that collects counters has the same "Collect only what the question
+needs" section: kernel-bottleneck, memory, roofline, speed-of-light, and
+torch-trace. Keep that section identical in all five. Put a tip that only one
+skill needs in that skill's own steps.
+
+Skills must also serve users on the two previous ROCm releases. When a change
+alters how a feature behaves, keep a short note in the skill saying how it
+worked before and in which release.
+
+## Publishing to amd/skills
+
+amd/skills imports each skill directory from `develop`. It copies only the skill
+directory and rewrites links that leave it, such as `../../docs/...`, to GitHub
+URLs. Edit the skills here; the next import overwrites edits made there.
+
+amd/skills grades each skill with skillscope under these rules:
+
+- It runs only `evals/evals.json`. That file needs at least three cases that
+  should trigger the skill, two that should not, and one triggering case with
+  `expected_behavior` or `unexpected_behavior`. `run_evals.py` checks the same
+  minimum.
+- It runs `evals.json` on Strix Halo (gfx1151) unless `evals/machine.yml` asks
+  for other hardware. Every skill sets `os: [Linux]` there to skip the Windows
+  runners. Only pc-sampling also sets `labels`, because it needs an MI300X; that
+  sends it to the catalog's gated Instinct runners.
+- Put cases that cannot pass on those runners in `evals/extended_evals.json`:
+  cases that need an Instinct GPU, and the torch-trace cases that profile a
+  model, since the catalog runners may not have PyTorch. The catalog skips this
+  file.
+- It copies only the skill directory, so `evals/samples/` holds copies of the
+  samples from `sample/`.

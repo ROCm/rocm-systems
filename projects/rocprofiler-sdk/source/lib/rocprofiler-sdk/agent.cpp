@@ -235,6 +235,13 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
         auto rocr_visible =
             parse_env_visible("ROCR_VISIBLE_DEVICES", agent_info.logical_node_type_id);
 
+        // HIP enumerates only ROCR-visible agents, so a ROCR-hidden agent is never HIP-visible
+        if(rocr_visible && !*rocr_visible)
+        {
+            set_hsa_visibility(false);
+            return;
+        }
+
         auto rocr_index =
             (rocr_visible && *rocr_visible) ? rocr_visible->index : agent_info.logical_node_type_id;
 
