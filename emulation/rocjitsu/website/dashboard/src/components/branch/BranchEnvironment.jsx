@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@m
 import { Fragment } from 'react';
 import { runEnvironmentDetails } from '../../data/provenance';
 import { groupMetadataFacts, metadataLabel } from '../shared/metadataPresentation';
-import { formatMetadataValue } from '../../utils/formatters';
+import { formatFullDate, formatMetadataValue } from '../../utils/formatters';
 import Disclosure from '../shared/Disclosure';
 import ScrollTableContainer from '../shared/ScrollTableContainer';
 
@@ -28,10 +28,10 @@ export default function BranchEnvironment({ candidate, reference, selection }) {
       ['baseBranch', 'Recorded base branch', (run) => run?.sourceBase?.branch], ['baseCommit', 'Recorded base SHA', (run) => run?.sourceBase?.commit],
     ]],
     ['Execution', [
-      ['committedAt', 'Commit time', (run) => run?.commitTimestamp], ['completedAt', 'Execution completed', (run) => run?.timestamp],
+      ['committedAt', 'Commit time', (run) => run?.commitTimestamp, formatFullDate], ['completedAt', 'Execution completed', (run) => run?.timestamp, formatFullDate],
       ['machine', 'Machine', (run) => run?.machineId], ['trigger', 'Trigger', (run) => run?.trigger],
     ]],
-  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value]) => ({ key, label, baseline: value(reference), candidate: value(candidate) })) }));
+  ].map(([label, fields]) => ({ label, facts: fields.map(([key, label, value, format]) => ({ key, label, format, baseline: value(reference), candidate: value(candidate) })) }));
   const rows = (items, prefix) => items.map((fact) => {
     const changed = Boolean(reference && candidate) && JSON.stringify(fact.baseline ?? null) !== JSON.stringify(fact.candidate ?? null);
     return <TableRow key={fact.key} data-testid={`branch-${prefix}-${fact.key}`} data-different={changed} sx={changed ? changedRowSx : undefined}>
@@ -39,8 +39,8 @@ export default function BranchEnvironment({ candidate, reference, selection }) {
         {metadataLabel(fact.label, fact.key)}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
-      <TableCell sx={{ fontFamily: sansFont }}>{formatMetadataValue(fact.baseline)}</TableCell>
-      <TableCell sx={{ fontFamily: sansFont }}>{formatMetadataValue(fact.candidate)}</TableCell>
+      <TableCell title={fact.format ? fact.baseline : undefined} sx={{ fontFamily: sansFont }}>{(fact.format ?? formatMetadataValue)(fact.baseline)}</TableCell>
+      <TableCell title={fact.format ? fact.candidate : undefined} sx={{ fontFamily: sansFont }}>{(fact.format ?? formatMetadataValue)(fact.candidate)}</TableCell>
     </TableRow>;
   });
   return <Disclosure data-testid="branch-environment" title="Environment & measurement details">

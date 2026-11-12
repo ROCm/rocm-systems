@@ -785,6 +785,13 @@ def format_table_id(config_id: int) -> str:
     return f"{config_id // 100}.{config_id % 100}"
 
 
+def metric_ids_by_name(data_config: Dict[str, Any]) -> Dict[str, str]:
+    """Map each metric name of a metric_table config to its "block.table.index" id."""
+    table_id = format_table_id(data_config["id"])
+    metrics = data_config.get("metric") or {}
+    return {name: f"{table_id}.{index}" for index, name in enumerate(metrics)}
+
+
 def resolve_block_token(token: str, alias_map: Dict[str, str]) -> Optional[str]:
     """Return the metric id for a block or metric id or alias, or None if unknown."""
     if METRIC_ID_RE.match(token):
@@ -1342,16 +1349,16 @@ def _iter_metric_table_rows(
     if block_id != "0":
         yield block_id, (panel["title"], "", "")
 
-    table_id = format_table_id(data_config["id"])
-    yield table_id, (data_config["title"], "", "")
+    yield format_table_id(data_config["id"]), (data_config["title"], "", "")
 
     descriptions = panel.get("metrics_description") or {}
-    for index, (name, entries) in enumerate(data_config["metric"].items()):
+    metric_ids = metric_ids_by_name(data_config)
+    for name, entries in data_config["metric"].items():
         if not _metric_has_valid_expr(entries, data_config):
             continue
         unit = entries.get("unit")
         description = " ".join(str(descriptions.get(name) or "").split())
-        yield f"{table_id}.{index}", (name, str(unit or ""), description)
+        yield metric_ids[name], (name, str(unit or ""), description)
 
 
 def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:

@@ -29,6 +29,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * They are aliases of `-b 2`, `-b 3`, and `-b 4`.
   * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
 
+* Added debug options for troubleshooting ROCm Compute Profiler itself. `--help` lists them only with `--debug`.
+  * `--debug-list-metrics-gfx-id <arch>`: with `--list-metrics`, list the blocks and metrics of another GPU.
+  * `analyze --debug-metric-expression`: print each metric's expression and inputs.
+  * `analyze --debug-table-view`: print every block as plain tables.
+  * `analyze --debug-verify-deps`: check that the Python dependencies of analyze mode are installed, then exit.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
@@ -60,7 +66,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--pc-sampling-rows` now sets the number of kernels shown.
   * Per-instruction counts are in the per-kernel ISA CSV files.
 
-* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--debug-list-metrics-gfx-id <arch>` to list another GPU.
 
 * `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
 
@@ -76,7 +82,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
-* `--specs-correction` takes `name:value` pairs separated by spaces, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
 * Renamed the roofline options to start with `--roofline`. The old names still work for now but print a warning, so update your commands:
   * `--roof-only` → `--roofline`
@@ -116,6 +122,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options. Use `--trace-ml-api`, `--list-operators`, and `--operator` instead.
 
+* Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-metric-expression`, `--debug-table-view`, and `--debug-verify-deps` instead.
+
 ### Optimized
 
 * Profile mode collects only the counters that metric equations use, which can reduce the number of profiling passes.
@@ -142,8 +150,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * `--list-blocks` and `--list-available-metrics` will be removed in a future release.
-
-* Comma-separated `--specs-correction` pairs are deprecated and will be removed in a future release. Separate the pairs with spaces instead.
 
 * The old roofline option names (`--roof-only`, `--bench-only`, and `--device`) will be removed in a future release. Use the new `--roofline-*` names instead.
 

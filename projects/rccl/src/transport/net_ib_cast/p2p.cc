@@ -211,8 +211,11 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
     // Selective retransmission
     if (comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true) {
       for (int r = 0; r < nreqs; r++) {
-        comm->wrs[r].sg_list->addr += comm->wrs[r].sg_list->length;
-        comm->wrs[r].wr.rdma.remote_addr += comm->wrs[r].sg_list->length;
+        // Advance by the equal-split chunk, not sg_list: an empty post clears it, and its length is not the chunk.
+        int chunkSize = DIVUP(DIVUP(reqs[r]->send.size, nqps), align) * align;
+        sendOffsets[r] += chunkSize;
+        comm->sges[r].addr += chunkSize;
+        comm->wrs[r].wr.rdma.remote_addr += chunkSize;
       }
       INFO(NCCL_NET,
            "NET/IB: %s: Skipping retransmission on QP index %d (req=%p, slot=%d) as it was already delivered.",

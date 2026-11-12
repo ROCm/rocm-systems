@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -72,7 +73,7 @@ struct SnapshotFixture {
   GpuMemory memory{"ds_snapshot_mem"};
   L2Cache l2{"ds_snapshot_l2"};
   std::unique_ptr<ComputeUnitCore> cu;
-  Wavefront *wf;
+  Wavefront *wf = nullptr;
   rj_code_arch_t arch;
   uint32_t register_count;
   std::shared_ptr<ExecutionPluginGroup> group;
@@ -86,7 +87,9 @@ struct SnapshotFixture {
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = register_count;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("ds_snapshot_cu", config, &memory, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "ds_snapshot_cu", config, &memory, &l2);
+    if (!cu)
+      return;
     wf = cu->dispatch_wf(0, 0, 104, register_count, wave_size);
     group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<SnapshotObserver>(*cu);

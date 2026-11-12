@@ -394,7 +394,6 @@ Raw performance counter data produced by the underlying
 
    Intermediate CSV generation (``results_*.csv``) in ``rocpd`` mode and
    ``--retain-rocpd-output`` are deprecated and will be removed in a future release.
-   ``.db`` files will be retained by default and the analyze step will read them directly.
 
 
 .. _filtering:
@@ -428,11 +427,9 @@ Without any of these options, profile mode collects every block.
 Filtering options
 -----------------
 
-``-b``, ``--block <block-id|block-alias|metric-id>``
+``-b``, ``--block``
    Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
-   Give all values after one ``-b``, for example ``-b 2 5``. A repeated ``-b``
-   keeps only its own values.
    See :ref:`profile-selection-options` for the options it can be combined with.
 
 ``--speed-of-light``, ``--memory-chart``, ``--roofline``
@@ -440,13 +437,13 @@ Filtering options
    Speed-of-Light, Memory Chart, and Roofline blocks.
    See :ref:`profile-selection-options` for the options they can be combined with.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``--kernel-iteration-range <iteration>``
+``--kernel-iteration-range``
    Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
-``--set <metric-set>``
+``--set``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
    See :ref:`profiling-metric-sets` and :ref:`profile-selection-options`.
 
@@ -739,11 +736,11 @@ that contains both ``roofline.csv`` and application performance counters
 Roofline options (profile)
 --------------------------
 
-``--roofline-device <gpu_id>``
+``--roofline-device``
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
-``-k``, ``--kernel <kernel-substr>``
+``-k``, ``--kernel``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
 .. note::

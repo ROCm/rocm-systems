@@ -18,6 +18,7 @@
 /// RDNA4, with additional CDNA coverage for 16-bit source operands. DOT cases
 /// exercise their separate inline handling on RDNA3 and RDNA4.
 
+#include "compute_unit_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -82,7 +83,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3p_pk_inline_const", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_inline_const", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -358,6 +361,8 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneDefaultPackingAgreesWithSc
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(ROCJITSU_CODE_ARCH_CDNA4);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     return fx.run(words.data(), 0x3C003C00u);
@@ -441,6 +446,8 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32Bf16InlineOneNarrowsAndSimdAgrees)
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(ROCJITSU_CODE_ARCH_RDNA3);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     EXPECT_EQ(fx.wf->wf_size(), WF_SIZE) << "fixture assumes wave32";

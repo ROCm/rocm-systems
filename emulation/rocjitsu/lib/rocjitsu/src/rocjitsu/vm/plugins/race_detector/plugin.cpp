@@ -371,7 +371,23 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32
   detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
 }
 
-void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) { release_wave_state(wf); }
+void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  if (RaceWavefrontState *state = get_state(wf); state && state->race_state) {
+    // Normal termination drains the wave's memory operations before this hook.
+    // Model s_endpgm's implicit wait, retaining LDS history until a subsequent
+    // workgroup barrier supplies ordering with the surviving waves.
+    const amdgpu::WaitcntModel model = amdgpu::waitcnt_model(wf.cu().arch()).value();
+    PendingWaitCount wait;
+    for (size_t index = 0; index < amdgpu::kWaitCounterCount; ++index) {
+      const auto kind = static_cast<amdgpu::WaitCounterKind>(index);
+      if (const std::optional<amdgpu::WaitCounterType> counter =
+              amdgpu::memory_wait_counter_type(kind, model))
+        wait.add(*counter, 0);
+    }
+    state->race_state->dispatch(wait);
+  }
+  release_wave_state(wf);
+}
 
 void RaceDetectorPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
   release_wave_state(wf);
@@ -688,7 +704,16 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     s->race_state->dispatch(wait);
 }
 
-void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                                 BarrierKind kind) {
+  if (wavefronts.empty())
+    return;
+  if (kind == BarrierKind::Workgroup) {
+    auto *s = get_state(wavefronts.front());
+    assert(s && s->race_state);
+    s->race_state->getDetector()->flushWorkgroupBarrierEvents();
+    return;
+  }
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);

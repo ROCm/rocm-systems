@@ -1018,6 +1018,19 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
     }
   }
+  // M0 can displace SGPR reads and writes, which ordinary liveness does not
+  // model. Callable probes allocate envelope registers from those facts.
+  if (std::ranges::any_of(
+          points_, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; })) {
+    std::vector<BasicBlock *> probe_scope;
+    probe_scope.reserve(blocks_.size());
+    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+      probe_scope.push_back(block.get());
+    if (accesses_sgprs_indirectly_via_movrel(KernelBlockScope(probe_scope))) {
+      out.errors.emplace_back("probe calls do not support relative SGPR access (s_movrel*)");
+      return out;
+    }
+  }
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());

@@ -4,7 +4,6 @@
 import argparse
 import re
 from collections import defaultdict
-from dataclasses import fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +30,7 @@ from utils.utils_common import (
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     format_table_id,
+    metric_ids_by_name,
     normalize_filter_to_str_list,
 )
 from utils.utils_counter_defs import metric_expressions, metric_value_keys
@@ -215,9 +215,9 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
-    metric_entries = data_config["metric"]
-    for i, (key, entries) in enumerate(metric_entries.items()):
-        metric_idx = f"{table_data_source_idx}.{i}"
+    metric_ids = metric_ids_by_name(data_config)
+    for key, entries in data_config["metric"].items():
+        metric_idx = metric_ids[key]
 
         if not _metric_passes_filter(
             metric_id=metric_idx,
@@ -602,8 +602,8 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, args.debug),
-        args.debug,
+        apply_filters(workload, args.debug_metric_expression),
+        args.debug_metric_expression,
     )
 
 
@@ -628,37 +628,16 @@ def build_comparable_columns(time_unit: str) -> list[str]:
 
 
 def correct_sys_info(mspec: MachineSpecs, specs_correction: List[str]) -> pd.DataFrame:
-    """Apply name:value spec corrections to mspec and return the specs as a frame.
-
-    A value whose comma-separated pieces all name specs is the deprecated
-    comma-separated form and is split; any other comma is part of the value.
-    """
-    spec_names = {spec.name for spec in fields(mspec)}
-    pairs: Dict[str, str] = {}
-    for correction in specs_correction:
-        pieces = correction.split(",")
-        if len(pieces) > 1 and all(
-            ":" in piece and piece.split(":", 1)[0].strip() in spec_names
-            for piece in pieces
-        ):
-            console_warning(
-                "Comma-separated --specs-correction pairs are deprecated and will be "
-                "removed in a future release. Separate name:value pairs with spaces, "
-                "for example: --specs-correction num_xcd:4 cu_per_gpu:64"
-            )
-        else:
-            pieces = [correction]
-        for piece in pieces:
-            key, value = piece.split(":", 1)
-            pairs[key.strip()] = value.strip()
-
-    # Apply corrections
-    for key, value in pairs.items():
-        if key in spec_names:
-            setattr(mspec, key, value)
-        else:
+    """Apply the name:value corrections to mspec and return the specs as one row."""
+    for pair in specs_correction:
+        name, _, value = pair.partition(":")
+        name = name.strip()
+        if pair.count(":") != 1 or not hasattr(mspec, name):
             console_error(
-                "analyze", f'Invalid spec "{key}". Use --specs to see valid options'
+                "analyze",
+                f'Invalid --specs-correction "{pair}". Use name:value, where name '
+                "is a column name in the workload's sysinfo.csv.",
             )
+        setattr(mspec, name, value.strip())
     # Convert dict to DataFrame for downstream pandas-based processing
     return pd.DataFrame(mspec.get_class_members(), index=[0])

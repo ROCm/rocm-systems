@@ -183,6 +183,7 @@ int devtimeLoopLarge = 0;
 int devtimeSkipMid = -1;
 int devtimeSkipLarge = -1;
 int devtimeCheck = 0;
+int ginResourceSharingMode = 0;  // CLI: 0=thread (default), 1=CTA, 2=device
 int unalign = 0;
 int memory_report = 0;
 
@@ -2046,6 +2047,7 @@ int main(int argc, char* argv[], char **envp) {
     {"devtime_skip_mid", required_argument, 0, 'j'},
     {"devtime_skip_large", required_argument, 0, 'k'},
     {"devtime_check", required_argument, 0, 'H'},
+    {"gin_resource_sharing", required_argument, 0, 1000},
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -2250,6 +2252,14 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
         }
         break;
+      case 1000:
+        ginResourceSharingMode = (int)strtol(optarg, NULL, 0);
+        if (ginResourceSharingMode < 0 || ginResourceSharingMode > 2) {
+          fprintf(stderr, "gin_resource_sharing must be 0 (thread), 1 (CTA), or 2 (device), got %d\n",
+                  ginResourceSharingMode);
+          return -1;
+        }
+        break;
       case 'L':
         devtimeLoop = (int)strtol(optarg, NULL, 0);
         break;
@@ -2335,6 +2345,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
             "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
             "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
+            "[--gin_resource_sharing <0/1/2> GIN tester ncclGin resource-sharing mode: 0=thread (exclusive-QP, drops SQ lock), 1=CTA, 2=device (default: 0). all_gather ignores this and stays GPU-locked (multi-CTA poster)] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;
@@ -2537,6 +2548,37 @@ testResult_t run() {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
+  }
+
+  const char* tlsPsk = getenv(NCCL_TESTS_TLS_PSK_ENV);
+  if (tlsPsk) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+    typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
+#ifdef RCCL_TESTS_STATIC_RCCL
+    ncclSetEncryption_t setEncryption = ncclSetEncryption;
+#else
+    // Looked up at run time: a direct reference would keep the binary from loading against
+    // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
+    ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
+    if (setEncryption == NULL) {
+      fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
+        test_ncclVersion);
+      return testInvalidUsage;
+    }
+#endif
+    ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+    encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
+    encryption.psk = tlsPsk;
+    NCCLCHECK(setEncryption(&encryption));
+    // RCCL keeps its own copy of the key. Dropping the variable keeps it out of RCCL's RAS
+    // environment report, which collects every NCCL_* entry, and out of child processes.
+    unsetenv(NCCL_TESTS_TLS_PSK_ENV);
+    if (proc == 0) printf("# Socket encryption: TLS (PSK)\n");
+#else
+    fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
+      NCCL_VERSION_CODE);
+    return testInvalidUsage;
+#endif
   }
 
   ncclUniqueId ncclId;

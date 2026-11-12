@@ -74,27 +74,6 @@ def test_list_kernels(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx_id_is_rejected(
-    binary_handler_analyze_rocprof_compute, capsys
-):
-    """analyze lists the -p workload's GPU, so it rejects --list-metrics-gfx-id."""
-    workload_dir = integration_common.setup_workload_dir(indirs[1])
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-metrics",
-        "--list-metrics-gfx-id",
-        "gfx908",
-    ])
-    assert code == 1
-    assert "--list-metrics-gfx-id can't be used in analyze mode" in (
-        capsys.readouterr().out
-    )
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
 def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
@@ -673,14 +652,14 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_g(binary_handler_analyze_rocprof_compute):
+def test_debug_metric_expression(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = integration_common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
             workload_dir,
-            "-g",
+            "--debug-metric-expression",
         ])
         assert code == 0
 

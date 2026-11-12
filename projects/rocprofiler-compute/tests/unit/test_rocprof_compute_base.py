@@ -48,8 +48,9 @@ def rocprof_compute_with_args(args: argparse.Namespace) -> RocProfCompute:
 
 
 def parse_profile_args(options: list[str]) -> argparse.Namespace:
-    parser = build_parser(Path.cwd(), SUPPORTED_ARCHS, {"ver_pretty": "test"})
-    return parser.parse_args(["profile", *options, "--", "./app"])
+    argv = ["profile", *options, "--", "./app"]
+    parser = build_parser(Path.cwd(), SUPPORTED_ARCHS, {"ver_pretty": "test"}, argv)
+    return parser.parse_args(argv)
 
 
 @pytest.mark.parametrize(
@@ -169,3 +170,16 @@ def test_validate_list_option_exclusions(options, error, caplog):
     with pytest.raises(SystemExit):
         instance._validate_list_option_exclusions()
     assert error in caplog.text
+
+
+def test_validate_list_option_exclusions_gfx_id_requires_list_metrics(monkeypatch):
+    """--debug-list-metrics-gfx-id is rejected without --list-metrics."""
+    error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
+    args = argparse.Namespace(
+        mode=None, debug_list_metrics_gfx_id="gfx90a", list_metrics=None
+    )
+    with pytest.raises(SystemExit):
+        rocprof_compute_with_args(args)._validate_list_option_exclusions()
+    assert "with --list-metrics" in error.call_args.args[0]
