@@ -52,8 +52,18 @@ add_library(
     fp/half_minmax.cpp
     fp/ldexp.cpp
     fp/minmax.cpp
+    fp/mixed_mad.cpp
+    fp/mixed_bf16.cpp
+    fp/packed_bf16.cpp
     fp/mixed_fma.cpp
+    fp/packed_f32.cpp
     fp/packed_fma.cpp
+    dot/cdna_dot.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
+    dot/scalar_repair.cpp
     graphics/cube.cpp
     graphics/interp16.cpp
     graphics/interp32.cpp

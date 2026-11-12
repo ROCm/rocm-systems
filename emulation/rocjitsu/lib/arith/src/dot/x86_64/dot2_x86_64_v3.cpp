@@ -28,7 +28,7 @@ template <bool Bf16> __m256 widen(__m256i words, int shift, uint32_t negate) {
 
 // Accumulate loose FP16/BF16 DOT2 products for the selected lanes. Requires validated
 // controls; preserve inactive destination lanes.
-template <bool Bf16>
+template <bool Bf16, bool PairFirst = false>
 void dot(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint32_t *a,
          const uint32_t *b, const uint32_t *c) {
   const int a0 = instruction_flags & RJ_ARITH_DOT_LO_A_HIGH ? 16 : 0;
@@ -44,10 +44,18 @@ void dot(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
             _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)),
             _mm256_set1_epi32(instruction_flags & RJ_ARITH_DOT_ABS_C ? 0x7fffffff : -1)),
         neg_c));
-    acc = _mm256_fmadd_ps(widen<Bf16>(va, a0, instruction_flags & RJ_ARITH_DOT_NEG_LO_A),
-                          widen<Bf16>(vb, b0, instruction_flags & RJ_ARITH_DOT_NEG_LO_B), acc);
-    acc = _mm256_fmadd_ps(widen<Bf16>(va, a1, instruction_flags & RJ_ARITH_DOT_NEG_HI_A),
-                          widen<Bf16>(vb, b1, instruction_flags & RJ_ARITH_DOT_NEG_HI_B), acc);
+    if constexpr (PairFirst) {
+      auto low = _mm256_mul_ps(widen<Bf16>(va, a0, instruction_flags & RJ_ARITH_DOT_NEG_LO_A),
+                               widen<Bf16>(vb, b0, instruction_flags & RJ_ARITH_DOT_NEG_LO_B));
+      auto high = _mm256_mul_ps(widen<Bf16>(va, a1, instruction_flags & RJ_ARITH_DOT_NEG_HI_A),
+                                widen<Bf16>(vb, b1, instruction_flags & RJ_ARITH_DOT_NEG_HI_B));
+      acc = _mm256_add_ps(_mm256_add_ps(low, high), acc);
+    } else {
+      acc = _mm256_fmadd_ps(widen<Bf16>(va, a0, instruction_flags & RJ_ARITH_DOT_NEG_LO_A),
+                            widen<Bf16>(vb, b0, instruction_flags & RJ_ARITH_DOT_NEG_LO_B), acc);
+      acc = _mm256_fmadd_ps(widen<Bf16>(va, a1, instruction_flags & RJ_ARITH_DOT_NEG_HI_A),
+                            widen<Bf16>(vb, b1, instruction_flags & RJ_ARITH_DOT_NEG_HI_B), acc);
+    }
     auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                             _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask,
@@ -65,6 +73,16 @@ void dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t instruction_flags, u
     dot<true>(exec_mask, instruction_flags, d, a, b, c);
   } else {
     dot<false>(exec_mask, instruction_flags, d, a, b, c);
+  }
+}
+
+// Inherited CDNA pair-sum order; retain gradual underflow and apply all selectors.
+void cdna_dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  if (bf16) {
+    dot<true, true>(exec_mask, instruction_flags, d, a, b, c);
+  } else {
+    dot<false, true>(exec_mask, instruction_flags, d, a, b, c);
   }
 }
 
