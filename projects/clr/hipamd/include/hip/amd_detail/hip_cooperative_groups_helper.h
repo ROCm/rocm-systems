@@ -364,7 +364,24 @@ __CG_STATIC_QUALIFIER__ void barrier_wait() {
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
 }
 
+// On gfx1250+, ext dispatch packets are used for all launches. SPI only writes
+// cluster TTMP regs when CLUSTER_EN=1, which MEC sets only when cluster_size > {1,1,1}.
+// For non-cluster dispatches the TTMP regs contain stale values from prior waves.
+// Detect this by reading cluster_size from the ext dispatch packet (offsets 20-22
+// per hsa_amd_ext_kernel_dispatch_packet_t layout).
+__CG_STATIC_QUALIFIER__ bool is_cluster_dispatch() {
+#if __has_builtin(__builtin_amdgcn_dispatch_ptr)
+  const unsigned char* pkt =
+      (const unsigned char*)__builtin_amdgcn_dispatch_ptr();
+  return pkt[20] > 1 || pkt[21] > 1 || pkt[22] > 1;
+#else
+  return false;
+#endif
+}
+
 __CG_STATIC_QUALIFIER__ dim3 block_index() {
+  if (!is_cluster_dispatch())
+    return dim3(0, 0, 0);
   return dim3(__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_id_x)
                   ? __builtin_amdgcn_cluster_workgroup_id_x()
                   : 0,
@@ -377,6 +394,8 @@ __CG_STATIC_QUALIFIER__ dim3 block_index() {
 }
 
 __CG_STATIC_QUALIFIER__ dim3 dim_blocks() {
+  if (!is_cluster_dispatch())
+    return dim3(1, 1, 1);
   return dim3((__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_id_x)
                    ? __builtin_amdgcn_cluster_workgroup_max_id_x()
                    : 0) +
@@ -404,6 +423,8 @@ __CG_STATIC_QUALIFIER__ dim3 thread_index() {
 }
 
 __CG_STATIC_QUALIFIER__ unsigned int num_blocks() {
+  if (!is_cluster_dispatch())
+    return 1;
   return (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cluster_workgroup_max_flat_id)
               ? __builtin_amdgcn_cluster_workgroup_max_flat_id()
               : 0) +
