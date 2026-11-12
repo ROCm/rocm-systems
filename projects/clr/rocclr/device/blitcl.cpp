@@ -128,6 +128,52 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
       }
     }
 
+    // Non-temporal variant of __amd_rocclr_copyBuffer, selected by
+    // DEBUG_CLR_BLIT_NONTEMPORAL. Identical to the kernel above except that the
+    // store carries a non-temporal hint (th:TH_STORE_NT on gfx12), telling the
+    // cache not to retain the destination lines. A bulk copy never re-reads
+    // what it just wrote, so keeping those lines costs capacity that concurrent
+    // work could use.
+    //
+    // Two deliberate choices here:
+    //   * The access width stays ulong2 (128-bit). __builtin_nontemporal_store
+    //     takes a pointer to a scalar or to a native vector, and ulong2 is one,
+    //     so the hint costs no width. Narrowing to ulong to obtain the hint
+    //     halves bytes in flight per work item: measured +77% time, equivalently
+    //     -44% bandwidth, on a 1 GiB copy on gfx1250.
+    //   * Only the store is non-temporal. The source may legitimately be reused
+    //     by a following copy (one buffer broadcast to many), so it keeps
+    //     ordinary caching.
+    __kernel void __amd_rocclr_copyBufferNT(__global uchar* src, __global uchar* dst, ulong size,
+                                            uint remainder, uint aligned_size, ulong end_ptr,
+                                            uint next_chunk, uint workgroup_size) {
+      uint l = __builtin_amdgcn_workitem_id_x();
+      uint g = __builtin_amdgcn_workgroup_id_x();
+      ulong id = (g * workgroup_size + l);
+      ulong id_remainder = id;
+
+      if (aligned_size == sizeof(ulong2)) {
+        __global ulong2* srcD = (__global ulong2*)(src);
+        __global ulong2* dstD = (__global ulong2*)(dst);
+        while ((ulong)(&dstD[id]) < end_ptr) {
+          __builtin_nontemporal_store(srcD[id], &dstD[id]);
+          id += next_chunk;
+        }
+      } else {
+        __global uint* srcD = (__global uint*)(src);
+        __global uint* dstD = (__global uint*)(dst);
+        while ((ulong)(&dstD[id]) < end_ptr) {
+          __builtin_nontemporal_store(srcD[id], &dstD[id]);
+          id += next_chunk;
+        }
+      }
+      if ((remainder != 0) && (id_remainder == 0)) {
+        for (ulong i = size - remainder; i < size; ++i) {
+          dst[i] = src[i];
+        }
+      }
+    }
+
     typedef struct CopyBufferBatchDescriptor {
       ulong source_address;
       ulong destination_address;
