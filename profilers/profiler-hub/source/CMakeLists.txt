@@ -59,7 +59,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/common/connection_pool.hpp
 )
 if(PROFILER_HUB_ENABLE_ROCPD_V3)
-    list(APPEND profiler-hub_sources
+    list(
+        APPEND profiler-hub_sources
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_reader.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_reader.hpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v3/rocpd_v3_histogram.cpp
@@ -69,7 +70,8 @@ if(PROFILER_HUB_ENABLE_ROCPD_V3)
 endif()
 
 if(PROFILER_HUB_ENABLE_ROCPD_V2)
-    list(APPEND profiler-hub_sources
+    list(
+        APPEND profiler-hub_sources
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_reader.cpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_reader.hpp
         ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd_v2/rocpd_v2_catalog.cpp
