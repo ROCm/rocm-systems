@@ -607,7 +607,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
-  size_t fcollect_pSync_offset = (team_obj->fcollect_sequence_number % 2) * pe_size;
+  size_t fcollect_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   // Lane id within the calling wave, so waves other than wave 0 also work.
   int tid = get_flat_block_id() % WF_SIZE;
@@ -637,7 +637,7 @@ __device__ void IPCContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   if (is_thread_zero_in_wave()) {
-    team_obj->fcollect_sequence_number++;
+    team_obj->alltoall_sequence_number++;
   }
 
   sync_wave(team);
@@ -712,7 +712,7 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
   int my_pe_in_team = team_obj->my_pe;
-  size_t fcollect_pSync_offset = (team_obj->fcollect_sequence_number % 2) * pe_size;
+  size_t fcollect_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
   // Workgroup variant: every thread in the block takes a distinct dest PE.
@@ -745,7 +745,7 @@ __device__ void IPCContext::fcollectmem_wg_linear_thread_puts(rocshmem_team_t te
 
   __syncthreads();
   if (is_thread_zero_in_block()) {
-    team_obj->fcollect_sequence_number++;
+    team_obj->alltoall_sequence_number++;
   }
 
   __syncthreads();
