@@ -38,6 +38,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "xgmi_port_map_internal.h"
 
 using amd::smi::AMDGpuMetricTypeId_t;
 using amd::smi::getRSMIStatusString;
@@ -1024,24 +1025,8 @@ rsmi_status_t rsmi_dev_xgmi_port_num_get(uint32_t dv_ind, uint32_t* count,
   std::string s;
   ret = read_dev_port_map_file(amd::smi::kDevXGMIPortNum, dv_ind, &s);
 
-  std::istringstream iss(s);
-  std::string line;
-  *count = 0;
-  while (std::getline(iss, line)) {
-    if (line.empty()) continue;
-    std::istringstream f(line);
-    std::string src_token, arrow, dst_token;
-    if (f >> src_token >> arrow >> dst_token) {
-      size_t src_colon = src_token.find(':');
-      size_t dst_colon = dst_token.find(':');
-      if (src_colon != std::string::npos && dst_colon != std::string::npos) {
-        uint16_t src_link = static_cast<uint16_t>(std::stoi(src_token.substr(src_colon + 1)));
-        uint16_t dst_node = static_cast<uint16_t>(std::stoi(dst_token.substr(0, dst_colon)));
-        link_to_dst_node[src_link] = dst_node;
-        (*count)++;
-      }
-    }
-  }
+  const auto parse_status = amd::smi::detail::parse_xgmi_port_map(s, count, link_to_dst_node);
+  if (ret == RSMI_STATUS_SUCCESS) ret = parse_status;
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting " << amd::smi::getRSMIStatusString(ret);

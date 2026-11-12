@@ -23,7 +23,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <set>
 #include <sstream>
 #include <string>
@@ -59,11 +58,13 @@
 #include "amd_smi/impl/amd_smi_wsl_device.h"
 #endif
 #include "fwupd_carveout.h"
+#include "link_metrics_internal.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "topology_nearest_internal.h"
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
@@ -3892,6 +3893,7 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
   AMDSMI_CHECK_INIT();
   if (link_metrics == nullptr) return AMDSMI_STATUS_INVAL;
 
+  link_metrics->num_links = 0;
   amdsmi_gpu_metrics_t metric_info = {};
   for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
     link_metrics->links[i].max_bandwidth = std::numeric_limits<uint32_t>::max();
@@ -3901,65 +3903,52 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
 
   amdsmi_status_t status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
   if (status != AMDSMI_STATUS_SUCCESS) return status;
-  link_metrics->num_links = AMDSMI_MAX_NUM_XGMI_LINKS;
 
+  uint32_t mapped_count = 0;
   uint16_t link_to_dst_node[AMDSMI_MAX_NUM_XGMI_LINKS];
   std::fill_n(link_to_dst_node, AMDSMI_MAX_NUM_XGMI_LINKS, std::numeric_limits<uint16_t>::max());
-  status = rsmi_wrapper(rsmi_dev_xgmi_port_num_get, processor_handle, 0, &link_metrics->num_links,
+  status = rsmi_wrapper(rsmi_dev_xgmi_port_num_get, processor_handle, 0, &mapped_count,
                         link_to_dst_node);
 
-  for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; i++) {
-    memset(&link_metrics->links[i].bdf, 0xFF, sizeof(amdsmi_bdf_t));
-    if (link_to_dst_node[i] != std::numeric_limits<uint16_t>::max()) {
-      uint32_t node_id = link_to_dst_node[i];
-      std::string node_symlink = "node" + std::to_string(node_id);
-      std::string sysfs_base = "/sys/bus/pci/devices/";
-      DIR* dir = opendir(sysfs_base.c_str());
-      if (dir) {
-        struct dirent* entry;
-        while ((entry = readdir(dir)) != nullptr) {
-          if (entry->d_type != DT_DIR && entry->d_type != DT_LNK) continue;
-          std::string bdf = entry->d_name;
-          if (bdf == "." || bdf == "..") continue;
-          std::string symlink_path = sysfs_base + bdf + "/xgmi_hive_info/" + node_symlink;
-          char buf[PATH_MAX] = {0};
-          ssize_t len = readlink(symlink_path.c_str(), buf, sizeof(buf) - 1);
-          if (len > 0) {
-            buf[len] = '\0';
-            std::string target(buf);
-            size_t last_slash = target.find_last_of('/');
-            std::string bdf_str =
-                (last_slash != std::string::npos) ? target.substr(last_slash + 1) : target;
-            // Parse BDF string: "dddd:bb:dd.f"
-            uint64_t domain = 0;
-            uint32_t bus = 0, device = 0, function = 0;
-            if (sscanf(bdf_str.c_str(), "%4lx:%2x:%2x.%1x", &domain, &bus, &device, &function) ==
-                4) {
-              amdsmi_bdf_t dst_bdf = {};
-              dst_bdf.domain_number = domain & 0xffffffffffff;
-              dst_bdf.bus_number = static_cast<uint8_t>(bus) & 0xff;
-              dst_bdf.device_number = static_cast<uint8_t>(device) & 0x1f;
-              dst_bdf.function_number = static_cast<uint8_t>(function) & 0x07;
-              link_metrics->links[i].bdf = dst_bdf;
-            }
-            break;  // Found, stop searching
+  const auto resolve_bdf = [](uint16_t node_id) {
+    amdsmi_bdf_t dst_bdf;
+    memset(&dst_bdf, 0xFF, sizeof(dst_bdf));
+    std::string node_symlink = "node" + std::to_string(node_id);
+    std::string sysfs_base = "/sys/bus/pci/devices/";
+    DIR* dir = opendir(sysfs_base.c_str());
+    if (dir) {
+      struct dirent* entry;
+      while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_type != DT_DIR && entry->d_type != DT_LNK) continue;
+        std::string bdf = entry->d_name;
+        if (bdf == "." || bdf == "..") continue;
+        std::string symlink_path = sysfs_base + bdf + "/xgmi_hive_info/" + node_symlink;
+        char buf[PATH_MAX] = {0};
+        ssize_t len = readlink(symlink_path.c_str(), buf, sizeof(buf) - 1);
+        if (len > 0) {
+          buf[len] = '\0';
+          std::string target(buf);
+          size_t last_slash = target.find_last_of('/');
+          std::string bdf_str =
+              (last_slash != std::string::npos) ? target.substr(last_slash + 1) : target;
+          // Parse BDF string: "dddd:bb:dd.f"
+          uint64_t domain = 0;
+          uint32_t bus = 0, device = 0, function = 0;
+          if (sscanf(bdf_str.c_str(), "%4lx:%2x:%2x.%1x", &domain, &bus, &device, &function) == 4) {
+            dst_bdf.domain_number = domain & 0xffffffffffff;
+            dst_bdf.bus_number = static_cast<uint8_t>(bus) & 0xff;
+            dst_bdf.device_number = static_cast<uint8_t>(device) & 0x1f;
+            dst_bdf.function_number = static_cast<uint8_t>(function) & 0x07;
           }
+          break;  // Found, stop searching
         }
-        closedir(dir);
       }
+      closedir(dir);
     }
-    link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
-    link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
-    link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
-    if (metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) {
-      link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
-    }
-    if ((metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) &&
-        (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
-      link_metrics->links[i].max_bandwidth =
-          metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
-  }
-  return AMDSMI_STATUS_SUCCESS;
+    return dst_bdf;
+  };
+  return amd::smi::detail::populate_link_metrics(metric_info, link_to_dst_node, mapped_count,
+                                                 status, link_metrics, resolve_bdf);
 }
 
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
@@ -6984,113 +6973,12 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
     return amdsmi_status_t::AMDSMI_STATUS_INVAL;
   }
 
-  auto status(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
-
-  struct LinkTopolyInfo_t {
-    amdsmi_processor_handle target_processor_handle;
-    amdsmi_link_type_t link_type;
-    bool is_accessible;
-    uint64_t num_hops;
-    uint64_t link_weight;
-  };
-
-  /*
-   *  Note: The link topology table is sorted by the number of hops and link weight.
-   */
-  struct LinkTopogyOrderCmp_t {
-    constexpr bool operator()(const LinkTopolyInfo_t& left,
-                              const LinkTopolyInfo_t& right) const noexcept {
-      if (left.num_hops == right.num_hops) {
-        return (left.num_hops >= right.num_hops);
-      } else {
-        return (left.link_weight > right.link_weight);
-      }
-    }
-  };
-  std::priority_queue<LinkTopolyInfo_t, std::vector<LinkTopolyInfo_t>, LinkTopogyOrderCmp_t>
-      link_topology_order{};
-  //
-
   AMDSMI_CHECK_INIT();
-  auto socket_counter = uint32_t(0);
-  if (auto api_status = amdsmi_get_socket_handles(&socket_counter, nullptr);
-      (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
-    return api_status;
-  }
-
-  std::vector<amdsmi_socket_handle> socket_list(socket_counter);
-  if (auto api_status = amdsmi_get_socket_handles(&socket_counter, socket_list.data());
-      (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
-    return api_status;
-  }
-
-  uint32_t device_counter(AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP);
-  amdsmi_processor_handle device_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP];
-  for (auto socket_idx = uint32_t(0); socket_idx < socket_counter; ++socket_idx) {
-    if (auto api_status =
-            amdsmi_get_processor_handles(socket_list[socket_idx], &device_counter, device_list);
-        (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
-      return api_status;
-    }
-
-    for (auto device_idx = uint32_t(0); device_idx < device_counter; ++device_idx) {
-      /*  Note: Skip the processor handle that is being queried. */
-      if (processor_handle != device_list[device_idx]) {
-        // Accessibility?
-        auto is_accessible(false);
-        if (auto api_status =
-                amdsmi_is_P2P_accessible(processor_handle, device_list[device_idx], &is_accessible);
-            (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) || !is_accessible) {
-          continue;
-        }
-
-        // Link type matches what we are searching for?
-        auto link_type_new = link_type;
-        auto num_hops = uint64_t(0);
-        if (auto api_status = amdsmi_topo_get_link_type(processor_handle, device_list[device_idx],
-                                                        &num_hops, &link_type_new);
-            (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) ||
-            (link_type_new != link_type)) {
-          continue;
-        }
-
-        // Link weights
-        auto link_weight = uint64_t(0);
-        if (auto api_status = amdsmi_topo_get_link_weight(processor_handle, device_list[device_idx],
-                                                          &link_weight);
-            (api_status != amdsmi_status_t::AMDSMI_STATUS_SUCCESS)) {
-          continue;
-        }
-
-        // Topology nearest info
-        LinkTopolyInfo_t link_info = {.target_processor_handle = device_list[device_idx],
-                                      .link_type = link_type,
-                                      .is_accessible = is_accessible,
-                                      .num_hops = num_hops,
-                                      .link_weight = link_weight};
-        link_topology_order.push(link_info);
-      }
-    }
-  }
-
-  /*
-   *  Note: The link topology table is sorted by the number of hops and link weight.
-   */
-  std::fill(std::begin(topology_nearest_info->processor_list),
-            std::end(topology_nearest_info->processor_list), nullptr);
-  topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
-  auto topology_nearest_counter = uint32_t(0);
-  while (!link_topology_order.empty()) {
-    auto link_info = link_topology_order.top();
-    link_topology_order.pop();
-
-    if (topology_nearest_counter < (AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP)) {
-      topology_nearest_info->processor_list[topology_nearest_counter++] =
-          link_info.target_processor_handle;
-    }
-  }
-
-  return status;
+  const amd::smi::detail::TopologyDeps deps = {
+      amdsmi_get_socket_handles, amdsmi_get_processor_handles, amdsmi_is_P2P_accessible,
+      amdsmi_topo_get_link_type, amdsmi_topo_get_link_weight};
+  return amd::smi::detail::get_link_topology_nearest(processor_handle, link_type,
+                                                     topology_nearest_info, deps);
 }
 
 static const std::map<amdsmi_virtualization_mode_t, std::string> virtualization_mode_map = {
