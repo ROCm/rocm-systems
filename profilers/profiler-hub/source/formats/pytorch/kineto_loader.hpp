@@ -58,6 +58,7 @@ struct loaded_trace_t
     std::map<std::pair<std::int64_t, std::int64_t>, std::string> thread_names;
     std::map<std::int64_t, std::string>                          process_names;
     std::map<std::int64_t, std::string>                          device_names;
+    std::map<std::int64_t, std::string>                          lane_names;
     bool                                                         gzip{};
     load_diag_t                                                  diag{};
 };

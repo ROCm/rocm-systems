@@ -49,8 +49,8 @@ event_order(const store_row_t& a, const store_row_t& b)
     return a.end > b.end;
 }
 
-// Unknown categories, memsets and GPU annotations have no event type of their own and
-// are served as regions.
+// Unknown categories, memsets, GPU annotations and the CUDA syncs other than a stream
+// wait have no event type of their own and are served as regions.
 std::vector<store_row_t>
 sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
 {
@@ -66,8 +66,7 @@ sorted_rows(loaded_trace_t& t, const std::vector<std::uint32_t>& idxs)
         rows.push_back({ start,
                          start + static_cast<std::uint64_t>(dur),
                          e.name_id,
-                         t.cat_classes[e.cat_id].event_type.value_or(
-                             reader_types::event_type_t::region),
+                         event_type_of(t.cat_classes[e.cat_id], t.names[e.name_id]),
                          i });
     }
     std::stable_sort(rows.begin(), rows.end(), event_order);
@@ -128,6 +127,11 @@ load_store(const std::string& path, std::function<bool()> cancelled)
 
     for(auto& [key, idxs] : host_groups)
     {
+        if(const auto lane = trace.lane_names.find(key.second);
+           lane != trace.lane_names.end())
+        {
+            trace.thread_names.emplace(key, lane->second);
+        }
         store_track_t track{};
         track.id       = static_cast<std::uint32_t>(store.tracks.size());
         const auto it  = trace.thread_names.find(key);
@@ -158,7 +162,9 @@ load_store(const std::string& path, std::function<bool()> cancelled)
         }
         store_track_t track{};
         track.id        = static_cast<std::uint32_t>(store.tracks.size());
-        track.name      = fmt::format("GPU {} / Stream {}", key.first, key.second);
+        track.name      = key.second < 0
+                              ? fmt::format("GPU {} / Device-wide", key.first)
+                              : fmt::format("GPU {} / Stream {}", key.first, key.second);
         track.category  = reader_types::track_kind_t::stream;
         track.pid       = launcher_pid < 0 ? busiest_pid : launcher_pid;
         track.agent_id  = static_cast<std::uint64_t>(key.first) + 1;
