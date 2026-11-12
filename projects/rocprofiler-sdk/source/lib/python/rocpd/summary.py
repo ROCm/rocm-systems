@@ -248,18 +248,18 @@ def generate_summary_query(
         join_condition = "T.guid = A.guid AND T.{name_column} = A.name".format(
             name_column=name_column
         )
-        # If by_rank_env_var is found, include it in the select and join clauses; otherwise, only include ProcessID and Hostname
+        # If by_rank_env_var is found, include it in the select and join clauses; otherwise, only include Process_Id and Hostname
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
             rank_alias = "Rank"
-            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, AD.pid AS ProcessID, P.hostname AS Hostname,".format(
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, AD.pid AS Process_Id, P.hostname AS Hostname,".format(
                 rank_column_name=rank_column_name, rank_alias=rank_alias
             )
             total_duration_join = "JOIN total_duration TD ON AD.guid = TD.guid JOIN processes P ON AD.pid = P.pid JOIN rocpd_info_process PI ON AD.pid = PI.pid"
         else:
             rank_column_name = ""
             rank_alias = ""
-            additional_select_columns = "AD.pid AS ProcessID, P.hostname AS Hostname,"
+            additional_select_columns = "AD.pid AS Process_Id, P.hostname AS Hostname,"
             total_duration_join = "JOIN total_duration TD ON AD.guid = TD.guid JOIN processes P ON AD.pid = P.pid"
     else:
         view_suffix = "_summary"
@@ -365,18 +365,18 @@ def generate_domain_query(
         if by_rank_env_var is not None:
             rank_column_name = by_rank_env_var
             rank_alias = "Rank"
-            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, GD.ProcessID, GD.Hostname,".format(
+            additional_select_columns = "json_extract(PI.environment, '$.{rank_column_name}') AS {rank_alias}, GD.Process_Id, GD.Hostname,".format(
                 rank_column_name=rank_column_name, rank_alias=rank_alias
             )
-            join_condition = "JOIN total_duration TD ON GD.ProcessID = TD.ProcessID JOIN rocpd_info_process PI ON GD.ProcessID = PI.pid"
+            join_condition = "JOIN total_duration TD ON GD.Process_Id = TD.Process_Id JOIN rocpd_info_process PI ON GD.Process_Id = PI.pid"
         else:
             rank_column_name = ""
             rank_alias = ""
-            additional_select_columns = "GD.ProcessID, GD.Hostname,"
-            join_condition = "JOIN total_duration TD ON GD.ProcessID = TD.ProcessID"
-        additional_group_columns = "ProcessID, Hostname,"
-        total_duration_group_by = "GROUP BY ProcessID"
-        order_by = "ORDER BY GD.ProcessID"
+            additional_select_columns = "GD.Process_Id, GD.Hostname,"
+            join_condition = "JOIN total_duration TD ON GD.Process_Id = TD.Process_Id"
+        additional_group_columns = "Process_Id, Hostname,"
+        total_duration_group_by = "GROUP BY Process_Id"
+        order_by = "ORDER BY GD.Process_Id"
     else:
         view_suffix = "_summary"
         view_name = "domain_summary"
@@ -421,7 +421,7 @@ def generate_domain_query(
                     MAX("MAX (nsec)") AS "MAX (nsec)",
                     SUM("STD_DEV") AS "STD_DEV"
                 FROM all_domains
-                GROUP BY domain{", ProcessID" if by_rank else ""}
+                GROUP BY domain{", Process_Id" if by_rank else ""}
             ),
             total_duration AS (
                 SELECT
@@ -718,7 +718,7 @@ def create_process_files_query(connection: RocpdImportData, by_rank=False):
     query = f"""
         SELECT
             {rank_select}
-            P.id AS ProcessID,
+            P.id AS Process_Id,
             N.hostname AS Hostname,
             json_extract(P.extdata, '$.output_file') AS Filename
         FROM rocpd_info_process P
