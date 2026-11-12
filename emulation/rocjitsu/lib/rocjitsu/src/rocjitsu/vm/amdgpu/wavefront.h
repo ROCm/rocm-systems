@@ -899,9 +899,19 @@ public:
     return instruction_execution_error_ != InstructionExecutionError::None;
   }
 
+  /// @brief Preserve the diagnostic name before a failed pipeline destroys its instruction.
+  void preserve_instruction_execution_error_mnemonic(std::string_view mnemonic) const {
+    instruction_execution_error_mnemonic_ = mnemonic;
+  }
+
+  std::string_view instruction_execution_error_mnemonic() const {
+    return instruction_execution_error_mnemonic_;
+  }
+
   void clear_instruction_execution_error() {
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
   }
 
   void begin_instruction_execution() { clear_instruction_execution_error(); }
@@ -1251,6 +1261,7 @@ public:
     pending_alu_causes_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
+    instruction_execution_error_mnemonic_.clear();
     sleep_cycles_ = 0;
     in_trap_handler_ = false;
     trap_interrupt_sent_ = false;
@@ -1305,6 +1316,7 @@ protected:
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
   mutable const char *instruction_execution_error_detail_ = nullptr;
+  mutable std::string instruction_execution_error_mnemonic_;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.

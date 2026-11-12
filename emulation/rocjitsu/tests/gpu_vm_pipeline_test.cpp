@@ -675,6 +675,8 @@ TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSucces
       context.cu->step();
       context.cu->step();
       const std::string diagnostic = testing::internal::GetCapturedStderr();
+      EXPECT_NE(diagnostic.find("could not execute global_load_b32"), std::string::npos)
+          << diagnostic;
       const std::string reason = "unsupported atomic operation for this width or memory domain";
       const auto warning = diagnostic.find(reason);
       EXPECT_NE(warning, std::string::npos) << diagnostic;
