@@ -20,8 +20,8 @@ Result reject_instruction(InputError &error, InputErrorCode code, std::string me
   return Result::failure();
 }
 
-bool admitted_instruction(std::string_view name, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && name == "s_mul_i32")
+bool admitted_instruction(std::string_view name) {
+  if (name == "s_mul_i32")
     return true;
   constexpr std::array names = {
       "s_load_dword",       "s_load_dwordx2",
@@ -105,7 +105,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arc
   if (name.starts_with("ds_") && width == 0)
     return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                               "unsupported LDS form: " + std::string(name), offset);
-  if (width == 0 && !admitted_instruction(name, arch))
+  if (width == 0 && !admitted_instruction(name))
     return reject_instruction(error, InputErrorCode::UnsupportedInstruction,
                               "instruction outside MVP: " + std::string(name), offset);
   if (width != 0) {

@@ -74,6 +74,66 @@ def set_property(test, name, value):
 
 
 class RequiredCoverage(unittest.TestCase):
+    def test_core_multi_workgroup_regressions_cannot_be_omitted(self):
+        expected = {
+            'ConSanHsaPlugin.CompleteWorkgroupsPublishAllRowsAndCaptureTheirFullExtent',
+            'ConSanBoundedLaunch.AllNativeTargetsKeepBoundedWorkgroupRowsAndAdmission',
+            'ConSanAnalysis.EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups',
+            'ConSanAnalysis.EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups',
+            'ConSanAnalysis.Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks',
+        }
+        for suffix in (
+            'gfx942Wave64',
+            'gfx950Wave64',
+            'gfx1100Wave32',
+            'gfx1100Wave64',
+            'gfx1201Wave32',
+            'gfx1201Wave64',
+            'gfx1250Wave32',
+        ):
+            expected.add(
+                'ConSanTargets/ConSanTargetStatic.'
+                f'BoundedWorkgroupFixturesRetainQualifiedLdsSites/{suffix}'
+            )
+        required = required_names()
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertIn(name, required)
+                with self.assertRaisesRegex(
+                    ValueError, 'Required ConSan registrations missing'
+                ):
+                    validate_selected([{'name': item} for item in required - {name}])
+
+    def test_multi_workgroup_controls_are_required_for_every_target_and_wave_mode(self):
+        required = required_names()
+        for gpu, wave_size in (
+            ('gfx942', 64),
+            ('gfx950', 64),
+            ('gfx1100', 32),
+            ('gfx1100', 64),
+            ('gfx1201', 32),
+            ('gfx1201', 64),
+            ('gfx1250', 32),
+        ):
+            for prefix, case, groups in (
+                ('Production', 'grouped_race', 16),
+                ('Production', 'grouped_isolation', 4),
+                ('', 'grouped_repeat', 4),
+                ('', 'grouped_missing_id', 4),
+            ):
+                name = (
+                    f'ConSanSim{prefix}E2E.{gpu}.wave{wave_size}'
+                    f'.assembly.{case}.groups{groups}'
+                )
+                with self.subTest(name=name):
+                    self.assertIn(name, required)
+                    with self.assertRaisesRegex(
+                        ValueError, 'Required ConSan registrations missing'
+                    ):
+                        validate_selected(
+                            [{'name': item} for item in required - {name}]
+                        )
+
     def test_multiple_barrier_controls_cannot_be_omitted(self):
         required = required_names()
         for case in ('barrier_multiple', 'barrier_missing_second'):

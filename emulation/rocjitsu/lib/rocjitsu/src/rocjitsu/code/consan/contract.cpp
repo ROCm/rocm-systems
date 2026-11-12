@@ -440,10 +440,10 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
     return reject(error, ContractErrorCode::UnsupportedLaunch,
                   "capture requires complete bounded 1D workgroups and no private segment");
   const uint32_t workgroups = dimensions.grid[0] / dimensions.workgroup[0];
-  if (workgroups > (manifest.target == 1250 ? 16u : 1u) ||
+  if (workgroups > kWorkgroupCapacity ||
       (workgroups > 1 && manifest.entry.workgroup_id_scalar == UINT32_MAX))
     return reject(error, ContractErrorCode::UnsupportedLaunch,
-                  "multi-workgroup profile requires gfx1250, at most 16 groups, and original "
+                  "multi-workgroup profile requires at most 16 groups and original "
                   "workgroup-X input");
   const uint64_t row_stride = report_row_bytes(manifest.sites.size(), !manifest.barriers.empty());
   const uint32_t waves_per_group =

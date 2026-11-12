@@ -25,12 +25,12 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x94, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
+    0x95, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
     "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;workgroup-id=entry-"
-    "scalar;gfx1250-workgroups-1d=1..16;"
+    "scalar;workgroups-1d=1..16;"
     "mask64;address-groups-per-"
     "site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
@@ -43,6 +43,7 @@ inline constexpr uint32_t kAccessRecordBytes = 64;
 inline constexpr uint32_t kContextBytes = 64;
 inline constexpr uint32_t kSyncRecordBytes = 32;
 inline constexpr uint32_t kSyncCapacity = 16;
+inline constexpr uint32_t kWorkgroupCapacity = 16;
 inline constexpr uint32_t kWorkgroupIdTtmp9Selector = 108 + 9;
 
 constexpr uint64_t sync_offset(uint64_t sites) {
@@ -301,7 +302,7 @@ initialize_transport(const Manifest &manifest, const LaunchDimensions &dimension
                                                   const ContractLimits &limits = {});
 
 /// @brief Check actual launch shape and derive the single canonical storage layout.
-/// @details One one-dimensional workgroup, bounded by kernel facts and budgets.
+/// @details Complete one-dimensional workgroups, bounded by kernel facts and budgets.
 /// Segment minima preserve the original packet extents. No dynamic private
 /// frame is admitted in MVP.
 [[nodiscard]] FailureOr<LaunchLayout>
