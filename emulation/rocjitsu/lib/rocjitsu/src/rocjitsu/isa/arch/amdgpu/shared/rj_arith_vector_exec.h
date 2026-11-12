@@ -84,7 +84,8 @@ private:
 class VectorInput64 {
 public:
   VectorInput64(RegisterAccess &registers, Wavefront &wave, const Operand &operand,
-                uint64_t exec_mask) {
+                uint64_t exec_mask, bool packed_words = false,
+                ScalarPairMode scalar_mode = ScalarPairMode::Preserve) {
     if (!exec_mask) {
       values_[0].fill(0);
       values_[1].fill(0);
@@ -102,6 +103,27 @@ public:
         values_[1].fill(0);
         data = {values_[0].data(), values_[1].data()};
       }
+      return;
+    }
+    if (packed_words) {
+      values_[0].fill(0);
+      values_[1].fill(0);
+      // Packed inline constants replicate their FP32 bits, rather than widening
+      // to a numeric 64-bit value. Delegated operands retain pair32 routing.
+      if (operand.const_value()) {
+        const auto value = registers.read_lane_pair32(operand, 0, scalar_mode);
+        values_[0].fill(value.lo);
+        values_[1].fill(value.hi);
+      } else {
+        for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+          if ((exec_mask >> lane) & 1) {
+            const auto value = registers.read_lane_pair32(operand, lane, scalar_mode);
+            values_[0][lane] = value.lo;
+            values_[1][lane] = value.hi;
+          }
+        }
+      }
+      data = {values_[0].data(), values_[1].data()};
       return;
     }
     // A numeric 64-bit operand widens its scalar constant once; the packed

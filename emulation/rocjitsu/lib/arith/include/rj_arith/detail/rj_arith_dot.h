@@ -235,6 +235,51 @@ int rj_arith_v_dot8_u32_u4_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, const uint32_t *const *c);
 
+// CDNA FP16/BF16 DOT2 uses one packed A/B VGPR and one FP32 C/D VGPR.
+// Compatibility inherits host FP32 pair-sum-then-C arithmetic; Loose may differ
+// from GPU rounding. Strict exact modes are unsupported. Guest FP modes and CLAMP
+// are ignored. DOT2C accumulates into old D and requires instruction_flags == 0.
+// FP status is unchanged. Wave32/64 preserve inactive lanes and allow D/input aliasing.
+int rj_arith_v_dot2_f32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_dot2_f32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_dot2c_f32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+
+int rj_arith_v_dot2c_f32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+
+int rj_arith_v_dot2_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_dot2_f32_bf16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_dot2c_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts);
+
+int rj_arith_v_dot2c_f32_bf16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

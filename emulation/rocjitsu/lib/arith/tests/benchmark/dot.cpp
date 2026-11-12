@@ -10,6 +10,30 @@ namespace rocjitsu::arith::test {
 
 // Append DOT workloads and their supported CPU/semantics variants.
 void add_dot(std::vector<Benchmark> &cases) {
+  add(cases, "dot", "v_dot2_f32_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2_f32_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "dot", "v_dot2_f32_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2_f32_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "dot", "v_dot2c_f32_f16_w32_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2c_f32_f16_w32_gfx942(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "dot", "v_dot2c_f32_f16_w64_gfx942", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2c_f32_f16_w64_gfx942(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "dot", "v_dot2_f32_bf16_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2_f32_bf16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "dot", "v_dot2_f32_bf16_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2_f32_bf16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
+  });
+  add(cases, "dot", "v_dot2c_f32_bf16_w32_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2c_f32_bf16_w32_gfx950(flags, UINT32_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
+  add(cases, "dot", "v_dot2c_f32_bf16_w64_gfx950", [](Operands &r, uint64_t flags) {
+    return rj_arith_v_dot2c_f32_bf16_w64_gfx950(flags, UINT64_MAX, 0, r.d, r.a, r.b, &r.status);
+  });
   add(cases, "dot", "v_dot2_f16_f16_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_dot2_f16_f16_w32(flags, UINT32_MAX, 0, r.d, r.a, r.b, r.c, &r.status);
   });

@@ -523,7 +523,8 @@ void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mix_f32_w32_gfx12,
                                    rj_arith_v_fma_mix_f32_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xF, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xF, false,
+                                   false);
 }
 
 RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -558,7 +559,8 @@ RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mix_f32_w32_gfx12,
                                    rj_arith_v_fma_mix_f32_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xF, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xF, false,
+                                   false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -583,7 +585,8 @@ void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixlo_f16_w32_gfx12,
                                    rj_arith_v_fma_mixlo_f16_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0x3, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0x3, false,
+                                   false);
 }
 
 RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -618,7 +621,8 @@ RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixlo_f16_w32_gfx12,
                                    rj_arith_v_fma_mixlo_f16_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0x3, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0x3, false,
+                                   false);
   dpp_write_mask_scope_.restore();
 }
 
@@ -643,7 +647,8 @@ void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixhi_f16_w32_gfx12,
                                    rj_arith_v_fma_mixhi_f16_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xC, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xC, false,
+                                   false);
 }
 
 RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -678,7 +683,8 @@ RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
       (inst_.opsel_hi_2 && amdgpu::is_inline_float_src(inst_.src2) ? 4u : 0u);
   amdgpu::arith::execute_mixed_fma(wf, rj_arith_v_fma_mixhi_f16_w32_gfx12,
                                    rj_arith_v_fma_mixhi_f16_w64_gfx12, wf.cu().arithmetic_flags(),
-                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xC, false);
+                                   modifiers, vdst, src0, src1, src2, narrow_sources, 0xC, false,
+                                   false);
   dpp_write_mask_scope_.restore();
 }
 

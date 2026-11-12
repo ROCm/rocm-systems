@@ -147,6 +147,7 @@ FMA_F32 = {
 }
 
 MIXED_FMA_NAMES = {'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'}
+MIXED_BF16_NAMES = {'V_FMA_MIX_F32_BF16', 'V_FMA_MIXLO_BF16', 'V_FMA_MIXHI_BF16'}
 
 PACKED_FMA16_NAMES = {'V_PK_FMA_F16', 'V_PK_FMAC_F16'}
 
@@ -161,7 +162,13 @@ PACKED_BINARY16_NAMES = {
     'V_PK_MAXIMUM_F16',
 }
 
-DOT2_F32_NAMES = {'V_DOT2_F32_F16', 'V_DOT2_F32_BF16', 'V_DOT2ACC_F32_F16'}
+DOT2_F32_NAMES = {
+    'V_DOT2_F32_F16',
+    'V_DOT2_F32_BF16',
+    'V_DOT2ACC_F32_F16',
+    'V_DOT2C_F32_F16',
+    'V_DOT2C_F32_BF16',
+}
 
 DOT4_F32_NAMES = {
     'V_DOT4_F32_FP8_FP8',
@@ -1122,7 +1129,17 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
     hi_c_expr = ctx.op_sel_hi_2_expr
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in MIXED_FMA_NAMES:
+    bf16 = arch == 'cdna5' and mnemonic in MIXED_BF16_NAMES
+    legacy_mad = arch in ('cdna3', 'cdna4') and mnemonic in {
+        'V_MAD_MIX_F32',
+        'V_MAD_MIXLO_F16',
+        'V_MAD_MIXHI_F16',
+    }
+    if (
+        not bf16
+        and not legacy_mad
+        and (arch not in ('rdna3', 'rdna4', 'cdna5') or mnemonic not in MIXED_FMA_NAMES)
+    ):
         return None
     if enc_name != 'ENC_VOP3P' or len(dst) != 1 or len(src) != 3:
         return None
@@ -1132,7 +1149,7 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     for index, source in enumerate('ABC'):
         selected = f'({high} & {1 << index})' if index < 2 else hi_c_expr
         terms += [
-            f'({selected} ? RJ_ARITH_MIX_F16_{source} : 0u)',
+            f'({selected} ? RJ_ARITH_MIX_{"BF16" if bf16 else "F16"}_{source} : 0u)',
             f'(({low} & {1 << index}) ? RJ_ARITH_ALU_HIGH_{source} : 0u)',
             f'((inst_.neg & {1 << index}) ? RJ_ARITH_ALU_NEG_{source} : 0u)',
             f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_ALU_ABS_{source} : 0u)',
@@ -1140,19 +1157,32 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         narrow += [
             f'({selected} && amdgpu::is_inline_float_src(inst_.src{index}) ? {1 << index}u : 0u)'
         ]
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else '')
+    )
     byte_mask = (
         '0xF'
-        if mnemonic == 'V_FMA_MIX_F32'
+        if mnemonic in ('V_FMA_MIX_F32', 'V_MAD_MIX_F32', 'V_FMA_MIX_F32_BF16')
         else '0xC' if 'MIXHI' in mnemonic else '0x3'
     )
+    if bf16:
+        return '\n'.join(
+            [
+                '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
+                f'  amdgpu::arith::execute_mixed_bf16(wf, {wave_api(api, 32)},',
+                '      wf.cu().arithmetic_flags(), modifiers,',
+                f'      {dst[0]}, {", ".join(src)}, {byte_mask});',
+            ]
+        )
     return '\n'.join(
         [
             '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
             '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
             f'  amdgpu::arith::execute_mixed_fma(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
             '      wf.cu().arithmetic_flags(), modifiers,',
-            f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(arch == "rdna3").lower()});',
+            f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, {str(arch == "cdna5").lower()});',
         ]
     )
 
@@ -1285,7 +1315,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
-    if arch not in ('rdna3', 'rdna4') or len(dst) != 1:
+    if arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4') or len(dst) != 1:
         return None
     if mnemonic in DOT4_F32_NAMES:
         if arch != 'rdna4' or enc_name != 'ENC_VOP3P' or len(src) != 3:
@@ -1308,13 +1338,22 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         )
     if mnemonic not in DOT2_F32_NAMES:
         return None
-    accumulate = mnemonic == 'V_DOT2ACC_F32_F16'
-    if accumulate:
+    cdna = arch in ('cdna3', 'cdna4')
+    cdna_accumulate = mnemonic in ('V_DOT2C_F32_F16', 'V_DOT2C_F32_BF16')
+    if cdna_accumulate and not cdna:
+        return None
+    if arch == 'cdna3' and mnemonic.endswith('_BF16'):
+        return None
+    accumulate = mnemonic == 'V_DOT2ACC_F32_F16' or cdna_accumulate
+    if cdna_accumulate:
+        if enc_name not in ('ENC_VOP2', 'ENC_VOP3') or len(src) != 2:
+            return None
+    elif accumulate:
         if arch != 'rdna3' or enc_name != 'ENC_VOP2' or len(src) != 2:
             return None
     elif enc_name != 'ENC_VOP3P' or len(src) != 3:
         return None
-    bf16 = mnemonic == 'V_DOT2_F32_BF16'
+    bf16 = mnemonic.endswith('_BF16')
     terms = []
     if not accumulate:
         low, high = opsel_exprs
@@ -1331,9 +1370,9 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_DOT_NEG_HI_{source} : 0u)',
             ]
     narrow, replicate = [], []
-    for index in range(1 if accumulate else 2):
+    for index in range(0 if cdna_accumulate else 1 if accumulate else 2):
         selector = f'inst_.src{index}'
-        if bf16:
+        if bf16 and not cdna:
             broadcast = f'amdgpu::dot2_src_needs_half_replication({selector})'
             replicate.append(f'({broadcast} ? {1 << index}u : 0u)')
             # BF16 broadcasts upper16(FP32). GFX11 integer inline constants
@@ -1349,7 +1388,11 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
     api = (
         'rj_arith_v_dot2_f32_'
         + ('bf16' if bf16 else 'f16')
-        + ('_gfx12' if arch == 'rdna4' else '')
+        + (
+            ('_gfx950' if bf16 else '_gfx942')
+            if cdna
+            else '_gfx12' if arch == 'rdna4' else ''
+        )
     )
     addend = dst[0] if accumulate else src[2]
     return '\n'.join(
@@ -1357,7 +1400,9 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
             '  const uint64_t modifiers = '
             + (' |\n      '.join(terms) if terms else '0')
             + ';',
-            '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
+            '  const unsigned narrow_sources = '
+            + (' | '.join(narrow) if narrow else '0')
+            + ';',
             '  const unsigned replicate_sources = '
             + (' | '.join(replicate) if replicate else '0')
             + ';',

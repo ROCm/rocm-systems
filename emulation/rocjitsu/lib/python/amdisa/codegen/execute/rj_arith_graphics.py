@@ -90,11 +90,16 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic != 'V_MULLIT_F32' or not is_vop3:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna5')
+        or mnemonic != 'V_MULLIT_F32'
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch == 'rdna4' else '')
+    # gfx1250 inherits the same NaN, rounding and OMOD model as gfx12.
+    api = 'rj_arith_v_mullit_f32' + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
     terms = []
     for i, letter in enumerate('ABC'):
         terms += [
