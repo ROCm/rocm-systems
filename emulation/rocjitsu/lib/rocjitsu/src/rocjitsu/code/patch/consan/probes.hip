@@ -28,11 +28,14 @@ __device__ __attribute__((always_inline)) GlobalWords context(u32 low, u32 high)
   return reinterpret_cast<GlobalWords>(u64{uniform(low)} | (u64{uniform(high)} << 32));
 }
 
-__device__ __attribute__((always_inline)) GlobalWords row(GlobalWords dispatch, u32 id,
-                                                          u32 stride) {
+__device__ __attribute__((always_inline)) GlobalWords row(GlobalWords dispatch, u32 id, u32 stride,
+                                                          u32 workgroup) {
+  const u32 waves =
+      (dispatch[wire::kContextWorkgroup / 4] + CONSAN_PROBE_WAVE_SIZE - 1) / CONSAN_PROBE_WAVE_SIZE;
   const u64 report = u64{dispatch[wire::kContextReportPointer / 4]} |
                      (u64{dispatch[wire::kContextReportPointer / 4 + 1]} << 32);
-  const u64 offset = rocjitsu::consan::kReportHeaderBytes + u64{uniform(id)} * uniform(stride);
+  const u64 offset = rocjitsu::consan::kReportHeaderBytes +
+                     (u64{uniform(workgroup)} * waves + uniform(id)) * uniform(stride);
   return reinterpret_cast<GlobalWords>(report + offset);
 }
 
@@ -48,26 +51,27 @@ wave_state(GlobalWords output) {
 } // namespace
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
-void rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride) {
+void rj_consan_entry(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup) {
   GlobalWords dispatch = context(low, high);
   const u32 wave = uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE;
-  GlobalWords output = row(dispatch, wave, stride);
+  GlobalWords output = row(dispatch, wave, stride, workgroup);
   wave_state(output).initialize(lane_id());
   if (lane_id() == 0) {
     output[wire::kRowSerial / 4] = dispatch[wire::kContextSerial / 4];
     output[wire::kRowSerial / 4 + 1] = dispatch[wire::kContextSerial / 4 + 1];
     output[wire::kRowEntry / 4] = 0;
     output[wire::kRowWave / 4] = wave;
+    output[wire::kRowWorkgroupX / 4] = uniform(workgroup);
     output[wire::kRowFinalPhase / 4] = 0;
     publish(output + wire::kRowStatus / 4, wire::kRowEntered);
   }
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
-void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 site,
+void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 site,
                       u32 address, u32 immediate, u32 mask_low, u32 mask_high, u32 width) {
   GlobalWords dispatch = context(low, high);
-  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
+  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride, workgroup);
   u64 remaining = u64{uniform(mask_low)} | (u64{uniform(mask_high)} << 32);
   if (remaining == 0)
     return;
@@ -105,10 +109,10 @@ void rj_consan_access(u32 low, u32 high, u32 first_workitem, u32 stride, u32 sit
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
-void rj_consan_barrier(u32 low, u32 high, u32 first_workitem, u32 stride, u32 group,
+void rj_consan_barrier(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup, u32 group,
                        u32 journal_offset) {
   GlobalWords dispatch = context(low, high);
-  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
+  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride, workgroup);
   if (lane_id() == 0) {
     const u32 phase = output[wire::kRowFinalPhase / 4] + 1;
     output[wire::kRowFinalPhase / 4] = phase;
@@ -125,9 +129,9 @@ void rj_consan_barrier(u32 low, u32 high, u32 first_workitem, u32 stride, u32 gr
 }
 
 extern "C" __device__ __attribute__((noinline, used, visibility("default")))
-void rj_consan_exit(u32 low, u32 high, u32 first_workitem, u32 stride) {
+void rj_consan_exit(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup) {
   GlobalWords dispatch = context(low, high);
-  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride);
+  GlobalWords output = row(dispatch, uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE, stride, workgroup);
   if (lane_id() == 0)
     publish(output + wire::kRowStatus / 4,
             wire::kRowEntered | wire::kRowExited |

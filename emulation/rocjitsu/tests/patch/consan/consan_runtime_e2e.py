@@ -57,6 +57,17 @@ CASES = (
     'mixed_disjoint',
     'mixed_read_read',
     'mixed_barrier',
+    'grouped_disjoint',
+    'grouped_barrier',
+    'grouped_empty',
+    'grouped_race',
+    'grouped_read_read',
+    'grouped_isolation',
+    'grouped_repeat',
+    'grouped_oversized',
+    'grouped_edge',
+    'grouped_missing_id',
+    'single_missing_id',
     'wrong-artifact',
     'bad-geometry',
     'profiling',
@@ -115,6 +126,8 @@ class Driver:
                 str(self.args.wave_size),
                 '--threads',
                 str(self.args.threads),
+                '--workgroups',
+                str(self.args.workgroups),
             ]
             if self.args.amd_signals:
                 argv.append('--amd-signals')
@@ -164,6 +177,10 @@ class Driver:
         fixture_name = {
             'repeat': 'disjoint',
             'repeat_race': 'race',
+            'grouped_repeat': 'grouped_barrier',
+            'grouped_oversized': 'grouped_disjoint',
+            'grouped_edge': 'grouped_disjoint',
+            'single_missing_id': 'disjoint',
             'wrong-artifact': 'race',
             'bad-geometry': 'disjoint',
             'profiling': 'disjoint',
@@ -193,6 +210,25 @@ class Driver:
                 'mixed_barrier': 5,
             }[fixture_name]
             fixture = fixture_directory / f'mixed-{number}.hsaco'
+        elif args.case == 'single_missing_id':
+            fixture = fixture_directory / 'native-no-workgroup-id.hsaco'
+        elif fixture_name.startswith('grouped_'):
+            name = (
+                'native-no-workgroup-id'
+                if fixture_name == 'grouped_missing_id'
+                else 'group-'
+                + str(
+                    {
+                        'grouped_disjoint': 1,
+                        'grouped_barrier': 2,
+                        'grouped_race': 3,
+                        'grouped_read_read': 4,
+                        'grouped_empty': 5,
+                        'grouped_isolation': 6,
+                    }[fixture_name]
+                )
+            )
+            fixture = fixture_directory / f'{name}.hsaco'
         else:
             case_number = {
                 'race': 1,
@@ -231,6 +267,7 @@ class Driver:
                 'repeat_race',
                 'branched',
                 'reused-signal',
+                'grouped_repeat',
                 'barrier_multiple',
             )
             else 1
@@ -251,6 +288,13 @@ class Driver:
             )
         if fixture_name == 'mixed_barrier':
             mode = 'mixed'
+        grouped = fixture_name in (
+            'grouped_disjoint',
+            'grouped_barrier',
+            'grouped_empty',
+        )
+        if grouped:
+            mode = 'grouped' if fixture_name == 'grouped_disjoint' else 'grouped_sync'
         # The missing-statistics diagnostic precedes device admission in the
         # runner. Check the requested agent first so an unavailable physical
         # target cannot pass that control without a matching device.
@@ -258,9 +302,17 @@ class Driver:
             synchronized
             or wide
             or fixture_name == 'mixed_barrier'
+            or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
                 defined
-                and args.case in ('disjoint', 'alias', 'repeat', 'missing-statistics')
+                and args.case
+                in (
+                    'disjoint',
+                    'alias',
+                    'repeat',
+                    'single_missing_id',
+                    'missing-statistics',
+                )
             )
         ):
             self.run(
@@ -280,6 +332,7 @@ class Driver:
         }
         options = {
             'bad-geometry': ['--bad-geometry'],
+            'grouped_edge': ['--bad-geometry'],
             'profiling': ['--profiling'],
             'reused-signal': ['--reuse-signal'],
             'batch-barrier-and': ['--batch-barrier-and'],
@@ -319,6 +372,9 @@ class Driver:
                 if args.case
                 in (
                     'bad-geometry',
+                    'grouped_edge',
+                    'grouped_oversized',
+                    'grouped_missing_id',
                     'reused-signal',
                     'batch-barrier-and',
                     'batch-barrier-or',
@@ -406,6 +462,9 @@ class Driver:
     def assert_observations(self, decoded, fixture):
         if fixture.startswith(('wide_', 'mixed_')):
             self.assert_width_observations(decoded, fixture)
+            return
+        if fixture.startswith('grouped_'):
+            self.assert_workgroup_observations(decoded, fixture)
             return
         expected = {
             'race': 2,
@@ -602,6 +661,70 @@ class Driver:
                 total += len(records)
             assert total > 0
 
+    def assert_workgroup_observations(self, decoded, fixture):
+        groups = self.args.workgroups
+        waves = (self.args.threads + 31) // 32
+        for index, execution in enumerate(decoded['executions']):
+            assert execution['serial'] == index + 1
+            assert execution['argument_u32'] == 7 + 16 * index
+            assert execution['grid_x'] == groups * self.args.threads
+            assert execution['workgroup_size_x'] == self.args.threads
+            assert len(execution['rows']) == groups * waves
+            total = 0
+            for row_index, row in enumerate(execution['rows']):
+                group, wave = divmod(row_index, waves)
+                assert (
+                    row['serial'] == index + 1
+                    and row['workgroup_x'] == group
+                    and row['wave'] == wave
+                )
+                assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
+                records = row['records']
+                if fixture in ('grouped_disjoint', 'grouped_barrier', 'grouped_empty'):
+                    assert len(records) == row['final_sequence'] == 2
+                    for site, record in enumerate(records):
+                        assert record['site'] == site and record['sequence'] == site + 1
+                        assert record['offset'] == (
+                            wave * 4
+                            if site == 0 or fixture == 'grouped_disjoint'
+                            else 0
+                        )
+                    if fixture != 'grouped_disjoint':
+                        assert row['completions'][0]['commit'] == 0x43534243
+                        assert (
+                            row['completions'][0]['group'] == 0
+                            and row['completions'][0]['occurrence'] == 1
+                        )
+                        assert (
+                            row['completions'][0]['participants'] == waves
+                            and row['completions'][0]['sequence'] == 1
+                        )
+                else:
+                    expected = (
+                        (wave < 2)
+                        if fixture != 'grouped_isolation'
+                        else (wave == (0 if group == 0 else 1))
+                    )
+                    assert len(records) == row['final_sequence'] == int(expected)
+                    if records:
+                        assert records[0]['site'] == (0 if wave == 0 else 1)
+                        assert records[0]['offset'] == 0 and records[0]['sequence'] == 1
+                for record in records:
+                    assert record['commit'] == 0x43534143 and record['flags'] == 1
+                    assert record['width'] == 4 and record['mask'] == 1
+                    kind = decoded['sites'][record['site']]['access']
+                    assert kind == (
+                        1
+                        if fixture == 'grouped_read_read' or record['site'] == 1
+                        else 2
+                    )
+                total += len(records)
+            assert total == (
+                2 * groups * waves
+                if fixture in ('grouped_disjoint', 'grouped_barrier', 'grouped_empty')
+                else groups if fixture == 'grouped_isolation' else 2 * groups
+            )
+
 
 def add_target_arguments(parser):
     parser.add_argument('--test-statistics', action='store_true')
@@ -613,6 +736,7 @@ def add_target_arguments(parser):
     )
     parser.add_argument('--wave-size', type=int, choices=(32, 64), default=32)
     parser.add_argument('--threads', type=int, default=64)
+    parser.add_argument('--workgroups', type=int, default=1)
     parser.add_argument(
         '--fixture-kind',
         choices=('named-assembly', 'assembly', 'hip'),

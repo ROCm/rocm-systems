@@ -95,13 +95,13 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr
-        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
-           "[--baseline] "
-           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-           "[--separate-barrier] [--high-lane] [--amd-signals]\n"
-           "MODE: defined, synchronized, mixed, wide_u16, wide_i16, wide_b64, wide_b128, observe\n";
+    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+                 "[--baseline] "
+                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+                 "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
+                 "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u16, wide_i16, "
+                 "wide_b64, wide_b128, observe\n";
     return 3;
   }
   uint32_t launches = 0;
@@ -111,16 +111,18 @@ int run(int argc, char **argv) {
     return 3;
   const std::string_view mode(argv[4]);
   const bool defined = mode == "defined";
+  const bool grouped = mode == "grouped" || mode == "grouped_sync";
+  const bool group_barrier = mode == "grouped_sync";
   const bool mixed = mode == "mixed";
   const bool synchronized = mode == "synchronized" || mixed;
   const uint32_t wide_width = mode == "wide_u16" || mode == "wide_i16" ? 2
                               : mode == "wide_b64"                     ? 8
                               : mode == "wide_b128"                    ? 16
                                                                        : 0;
-  if (!defined && !synchronized && wide_width == 0 && mode != "observe")
+  if (!defined && !synchronized && !grouped && wide_width == 0 && mode != "observe")
     return 3;
   std::string_view target = "gfx1100";
-  uint32_t threads = 64, wave_size = 32;
+  uint32_t threads = 64, wave_size = 32, workgroups = 1;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
   bool test_statistics = false, separate_barrier = false, high_lane = false, amd_signals = false;
   uint16_t barrier_type = 0;
@@ -147,9 +149,12 @@ int run(int argc, char **argv) {
       separate_barrier = true;
     else if (option == "--target" && index + 1 < argc)
       target = argv[++index];
-    else if ((option == "--threads" || option == "--wave-size") && index + 1 < argc) {
+    else if ((option == "--threads" || option == "--wave-size" || option == "--workgroups") &&
+             index + 1 < argc) {
       const char *value = argv[++index];
-      uint32_t &number = option == "--threads" ? threads : wave_size;
+      uint32_t &number = option == "--threads"     ? threads
+                         : option == "--wave-size" ? wave_size
+                                                   : workgroups;
       const std::from_chars_result conversion =
           std::from_chars(value, value + std::strlen(value), number);
       if (conversion.ec != std::errc{} || *conversion.ptr != '\0')
@@ -159,10 +164,11 @@ int run(int argc, char **argv) {
   }
   const rocjitsu::consan::TargetProfile *profile = rocjitsu::consan::target_profile(target);
   if (profile == nullptr || !rocjitsu::consan::supports_wave(*profile, wave_size) || threads == 0 ||
-      threads > 1024)
+      threads > 1024 || workgroups == 0 || workgroups > 32)
     return 3;
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const uint32_t output_words = std::max(wide_width ? 4 * wave_count : wave_count, 2u);
+  const uint32_t output_words =
+      std::max((wide_width ? 4u : 1u) * wave_count * (grouped ? workgroups : 1u), 2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
     return 3;
@@ -294,6 +300,7 @@ int run(int argc, char **argv) {
     const uint32_t input = 7 + 16 * index;
     std::memset(arguments, 0, 16);
     std::memcpy(arguments, &input, 4);
+    std::memcpy(static_cast<uint8_t *>(arguments) + 4, &wave_count, 4);
     std::memcpy(static_cast<uint8_t *>(arguments) + 8, &output, 8);
     std::memset(output, 0, output_bytes);
     if (barrier_type && !require(create_completion(&barrier_signal), "barrier completion")) {
@@ -308,7 +315,7 @@ int run(int argc, char **argv) {
     packet->setup = 1;
     packet->workgroup_size_x = static_cast<uint16_t>(threads);
     packet->workgroup_size_y = packet->workgroup_size_z = 1;
-    packet->grid_size_x = bad_geometry ? 2 * threads : threads;
+    packet->grid_size_x = threads * workgroups + uint32_t{bad_geometry};
     packet->grid_size_y = packet->grid_size_z = 1;
     packet->group_segment_size = group_bytes;
     packet->kernel_object = kernel;
@@ -414,6 +421,12 @@ int run(int argc, char **argv) {
           if (last_output[4 * wave + word] != expected[word])
             result = 23;
       }
+    } else if (grouped) {
+      for (uint32_t group = 0; group < workgroups; ++group)
+        for (uint32_t wave = 0; wave < wave_count; ++wave)
+          if (last_output[group * wave_count + wave] !=
+              input + 16 * group + (group_barrier ? 0 : wave))
+            result = 23;
     }
     if (drain) {
       const auto drain_started = std::chrono::steady_clock::now();
