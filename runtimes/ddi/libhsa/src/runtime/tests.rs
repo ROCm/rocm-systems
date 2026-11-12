@@ -708,6 +708,7 @@ fn cpu_cache_source_requires_a_unique_cpu_without_domain_evidence() {
     assert!(host_caches_for_cpu(&topology, None, 2).is_none());
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 /// Verifies separate KFD CPU nodes retain their bank sizes and APU policy.
 fn cpu_agents_follow_kfd_cpu_nodes_and_system_banks() {
@@ -851,4 +852,16 @@ fn hsa_runtime_reinitializes_after_shutdown() {
         assert_eq!(crate::hsa_init(), SUCCESS);
         assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
+}
+
+#[test]
+/// Unsupported native services retain an actionable public status.
+fn unsupported_native_services_report_not_supported() {
+    assert_eq!(
+        map_error(rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Unsupported,
+            detail: "unqualified transport",
+        }),
+        NOT_SUPPORTED
+    );
 }
