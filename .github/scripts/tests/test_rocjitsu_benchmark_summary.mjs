@@ -7,8 +7,6 @@ import { readFile, writeFile, mkdir, mkdtemp, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { normalizePublishedData } from '../../../emulation/rocjitsu/scripts/benchmark-data/index.mjs';
-import { publishedRunPath } from '../../../emulation/rocjitsu/scripts/benchmark-data/runSchema.mjs';
 import { buildBenchmarkSummary, readBenchmarkSummary } from '../rocjitsu_benchmark_report.js';
 
 const fixture = JSON.parse(await readFile(new URL('../../../emulation/rocjitsu/website/dashboard/tests/fixtures/fictional-producer-run.json', import.meta.url)));
@@ -34,15 +32,20 @@ function publication() {
   return [baseline, candidate];
 }
 
+function publishedRunPath(run) {
+  const group = run.publication.source.branch === 'develop' ? 'default-branch' : 'side-branches';
+  return `runs/${group}/${run.publication.id}.json`;
+}
+
 function dataset(runs) {
   return { index: { generatedAt: '2026-11-03T00:00:00Z', runFiles: runs.map((entry) => publishedRunPath(entry)) }, runs };
 }
 
 async function summarize(runs = publication()) {
-  return buildBenchmarkSummary(normalizePublishedData(dataset(runs)), 'candidate', candidateSha);
+  return buildBenchmarkSummary(runs, 'candidate', candidateSha);
 }
 
-test('uses dashboard comparisons for counts, timing rows and exact run links', async () => {
+test('reports run coverage, timing changes and exact run links', async () => {
   const summary = await summarize();
   assert.equal(summary.baselineRunId, 'baseline');
   assert.match(summary.markdown, /3\/3 benchmarks completed/);
@@ -110,7 +113,7 @@ test('escapes untrusted benchmark names in Markdown tables', async () => {
   assert.ok(!markdown.includes('<img>'));
 });
 
-test('uses medians from the dashboard adapter instead of the first sample', async () => {
+test('uses median timing instead of the first sample', async () => {
   const runs = publication();
   runs[1].benchmark_results[0].timing_results_s = [1, 120, 130];
   assert.match((await summarize(runs)).markdown, /\| 100 s \| 120 s \| \+20.0% \|/);
@@ -132,12 +135,12 @@ test('groups targets and thread policies separately and limits the largest chang
 });
 
 test('refuses a missing candidate or mismatched measured commit', async () => {
-  const data = normalizePublishedData(dataset(publication()));
-  await assert.rejects(buildBenchmarkSummary(data, 'missing', candidateSha), /does not match/);
-  await assert.rejects(buildBenchmarkSummary(data, 'candidate', baselineSha), /does not match/);
+  const runs = publication();
+  assert.throws(() => buildBenchmarkSummary(runs, 'missing', candidateSha), /does not match/);
+  assert.throws(() => buildBenchmarkSummary(runs, 'candidate', baselineSha), /does not match/);
 });
 
-test('CLI produces the summary without a website checkout', async (t) => {
+test('CLI produces the summary with only the bot scripts installed', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'rocjitsu-summary-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const source = dataset(publication());
@@ -150,9 +153,6 @@ test('CLI produces the summary without a website checkout', async (t) => {
   for (const file of ['rocjitsu_benchmark_report.js', 'rocjitsu_fuzz_report.js']) {
     await cp(new URL(`../${file}`, import.meta.url), join(scripts, file));
   }
-  const sharedData = join(checkout, 'emulation/rocjitsu/scripts/benchmark-data');
-  await mkdir(sharedData, { recursive: true });
-  await cp(new URL('../../../emulation/rocjitsu/scripts/benchmark-data/', import.meta.url), sharedData, { recursive: true });
   const script = join(scripts, 'rocjitsu_benchmark_report.js');
   const output = join(directory, 'summary.json');
   execFileSync(process.execPath, [script, '--data-dir', directory, '--run-id', 'candidate', '--head-sha', candidateSha, '--output', output]);
@@ -182,4 +182,55 @@ test('a run without a recorded base does not report timing comparisons', async (
   assert.equal(summary.baselineRunId, null);
   assert.match(summary.markdown, /3\/3 benchmarks completed/);
   assert.doesNotMatch(summary.markdown, /faster|slower|Duration change|Compared with/);
+});
+
+test('uses the latest published attempt for the exact base commit', async () => {
+  const runs = publication();
+  const retry = structuredClone(runs[0]);
+  retry.publication.id = 'baseline-retry';
+  retry.execution_summary.finished_at = '2026-11-01T12:00:00Z';
+  for (const result of retry.benchmark_results) result.timing_results_s = [200];
+  runs.push(retry);
+  const summary = await summarize(runs);
+  assert.equal(summary.baselineRunId, 'baseline-retry');
+  assert.match(summary.markdown, /\| 200 s \| 120 s \| -40.0% \|/);
+});
+
+test('uses the even-sample median without modifying the published samples', async () => {
+  const runs = publication();
+  runs[1].benchmark_results[0].timing_results_s = [140, 100, 120, 160];
+  const before = structuredClone(runs);
+  assert.match((await summarize(runs)).markdown, /\| 100 s \| 130 s \| \+30.0% \|/);
+  assert.deepEqual(runs, before);
+});
+
+test('changes exactly on the duration band remain within the band', async () => {
+  const runs = publication();
+  for (const [index, value] of [103, 97, 104].entries()) {
+    runs[1].benchmark_results[index].timing_results_s = [value];
+  }
+  assert.match((await summarize(runs)).markdown, /gfx950 \/ default: 0 faster, 1 slower, 2 within band/);
+});
+
+test('results only in the baseline remain not comparable', async () => {
+  const runs = publication();
+  runs[0].benchmark_results.push({ ...structuredClone(runs[0].benchmark_results[0]), target: 'gfx1250' });
+  assert.match((await summarize(runs)).markdown, /gfx1250 \/ default: 0 faster, 0 slower, 0 within band, 1 not comparable/);
+});
+
+for (const samples of [[], [0], [NaN], [Infinity], [-1], [120, null]]) {
+  test(`invalid timing samples do not produce a timing change (${JSON.stringify(samples)})`, async () => {
+    const runs = publication();
+    runs[1].benchmark_results[0].timing_results_s = samples;
+    const { markdown } = await summarize(runs);
+    assert.match(markdown, /2\/3 benchmarks completed/);
+    assert.match(markdown, /1 not comparable/);
+    assert.doesNotMatch(markdown, /\+20.0%/);
+  });
+}
+
+test('duplicate measurements are rejected rather than silently replacing a result', () => {
+  const runs = publication();
+  runs[1].benchmark_results.push(structuredClone(runs[1].benchmark_results[0]));
+  assert.throws(() => buildBenchmarkSummary(runs, 'candidate', candidateSha), /Duplicate benchmark result/);
 });

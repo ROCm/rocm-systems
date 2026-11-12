@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
-      - "emulation/rocjitsu/scripts/benchmark-data/**"
       - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
@@ -17,7 +16,6 @@ on:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
-      - "emulation/rocjitsu/scripts/benchmark-data/**"
       - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"

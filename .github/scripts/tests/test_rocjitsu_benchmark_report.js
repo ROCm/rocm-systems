@@ -426,15 +426,13 @@ for (const postMerge of [false, true]) {
       associated[0].merge_commit_sha = args.headSha;
     }
     const { readFile } = require('node:fs/promises');
-    const { normalizePublishedData } = await import('../../../emulation/rocjitsu/scripts/benchmark-data/index.mjs');
     const directory = resolve(dashboard, 'tests/fixtures/data');
     const index = JSON.parse(await readFile(resolve(directory, 'index.json'), 'utf8'));
     const runs = await Promise.all(index.runFiles.map(async (file) => JSON.parse(await readFile(resolve(directory, file), 'utf8'))));
-    const data = normalizePublishedData({ index, runs });
-    data.allRuns.find((run) => run.runId === args.publishedRunId).sourceBase = {
-      branch: 'develop', commit: data.allRuns.find((run) => run.runId === 'fictional-develop-22').provenance.rocjitsuCommitSha,
+    runs.find((run) => run.publication.id === args.publishedRunId).publication.source.base = {
+      branch: 'develop', commit: runs.find((run) => run.publication.id === 'fictional-develop-22').provenance.rocjitsu.rocjitsu_commit_sha,
     };
-    const summary = await buildBenchmarkSummary(data, args.publishedRunId, args.headSha);
+    const summary = await buildBenchmarkSummary(runs, args.publishedRunId, args.headSha);
     const summaryPath = await summaryArtifact(t, JSON.stringify(summary));
     await reportBenchmark({ ...args, summaryPath });
     const body = comments[0].body;

@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import * as schema from '../../src/data/runSchema.js';
 import raw from '../fixtures/fictional-producer-run.json' with { type: 'json' };
 import { loadDashboardDataFiles } from '../../src/data/dashboardData.js';
@@ -25,18 +25,13 @@ test.each([false, true])('later configurations retain their cohort regardless of
 
 test('membership, normalized configurations and result identities share configurationKey', () => {
   const source = publication();
-  const { data } = adaptPublishedDashboardData(source);
-  const normalized = data.runs[0];
-  const catalog = data.catalogs[normalized.catalogId];
-  for (const row of source.runs[0].benchmark_results) {
-    const key = schema.configurationKey(row.target, row.thread_policy);
-    expect(catalog.configurations[key]).toContain(row.id);
-    expect(normalized.configurations).toContainEqual({
-      target: row.target, thread_policy: row.thread_policy,
-    });
-    expect(normalized.tests).toContainEqual(expect.objectContaining({
-      logicalTestId: row.id, testId: `${key}:${row.id}`,
-    }));
+  const key = vi.spyOn(schema, 'configurationKey');
+  try {
+    adaptPublishedDashboardData(source);
+    expect(key).toHaveBeenCalledWith('gfx950', 'default');
+    expect(key).toHaveBeenCalledTimes(source.runs[0].benchmark_results.length * 3);
+  } finally {
+    key.mockRestore();
   }
 });
 

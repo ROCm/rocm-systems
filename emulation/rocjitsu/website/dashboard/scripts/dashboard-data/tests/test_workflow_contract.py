@@ -19,7 +19,6 @@ def test_website_ci_watches_benchmark_preparation(event):
     assert (
         'emulation/rocjitsu/scripts/prepare-benchmarks.py' in triggers[event]['paths']
     )
-    assert 'emulation/rocjitsu/scripts/benchmark-data/**' in triggers[event]['paths']
 
 
 def test_benchmark_pr_trigger_extends_develop_push_paths():
@@ -719,14 +718,3 @@ def test_comparison_summary_is_optional_and_preserves_publication_attempt_identi
         'benchmark-summary/summary.json'
         in report_steps['Comment on the pull request']['with']['script']
     )
-
-
-def test_shared_benchmark_data_changes_republish_the_dashboard():
-    workflow = yaml.safe_load((WORKFLOWS / 'rocjitsu-publish-website.yml').read_text())
-    detection = next(
-        step
-        for step in workflow['jobs']['publish']['steps']
-        if step['name'] == 'Detect dashboard changes since publication'
-    )
-    patterns = yaml.safe_load(detection['with']['filters'])['changed']
-    assert 'emulation/rocjitsu/scripts/benchmark-data/**' in patterns

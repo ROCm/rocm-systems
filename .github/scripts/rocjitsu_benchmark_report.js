@@ -11,11 +11,8 @@ const { findExistingReportComment } = require('./rocjitsu_fuzz_report.js');
 const DASHBOARD_URL = 'https://rocm.github.io/rocm-systems/rocjitsu-dashboard/';
 const MAX_SUMMARY_LENGTH = 40000;
 const MAX_TIMING_CHANGES = 5;
-
-// The comment job only checks out .github/scripts; data modules are needed by the summary CLI.
-function loadBenchmarkData() {
-  return import('../../emulation/rocjitsu/scripts/benchmark-data/index.mjs');
-}
+const DURATION_CHANGE_BAND_PERCENT = 3;
+const THREAD_POLICIES = ['single', 'default'];
 
 async function findPullRequest({ github, context, core, headSha }) {
   if (context.eventName !== 'push') return context.payload.pull_request;
@@ -148,26 +145,116 @@ function formatSeconds(value) {
   return `${Number(value.toPrecision(4))} s`;
 }
 
-function describeInputChanges(candidate, baseline, typedJsonIdentity) {
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function describeInputChanges(candidate, baseline) {
   const changes = [];
-  if (candidate.environmentId !== baseline.environmentId) {
+  const measurementInputs = (run) => {
+    const provenance = structuredClone(run.provenance ?? {});
+    for (const key of ['rocjitsu_commit_sha', 'rocjitsu_commit_timestamp', 'target_config_sha256']) {
+      delete provenance.rocjitsu?.[key];
+    }
+    const settings = ['warmups', 'samples', 'timeout_seconds', 'benchmark_suite']
+      .map((key) => [key, run.execution_summary[key]]);
+    return stableJson({ provenance, settings });
+  };
+  if (measurementInputs(candidate) !== measurementInputs(baseline)) {
     changes.push('environment or measurement settings');
   }
-  if (candidate.machineId !== baseline.machineId) changes.push('benchmark machine');
-
-  const tensileRevision = (run) => run.provenance.details
-    .find(({ key }) => key === 'auxiliary.tensile_commit_sha')?.value;
-  if (tensileRevision(candidate) !== tensileRevision(baseline)) changes.push('Tensile revision');
-
-  const workloadSignature = (run) => typedJsonIdentity(
-    run.tests.map((test) => [test.testId, test.suite, test.operation, test.problem])
-      .sort((left, right) => left[0].localeCompare(right[0])),
-  );
-  if (candidate.catalogId !== baseline.catalogId ||
-      workloadSignature(candidate) !== workloadSignature(baseline)) {
+  if (candidate.publication.machine_label !== baseline.publication.machine_label) {
+    changes.push('benchmark machine');
+  }
+  if (candidate.publication.tensile_commit_sha !== baseline.publication.tensile_commit_sha) {
+    changes.push('Tensile revision');
+  }
+  const workloadSignature = (run) => stableJson(run.benchmark_results.map((result) => [
+    result.target, result.thread_policy, result.id, result.suite, result.operation, result.problem,
+  ]).sort((left, right) => stableJson(left).localeCompare(stableJson(right))));
+  if (workloadSignature(candidate) !== workloadSignature(baseline)) {
     changes.push('workload definitions or coverage');
   }
   return changes;
+}
+
+function medianSeconds(result) {
+  const samples = result.timing_results_s;
+  if (result.status !== 'completed' || !Array.isArray(samples) || !samples.length ||
+      !samples.every((sample) => Number.isFinite(sample) && sample > 0)) return null;
+
+  const sorted = [...samples].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : sorted[middle - 1] / 2 + sorted[middle] / 2;
+}
+
+function indexResults(run) {
+  const results = new Map();
+  for (const result of run.benchmark_results) {
+    if (typeof result.id !== 'string' || !result.id || typeof result.name !== 'string' ||
+        !result.name.trim() || typeof result.target !== 'string' ||
+        !/^[A-Za-z0-9._-]+$/.test(result.target) || !THREAD_POLICIES.includes(result.thread_policy)) {
+      throw new Error('Invalid benchmark result identity');
+    }
+    const testId = `${result.target}/${result.thread_policy}:${result.id}`;
+    if (results.has(testId)) throw new Error(`Duplicate benchmark result: ${testId}`);
+    results.set(testId, {
+      ...result, testId, mode: result.thread_policy, durationSeconds: medianSeconds(result),
+    });
+  }
+  return results;
+}
+
+function compareBenchmarkResults(candidateResults, baselineResults) {
+  const configurations = new Map();
+  const ids = new Set([...candidateResults.keys(), ...baselineResults.keys()]);
+  for (const id of ids) {
+    const candidateTest = candidateResults.get(id);
+    const baselineTest = baselineResults.get(id);
+    const { target, mode } = candidateTest ?? baselineTest;
+    const key = `${target}/${mode}`;
+    if (!configurations.has(key)) {
+      configurations.set(key, {
+        target, mode, comparable: [], notComparable: [],
+        counts: { faster: 0, slower: 0, neutral: 0, unavailable: 0 },
+        tolerance: DURATION_CHANGE_BAND_PERCENT,
+      });
+    }
+    const comparison = configurations.get(key);
+    if (candidateTest?.durationSeconds == null || baselineTest?.durationSeconds == null) {
+      comparison.notComparable.push({ candidateTest, baselineTest });
+      continue;
+    }
+    const delta = (candidateTest.durationSeconds - baselineTest.durationSeconds) /
+      baselineTest.durationSeconds * 100;
+    if (!Number.isFinite(delta)) {
+      comparison.counts.unavailable += 1;
+      continue;
+    }
+    comparison.comparable.push({ candidateTest, baselineTest, delta });
+    if (delta > DURATION_CHANGE_BAND_PERCENT) comparison.counts.slower += 1;
+    else if (delta < -DURATION_CHANGE_BAND_PERCENT) comparison.counts.faster += 1;
+    else comparison.counts.neutral += 1;
+  }
+  return [...configurations.values()].sort((left, right) =>
+    left.target.localeCompare(right.target) ||
+    THREAD_POLICIES.indexOf(left.mode) - THREAD_POLICIES.indexOf(right.mode));
+}
+
+function findRecordedBase(runs, candidate) {
+  const base = candidate.publication.source.base;
+  if (base?.branch !== 'develop') return null;
+  return runs.filter((run) => run.publication.source.branch === 'develop' &&
+    run.provenance.rocjitsu.rocjitsu_commit_sha === base.commit &&
+    run.provenance.rocjitsu.rocjitsu_commit_sha !== candidate.provenance.rocjitsu.rocjitsu_commit_sha)
+    .sort((left, right) => Date.parse(left.execution_summary.finished_at) -
+      Date.parse(right.execution_summary.finished_at) ||
+      left.publication.id.localeCompare(right.publication.id)).at(-1) ?? null;
 }
 
 function renderCoverage({ completed, total, failed, timeout }) {
@@ -219,61 +306,68 @@ function renderComparison(comparisons, band) {
   return lines;
 }
 
-async function buildBenchmarkSummary(data, runId, headSha) {
-  const {
-    findRecordedBase, selectRecentRunSummaries, selectRunComparison,
-    typedJsonIdentity, commitShaFor, DURATION_CHANGE_BAND_PERCENT,
-  } = await loadBenchmarkData();
-  const candidate = data.allRuns.find((run) => run.runId === runId);
-  if (!candidate || commitShaFor(candidate) !== headSha) {
+function buildBenchmarkSummary(runs, runId, headSha) {
+  const candidate = runs.find((run) => run.publication.id === runId);
+  if (!candidate || candidate.provenance.rocjitsu.rocjitsu_commit_sha !== headSha) {
     throw new Error('Published candidate does not match measured run and commit');
   }
-  const baseline = findRecordedBase(data.runs, candidate, data.canonicalBranch);
-  const filters = { targets: data.targets, modes: data.modes, suites: data.suites };
-  const [coverage] = selectRecentRunSummaries([candidate], filters);
+  const candidateResults = indexResults(candidate);
+  const coverage = { total: candidateResults.size, completed: 0, failed: 0, timeout: 0 };
+  for (const result of candidateResults.values()) {
+    if (result.durationSeconds !== null) coverage.completed += 1;
+    else if (result.status === 'failed') coverage.failed += 1;
+    else if (result.status === 'timeout') coverage.timeout += 1;
+  }
+  const baseline = findRecordedBase(runs, candidate);
   const lines = [renderCoverage(coverage), ''];
-  const summary = { runId, headSha, baselineRunId: baseline?.runId ?? null };
+  const summary = { runId, headSha, baselineRunId: baseline?.publication.id ?? null };
   if (!baseline) {
     lines.push('Timing comparison unavailable: no published result for the recorded base.');
     return { ...summary, markdown: lines.join('\n') };
   }
 
-  const comparisons = [];
-  for (const target of data.targets) {
-    for (const mode of data.modes) {
-      const comparison = selectRunComparison(candidate, baseline, {
-        ...filters, targets: [target], modes: [mode],
-      });
-      if (comparison.comparable.length || comparison.notComparable.length) {
-        comparisons.push({ target, mode, ...comparison });
-      }
-    }
-  }
+  const comparisons = compareBenchmarkResults(candidateResults, indexResults(baseline));
   lines.push(...renderComparison(comparisons, DURATION_CHANGE_BAND_PERCENT));
-  const inputChanges = describeInputChanges(candidate, baseline, typedJsonIdentity);
+  const inputChanges = describeInputChanges(candidate, baseline);
   if (inputChanges.length) {
     lines.push('', `**Changed inputs:** ${inputChanges.join(', ')}. Timing differences may reflect these changes.`);
   }
 
   const comparisonUrl = new URL(DASHBOARD_URL);
   comparisonUrl.searchParams.set('view', 'compare');
-  comparisonUrl.searchParams.set('compareCandidate', candidate.runId);
-  comparisonUrl.searchParams.set('compareBaseline', baseline.runId);
-  const baselineCommit = escapeMarkdown(commitShaFor(baseline).slice(0, 12));
+  comparisonUrl.searchParams.set('compareCandidate', candidate.publication.id);
+  comparisonUrl.searchParams.set('compareBaseline', baseline.publication.id);
+  const baselineCommit = escapeMarkdown(baseline.provenance.rocjitsu.rocjitsu_commit_sha.slice(0, 12));
   lines.push('', `Compared with [\`${baselineCommit}\`](${comparisonUrl.href}).`);
   return { ...summary, markdown: lines.join('\n') };
 }
 
 async function readBenchmarkSummary(dataDir, runId, headSha) {
-  const { normalizePublishedData, validatePublishedManifest, parsePublishedJson } = await loadBenchmarkData();
-  const index = parsePublishedJson(await readFile(resolve(dataDir, 'index.json'), 'utf8'));
-  validatePublishedManifest(index);
+  const index = JSON.parse(await readFile(resolve(dataDir, 'index.json'), 'utf8'));
+  const validPath = /^runs\/(default-branch|side-branches)\/[A-Za-z0-9][A-Za-z0-9._-]*\.json$/;
+  if (!Array.isArray(index.runFiles) || new Set(index.runFiles).size !== index.runFiles.length) {
+    throw new Error('Invalid publication index');
+  }
+  for (const file of index.runFiles) {
+    if (typeof file !== 'string' || !validPath.test(file)) {
+      throw new Error(`Invalid run filename: ${file}`);
+    }
+  }
   const runs = await Promise.all(index.runFiles.map(async (file) => {
-    const text = await readFile(resolve(dataDir, file), 'utf8');
-    return parsePublishedJson(text);
+    const run = JSON.parse(await readFile(resolve(dataDir, file), 'utf8'));
+    const branch = run.publication?.source?.branch;
+    const group = branch === 'develop' ? 'default-branch' : 'side-branches';
+    if (run.schema_version !== 1 || typeof branch !== 'string' || !branch ||
+        !Array.isArray(run.benchmark_results) || !run.provenance?.rocjitsu ||
+        !run.execution_summary || file !== `runs/${group}/${run.publication.id}.json`) {
+      throw new Error(`Invalid published run: ${file}`);
+    }
+    return run;
   }));
-  const data = normalizePublishedData({ index, runs });
-  return buildBenchmarkSummary(data, runId, headSha);
+  if (new Set(runs.map((run) => run.publication.id)).size !== runs.length) {
+    throw new Error('Duplicate published run ID');
+  }
+  return buildBenchmarkSummary(runs, runId, headSha);
 }
 
 async function runSummaryCommand() {
