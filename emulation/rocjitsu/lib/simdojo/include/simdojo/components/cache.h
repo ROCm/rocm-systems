@@ -242,8 +242,7 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
-    // Complete deferred allocations before publishing a resident tag. A failing
-    // new_handler must leave the cache empty and safe to retry.
+    // Complete deferred allocations before publishing a resident tag.
     tags_.materialize();
     data_.materialize();
     uint32_t set = set_index(addr);
@@ -632,7 +631,7 @@ private:
           return ptr;
         std::new_handler handler = std::get_new_handler();
         if (!handler)
-          throw std::bad_alloc();
+          std::abort();
         handler();
       }
     }

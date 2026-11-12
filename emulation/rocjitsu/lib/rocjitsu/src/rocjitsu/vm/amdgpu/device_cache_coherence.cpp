@@ -76,31 +76,26 @@ DeviceCacheCoherence::AtomicBoundary DeviceCacheCoherence::acquire_atomic_bounda
   std::unique_lock coherence_lock(mutex_);
 
   size_t locked_l2_count = 0;
-  try {
-    // l2_caches_ is maintained in pointer order while mutex_ is held, so the
-    // boundary needs neither a registry copy nor a per-atomic allocation.
-    for (L2Cache *cache : l2_caches_) {
-      cache->maintenance_mutex_.lock();
-      ++locked_l2_count;
-    }
-    for (L2Cache *cache : l2_caches_) {
-      const VmAccessOutcome outcome = cache->flush_dirty_locked();
-      if (outcome != VmAccessOutcome::Complete) {
-        release_cache_locks(locked_l2_count, 0);
-        return AtomicBoundary(outcome);
-      }
-    }
-
-    // Eagerly walking every cache tag makes lane-level atomics prohibitively
-    // expensive. Advancing the epoch makes all extant clean lines logically
-    // stale; each cache discards them once, on its next ordinary access.
-    [[maybe_unused]] const uint64_t next_epoch =
-        data_epoch_.fetch_add(1, std::memory_order_release) + 1;
-    assert(next_epoch != 0 && "device cache coherence epoch wrapped");
-  } catch (...) {
-    release_cache_locks(locked_l2_count, 0);
-    throw;
+  // l2_caches_ is maintained in pointer order while mutex_ is held, so the
+  // boundary needs neither a registry copy nor a per-atomic allocation.
+  for (L2Cache *cache : l2_caches_) {
+    cache->maintenance_mutex_.lock();
+    ++locked_l2_count;
   }
+  for (L2Cache *cache : l2_caches_) {
+    const VmAccessOutcome outcome = cache->flush_dirty_locked();
+    if (outcome != VmAccessOutcome::Complete) {
+      release_cache_locks(locked_l2_count, 0);
+      return AtomicBoundary(outcome);
+    }
+  }
+
+  // Eagerly walking every cache tag makes lane-level atomics prohibitively
+  // expensive. Advancing the epoch makes all extant clean lines logically
+  // stale; each cache discards them once, on its next ordinary access.
+  [[maybe_unused]] const uint64_t next_epoch =
+      data_epoch_.fetch_add(1, std::memory_order_release) + 1;
+  assert(next_epoch != 0 && "device cache coherence epoch wrapped");
 
   return AtomicBoundary(this, locked_l2_count, std::move(atomic_lock), std::move(coherence_lock));
 }
@@ -139,39 +134,33 @@ DeviceCacheCoherence::acquire_cache_maintenance(DeviceCacheOperation operation,
     atomic_lock.unlock();
     return emit_error.emit() << message;
   };
-  try {
+  for (L2Cache *cache : l2_caches_) {
+    cache->maintenance_mutex_.lock();
+    ++locked_l2_count;
+  }
+
+  for (MemorySideCache *cache : memory_side_caches_) {
+    cache->access_gate_.lock();
+    ++locked_memory_side_count;
+  }
+
+  // This path can run on the standalone SDMA worker. It must never enter the
+  // simulation topology from that thread, so legacy dirty state is published
+  // directly to the SoC's GpuMemory backing while cache access is excluded.
+  if (operation == DeviceCacheOperation::WritebackInvalidate) {
     for (L2Cache *cache : l2_caches_) {
-      cache->maintenance_mutex_.lock();
-      ++locked_l2_count;
+      if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+        return fail_writeback("L2 cache maintenance backing write failed");
+      }
     }
+  }
 
+  if (operation == DeviceCacheOperation::WritebackInvalidate) {
     for (MemorySideCache *cache : memory_side_caches_) {
-      cache->access_gate_.lock();
-      ++locked_memory_side_count;
-    }
-
-    // This path can run on the standalone SDMA worker. It must never enter the
-    // simulation topology from that thread, so legacy dirty state is published
-    // directly to the SoC's GpuMemory backing while cache access is excluded.
-    if (operation == DeviceCacheOperation::WritebackInvalidate) {
-      for (L2Cache *cache : l2_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
-          return fail_writeback("L2 cache maintenance backing write failed");
-        }
+      if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
+        return fail_writeback("memory-side cache maintenance backing write failed");
       }
     }
-
-    if (operation == DeviceCacheOperation::WritebackInvalidate) {
-      for (MemorySideCache *cache : memory_side_caches_) {
-        if (cache->flush_dirty_to_legacy_backing_locked() != VmAccessOutcome::Complete) {
-          return fail_writeback("memory-side cache maintenance backing write failed");
-        }
-      }
-    }
-
-  } catch (...) {
-    release_cache_locks(locked_l2_count, locked_memory_side_count);
-    throw;
   }
 
   return DeviceCacheMaintenanceLease(this, locked_l2_count, locked_memory_side_count,
