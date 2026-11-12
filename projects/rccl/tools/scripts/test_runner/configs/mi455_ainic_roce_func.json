@@ -5850,6 +5850,16 @@
           "name": "Symmetric_AllGather_TDM_Window",
           "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it, and 1 MiB below the window; checks the reported algorithm, the logged kernel and every rank's data",
           "test_filter": "SymWin_AllGatherTdm.*"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaStData",
+          "description": "Forced AllGather_HierLsaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaST_PositionDependentData"
+        },
+        {
+          "name": "Symk_AllGatherHierLsaTmaStData",
+          "description": "Forced AllGather_HierLsaTmaST with position-dependent data, including a per-rank size that makes each block push several chunks; own process so RCCL_SYM_K_MIN/MAX_BYTES are not read earlier; skips outside partition mode with two or more packages",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherHierLsaTmaST_PositionDependentData"
         }
       ]
     },
@@ -5893,6 +5903,11 @@
           "name": "DDA_Fabric_AllReduce_LL_TwoShot",
           "description": "DDA fabric AllReduce LL two-shot tier past the one-shot threshold: analytic sum and the two-shot COLL log line",
           "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_SpreadTwoShot",
+          "description": "DDA fabric AllReduce LL spread two-shot on the one-shot grid at 1 MiB from 5 ranks: analytic sum and the spread COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLSpreadTwoShotMultiRank"
         },
         {
           "name": "DDA_Fabric_AllReduce_LL128_OneShot",

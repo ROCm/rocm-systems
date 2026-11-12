@@ -7,9 +7,9 @@
 // Register routing follows rocjitsu's DS handlers. RDNA3 Wave64 routes within
 // each half-wave; RDNA4 Wave64 routes across the entire wave.
 
-#include "common/internal.h"
 #include "common/simd.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_register.h"
 
 #include <stdint.h>
 

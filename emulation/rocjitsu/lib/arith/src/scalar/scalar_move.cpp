@@ -6,8 +6,8 @@
 
 // Register transfer semantics follow rocjitsu generated/shared/execute_shared.h.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_scalar.h"
 
 #include <stdint.h>
 
