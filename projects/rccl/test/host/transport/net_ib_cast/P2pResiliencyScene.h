@@ -44,7 +44,7 @@ inline std::atomic<uint64_t> g_p2pResiliencyNowNs{3600ull * 1000000000ull};
 inline uint64_t P2pResiliencyTestClockNano() { return g_p2pResiliencyNowNs.load(); }
 inline void P2pResiliencyAdvanceMs(uint64_t ms) { g_p2pResiliencyNowNs += ms * 1000000ull; }
 
-// Defined by p2p-resiliency-recovery-test.cc, which sees the recovery thread's statics.
+// Defined by P2pResiliencyRecoveryUnit.h, which sees the recovery thread's statics.
 // Stops the thread without racing its wait (AICOMRCCL-3103).
 void P2pResiliencyStopRecoveryThread();
 // Frees every recovery context queued for a thread that is not running; returns how many.

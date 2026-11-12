@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/transport/net_ib_cast/p2p_resiliency_recovery.cc (via
-// P2P_RESILIENCY_RECOVERY_CC_PATH): the UD recovery QPs, the alive/ACK protocol and its thread.
+// NET_IB_CAST_P2P_RESILIENCY_RECOVERY_CC_PATH): the UD recovery QPs, the alive/ACK protocol and its thread.
 
 #include <gtest/gtest.h>
 
@@ -18,42 +18,12 @@
 #include <thread>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "P2pResiliencyScene.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/param_redirect.h"
 
-// Only malloc and free from fakes/libc_seam.h: its send/recv renames would hit the context's members.
-extern "C" void* micro_malloc(size_t);
-extern "C" void micro_free(void*);
-
-#define clockNano P2pResiliencyTestClockNano
-#define malloc micro_malloc
-#define free micro_free
-#include P2P_RESILIENCY_RECOVERY_CC_PATH
-#undef free
-#undef malloc
-#undef clockNano
-
-// ThreadStop clears the flag without the mutex, so its wakeup can be lost (AICOMRCCL-3103).
-// Clearing it under the mutex first makes the stop deterministic.
-void P2pResiliencyStopRecoveryThread() {
-  if (IbCastPortRecoveryRefCount.load() == 1) {
-    std::lock_guard<std::mutex> lock(IbCastPortRecoveryMutex);
-    IbCastPortRecoveryThreadActive.store(false);
-  }
-  EXPECT_EQ(IbCastPortRecoveryThreadStop(), ncclSuccess);
-}
-
-int P2pResiliencyDrainRecoveryInbox() {
-  std::list<ncclIbPortRecoveryContext*> queued;
-  {
-    std::lock_guard<std::mutex> lock(IbCastPortRecoveryMutex);
-    queued.swap(recoveryInbox);
-  }
-  for (ncclIbPortRecoveryContext* ctx : queued) IbCastPortRecoveryContextDestroy(ctx);
-  return queued.size();
-}
+#include "P2pResiliencyRecoveryUnit.h"
 
 namespace {
 

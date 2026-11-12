@@ -17,7 +17,7 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "Net*"  # net.cc; also matches the NetIb, NetSocket and NetTelemetry suites
       - "Nvls*"
-      - "P2p*"
+      - "P2p*"  # p2p.cc; also matches net_ib_cast's P2pResiliency suites
       - "RmaSocket*"
     exclude_windows:
       - "*"
