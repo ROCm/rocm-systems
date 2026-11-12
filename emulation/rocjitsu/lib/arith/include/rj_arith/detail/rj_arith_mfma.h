@@ -216,6 +216,50 @@ int rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64_gfx950(uint64_t flags, uint64_t con
                                                     const uint32_t *const *b,
                                                     const uint32_t *const *c);
 
+// Independent mixed matrix formats; A occupies controls bits 0..2 and B bits 3..5.
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_FP8 = 0ULL;
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_BF8 = 1ULL;
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_FP6 = 2ULL;
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_BF6 = 3ULL;
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_FP4 = 4ULL;
+constexpr uint64_t RJ_ARITH_MATRIX_FORMAT_B_SHIFT = 3ULL;
+
+// gfx950 D=A*B+C, Wave64, ignoring EXEC. A/B independently use 8,6,4 VGPRs
+// for 8,6,4-bit formats; each pointer addresses 64 words. C/D use M*M/64 VGPRs.
+// Reserved formats/controls reject before operand access. Aliases are supported.
+// Compatibility retains legacy scalar unfused / SIMD fused accumulation; strict
+// empirical modes are unsupported. FP modes are ignored and FP status is untouched.
+int rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c);
+int rj_arith_v_mfma_f32_32x32x64_f8f6f4_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            const uint32_t *const *c);
+
+// Scale byte selectors in controls, plus absolute-value-before-negate on C.
+constexpr uint64_t RJ_ARITH_MFMA_SCALE_A_BYTE_SHIFT = 6ULL;
+constexpr uint64_t RJ_ARITH_MFMA_SCALE_B_BYTE_SHIFT = 8ULL;
+constexpr uint64_t RJ_ARITH_MFMA_SCALE_NEG_C = 1ULL << 10;
+constexpr uint64_t RJ_ARITH_MFMA_SCALE_ABS_C = 1ULL << 11;
+
+// gfx950 block-scaled MFMA, with the same format/layout and overlap contract above.
+// scale_a/scale_b each address 64 packed words (one VGPR); byte selectors choose
+// the E8M0 exponent for each lane. Scale lane M*block+row/column applies to one
+// fused 32-product dot, followed by combined-exponent scaling and addition to C.
+// Scale 0xff produces NaN. Inline scale sourcing is the caller's responsibility.
+// Loose and Compatibility supported; strict empirical modes remain unsupported.
+int rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c,
+                                                   const uint32_t *scale_a,
+                                                   const uint32_t *scale_b);
+int rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c, const uint32_t *scale_a,
+                                                  const uint32_t *scale_b);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

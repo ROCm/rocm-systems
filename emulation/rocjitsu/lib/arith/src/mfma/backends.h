@@ -38,4 +38,18 @@ void mfma_fp8_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *c
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 void mfma_fp8_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c);
+template <int M, int K>
+void mfma_mixed_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+                          const uint32_t *const *b, const uint32_t *const *c);
+template <int M, int K>
+void mfma_mixed_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+                          const uint32_t *const *b, const uint32_t *const *c);
+template <int M, int K>
+void mfma_scaled_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+                           const uint32_t *const *b, const uint32_t *const *c,
+                           const uint32_t *scale_a, const uint32_t *scale_b);
+template <int M, int K>
+void mfma_scaled_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
+                           const uint32_t *const *b, const uint32_t *const *c,
+                           const uint32_t *scale_a, const uint32_t *scale_b);
 } // namespace rocjitsu::arith

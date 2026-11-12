@@ -203,6 +203,8 @@ TEST(BenchmarkInputs, OneQuietNanElement) {
       {"v_swmmac_f32_16x16x32_f16_w32", 0, 0x7e00U, 0xffffU, 0},
       {"v_wmma_f32_16x16x32_f16_w32", 0, 0x7e00U, 0xffffU, 0},
       {"v_wmma_bf16f32_16x16x32_bf16_w32", 0, 0x7fc0U, 0xffffU, 0},
+      {"v_wmma_f32_16x16x128_f8f6f4_w32", 0, 0x7fU, 0xffU, 0},
+      {"v_wmma_f32_32x16x128_f4_w32", 2, 0x7fc00000U, UINT32_MAX, 0},
       {"v_dot4_f32_fp8_bf8_w32", 0, 0x7fU, 0xffU, 0},
       {"v_dot4_f32_bf8_fp8_w64", 0, 0x7eU, 0xffU, 0},
       {"v_fmac_f32_w32", 0, 0x7fc00000U, UINT32_MAX, 0},
