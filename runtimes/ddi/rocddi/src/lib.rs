@@ -23,7 +23,7 @@ pub mod memory;
 mod os;
 pub mod session;
 pub mod topology;
-pub use error::{Error, ErrorKind};
+pub use error::{Error, ErrorKind, NativeStatus, NativeStatusDomain};
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test_support;

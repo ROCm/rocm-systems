@@ -160,8 +160,7 @@ impl Memory {
                 Ok(amdf_memory_release_info_t::default())
             }
             Err(error)
-                if error.kind() == rocddi::ErrorKind::Busy
-                    && error.native_error_code().is_none() =>
+                if error.kind() == rocddi::ErrorKind::Busy && error.native_status().is_none() =>
             {
                 Err(BUSY)
             }

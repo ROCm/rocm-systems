@@ -620,7 +620,11 @@ mod tests {
                     })
                     .unwrap();
                 assert_eq!(
-                    queue.refresh_status().unwrap_err().native_error_code(),
+                    queue
+                        .refresh_status()
+                        .unwrap_err()
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
                     Some(errno::EIO)
                 );
                 assert_eq!(queue.status().retired_submission, 0);
@@ -755,7 +759,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EFAULT));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EFAULT)
+                );
             },
         );
         drm::with_script(
@@ -771,7 +780,12 @@ mod tests {
                 let error = KfdKernelQueue::create(vm.clone(), KernelQueueFormat::Pm4)
                     .err()
                     .unwrap();
-                assert_eq!(error.native_error_code(), Some(errno::EBUSY));
+                assert_eq!(
+                    error
+                        .native_status()
+                        .and_then(crate::NativeStatus::errno_code),
+                    Some(errno::EBUSY)
+                );
                 // Drop retries the ordinary EBUSY rollback through the owner.
             },
         );

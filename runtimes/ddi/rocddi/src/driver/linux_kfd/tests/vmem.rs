@@ -380,7 +380,11 @@ fn ambiguous_syncobj_destroy_quarantines_the_id_and_render_vm() {
             let mut state = vm.vmem.lock().unwrap();
             assert_eq!(state.ensure_syncobj(render).unwrap(), 7);
             assert_eq!(
-                state.close(render).unwrap_err().native_error_code(),
+                state
+                    .close(render)
+                    .unwrap_err()
+                    .native_status()
+                    .and_then(crate::NativeStatus::errno_code),
                 Some(errno::EFAULT)
             );
             let replacement = drm::create_syncobj(render).unwrap();
