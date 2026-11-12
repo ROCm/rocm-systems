@@ -13,6 +13,13 @@ The information presented in this document is for informational purposes only an
 ## Note
 HRR Capture is now disabled by default on AMD platforms. The feature will be securely re-enabled in a future release
 
+## Tested environment
+
+HRR is tested on Linux only: an AMD Instinct MI350X (gfx950) under Ubuntu 22.04 LTS with
+Linux kernel 5.15, with HIP built from the `develop` branch of rocm-systems. Other GPUs,
+Linux distributions and kernels may work, or may not; they are not tested. Windows is not
+covered.
+
 ## Capture
 
 ```bash
@@ -20,8 +27,7 @@ HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
 Capture also needs your consent, given once per user: write the line `yes` to
-`${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent` (`%APPDATA%\hrr\capture-consent`
-on Windows). Where no such file can be kept, as in CI or a container, set
+`${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`. Where no such file can be kept, as in CI or a container, set
 `HIP_HRR_CAPTURE_CONSENT=yes` instead. Without either, the process runs
 unrecorded and says why in one line on stderr. A set `HIP_HRR_CAPTURE_CONSENT` decides
 either way: any value other than `yes`, such as `no`, withholds consent even
@@ -31,17 +37,11 @@ when the file says yes. The manifest metadata records which of the two gave cons
 The variable applies to every process that inherits the environment, child processes
 and MPI ranks included. The file applies to that user on every host that shares the
 home directory. Whoever controls the user's environment or configuration directory can
-give consent. On Linux the file counts only as a regular file owned by the user, not
-reached through a symbolic link and with no other hard link. On Windows it is not
-checked for an owner and junctions are followed, so a redirected or shared `%APPDATA%`
-gives no per-user guarantee.
+give consent. The file counts only as a regular file owned by the user, not reached
+through a symbolic link and with no other hard link.
 
 ```bash
 d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
-```
-
-```powershell
-New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "$env:APPDATA\hrr\capture-consent" yes
 ```
 
 A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
@@ -91,7 +91,7 @@ Point at a specific `pid-<pid>/` subdirectory when the capture root has multiple
 hrr-playback ./my_capture.hrr/pid-<pid>/ --info
 ```
 
-**Full replay** (Windows or Linux; requires AMD GPU and matching `hrr-playback` + HIP libraries):
+**Full replay** (Linux; requires AMD GPU and matching `hrr-playback` + HIP libraries):
 
 ```bash
 hrr-playback ./my_capture.hrr/pid-<pid>/
@@ -124,14 +124,14 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_CAPTURE_MAX_MB` | 0 (no limit) | Largest size, in MiB, of each process's archive (`pid-<pid>/`), manifests aside. The write that would pass it is not made: capture stops with a `[HRR capture] Capture stopped` message on stderr, the archive is marked incomplete, and the application runs on. A process it forks afterwards still gets an archive of its own |
 | `HIP_HRR_CAPTURE_MAX_BLOB_MB` | 0 (no limit) | Largest copy, in MiB, stored as a blob. A larger one is recorded without its contents, the archive is marked incomplete with one message on stderr, and capture goes on. Replay refuses by name a host-to-device copy recorded so, whether `hipMemcpy`, `hipMemcpyAsync`, `hipMemcpyHtoD`, `hipMemcpyHtoDAsync`, `hipMemcpyWithStream`, a 2D or 3D copy or a to-symbol graph copy, a `hipHostRegister`, and a kernel launch outside a stream capture whose pinned host snapshot was left out. Code objects and the fat binaries HIP registers are always stored; a `hipLinkAddData` image is not, and replay refuses its link |
 
-On Linux the archive is readable only by the user who captured it (the directories capture creates are 0700 and its files 0600; an output directory that already exists keeps its own mode). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+The archive is readable only by the user who captured it (the directories capture creates are 0700 and its files 0600; an output directory that already exists keeps its own mode). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -298,8 +298,7 @@ Capture wire version must match the `hrr-playback` reader (see DESIGN.md wire-fo
 
 Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-and-triage/SKILL.md).
 **Linux:** full workflow via `triage_archive.sh` (native replay, optional Docker replay, auto-build).
-**Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
-requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
+Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
 
 For the other end, producing an archive in the first place:

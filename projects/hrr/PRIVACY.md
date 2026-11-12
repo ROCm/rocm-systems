@@ -12,6 +12,11 @@ fails when the manifest fields written by capture and the table below disagree.
 
 ## Scope
 
+This page, and the security review it supports, cover HRR on Linux. Windows capture and
+replay, and archive signing, are not covered; each will be added in its own change. The
+environment HRR is tested on is listed in the README under
+[Tested environment](README.md#tested-environment).
+
 ### In scope for HRR
 
 - **User consent.** Capture starts only after the user's explicit [consent](#consent):
@@ -23,7 +28,7 @@ fails when the manifest fields written by capture and the table below disagree.
   log, and opens no network connection.
 - **Archive content transparency.** This page and the notice described under
   [Sharing an archive](#sharing-an-archive) say what an archive may contain.
-- **Local filesystem access control.** On Linux, the directories capture creates are 0700
+- **Local filesystem access control.** The directories capture creates are 0700
   and its files 0600; an output directory that already exists keeps its own mode. See
   [How the archive is protected on disk](#how-the-archive-is-protected-on-disk).
 - **Secure replay handling.** Replay treats an archive as untrusted input, within the limits
@@ -49,8 +54,7 @@ fails when the manifest fields written by capture and the table below disagree.
 - **Privileged access.** Protection against root, privileged processes, a compromised
   account of the capturing user, or changes by the archive's owner.
 - **Protection after movement.** Keeping the original file permissions when an archive is
-  copied, moved, extracted, uploaded or backed up. On Windows, capture sets no access rights
-  of its own.
+  copied, moved, extracted, uploaded or backed up.
 - **Malicious applications.** Detecting an application, or its owner, deliberately changing
   what is captured.
 - **Retention and secure deletion.** Setting retention periods or guaranteeing secure
@@ -114,7 +118,7 @@ not make.
 | Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
 | Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | contents | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
-| Marker that capture is running: on Linux the boot id and the process start time in clock ticks since boot; on Windows the process creation date and time. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
+| Marker that capture is running: the boot id and the process start time in clock ticks since boot. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
 
 The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `event_count`,
 `blob_count`, the HIP and comgr versions, `capture_consent` (where the consent came from,
@@ -134,10 +138,9 @@ This table covers `manifest.json` only. The copy of the device properties a
 
 ## Never recorded
 
-Capture does not read the host name, the command line or the user name, and records a
-date and time of day only in the `active` marker on Windows. It reads only its own
-environment variables and the ones that locate the consent file (`XDG_CONFIG_HOME` and
-`HOME`, or `APPDATA` on Windows), and records none of their values. A string
+Capture does not read the host name, the command line or the user name, and records no
+date or time of day. It reads only its own environment variables and the ones that locate
+the consent file (`XDG_CONFIG_HOME` and `HOME`), and records none of their values. A string
 reaches the archive only as a kernel name; as a string argument of a HIP call (the path
 given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name given to
 `hipGetProcAddress`); as the name of a device variable the program registers; as a character
@@ -167,27 +170,23 @@ archive leaves the machine.
 
 Capture writes nothing until the user who runs the process has said yes
 ([AIRUNTIME-2857](https://amd-hub.atlassian.net/browse/AIRUNTIME-2857)): once, with the
-line `yes` in their own file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`
-(`%APPDATA%\hrr\capture-consent` on Windows), or with `HIP_HRR_CAPTURE_CONSENT=yes`, for
+line `yes` in their own file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`, or with `HIP_HRR_CAPTURE_CONSENT=yes`, for
 CI and containers. The variable applies to every process that inherits the environment,
 child processes and MPI ranks included; the file applies to that user on every host that
 shares the home directory. Consent is therefore given by whoever controls the user's
 environment or configuration directory. Any other value of the variable withholds
-consent, whatever the file says. On Linux a consent file owned by another user, reached
-through a symbolic link or with another hard link does not count. On Windows the file is
-not checked for an owner and junctions are followed, so a redirected or shared
-`%APPDATA%` gives no per-user guarantee. Without consent the process runs unrecorded, creates no
+consent, whatever the file says. A consent file owned by another user, reached through a
+symbolic link or with another hard link does not count. Without consent the process runs unrecorded, creates no
 archive and says why in one line on stderr; it never prompts. The consent covers the user
 who gave it, not the other people whose data the workload handles: an archive of a
 serving stack can still hold its clients' prompts, as listed above.
 
 ## How the archive is protected on disk
 
-On Linux the archive is readable only by the user who captured it: the directories capture
-creates are 0700 and its files 0600. An output directory that already exists keeps its own
-mode. On Windows capture sets no access rights of its own: the archive takes those of the
-output directory. [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
+The archive is readable only by the user who captured it: the directories capture creates
+are 0700 and its files 0600. An output directory that already exists keeps its own mode.
+[AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
 write go through the directory descriptors capture checked.
-[AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878) keeps the crash-time
-flush without displacing the application's own crash handler. None of these changes what an
+[AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878), still open, is to keep
+the crash-time flush without displacing the application's own crash handler. None of these changes what an
 archive contains.
