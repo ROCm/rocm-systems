@@ -15,7 +15,7 @@ use crate::memory::Allocation;
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::os::{ProcessIdentity, native_error};
-use crate::topology::{AttachmentKind, Endpoint, NativeNodeId, SourceId, TopologyGraphSnapshot};
+use crate::topology::{Endpoint, TopologyGraphSnapshot};
 use crate::{Error, ErrorKind};
 use std::mem::ManuallyDrop;
 
@@ -232,8 +232,7 @@ impl Session {
     /// # Errors
     /// Fails with `ResourceExhausted` if driver registry metadata cannot be allocated.
     pub fn new(lifetime: DriverContextLifetime) -> Result<Self, Error> {
-        #[cfg(target_os = "linux")]
-        crate::os::linux::process_identity::note_runtime_image()
+        crate::os::note_runtime_image()
             .map_err(|source| native_error("runtime image identity", source))?;
         let process = ProcessIdentity::capture()
             .map_err(|source| native_error("session process identity", source))?;
@@ -438,30 +437,6 @@ impl Session {
             driver.contribute_topology_graph(&mut snapshot)?;
             for endpoint in &snapshot.endpoints[start..] {
                 Self::validate_endpoint_owner(driver, endpoint)?;
-            }
-        }
-        // DRM's NUMA attachment is an OS locality observation. It does not
-        // identify a KFD node or imply an access route between these sources.
-        #[cfg(target_os = "linux")]
-        for index in 0..snapshot.endpoints.len() {
-            let endpoint = &snapshot.endpoints[index];
-            let Some(numa) = crate::topology::platform::linux::host_numa_node(endpoint) else {
-                continue;
-            };
-            let node = snapshot
-                .nodes
-                .iter()
-                .find(|node| {
-                    node.source == SourceId(0) && node.native_id == NativeNodeId::LinuxNuma(numa)
-                })
-                .map(|node| node.id);
-            if let Some(node) = node {
-                snapshot.attach_endpoint(
-                    endpoint.id,
-                    endpoint.driver_instance,
-                    node,
-                    AttachmentKind::HostLocality,
-                )?;
             }
         }
         Ok(snapshot)
