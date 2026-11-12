@@ -3,6 +3,8 @@
 
 /// @file rj_code.h
 /// @brief C API for instruction decoding, executables, code objects, and basic blocks.
+/// @note Allocation failures in rj_code_executable_create(), rj_code_inst_list_create(),
+/// and rj_code_basic_block_list_create() terminate the calling process.
 
 #ifndef ROCJITSU_CODE_RJ_CODE_H_
 #define ROCJITSU_CODE_RJ_CODE_H_
@@ -164,10 +166,12 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1250 = 5,
   /// @brief gfx1251 target ID.
   ROCJITSU_CODE_TARGET_GFX1251 = 6,
+  /// @brief gfx1100 target ID (RDNA3).
+  ROCJITSU_CODE_TARGET_GFX1100 = 7,
   // \NPI new GPU: add its public target identifier here and bind its
   // code-object name and ELF machine value in the corresponding ISA provider.
   /// @brief Number of named GPU targets and their exclusive upper bound.
-  ROCJITSU_CODE_TARGET_NUM_TARGETS = 7,
+  ROCJITSU_CODE_TARGET_NUM_TARGETS = 8,
   /// @brief Stable sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID = INT32_MAX
 } rj_code_target_id_t;
@@ -200,8 +204,6 @@ typedef struct rj_code_executable_t rj_code_executable_t;
 /// @returns ROCJITSU_STATUS_SUCCESS on success.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p path or @p exec is NULL.
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT if loading or parsing the file fails.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES if memory allocation fails.
-/// @retval ROCJITSU_STATUS_ERROR if another exception occurs while loading the executable.
 RJ_API_EXPORT rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec);
 
 /// @brief Increment the executable's reference count.

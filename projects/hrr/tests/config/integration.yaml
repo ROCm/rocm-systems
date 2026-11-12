@@ -63,6 +63,7 @@ cases:
   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo: {}
   Unit_HRR_CaptureExitSummary: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
+  Unit_HRR_CaptureIgnoresConsentOfOtherUser: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureLimit_ForkAfterStop: {}
   Unit_HRR_CaptureLimit_ForkAfterStop_Direct: {}
@@ -73,6 +74,7 @@ cases:
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureMovesEarlierArchiveAside: {}
+  Unit_HRR_CaptureNeedsConsent: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureRenamedArchive_Direct: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
@@ -142,8 +144,11 @@ cases:
   Unit_HRR_DrvMemcpy_Direct: {}
   Unit_HRR_EmbeddedPtrRoundtrip: {}
   Unit_HRR_EmbeddedPtrStruct_Direct: {}
+  Unit_HRR_ExtLaunchEventMarkers: {}
   Unit_HRR_ExtMallocRoundtrip: {}
   Unit_HRR_ExtMalloc_Direct: {}
+  Unit_HRR_ExtMemcpyBatchRoundtrip: {}
+  Unit_HRR_ExtMemcpyBatch_Direct: {}
   Unit_HRR_ExtModuleLaunchKernelRoundtrip: {}
   Unit_HRR_ExtModuleLaunchKernel_Direct: {}
   Unit_HRR_FailedBlobClose_Direct: {}
@@ -190,6 +195,14 @@ cases:
   Unit_HRR_GraphWorkload_Direct: {}
   Unit_HRR_HostAliasesRoundtrip: {}
   Unit_HRR_HostAliases_Direct: {}
+  Unit_HRR_HostBudgetManagedLeakRoundtrip: {}
+  Unit_HRR_HostBudgetManagedLeak_Direct: {}
+  Unit_HRR_HostBudgetManagedRoundtrip: {}
+  Unit_HRR_HostBudgetManaged_Direct: {}
+  Unit_HRR_HostBudgetMemCreateRoundtrip: {}
+  Unit_HRR_HostBudgetMemCreate_Direct: {}
+  Unit_HRR_HostBudgetMemMapHoldRoundtrip: {}
+  Unit_HRR_HostBudgetMemMapHold_Direct: {}
   Unit_HRR_HostFreeRoundtrip: {}
   Unit_HRR_HostFree_Direct: {}
   Unit_HRR_HostMemRoundtrip: {}

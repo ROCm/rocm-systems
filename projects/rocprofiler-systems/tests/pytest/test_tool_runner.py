@@ -16,7 +16,12 @@ import signal
 from typing import ClassVar
 
 import pytest
-from conftest import RocprofsysTest, assert_resolved_settings
+from conftest import (
+    RocprofsysTest,
+    assert_resolved_settings,
+    host_counters_expected,
+    parse_metadata_settings,
+)
 
 pytestmark = [pytest.mark.tool_runner]
 
@@ -41,15 +46,6 @@ TRANSPOSE_ARGS = ["4", "300", "50"]
 # workload's fib() frames actually get captured regardless of how fast the host
 # runs the workload.
 SAMPLING_NO_DELAY = {"ROCPROFSYS_SAMPLING_DELAY": "0.1"}
-
-
-@pytest.fixture
-def cpu_workload(rocprof_config) -> str:
-    """CPU workload with real, instrumentable functions. Used by most tests here."""
-    try:
-        return str(rocprof_config.get_target_executable("parallel-overhead"))
-    except FileNotFoundError:
-        pytest.skip("parallel-overhead example not built")
 
 
 @pytest.fixture
@@ -908,7 +904,7 @@ class TestCpuMetrics(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="host frequency and load counters",
-            counter_names_present=["Frequency (S)", "Load (S)"],
+            counter_names_present=host_counters_expected(["Frequency (S)", "Load (S)"]),
         )
 
 
@@ -962,3 +958,207 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
         assert (
             b"GFX Busy" in trace
         ), f"-D trace at {result.perfetto_file} has no GPU device counters"
+
+
+# ============================================================================
+# Backend -I / -E flags. Host backends (locks, kokkosp, mpip, ompt) run on
+# parallel-overhead. amd-smi runs transpose. -I rcclp is covered on an RCCL
+# workload in test_rccl.py.
+# ============================================================================
+
+RUN_TARGET = "rocprof-sys-run"
+
+_LOCKS_ON = {
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
+}
+
+_INCLUDE_ALL_OFF = {
+    "ROCPROFSYS_USE_MPIP": "OFF",
+    "ROCPROFSYS_USE_OMPT": "OFF",
+    "ROCPROFSYS_USE_KOKKOSP": "OFF",
+    "ROCPROFSYS_USE_RCCLP": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "OFF",
+}
+
+# flag_args, pass_regex, seed_env. The seed is the opposite of what the flag
+# sets, so the assertion only holds if the flag actually flipped it.
+BACKEND_ENV_CASES = [
+    pytest.param(
+        ["-I", "all"],
+        [
+            "ROCPROFSYS_USE_MPIP=true",
+            "ROCPROFSYS_USE_OMPT=true",
+            "ROCPROFSYS_USE_KOKKOSP=true",
+            "ROCPROFSYS_USE_RCCLP=true",
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=true",
+        ],
+        _INCLUDE_ALL_OFF,
+        marks=pytest.mark.mpi,
+        id="include-all",
+    ),
+    pytest.param(
+        ["-I", "mpip"],
+        ["ROCPROFSYS_USE_MPIP=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF"},
+        marks=pytest.mark.mpi,
+        id="mpip",
+    ),
+    pytest.param(
+        ["-I", "ompt"],
+        ["ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=pytest.mark.backend_include_ompt,
+        id="ompt",
+    ),
+    pytest.param(
+        ["-I", "kokkosp"],
+        ["ROCPROFSYS_USE_KOKKOSP=true"],
+        {"ROCPROFSYS_USE_KOKKOSP": "OFF"},
+        id="kokkosp",
+    ),
+    pytest.param(
+        ["-I", "mpip", "-I", "ompt"],
+        ["ROCPROFSYS_USE_MPIP=true", "ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF", "ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=[pytest.mark.mpi, pytest.mark.backend_include_ompt],
+        id="mpip-ompt",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_LOCKS=false"],
+        _LOCKS_ON,
+        id="mutex-locks",
+    ),
+    pytest.param(
+        ["-E", "rw-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false"],
+        _LOCKS_ON,
+        id="rw-locks",
+    ),
+    pytest.param(
+        ["-E", "spin-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false"],
+        _LOCKS_ON,
+        id="spin-locks",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks", "rw-locks", "spin-locks"],
+        [
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false",
+        ],
+        _LOCKS_ON,
+        id="all-locks",
+    ),
+]
+
+_ROCM_KERNEL_ARGS = ["--rocm=hip,kernel"]
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.sys_run
+@pytest.mark.backend_flags
+@pytest.mark.class_name("backend-flags-env")
+class TestBackendFlagsEnv(RocprofsysTest):
+    @pytest.mark.parametrize("flag_args, pass_regex, seed_env", BACKEND_ENV_CASES)
+    def test_resolved_setting(
+        self, domain_backend_flag_env, cpu_workload, flag_args, pass_regex, seed_env
+    ):
+        env = {**domain_backend_flag_env, **seed_env}
+        result = self.run_test(
+            "baseline",
+            target=RUN_TARGET,
+            env=env,
+            run_args=[*flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+        _assert_backend_settings(result, pass_regex)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sampling
+@pytest.mark.backend_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("backend-flags-artifacts")
+class TestBackendFlagsGpuArtifacts(RocprofsysTest):
+    def test_include_amd_smi(
+        self, domain_backend_flag_env, validation_rules_dir, transpose_baseline_rules
+    ):
+        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "OFF"}
+        result = self.run_transpose_sample(env, ["-I", "amd-smi", *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": True})
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto GPU counters",
+            categories=["hip_runtime_api"],
+            counter_names_present=["GFX Busy", "Temperature", "Power"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                *transpose_baseline_rules,
+                validation_rules_dir / "domain-flags" / "gpu-default-metrics-rules.json",
+            ],
+        )
+
+    def test_exclude_amd_smi(
+        self, domain_backend_flag_env, validation_rules_dir, transpose_baseline_rules
+    ):
+        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "ON"}
+        result = self.run_transpose_sample(env, ["-E", "amd-smi", *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=false"])
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": False})
+        # thread_cpu_time is only here so the validator lists the counter tracks.
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto without GPU counters",
+            categories=["hip_runtime_api"],
+            counter_names_present=["thread_cpu_time"],
+            fail_regex=[r"GPU \[\d+\]"],
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                *transpose_baseline_rules,
+                validation_rules_dir / "domain-flags" / "amd-smi-disabled-rules.json",
+            ],
+        )
+
+
+def _assert_backend_settings(result, pass_regex: list[str]) -> None:
+    """Assert the settings in pass_regex that are registered in this build.
+
+    Skip only when none of them are; a build-dependent key (rcclp) missing
+    from the build must not hide a real failure on the rest of the case.
+    """
+    metadata = result.get_output_file("metadata*.json")
+    if metadata is None:
+        pytest.fail(f"No metadata.json found under {result.output_dir}")
+    available = parse_metadata_settings(metadata)
+    expected = {}
+    unregistered = []
+    for entry in pass_regex:
+        key, value = entry.split("=", 1)
+        if key not in available:
+            unregistered.append(key)
+            continue
+        expected[key] = value == "true"
+    if not expected:
+        pytest.skip(f"Not registered as a setting in this build: {unregistered}")
+    assert_resolved_settings(result, expected)
+    if unregistered:
+        print(f"Not registered as a setting in this build, skipped: {unregistered}")

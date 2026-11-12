@@ -216,7 +216,8 @@ inline void write_scalar_selector(Wavefront &wf, uint32_t selector, uint32_t val
   if (!range)
     return;
   if (range->storage == ScalarRegisterStorage::SGPR) {
-    RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + range->index, value);
+    if (RegisterAccess(wf).write_sgpr(wf.sgpr_alloc().base + range->index, value).failed())
+      return;
     return;
   }
   if (range->storage == ScalarRegisterStorage::TTMP) {

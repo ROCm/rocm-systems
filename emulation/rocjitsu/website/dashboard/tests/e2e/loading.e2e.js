@@ -49,7 +49,7 @@ test('fatal load and failed refresh discard stale exports; Retry restores raw ma
   const failure = page.getByTestId('dashboard-data-error');
   await expect(failure).toContainText('No available test data');
   await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
-  for (const name of ['Branch Runs', 'Benchmarks', 'Run Comparison', 'Overview']) {
+  for (const name of ['Branch runs', 'Benchmarks', 'Run comparison', 'Overview']) {
     await page.getByRole('tab', { name, exact: true }).click();
     await expect(failure).toBeVisible();
   }
@@ -108,7 +108,7 @@ test('one invalid indexed run fails the entire publication instead of exposing p
   await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
   await expect(page.getByTestId('metric-card-latest-results')).toContainText('No configurations selected');
   await expect(page.getByRole('img')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Branch Runs', exact: true }).click();
+  await page.getByRole('tab', { name: 'Branch runs', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'No published branch runs' })).toBeVisible();
   await expect(page.getByTestId('branch-config-gfx1250-single')).toHaveCount(0);
 });

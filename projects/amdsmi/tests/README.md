@@ -170,6 +170,7 @@ The install target remaps the tree to the historical path:
 ```text
 tests/
 ├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs the merge base
+│                       abi_gate.py + abi_gate_test.py     blocking layout gate (README.md there)
 ├── amdsmi_build/       run_amdsmi_build.py + tests        distro/pkg-mgr build driver
 ├── dme_integration/    metrics/services/submodules + tests
 ├── python/test_*_guard.py, test_packaging_scriptlets.py, test_abi_compat.py
@@ -183,6 +184,7 @@ tests/
 ```text
  pre-commit ──► check_test_conventions.py   (layout + naming gate)
             ├─► abi_check_test.py           (when tests/abi_check/ changes)
+            ├─► abi_gate_test.py            (when abi_gate* or abi/ changes)
             └─► clang-format, ruff-format, gersemi, codespell
 
  CI (.github/workflows/)
@@ -193,6 +195,7 @@ tests/
                             ./unit_tests.py -v
                         └─► run_amdsmi_build.py summarize
    abi-compliance-check.yml ──► abi_check.py (major, then minor)
+   amdsmi-abi-gate.yml ──► abi_gate.py gate (base commit's copy)
    amdsmi-python-versions.yml ─► run_amdsmi_python_versions_test.py (3.6.8 → latest)
    amdsmi-upgrade-downgrade.yml ► run_amdsmi_upgrade_downgrade_test.py
                                   run_amdsmi_component_removal_test.py

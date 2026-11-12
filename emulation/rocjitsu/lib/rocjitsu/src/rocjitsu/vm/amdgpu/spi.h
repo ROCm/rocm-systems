@@ -16,6 +16,8 @@
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <cassert>
@@ -26,7 +28,6 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -72,12 +73,16 @@ public:
   }
 
   /// @brief Enqueue a workgroup from an ACE pipe.
-  void enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry) {
+  /// @details WGP-mode requests fail without changing the pending queues.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result enqueue_wg(uint32_t pipe_id, uint32_t global_wg_id, DispatchEntry *entry,
+                          util::DiagnosticEmitter emit_error = {}) {
     if (entry->wgp_mode)
-      throw std::invalid_argument("legacy SPI queue path does not support WGP-mode workgroups");
+      return emit_error.emit() << "legacy SPI queue path does not support WGP-mode workgroups";
     if (pipe_id >= pipe_queues_.size())
       pipe_queues_.resize(pipe_id + 1);
     pipe_queues_[pipe_id].push_back({pipe_id, global_wg_id, entry});
+    return util::Result::success();
   }
 
   /// @brief Try to dispatch the next ready WG to a CU.
@@ -263,14 +268,21 @@ public:
     auto resident = resident_wgp_workgroups_.find(wg_key(dispatch_id, global_wg_id));
     if (resident == resident_wgp_workgroups_.end())
       return false;
-    const size_t wgp_index = resident->second.wgp_index;
+    release_wgp_reservation(resident->second.wgp_index);
     resident_wgp_workgroups_.erase(resident);
-    assert(wgp_index < wgps_.size());
-    auto &wgp = *wgps_[wgp_index];
-    assert(wgp.active_workgroups != 0);
-    if (--wgp.active_workgroups == 0)
-      wgp.next_lds_alloc = 0;
     return true;
+  }
+
+  /// @brief Release every paired-WGP reservation belonging to a cancelled dispatch.
+  /// @details The CP must stop its waves before reclaiming their shared LDS.
+  /// Includes reservations whose waves have not launched or were already aborted.
+  void release_wgp_dispatch(uint32_t dispatch_id) {
+    std::erase_if(resident_wgp_workgroups_, [&](const auto &resident) {
+      if (wg_key_dispatch_id(resident.first) != dispatch_id)
+        return false;
+      release_wgp_reservation(resident.second.wgp_index);
+      return true;
+    });
   }
 
   uint32_t max_wgp_lds_bytes() const {
@@ -299,6 +311,14 @@ private:
   struct WgpReservation {
     size_t wgp_index = 0;
   };
+
+  void release_wgp_reservation(size_t wgp_index) {
+    assert(wgp_index < wgps_.size());
+    auto &wgp = *wgps_[wgp_index];
+    assert(wgp.active_workgroups != 0);
+    if (--wgp.active_workgroups == 0)
+      wgp.next_lds_alloc = 0;
+  }
 
   std::vector<ComputeUnitCore *> cus_;
   size_t next_cu_ = 0;

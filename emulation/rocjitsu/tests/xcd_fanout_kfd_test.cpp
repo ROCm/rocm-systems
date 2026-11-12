@@ -63,7 +63,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 using test::kernel_path;
 
 constexpr uint32_t kGpuId = 38144;

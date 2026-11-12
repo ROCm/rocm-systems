@@ -7,7 +7,6 @@
 
 use super::reservation::replace_mapping;
 use super::{HostAllocation, Reservation, page_size};
-use crate::os::linux::process_identity::check_process;
 use libc::{MAP_ANONYMOUS, MAP_PRIVATE, MAP_SHARED, PROT_NONE, PROT_READ, PROT_WRITE};
 #[cfg(test)]
 use std::ffi::c_void;
@@ -16,11 +15,13 @@ use std::os::fd::AsRawFd;
 
 pub(crate) struct HostReservation {
     range: Reservation,
-    process: u32,
 }
 
 impl HostReservation {
     pub(crate) fn create(size: usize, alignment: usize, process: u32) -> io::Result<Self> {
+        if process != std::process::id() {
+            return Err(io::Error::from(io::ErrorKind::Unsupported));
+        }
         let page = page_size()?;
         if size == 0
             || size % page != 0
@@ -31,7 +32,7 @@ impl HostReservation {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         let range = Reservation::new(size, alignment, (page as u64, usize::MAX as u64), false)?;
-        Ok(Self { range, process })
+        Ok(Self { range })
     }
 
     pub(crate) fn extent(&self) -> (usize, usize) {
@@ -39,7 +40,7 @@ impl HostReservation {
     }
 
     fn target(&self, offset: u64, length: u64) -> io::Result<(usize, usize)> {
-        check_process(self.process)?;
+        self.range.check_process()?;
         if !self.range.is_live() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
@@ -68,6 +69,7 @@ impl HostReservation {
         source_offset: u64,
         writable: bool,
     ) -> io::Result<()> {
+        source.check_process()?;
         let (address, length) = self.target(target_offset, length)?;
         let (source_address, source_length) = source.extent();
         let page = page_size()? as u64;
@@ -119,6 +121,34 @@ impl HostReservation {
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn fork_child_rejects_inherited_source_before_shared_replacement() {
+        let page = page_size().unwrap();
+        let source =
+            HostAllocation::create_remappable(page as u64, page as u64, std::process::id())
+                .unwrap();
+        // SAFETY: The child creates only its own target, checks the inherited
+        // source, and exits without running inherited Rust destructors.
+        let child = unsafe { libc::syscall(libc::SYS_fork) };
+        assert!(child >= 0);
+        if child == 0 {
+            // SAFETY: Bound a regression if inherited state is entered.
+            unsafe { libc::alarm(3) };
+            let rejected = HostReservation::create(page, page, std::process::id())
+                .ok()
+                .and_then(|mut target| target.replace(0, page as u64, &source, 0, true).err())
+                .is_some_and(|source| source.kind() == io::ErrorKind::Unsupported);
+            // SAFETY: _exit avoids inherited owner cleanup.
+            unsafe { libc::_exit(i32::from(!rejected)) }
+        }
+        let pid = i32::try_from(child).unwrap();
+        let mut status = 0;
+        // SAFETY: This waits only for the child created above.
+        assert_eq!(unsafe { libc::waitpid(pid, &raw mut status, 0) }, pid);
+        assert_eq!(status, 0);
+    }
 
     #[test]
     fn released_reservation_cannot_replace_a_new_mapping() {

@@ -131,6 +131,11 @@ public:
     bool reported = false;
     uint16_t order = kUnordered;
     uint64_t order_sequence = 0;
+    // Whether this pending result can be overwritten without a wait by a later
+    // load in the same order class. That also requires the incoming load to
+    // qualify for ordered writeback (see access_pending). Results whose counter
+    // decrements in order are not necessarily written to registers in order.
+    bool ordered_overwrite = true;
   };
   struct Hazard {
     Event producer;

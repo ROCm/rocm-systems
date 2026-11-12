@@ -94,9 +94,10 @@
  *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
  *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  * - 1.37 - hsa_amd_memory_async_batch_copy: HSA_AMD_MEMORY_COPY_OP_RECT
+ * - 1.38 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_SVM
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 37
+#define HSA_AMD_INTERFACE_VERSION_MINOR 38
 
 #ifdef __cplusplus
 extern "C" {
@@ -145,6 +146,12 @@ typedef enum {
    * dependency signal, and additional performance-oriented features.
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
+
+  /**
+   * Extended kernel dispatch packet with spatial locality computing support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
@@ -306,6 +313,10 @@ typedef union {
 
 /**
  * @brief AMD extended kernel dispatch packet.
+ *
+ * Supports both Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) and
+ * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD).
+ * The amd_format field determines which interpretation to use.
  */
 typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   /**
@@ -319,15 +330,18 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
 
   /**
    * AMD vendor-specific packet type. Used to configure which vendor packet this
-   * is. The parameters are described by hsa_amd_packet_type_t. This packet is
-   * of type HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.​
+   * is. The parameters are described by hsa_amd_packet_type_t.
+   * This packet supports:
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH (Format 3)
+   * - HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD (Format 4)
    */
   hsa_amd_packet_type8_t amd_format;
 
   /**
-   * Dispatch setup parameters. Used to configure kernel dispatch parameters
-   * such as the number of dimensions in the grid. The parameters are described
-   * by hsa_kernel_dispatch_packet_setup_t.​
+   * Dispatch setup parameters.
+   * Used to configure kernel dispatch parameters such as the number of
+   * dimensions in the grid. The parameters are described by
+   * hsa_kernel_dispatch_packet_setup_t.
    */
   uint8_t setup;
 
@@ -423,16 +437,25 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
   void* kernarg_address;
 
   /**
-   * Dependent signal object. This signal is read in the launch phase.​
+   * Format-dependent field (DW 14:13).
+   * Interpretation depends on amd_format:
    *
-   * The packet processor does not exit the launch phase for this packet, and
-   * thus does not perform the requested acquire fence scope’s actions, until
-   * the signal has been observed with the value 0.​
+   * Format 3 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH):
+   *   - dep_signal: Dependent signal object read in the launch phase.
+   *     The packet processor waits until the signal value is 0 before
+   *     exiting the launch phase. A signal handle value of 0 is allowed
+   *     and is interpreted as a satisfied dependency.
    *
-   * A signal handle value of 0 is allowed and is interpreted by the packet
-   * processor as a satisfied dependency.​
+   * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
+   *   - launch_descriptor: Pointer to amd_launch_descriptor_t structure
+   *     providing advanced scheduling control (CU enable, wave limiter,
+   *     L2 prefetch, etc.). A NULL pointer indicates no launch descriptor
+   *     is used. Dependencies must be handled via barrier packets.
    */
-  hsa_signal_t dep_signal;
+  union {
+    hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
+    amd_launch_descriptor_t* launch_descriptor;   // Format 4: pointer to descriptor
+  };
 
   /**
    * Signal used to indicate completion of the job. The application can use the
@@ -3237,13 +3260,21 @@ typedef enum {
   */
   HSA_EXT_POINTER_TYPE_IPC = 4,
   /*
-  No backend memory but virtual address
+  Virtual address reserved with hsa_amd_vmem_address_reserve that has not been
+  registered with hsa_amd_svm_attributes_set.  There is no memory backing this
+  address, so it cannot be used for data access or communication.
   */
   HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5,
   /*
   Memory was allocated with an HSA virtual memory allocator
   */
-  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6
+  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6,
+  /*
+  Virtual address reserved with hsa_amd_vmem_address_reserve and registered with
+  hsa_amd_svm_attributes_set.  The range is system memory managed by the SVM
+  subsystem and may be accessed as host memory.
+  */
+  HSA_EXT_POINTER_TYPE_SVM = 7
 } hsa_amd_pointer_type_t;
 
 /**
@@ -4998,11 +5029,11 @@ hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
  * to hsa_amd_vmem_handle_release.
  *
  * @param[out] memory_handle memory handle for this mapped address
- * @param[in] mapped address
+ * @param[in] addr Any address within a mapping created with hsa_amd_vmem_map.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid address
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p addr is not within a mapping
  */
 hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memory_handle,
                                               void* addr);

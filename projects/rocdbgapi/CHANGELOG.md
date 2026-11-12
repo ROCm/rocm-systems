@@ -13,6 +13,18 @@ Full documentation for AMD Debugger API is available at
   architecture. This enables proper handling of generic code objects
   (gfx9-4-generic, gfx10-3-generic, gfx11-generic, gfx12-5-generic) which are
   compatible with multiple specific architectures within the same family.
+- A CMake based GoogleTest and GMock unit test suite under `test/`, controlled
+  by the new `ENABLE_TESTS` and `ENABLE_UNIT_TESTS` options (both off by
+  default). Building the suite requires GoogleTest and GMock, provided by
+  either a `GTest::*` providing parent project or a system install. Pass
+  `-DENABLE_TESTS=ON` to opt in. See `test/README.md` for details.
+
+### Changed
+- The Windows DLL is now named after the library's major and minor version, as
+  in `rocm-dbgapi-0-84.dll`.  Windows has no equivalent of ELF symbol
+  versioning, so a consumer built against one version would otherwise load a
+  later, incompatible DLL of the same name.  The import library keeps its
+  unversioned name, so nothing changes at link time.
 
 ## rocm-dbgapi-0.83.0
 ### Added
@@ -33,12 +45,6 @@ Full documentation for AMD Debugger API is available at
 
 ## rocm-dbgapi-0.82.1 for ROCm-10.2
 ### Added
-- A CMake based GoogleTest and GMock unit test suite under `test/`, controlled
-  by the new `ENABLE_TESTS` and `ENABLE_UNIT_TESTS` options (both off by
-  default). Building the suite requires GoogleTest and GMock, provided by
-  either a `GTest::*` providing parent project or a system install. Pass
-  `-DENABLE_TESTS=ON` to opt in. See `test/README.md` for details.
-
 - Support for the following architectures:
  - `gfx1170`
  - `gfx1171`

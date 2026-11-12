@@ -23,3 +23,6 @@ use linux as platform;
 pub(crate) use platform::{
     HostAllocation, HostReservation, host_clock, host_page_size, native_error,
 };
+
+#[cfg(target_os = "linux")]
+pub(crate) use platform::process_identity::ProcessIdentity;

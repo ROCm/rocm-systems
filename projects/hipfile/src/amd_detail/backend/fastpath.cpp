@@ -37,6 +37,8 @@ fastpathFallbackEligibleErrno(int err)
 }
 
 /* The fastpath backend is used when:
+ *  - Configuration::fastpath() is true. Among other things, this is false when
+ *    ROCr is running on WSL2 (/dev/dxg), where AIS is not implemented
  *  - The file has been opened with the O_DIRECT flag
  *  - if statx contains direct io information
  *      - statx indicates the file descriptor supports direct IO (see statx (2))

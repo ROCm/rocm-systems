@@ -415,6 +415,16 @@ set_target_properties(
         CXX_EXTENSIONS ON
         CXX_VISIBILITY_PRESET hidden
         OUTPUT_NAME "rocm-dbgapi"
+        # Windows has no symbol versioning, so a DLL's file name is the only
+        # identity the loader checks.  Encoding major.minor here gives the DLL
+        # the fail-at-load behavior that the version nodes in src/exportmap.in
+        # give the ELF build, as those nodes move with the minor version.  The
+        # import library keeps the unversioned OUTPUT_NAME above, so consumers
+        # link -lrocm-dbgapi and pick the versioned name up through the PE
+        # import table.  This has no effect on a .so or a static library, whose
+        # artifacts are LIBRARY and ARCHIVE, not RUNTIME.
+        RUNTIME_OUTPUT_NAME
+            "rocm-dbgapi-${PROJECT_VERSION_MAJOR}-${PROJECT_VERSION_MINOR}"
         LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
         DEFINE_SYMBOL "AMD_DBGAPI_EXPORTS"
         VERSION ${PROJECT_VERSION}

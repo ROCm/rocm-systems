@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "counting_gpu_memory.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
@@ -23,8 +24,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
@@ -63,6 +67,7 @@
 #include <memory>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 using namespace rocjitsu;
 constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
 constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
@@ -309,7 +314,9 @@ TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("format_lds_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "format_lds_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -353,7 +360,8 @@ protected:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("formatted_cu", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "formatted_cu", cfg, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(5); // Lane 1 must not read, store or receive a load result.
@@ -1853,6 +1861,118 @@ TEST_P(RdnaLegacyFormatDecodeTest, SplitOpcodeBitSelectsD16BeforeExecution) {
   }
 }
 
+TEST_P(RdnaLegacyFormatDecodeTest, Gfx10BoundsUseElementStartsAndLaneAdjustedIndices) {
+  std::unique_ptr<Decoder> decoder = Decoder::create(GetParam());
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t kBase = 0x1000;
+  for (uint32_t word = 0; word < 12; ++word)
+    memory.write32(kBase + word * 4, 100 + word);
+  cu->write_sgpr(sb, kBase);
+  wf->set_exec(7);
+  struct Case {
+    uint16_t offset;
+    uint8_t scalar_offset;
+    uint32_t mode, records;
+    bool swizzle, add_tid;
+    std::array<uint32_t, 3> first, second;
+  };
+  constexpr Case cases[] = {
+      // Mode 0 accepts the first dword start at byte 12 of a 16-byte record.
+      {12, 0, 0, 4, false, false, {103, 103, 103}, {0, 0, 0}},
+      // Modes 0 and 1 check the ADD_TID-adjusted index even with IDXEN clear.
+      {12, 0, 0, 1, false, true, {103, 0, 0}, {0, 0, 0}},
+      {0, 0, 1, 1, false, true, {100, 0, 0}, {101, 0, 0}},
+      // Swizzled mode 3 checks a per-row payload and reduces the record
+      // limit by SOFFSET before index checking. This is the modeled policy.
+      {0, 4, 3, 4, true, true, {0, 0, 0}, {0, 0, 0}},
+      {0, 4, 3, 5, true, true, {101, 0, 0}, {109, 0, 0}},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(testing::Message() << test.mode << ':' << test.records << ':' << test.offset);
+    cu->write_sgpr(sb + 1, (16u << 16) | (test.swizzle ? 1u << 31 : 0));
+    cu->write_sgpr(sb + 2, test.records);
+    cu->write_sgpr(sb + 3, (test.mode << 28) | (test.add_tid ? 1u << 23 : 0) | kRdnaFormat32);
+    const auto words =
+        GetParam() == ROCJITSU_CODE_ARCH_RDNA1
+            ? rdna1::build_mubuf(rdna1::kBufferLoadDwordx2,
+                                 {.offset = test.offset,
+                                  .vdata = 8,
+                                  .soffset = static_cast<uint8_t>(128 + test.scalar_offset)})
+            : rdna2::build_mubuf(rdna2::kBufferLoadDwordx2,
+                                 {.offset = test.offset,
+                                  .vdata = 8,
+                                  .soffset = static_cast<uint8_t>(128 + test.scalar_offset)});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      EXPECT_EQ(cu->read_vgpr(vb + 8, lane), test.first[lane]);
+      EXPECT_EQ(cu->read_vgpr(vb + 9, lane), test.second[lane]);
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Rdna, RdnaLegacyFormatDecodeTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+
+TEST(BufferAddressGenerationTest, SharedBufferAddressHelpersRejectCdna5) {
+  amdgpu::GpuMemory memory{"cdna5_memory"};
+  amdgpu::L2Cache l2{"cdna5_l2"};
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("cdna5_cu", config, &memory, &l2);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(wf, nullptr);
+  const uint32_t sb = wf->sgpr_alloc().base;
+  cu->write_sgpr(sb, 0x1000);
+  cu->write_sgpr(sb + 1, 16u << 16);
+  cu->write_sgpr(sb + 3, (1u << 23) | (1u << 28)); // ADD_TID and index-only bounds.
+  wf->set_exec(5);
+  for (uint32_t records : {1u, 0u}) {
+    cu->write_sgpr(sb + 2, records);
+    for (bool typed : {false, true}) {
+      amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+      state.elem_size = 4;
+      state.num_elems = 1;
+      if (typed) {
+        rdna3_5::MtbufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128; // Constant zero.
+        amdgpu::addr_calc::mtbuf_calculate_addresses(instruction, *wf, state);
+      } else {
+        rdna3_5::MubufMachineInst instruction{};
+        instruction.srsrc = sb / 4;
+        instruction.soffset = 128;
+        amdgpu::addr_calc::mubuf_calculate_addresses(instruction, *wf, state);
+      }
+      EXPECT_EQ(state.lane_mask, 0u);
+      EXPECT_EQ(state.per_lane_addr[0], 0u);
+      EXPECT_EQ(state.per_lane_addr[2], 0u);
+    }
+  }
+  wf->halt();
+}
+
+TEST(LegacyRdnaBufferAddressTest, SwizzledTidExcludesScalarOffset) {
+  using amdgpu::addr_calc::gfx10_buffer_address;
+  constexpr uint32_t swizzle = 1u << 31;
+  constexpr uint32_t cache_swizzle = 1u << 30;
+  constexpr uint32_t word3 = (2u << 21) | (1u << 23); // 32 indices and ADD_TID.
+  // Spill addressing: lane 5, dword offset 4, scalar offset 7, IDXEN disabled.
+  EXPECT_EQ(gfx10_buffer_address(swizzle, word3, 16, false, 3, 4, 7, 5).offset, 155u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle | cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset,
+            155u);
+  EXPECT_EQ(gfx10_buffer_address(cache_swizzle, word3, 16, false, 3, 4, 7, 5).offset, 91u);
+  EXPECT_EQ(gfx10_buffer_address(swizzle, 2u << 21, 16, false, 3, 4, 7, 5).offset, 135u);
+}
+
 } // namespace

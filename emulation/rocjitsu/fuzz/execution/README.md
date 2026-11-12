@@ -13,17 +13,42 @@ An input has three parts:
   `gfx1251`. Their stable selector values are 0 through 11. Other values do no
   work.
 - Byte one selects asynchronous execution, concurrent issuers, and full EXEC.
+  Bit `0x10` enables runtime memory-wait diagnostics, including XCNT on CDNA5.
+  Bit `0x20` selects the cache-backed memory path for the same bounded mapping.
+  These two bits are excluded from the seed for initial register and memory
+  contents, so toggling them on replay preserves the starting guest state.
+  Execution can diverge once the memory paths see different cache state.
+  For example, a scalar load on the cache-backed path can read an older
+  cached value after a FLAT store to the same address.
 - The remaining bytes are the instruction stream.
 
 `--target NAME`, `--async auto|on|off`, and `--issuers auto|N` override those
-header fields during focused replay without changing the saved input. Generated
-WMMA inputs request full EXEC so an async override preserves their guest state.
+header fields during focused replay without changing the saved input. Pin a
+CDNA5 target to generate the WMMA prefixes. These inputs request full EXEC so
+an async override preserves their guest state.
 
-`--random` combines arbitrary bytes with streams assembled from generated
-target-specific encodings. Generated streams usually reach execution, while
-arbitrary inputs continue to exercise the decoder boundary. The JSON result
-includes `inputs_executed`, which counts inputs that reached at least one
-execution callback.
+`--random` mixes arbitrary bytes, streams assembled from generated target
+encodings, and bounded generated kernels. The kernel generator independently
+chooses arithmetic, loads and stores, EXEC changes, and branch targets. It
+often reuses recent results as operands or to compute memory addresses. The
+stream can skip instructions or revisit them in a short counted loop. Each
+memory operation and its target-specific waits form a single branchable unit.
+Generated kernels enable wait checking, which reports warnings to stderr.
+In streams assembled from target encodings, half of the single-bit mutations
+are biased toward the first 32 bytes after any protected WMMA prefix. All input
+families sample both memory paths. Inputs contain the encoded instructions for
+replay and mutation.
+
+To run the mix with one issuer and no matrix helpers:
+
+```sh
+build-execution/fuzz/execution/rj_execution_fuzz \
+  --random 1000 --threads 1 --issuers 1 --async off \
+  --output execution-smoke
+```
+
+The JSON result includes `inputs_executed`, which counts inputs that reached at
+least one execution callback.
 
 Eligible CDNA4 MFMA and CDNA5 WMMA instructions share one asynchronous helper
 by default. Input bits can select synchronous or asynchronous execution and can
@@ -135,8 +160,9 @@ build-execution-afl/fuzz/execution/rj_execution_fuzz \
 ```
 
 The generated corpus contains 128 inputs spanning 8, 32, 256, and 1024 bytes,
-including every automatic async and issuer mode. Omit `--target` from both seed
-generation and replay when intentionally fuzzing target selection.
+including a generated kernel for every selected target and every automatic
+async and issuer mode. Omit `--target` from both seed generation and replay
+when fuzzing target selection.
 
 Signals, sanitizer findings, and unexpected simulator failures remain visible to
 AFL++. Decoder rejection and unsupported instructions routed through the

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -73,20 +74,6 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
 }
 
 [[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
-
-[[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &inst) {
-  if (!is_s_clause(inst) || inst.size() != sizeof(uint32_t) || inst.num_src_operands() != 1)
-    return 0;
-
-  const Operand *clause = inst.src_operand(0);
-  if (clause == nullptr)
-    return 0;
-
-  // The decoded OPR_CLAUSE retains the packed SIMM16 value. SIMM16[5:0]
-  // encodes one less than the number of following instructions; bits 8:11 are
-  // BREAK_SPAN and are not part of the count.
-  return (static_cast<uint32_t>(clause->encoding_value()) & 0x3fu) + 1u;
-}
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
@@ -411,8 +398,13 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
     report(error_out, "trampoline plan: after_items must be empty for the inline nop");
     return false;
   }
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
+  if (nop.failed())
+    return false;
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
-      plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
+      plan.before_items[0].words[0] != nop.value()) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
                       "for the inlined nop");
     return false;
@@ -725,10 +717,16 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 
 } // namespace
 
-TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
-                                    uint64_t trampoline_offset) {
+std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
+                                                   rj_code_arch_t arch, uint64_t trampoline_offset,
+                                                   std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, arch, &error);
+  if (nop.failed())
+    return std::nullopt;
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, arch)}}};
+  plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
   return plan;
@@ -865,7 +863,12 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  patch.words.push_back(build_s_branch(*simm16, arch_));
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_, &error);
+  if (branch.failed())
+    return std::nullopt;
+  patch.words.push_back(branch.value());
   return patch;
 }
 
@@ -903,6 +906,14 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       report(error_out, "code-object target does not match the requested architecture");
       return false;
     }
+  } else if (obj_.image_size() >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, obj_.image_data(), sizeof(header));
+    const rj_code_arch_t source_arch = arch_for_elf_mach(header.e_flags);
+    if (source_arch != ROCJITSU_CODE_ARCH_INVALID && source_arch != arch_) {
+      report(error_out, "code-object ELF architecture does not match the requested architecture");
+      return false;
+    }
   }
   auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
                                                         : Decoder::create(registry, target);
@@ -918,21 +929,10 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
-  // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
-  uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
-    uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
-      if (clause_remaining > 0) {
-        clause_blocked_offsets_.insert(cur);
-        --clause_remaining;
-      }
-      offset_to_inst_.emplace(cur, &inst);
-      if (is_s_clause(inst))
-        clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
-      cur += static_cast<uint64_t>(inst.size());
+      offset_to_inst_.emplace(inst.src_loc(), &inst);
+      instruction_boundaries_.record(inst, obj_.text_sections().front()->vaddr());
     }
   }
   blocks_built_ = true;
@@ -1000,6 +1000,19 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "); liveness across fork/join is not modelled");
         return out;
       }
+    }
+  }
+  // M0 can displace SGPR reads and writes, which ordinary liveness does not
+  // model. Callable probes allocate envelope registers from those facts.
+  if (std::ranges::any_of(
+          points_, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; })) {
+    std::vector<BasicBlock *> probe_scope;
+    probe_scope.reserve(blocks_.size());
+    for (const std::unique_ptr<BasicBlock> &block : blocks_)
+      probe_scope.push_back(block.get());
+    if (accesses_sgprs_indirectly_via_movrel(KernelBlockScope(probe_scope))) {
+      out.errors.emplace_back("probe calls do not support relative SGPR access (s_movrel*)");
+      return out;
     }
   }
   const Section *text = obj_.text_sections().front();
@@ -1191,7 +1204,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       continue;
     }
 
-    if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
+    const InstructionBoundaries::Entry *boundary = instruction_boundaries_.find(pt.anchor_offset);
+    if (boundary && boundary->clause_member) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1737,7 +1751,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       // Currently, this means that the plan is to put a nop which means we do
       // not need to mess with spills
     } else {
-      TrampolinePlan plan = make_trampoline_plan(site, arch_, trampoline_offset);
+      std::optional<TrampolinePlan> maybe_plan =
+          make_trampoline_plan(site, arch_, trampoline_offset, &err);
+      if (!maybe_plan) {
+        result.errors.push_back(std::move(err));
+        continue;
+      }
+      const TrampolinePlan &plan = *maybe_plan;
       // The only assembly we currently allow is an inlined nop
       if (!validate_inline_nop_plan(plan, &err)) {
         result.errors.push_back(std::move(err));
@@ -1773,28 +1793,70 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
 
-  // Every per-site validation, branch-range check, and trampoline-byte
-  // construction has succeeded up to this point. Assemble the new .text in one
-  // buffer: the original bytes with each anchor spliced to its forward branch,
-  // followed by the local cave. replace_text() grows .text in place and fixes
-  // up the surrounding ELF (section/segment sizes, moved symbols, descriptor
-  // entries).
-  const auto text_span = patcher.text_bytes();
-  std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
-  for (const auto &a : applied) {
-    if (a.site->kind == InstrumentationKind::KernelEntry) {
+  // Per-site plans and trampoline bytes are ready. Collect original-text
+  // anchor replacements for one checked-edit transaction; KernelEntry callbacks
+  // retarget only the entry-stub branch. Apply checked edits before appending
+  // the local cave, then let replace_text() grow .text and fix up the surrounding
+  // ELF (section/segment sizes, moved symbols, descriptor entries).
+  std::vector<CheckedTextEdit> anchor_edits;
+  anchor_edits.reserve(applied.size());
+  for (const AppliedSite &applied_site : applied) {
+    if (applied_site.site->kind == InstrumentationKind::KernelEntry) {
       const uint64_t branch_pc =
           entry_patch->stub_offset + (entry_patch->words.size() - 1) * sizeof(uint32_t);
       const std::optional<int16_t> target =
-          compute_sopp_branch_simm16(branch_pc, a.trampoline_offset);
+          compute_sopp_branch_simm16(branch_pc, applied_site.trampoline_offset);
       if (!target) {
         result.errors.emplace_back("kernel-entry callback is outside the stub's branch range");
         return result;
       }
-      entry_patch->words.back() = build_s_branch(*target, arch_);
+      auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+      const util::DiagnosticEmitter error(record_error);
+      const util::FailureOr<uint32_t> branch = build_s_branch(*target, arch_, &error);
+      if (branch.failed())
+        return result;
+      entry_patch->words.back() = branch.value();
     } else {
-      std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
-                  a.site->original_size);
+      anchor_edits.push_back({.offset = applied_site.site->anchor_offset,
+                              .expected = applied_site.site->original_bytes,
+                              .replacement = {applied_site.bytes.patched_anchor_bytes.begin(),
+                                              applied_site.bytes.patched_anchor_bytes.begin() +
+                                                  applied_site.site->original_size}});
+    }
+  }
+  // Entry-only callbacks patch the appended stub, leaving original text intact.
+  const std::span<const uint8_t> original_text = patcher.text_bytes();
+  std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
+  if (!anchor_edits.empty()) {
+    // Conditional-debug branches and subvector loops do not yet expose their
+    // destination metadata. Missing displacement does not prove an anchor has
+    // no incoming reference. Keep this admission guard out of generic analysis.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        const std::string_view mnemonic = instruction.mnemonic();
+        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
+             mnemonic == "s_subvector_loop_end") &&
+            !instruction.branch_offset_bytes()) {
+          result.edit_error = TextEditError{
+              .code = TextEditErrorCode::UnsupportedReferences,
+              .offset = instruction.src_loc(),
+              .message = "branch destination metadata is unavailable for " + std::string(mnemonic)};
+          result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
+          return result;
+        }
+      }
+    }
+    std::vector<uint64_t> kernel_entries;
+    kernel_entries.reserve(kernels.size());
+    for (const KernelDescriptorInfo &kernel : kernels)
+      kernel_entries.push_back(kernel.entry_text_offset);
+    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
+                                       kernel_entries);
+    TextEditError edit_error;
+    if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
+      result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
+      result.edit_error = std::move(edit_error);
+      return result;
     }
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
@@ -1802,7 +1864,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
   if (entry_patch) {
-    append_nop_padding(new_text, entry_patch->padding_bytes, arch_);
+    auto record_error = [&](std::string_view message) { result.errors.emplace_back(message); };
+    const util::DiagnosticEmitter error(record_error);
+    if (append_nop_padding(new_text, entry_patch->padding_bytes, arch_, &error).failed()) {
+      return result;
+    }
     append_words(new_text, entry_patch->words);
   }
   for (const auto &a : applied)
@@ -1905,14 +1971,17 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       patch.link_pair_base = a.link_pair_base;
       patch.target_pair_base = a.target_pair_base;
     }
-    result.sites.push_back({.kind = a.site->kind,
-                            .original_offset = a.site->anchor_offset,
-                            .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
-                            .guest_size = a.site->kind == InstrumentationKind::KernelEntry
-                                              ? 0u
-                                              : a.site->original_size,
-                            .instrumentation_offset = a.trampoline_offset,
-                            .instrumentation_size = a.bytes.original_byte_offset});
+    // The builder owns the layout, including the call envelope's attribution.
+    result.sites.push_back(
+        {.kind = a.site->kind,
+         .original_offset = a.site->anchor_offset,
+         .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
+         .guest_size =
+             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .instrumentation_offset =
+             a.trampoline_offset + (a.is_probe_call ? a.bytes.call_envelope_byte_offset : 0),
+         .instrumentation_size =
+             a.is_probe_call ? a.bytes.call_envelope_byte_size : a.bytes.original_byte_offset});
     result.patches.push_back(std::move(patch));
   }
   return result;

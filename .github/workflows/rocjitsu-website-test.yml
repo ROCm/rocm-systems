@@ -8,6 +8,8 @@ on:
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
   push:
     branches:
       - develop
@@ -17,6 +19,8 @@ on:
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
   workflow_dispatch:
 
 permissions:
@@ -73,6 +77,10 @@ jobs:
           node-version: "22.13.0"
           cache: npm
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
+
+      - name: Test benchmark PR reporting
+        working-directory: .
+        run: node --test .github/scripts/tests/test_rocjitsu_benchmark_report.js
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

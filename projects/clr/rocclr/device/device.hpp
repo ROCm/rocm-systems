@@ -1891,7 +1891,8 @@ class Device : public RuntimeObject {
   cl_device_type type() const { return info().type_ & ~(CL_DEVICE_TYPE_DEFAULT); }
 
   //! Create a new virtual device environment.
-  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL) = 0;
+  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL,
+                                                     bool cooperative = false) = 0;
 
   //! Create a program for device.
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
@@ -2218,6 +2219,25 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Write host data into a device global, blocking until the write has finished
+   * and without enqueuing on any queue an application feeds.
+   *
+   * Fills externally-initialized globals whose value is only known once the executable is
+   * on the device, such as the pointer a __managed__ variable is dereferenced through.
+   * Callers run on the kernel launch path  where a copy on the null stream would be
+   * host-blocking and would wait for work the application queued earlier, deadlocking
+   * whenever that work is gated on something the host only does after the launch returns.
+   *
+   * @param dst Memory object wrapping the global, as returned by createGlobalVarObj
+   * @param offset Byte offset within the global
+   * @param size Number of bytes to write
+   * @param src Host source buffer
+   * @return False if the write failed.
+   */
+  [[nodiscard]] virtual bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                               const void* src) const = 0;
+
+  /**
    * Recovers the location and size of a VMM allocation.
    *
    * @param amd_mem_obj physical memory object of the allocation
@@ -2305,6 +2325,19 @@ class Device : public RuntimeObject {
   }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
+  //! Takes count armed HW events for a pooled graph set
+  virtual bool AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+    return CreateHwEvents(count, /*batched=*/true, hw_events);
+  }
+  //! Gives back armed HW events from AcquireHwEvents
+  virtual void ReturnHwEvents(std::vector<void*>& hw_events) const {
+    QuiesceHwEvents(hw_events);
+    for (void* hw_event : hw_events) {
+      DestroyHwEvent(hw_event);
+    }
+    hw_events.clear();
+  }
+
   //! Re-arm already-allocated HW event signals so they can be reused by a new
   //! graph launch (resets the signal value and cached timing). Used by the
   //! graph signal pool to avoid create/destroy on every launch.
@@ -2335,8 +2368,9 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
+  //! profiled means the launch reads the timing of its patched completion signals
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const {}
+                                   const std::vector<void*>& hw_events, bool profiled) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

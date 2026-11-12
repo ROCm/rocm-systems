@@ -126,15 +126,44 @@ removes it. The helper waits for the lock through an independently opened file
 description. Retirement unmaps the lease without closing a long-lived application
 descriptor, so concurrent `close_range` or descriptor replacement cannot make it
 close an unrelated file. A helper thread waits for release of the lock and
-notifies the event loop. The helper retires
-on owner exit or exec, preserving any exported tokens until they close, without
-retaining application mappings. The interposer starts it before application
-code can lower file limits. A forked child starts its own helper under the
-child's then-current hard limits. Generated topology files and proc-maps
-snapshots are sized there and populated through mappings; these small metadata
-files must fit that helper's hard file limit. Topology population failures emit
-a warning identifying the file. Application writes, including runtime compiler
-temporary files, continue to obey the application's current limit.
+notifies the event loop. On owner exit or exec, the helper closes its listener
+and private request connections, including idle connections inherited by forked
+children. It continues serving exported tokens until they close. During
+initialization the interposer calls
+`prepare_memory_keeper` and waits for readiness before application code can
+lower file limits. A forked child starts its own helper under the child's
+then-current hard limits.
+Generated topology files and proc-maps snapshots are sized there. Topology
+files with small payloads travel with the sizing request and are written by the helper
+with positional I/O. Larger topology files and proc-maps snapshots are
+populated through shared mappings.
+Both paths preserve the caller's file offset. Metadata files must fit the
+helper's hard file limit. Topology population
+failures emit a warning identifying the file. Application writes, including
+runtime compiler temporary files, continue to obey the application's current
+limit.
+
+The owner records the helper's kernel-supplied PID from the inherited startup
+channel. Before sending a backing descriptor, it checks the listener's PID
+and credentials against the process identity reported at startup. On kernels
+with 64-bit pidfs, the helper's pidfd inode identifies that process across PID
+reuse. Otherwise the owner requires a private cookie from the startup channel
+before transferring a backing descriptor. If the helper cannot answer before
+the timeout and its lifetime is ambiguous, preparation returns `EAGAIN` and
+preserves its lease. Preparation can be retried when the helper responds.
+
+Allocation and metadata requests use temporary private connections for both
+requests and responses. Consecutive nonempty topology files share a connection. The helper
+acknowledges groups of small writes before the caller publishes the tree. Empty
+files are truncated locally, in order, without holding a connection. The caller closes each inline file descriptor after passing it to
+the helper and keeps only the current file for mapped writes. Batch size does
+not increase the application's descriptor requirement. If the kernel limits
+descriptors in flight, the caller drains the batch before retrying. At the end
+of the batch it shuts down the connection so a forked child cannot keep the
+helper endpoint open.
+
+Token reopen requests retain separate reply socket pairs because a token may
+be shared by multiple callers, including callers in different processes.
 
 Changing effective user or group credentials retires the previous helper's
 lease before using a new helper; previously exported tokens retain their keeper
@@ -159,7 +188,8 @@ sizing and application limits unchanged.
 
 Installed objects locate the helper in their installation. Only objects inside
 the configured build tree may fall back to its helper executable; an incomplete
-installation fails rather than using another build's private protocol.
+installation fails rather than using another build's private protocol. The
+startup reply identifies the private protocol before any allocation is sent.
 
 File-limit handling does not require `HSA_ENABLE_IPC_MODE_LEGACY=1`. Ordinary HIP
 allocation, copies, dispatch, and local VMM work with the runtime's default IPC
