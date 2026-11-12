@@ -200,21 +200,23 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     }
 }
 
-// rocprofiler_configure calls this from std::call_once while HIP is still
-// registering its fat binary, and the process-sampler thread may already be
-// running. std::exit destroys those maps and that thread; the result is a
-// NULL deref or std::terminate. _exit skips C++ teardown.
+// std::exit before the process is Active runs static destructors while
+// exit_gotcha is already installed. Teardown destroys a causal thread_data
+// whose deleter calls pthread_create_gotcha::shutdown(), and that copies a
+// shared_ptr to a timemory hash map exit has already destroyed. The copy
+// NULL-derefs (fault address 0). The same crash happens on a CPU-only
+// workload, so it is not specific to HIP registration. _exit skips that
+// teardown.
 [[noreturn]] void
 exit_failed_backend()
 {
     logger_t::instance().flush();
     if(state::process::get() == state::process::Active)
     {
-        // Registration is done, so C++ teardown and atexit finalizers are safe.
+        // Statics are still alive once the process is Active.
         std::exit(EXIT_FAILURE);
     }
-    // Still inside rocprofiler_configure: skip static teardown, which would
-    // race with HIP's fat-binary registration.
+    // Before Active, exit destroys a timemory hash map and then uses it.
     ::_exit(EXIT_FAILURE);
 }
 
